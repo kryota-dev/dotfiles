@@ -133,6 +133,17 @@ alias -g C='| pbcopy'
 # alias bl='brew list'
 # alias bd='brew doctor'
 
+alias pn='pnpm'
+alias pni='pnpm install'
+alias pnx='pnpx'
+alias pnv='pnpm -v'
+
+# mkdirとtouchを同時に行う
+function mduch(){
+  mkdir -p "$(dirname "$1")"
+  touch "$1"
+}
+
 function update-brewfile(){
   rm -rf ~/dotfiles/.bin/.Brewfile
   brew bundle dump --file ~/dotfiles/.bin/.Brewfile
@@ -188,7 +199,7 @@ typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet
 
 eval "$(direnv hook zsh)"
 
+. /opt/homebrew/opt/asdf/libexec/asdf.sh
+
 # Amazon Q post block. Keep at the bottom of this file.
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
-
-. /opt/homebrew/opt/asdf/libexec/asdf.sh
