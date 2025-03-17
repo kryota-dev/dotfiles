@@ -47,7 +47,6 @@ brew "smudge/smudge/nightlight"
 cask "1password", args: { appdir: "/Applications" }
 cask "1password-cli"
 cask "adobe-acrobat-reader"
-cask "adobe-creative-cloud", args: { appdir: "/Applications" }
 cask "alt-tab", args: { appdir: "/Applications" }
 cask "amazon-q"
 cask "appcleaner", args: { appdir: "/Applications" }
@@ -60,7 +59,6 @@ cask "cloudflare-warp"
 cask "cursor"
 cask "deepl", args: { appdir: "/Applications" }
 cask "docker"
-cask "duet", args: { appdir: "/Applications" }
 cask "figma", args: { appdir: "/Applications" }
 cask "firefox", args: { appdir: "/Applications" }
 cask "google-chrome", args: { appdir: "/Applications" }
@@ -70,10 +68,8 @@ cask "jordanbaird-ice"
 cask "keyboardcleantool", args: { appdir: "/Applications" }
 cask "microsoft-edge", args: { appdir: "/Applications" }
 cask "monitorcontrol", args: { appdir: "/Applications" }
-cask "ngrok", args: { appdir: "/Applications" }
 cask "notion", args: { appdir: "/Applications" }
 cask "notion-calendar"
-cask "obs"
 cask "postman", args: { appdir: "/Applications" }
 cask "raycast", args: { appdir: "/Applications" }
 cask "rectangle"
@@ -84,8 +80,8 @@ cask "todoist", args: { appdir: "/Applications" }
 cask "visual-studio-code", args: { appdir: "/Applications" }
 cask "warp", args: { appdir: "/Applications" }
 cask "zoom", args: { appdir: "/Applications" }
-mas "Disk Speed Test", id: 425264550
 mas "Gapplin", id: 768053424
+mas "GarageBand", id: 682658836
 mas "iMovie", id: 408981434
 mas "Keynote", id: 409183694
 mas "LINE", id: 539883307
@@ -97,7 +93,6 @@ mas "Pages", id: 409201541
 mas "PicGIF Lite", id: 844918735
 mas "RunCat", id: 1429033973
 mas "Spark Desktop", id: 6445813049
-mas "TestFlight", id: 899247664
 mas "ToyViewer", id: 414298354
 mas "Windows App", id: 1295203466
 mas "WireGuard", id: 1451685025
