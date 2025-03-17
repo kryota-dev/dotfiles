@@ -12,6 +12,7 @@ brew "libyaml"
 brew "asdf"
 brew "cabextract"
 brew "cdrtools"
+brew "cloudflared"
 brew "curl"
 brew "direnv"
 brew "folly"
@@ -54,12 +55,15 @@ cask "adobe-creative-cloud", args: { appdir: "/Applications" }
 cask "alt-tab", args: { appdir: "/Applications" }
 cask "amazon-q"
 cask "appcleaner", args: { appdir: "/Applications" }
+cask "arc"
 cask "betterdisplay"
 cask "bettertouchtool", args: { appdir: "/Applications" }
 cask "brave-browser"
 cask "canva", args: { appdir: "/Applications" }
 cask "chatgpt"
 cask "chromium", args: { appdir: "/Applications" }
+cask "cloudflare-warp"
+cask "cursor"
 cask "deepl", args: { appdir: "/Applications" }
 cask "discord", args: { appdir: "/Applications" }
 cask "docker"
@@ -68,8 +72,8 @@ cask "figma", args: { appdir: "/Applications" }
 cask "firefox", args: { appdir: "/Applications" }
 cask "google-chrome", args: { appdir: "/Applications" }
 cask "google-drive", args: { appdir: "/Applications" }
-cask "hiddenbar", args: { appdir: "/Applications" }
 cask "iterm2"
+cask "jordanbaird-ice"
 cask "keyboardcleantool", args: { appdir: "/Applications" }
 cask "microsoft-edge", args: { appdir: "/Applications" }
 cask "monitorcontrol", args: { appdir: "/Applications" }
@@ -128,8 +132,6 @@ vscode "donjayamanne.githistory"
 vscode "dsznajder.es7-react-js-snippets"
 vscode "eamodio.gitlens"
 vscode "ecmel.vscode-html-css"
-vscode "equinusocio.vsc-material-theme"
-vscode "equinusocio.vsc-material-theme-icons"
 vscode "esbenp.prettier-vscode"
 vscode "figma.figma-vscode-extension"
 vscode "formulahendry.auto-rename-tag"
@@ -142,7 +144,6 @@ vscode "github.vscode-github-actions"
 vscode "glenn2223.live-sass"
 vscode "humao.rest-client"
 vscode "ibm.output-colorizer"
-vscode "icrawl.discord-vscode"
 vscode "james-yu.latex-workshop"
 vscode "jebbs.markdown-extended"
 vscode "kevinrose.vsc-python-indent"
@@ -168,6 +169,7 @@ vscode "ms-vscode.remote-repositories"
 vscode "ms-vscode.remote-server"
 vscode "ms-vsliveshare.vsliveshare"
 vscode "oderwat.indent-rainbow"
+vscode "openai.openai-chatgpt-adhoc"
 vscode "oven.bun-vscode"
 vscode "pkief.material-icon-theme"
 vscode "prisma.prisma"
