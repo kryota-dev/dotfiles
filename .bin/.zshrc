@@ -97,6 +97,10 @@ alias dsp='docker system prune --volumes'
 alias dcu='docker compose up'
 alias dcud='docker compose up -d'
 alias dcd='docker compose down'
+alias dcstart='docker compose start'
+alias dcstop='docker compose stop'
+alias dcrestart='docker compose restart'
+alias dclogs='docker compose logs -f'
 
 alias vi="nvim"
 alias vim="nvim"
@@ -200,3 +204,8 @@ eval "$(direnv hook zsh)"
 
 # Amazon Q post block. Keep at the bottom of this file.
 [[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
+# The following lines have been added by Docker Desktop to enable Docker CLI completions.
+fpath=(/Users/ryota/.docker/completions $fpath)
+autoload -Uz compinit
+compinit
+# End of Docker CLI completions
