@@ -1,6 +1,3 @@
-# Amazon Q pre block. Keep at the top of this file.
-[[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.pre.zsh"
-# Q pre block. Keep at the top of this file.
 # ========== zsh config ==========
 setopt auto_pushd
 setopt pushd_ignore_dups
@@ -13,6 +10,28 @@ export SAVEHIST=100000
 # =============================
 
 # ========== User specific aliases and functions ==========
+function ccpaths(){
+  local dir="${1:-.}"
+  # シンプルで安全な実装
+  echo "=== Directories ==="
+  /usr/bin/find "$dir" -type d -exec echo "- @{}/" \;
+  echo "=== Files ==="
+  /usr/bin/find "$dir" -type f -exec echo "- @{}" \;
+}
+
+function cccommands(){
+  local base_dir="${1:-.}"
+  local commands_dir=".claude/commands"
+  if [ ! -d "$commands_dir" ]; then
+    echo "Error: .claude/commands directory not found in ${base_dir}" >&2
+    return 1
+  fi
+  /usr/bin/find "$commands_dir" -name "*.md" -type f -exec echo "- @{}" \;
+}
+
+# 短縮エイリアス
+alias cccmds='cccommands'
+
 alias ll='ls -lF'
 alias la='ls -lAF'
 
@@ -94,6 +113,8 @@ function dce (){
 alias dip='docker image prune'
 alias dcp='docker container prune'
 alias dsp='docker system prune --volumes'
+
+alias dc='docker compose'
 alias dcu='docker compose up'
 alias dcud='docker compose up -d'
 alias dcd='docker compose down'
@@ -142,6 +163,10 @@ alias pni='pnpm install'
 alias pnx='pnpx'
 alias pnv='pnpm -v'
 
+# alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Alert.m4r && \
+#   afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r'
+alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r && \
+  afplay  /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Bamboo.m4r'
 # mkdirとtouchを同時に行う
 function mduch(){
   mkdir -p "$(dirname "$1")"
@@ -175,37 +200,48 @@ function pull-dotfiles(){
 alias alhelp='cat ${HOME}/.zshrc'
 # ===============================================
 
-# Source Prezto.
-if [[ -s "${ZDOTDIR:-$HOME}/.zprezto/init.zsh" ]]; then
-  source "${ZDOTDIR:-$HOME}/.zprezto/init.zsh"
-fi
-
-# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
-# Initialization code that may require console input (password prompts, [y/n]
-# confirmations, etc.) must go above this block; everything else may go below.
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f "$HOME/.p10k.zsh" ]] || source "$HOME/.p10k.zsh"
-autoload -Uz promptinit
-promptinit
-prompt powerlevel10k
-
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-
-# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
-typeset -g POWERLEVEL9K_INSTANT_PROMPT=quiet
-
 eval "$(direnv hook zsh)"
 
 . /opt/homebrew/opt/asdf/libexec/asdf.sh
 
-# Amazon Q post block. Keep at the bottom of this file.
-[[ -f "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh" ]] && builtin source "${HOME}/Library/Application Support/amazon-q/shell/zshrc.post.zsh"
 # The following lines have been added by Docker Desktop to enable Docker CLI completions.
 fpath=(/Users/ryota/.docker/completions $fpath)
 autoload -Uz compinit
 compinit
 # End of Docker CLI completions
+
+# bun completions
+[ -s "/Users/ryota/.bun/_bun" ] && source "/Users/ryota/.bun/_bun"
+
+# bun
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+
+# Claude Spec-Driven Development configuration
+export CLAUDE_HOME="$HOME/.claude"
+export PATH="$CLAUDE_HOME/scripts:$PATH"
+
+# Aliases for common SDD commands
+alias sdd-new='~/.claude/scripts/create-new-feature.sh'
+alias sdd-plan='~/.claude/scripts/setup-plan.sh'
+alias sdd-tasks='~/.claude/scripts/check-task-prerequisites.sh'
+alias sdd-agent='~/.claude/scripts/update-agent-context.sh'
+
+# Function to get current branch specs directory
+sdd-specs() {
+    local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [ -z "$branch" ]; then
+        echo "Error: Not in a git repository"
+        return 1
+    fi
+    local specs_dir="$(git rev-parse --show-toplevel)/specs/$branch"
+    if [ -d "$specs_dir" ]; then
+        echo "$specs_dir"
+        cd "$specs_dir"
+    else
+        echo "No specs directory for branch: $branch"
+        return 1
+    fi
+}
+export PATH="$HOME/.local/bin:$PATH"
+export PATH="$PATH:/Users/ryota/tools/coderabbitai/git-worktree-runner/bin"
