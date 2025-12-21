@@ -1,8 +1,6 @@
 # Set Homebrew
 eval "$(/opt/homebrew/bin/brew shellenv)"
 
-export npm_config_python=/opt/homebrew/opt/python@3.11/bin/python3.11
-
 # Set rbenv
 [[ -d ~/.rbenv  ]] && \
   export PATH=${HOME}/.rbenv/bin:${PATH} && \
