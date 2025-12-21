@@ -1,10 +1,11 @@
 [user]
 	name = kryota-dev
 	email = 50436249+kryota-dev@users.noreply.github.com
-	signingkey = /Users/ryota/.ssh/signing-key.pub
+	signingkey = /Users/ryota/.ssh/ssh-key.pub
 [core]
 	excludesfile = ~/.gitignore_global
 	editor = vim
+	ignorecase = false
 [difftool "sourcetree"]
 	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
 	path = 
@@ -22,3 +23,5 @@
 	defaultBranch = main
 [gpg "ssh"]
 	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+[extensions]
+	worktreeConfig = true

@@ -187,3 +187,20 @@ dist
 .svelte-kit
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,linux,node
+
+# Claude
+.claude/gh-assets/
+.claude/settings.local.json
+.claude/specs/
+.claude/prompts/
+.claude/reviews/**/*.md
+.claude/pull-requests/**/*.md
+.claude/issues/**/*.md
+.claude/plans/
+.serena/
+specs/
+
+# Personal files
+.kryota-dev/
+specs/
+*.local.*
