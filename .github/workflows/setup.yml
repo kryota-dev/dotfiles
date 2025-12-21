@@ -23,6 +23,3 @@ jobs:
 
       - name: defaults
         run: make defaults
-
-      - name: prezto
-        run: make prezto
