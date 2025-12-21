@@ -16,5 +16,5 @@ unzip UDEVGothic_v${UDEV_GOTHIC_VERSION}.zip
 rm -rf UDEVGothic_v${UDEV_GOTHIC_VERSION}.zip UDEVGothic_v${UDEV_GOTHIC_VERSION}
 
 # Chromium Setup
-echo -e "\033[0;34m- Chromium Setup...\033[0m"
-xattr -rc /Applications/Chromium.app
+# echo -e "\033[0;34m- Chromium Setup...\033[0m"
+# xattr -rc /Applications/Chromium.app
