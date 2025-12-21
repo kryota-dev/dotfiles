@@ -2,7 +2,6 @@ tap "grishka/grishka"
 tap "heroku/brew"
 tap "homebrew/bundle"
 tap "homebrew/services"
-tap "kegworks-app/kegworks"
 tap "minacle/chntpw"
 tap "smudge/smudge"
 tap "yuitosato/gh-asset"
@@ -38,7 +37,6 @@ brew "libyaml"
 brew "mas"
 brew "neovim"
 brew "pinact"
-brew "python@3.11"
 brew "ruby-build"
 brew "rbenv"
 brew "rename"
@@ -65,7 +63,6 @@ cask "appcleaner", args: { appdir: "/Applications" }
 cask "betterdisplay"
 cask "bettertouchtool", args: { appdir: "/Applications" }
 cask "brave-browser"
-cask "canva", args: { appdir: "/Applications" }
 cask "chatgpt"
 cask "claude"
 cask "claude-code"
@@ -80,23 +77,18 @@ cask "google-chrome@canary"
 cask "google-drive", args: { appdir: "/Applications" }
 cask "iterm2"
 cask "jordanbaird-ice"
-cask "kegworks"
 cask "keyboardcleantool", args: { appdir: "/Applications" }
 cask "keycastr"
 cask "microsoft-edge", args: { appdir: "/Applications" }
-cask "monitorcontrol", args: { appdir: "/Applications" }
 cask "notion", args: { appdir: "/Applications" }
-cask "notion-calendar"
 cask "postman", args: { appdir: "/Applications" }
 cask "raspberry-pi-imager"
 cask "raycast", args: { appdir: "/Applications" }
 cask "rectangle"
 cask "scroll-reverser", args: { appdir: "/Applications" }
 cask "session-manager-plugin"
-cask "shutter-encoder"
 cask "slack", args: { appdir: "/Applications" }
 cask "smoothcsv"
-cask "steam"
 cask "tailscale-app"
 cask "the-unarchiver", args: { appdir: "/Applications" }
 cask "todoist-app", args: { appdir: "/Applications" }
@@ -107,94 +99,14 @@ cask "warp", args: { appdir: "/Applications" }
 cask "zoom", args: { appdir: "/Applications" }
 mas "Copilot", id: 6738511300
 mas "Gapplin", id: 768053424
-mas "GarageBand", id: 682658836
 mas "iMovie", id: 408981434
-mas "Keynote", id: 409183694
 mas "LINE", id: 539883307
 mas "Microsoft Excel", id: 462058435
 mas "Microsoft PowerPoint", id: 462062816
 mas "Microsoft Word", id: 462054704
-mas "Numbers", id: 409203825
-mas "Pages", id: 409201541
 mas "PicGIF Lite", id: 844918735
 mas "RunCat", id: 1429033973
 mas "Spark Desktop", id: 6445813049
 mas "ToyViewer", id: 414298354
 mas "Windows App", id: 1295203466
 mas "Xcode", id: 497799835
-vscode "1password.op-vscode"
-vscode "42crunch.vscode-openapi"
-vscode "anthropic.claude-code"
-vscode "arjun.swagger-viewer"
-vscode "bierner.markdown-mermaid"
-vscode "biomejs.biome"
-vscode "bradlc.vscode-tailwindcss"
-vscode "chakrounanas.turbo-console-log"
-vscode "christian-kohler.path-intellisense"
-vscode "coderabbit.coderabbit-vscode"
-vscode "cweijan.vscode-mysql-client2"
-vscode "davidanson.vscode-markdownlint"
-vscode "dbaeumer.vscode-eslint"
-vscode "digitalbrainstem.javascript-ejs-support"
-vscode "docker.docker"
-vscode "dsznajder.es7-react-js-snippets"
-vscode "eamodio.gitlens"
-vscode "ecmel.vscode-html-css"
-vscode "esbenp.prettier-vscode"
-vscode "figma.figma-vscode-extension"
-vscode "formulahendry.auto-rename-tag"
-vscode "github.codespaces"
-vscode "github.copilot"
-vscode "github.copilot-chat"
-vscode "github.github-vscode-theme"
-vscode "github.remotehub"
-vscode "github.vscode-github-actions"
-vscode "github.vscode-pull-request-github"
-vscode "glenn2223.live-sass"
-vscode "hashicorp.terraform"
-vscode "humao.rest-client"
-vscode "ibm.output-colorizer"
-vscode "jackiotyu.git-worktree-manager"
-vscode "janisdd.vscode-edit-csv"
-vscode "mechatroner.rainbow-csv"
-vscode "mhutchie.git-graph"
-vscode "mosapride.zenkaku"
-vscode "ms-azuretools.vscode-containers"
-vscode "ms-azuretools.vscode-docker"
-vscode "ms-ceintl.vscode-language-pack-ja"
-vscode "ms-python.debugpy"
-vscode "ms-python.python"
-vscode "ms-python.vscode-pylance"
-vscode "ms-vscode-remote.remote-containers"
-vscode "ms-vscode-remote.remote-ssh"
-vscode "ms-vscode-remote.remote-ssh-edit"
-vscode "ms-vscode-remote.vscode-remote-extensionpack"
-vscode "ms-vscode.makefile-tools"
-vscode "ms-vscode.remote-explorer"
-vscode "ms-vscode.remote-repositories"
-vscode "ms-vscode.remote-server"
-vscode "ms-vsliveshare.vsliveshare"
-vscode "oderwat.indent-rainbow"
-vscode "openai.chatgpt"
-vscode "openai.openai-chatgpt-adhoc"
-vscode "pimzino.spec-workflow-mcp"
-vscode "pizzacat83.codic"
-vscode "pkief.material-icon-theme"
-vscode "redhat.vscode-yaml"
-vscode "ritwickdey.liveserver"
-vscode "seatonjiang.gitmoji-vscode"
-vscode "shardulm94.trailing-spaces"
-vscode "simonsiefke.svg-preview"
-vscode "streetsidesoftware.code-spell-checker"
-vscode "styled-components.vscode-styled-components"
-vscode "tamasfe.even-better-toml"
-vscode "typescriptteam.native-preview"
-vscode "unifiedjs.vscode-mdx"
-vscode "vitest.explorer"
-vscode "vscodevim.vim"
-vscode "wayou.vscode-todo-highlight"
-vscode "wix.vscode-import-cost"
-vscode "yoavbls.pretty-ts-errors"
-vscode "yusukehirao.vscode-markuplint"
-vscode "yzane.markdown-pdf"
-vscode "yzhang.markdown-all-in-one"
