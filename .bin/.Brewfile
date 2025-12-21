@@ -85,7 +85,6 @@ cask "postman", args: { appdir: "/Applications" }
 cask "raspberry-pi-imager"
 cask "raycast", args: { appdir: "/Applications" }
 cask "rectangle"
-cask "scroll-reverser", args: { appdir: "/Applications" }
 cask "session-manager-plugin"
 cask "slack", args: { appdir: "/Applications" }
 cask "smoothcsv"
