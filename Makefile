@@ -31,17 +31,6 @@ setup:
 	@.bin/setup.sh
 	@echo "\033[0;32mDone.\033[0m"
 
-# Setup defaultbrowser
-# defaultbrowser:
-# 	@echo "\033[0;34mRun defaultbrowser.sh\033[0m"
-# 	@.bin/defaultbrowser.sh
-# 	@echo "\033[0;32mDone.\033[0m"
-# 	@echo "Here are the steps to add a script directory to Raycast:"
-# 	@echo "1. Open Raycast settings"
-# 	@echo "2. Switch to the Extensions tab"
-# 	@echo "3. Click the + button and select \"Add Script Directory”"
-# 	@echo "4. Add \"~/dotfiles/raycast/scripts\""
-
 # Setup Other apps
 # other_apps:
 # 	@echo "\033[0;34mRun other_apps.sh\033[0m"
