@@ -39,7 +39,7 @@ Temporary Items
 !.bin/.claude/settings.json
 
 .bin/.codex/*
-!.bin/.codex/prompts/
+!.bin/.codex/prompts
 !.bin/.codex/config.toml
 !.bin/.codex/AGENTS.md
 
