@@ -1,7 +1,7 @@
 [user]
 	name = kryota-dev
 	email = 50436249+kryota-dev@users.noreply.github.com
-	signingkey = /Users/ryota/.ssh/ssh-key.pub
+	signingkey = ~/.ssh/ssh-key.pub
 [core]
 	excludesfile = ~/.gitignore_global
 	editor = vim
