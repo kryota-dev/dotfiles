@@ -37,3 +37,9 @@ Temporary Items
 !.bin/.claude/skills/
 !.bin/.claude/CLAUDE.md
 !.bin/.claude/settings.json
+
+.bin/.codex/*
+!.bin/.codex/prompts/
+!.bin/.codex/config.toml
+!.bin/.codex/AGENTS.md
+
