@@ -43,3 +43,5 @@ Temporary Items
 !.bin/.codex/config.toml
 !.bin/.codex/AGENTS.md
 
+.bin/.aws/*
+!.bin/.aws/config.template

@@ -11,4 +11,6 @@ for dotfile in "${SCRIPT_DIR}"/.??* ; do
   ln -fnsv "$dotfile" "$HOME"
 done
 
+ln -fnsv "${SCRIPT_DIR}/AGENTS.md" "$HOME"
+
 source ~/.zprofile
