@@ -1,0 +1,24 @@
+{
+  "name": "github-sub-issues",
+  "description": "GitHub Sub-issues および Issue Types の操作スキル。GraphQL API を使用して階層的な Issue 管理と Issue Type の設定を行います。",
+  "version": "1.0.0",
+  "author": "Claude Code",
+  "tags": ["github", "sub-issues", "issue-types", "graphql", "automation"],
+  "capabilities": [
+    "Parent Issue の Sub-issues 一覧取得",
+    "既存 Issue を Sub-issue として追加",
+    "Sub-issue を親から削除",
+    "Issue の Parent Issue 取得",
+    "Organization の Issue Types 一覧取得",
+    "Issue の Issue Type 設定・変更",
+    "複数 Issue の Issue Type 一括設定"
+  ],
+  "requirements": {
+    "tools": ["gh"],
+    "permissions": ["repo", "read:org"],
+    "headers": {
+      "sub_issues": "GraphQL-Features: sub_issues",
+      "issue_types": "GraphQL-Features: issue_types"
+    }
+  }
+}

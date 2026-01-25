@@ -1,0 +1,216 @@
+---
+description: PRを作成する。baseBranchの指定を引数で指定する。
+---
+
+# Pull Request作成タスク
+
+## 概要
+
+このタスクは、現在のブランチの変更内容を分析し、Pull Requestの下書きを自動生成してGitHubに投稿します。git diffによる差分分析、PRテンプレートの活用、GitHub CLIを使用したPR作成を行います。
+
+## 前提条件
+
+- GitHub CLI (`gh`) がインストールされていること
+- GitHub CLIで認証済みであること (`gh auth login`)
+- `git` コマンドが利用可能であること
+- 現在のブランチがマージ対象のベースブランチと異なること
+
+## 実行手順
+
+### 1. ブランチ情報の取得
+
+以下のコマンドを使用してブランチ情報を取得してください：
+
+1. **現在のブランチ名を取得**: `git branch --show-current`
+2. **ベースブランチの確認**: タスク実行時にユーザーから指定されたベースブランチを使用
+   - ユーザーから指定されなかった場合は、「どのブランチをベースブランチにしますか？」と尋ねる
+3. **リモートリポジトリ情報の取得**: `git remote get-url origin` からowner/repoを抽出
+4. **認証ユーザーの取得**: `gh api user --jq .login` でユーザー名を取得
+
+### 2. 差分の取得と分析
+
+現在のブランチとベースブランチの差分を取得し、分析してください：
+
+```bash
+# ファイル一覧の取得
+git diff --name-only origin/${BASE_BRANCH}..HEAD
+
+# 詳細な差分の取得
+git diff origin/${BASE_BRANCH}..HEAD
+
+# コミット履歴の取得
+git log --oneline origin/${BASE_BRANCH}..HEAD
+```
+
+### 3. 既存PR確認
+
+PR作成前に既存のPRがないか確認してください：
+
+```bash
+gh pr list --head $(git branch --show-current) --state open --json number,title,url
+```
+
+- 現在のブランチで開いているPRを検索
+- 既にPRが存在する場合は、更新するか新規作成するかユーザーに確認
+
+### 4. PR下書きの生成
+
+以下の情報を分析してPR下書きを作成してください：
+
+#### 分析対象項目
+
+- **変更ファイル一覧**: 追加、修正、削除されたファイル
+- **変更内容の要約**: コードの変更パターンと目的の推定
+- **コミットメッセージ**: 開発者の意図の把握
+- **機能追加 or バグ修正**: 変更の性質の判断
+
+#### PR下書きテンプレート
+
+@.github/PULL_REQUEST_TEMPLATE.md を読み込み、差分分析結果に基づいてテンプレート内の項目を自動的に埋めてください。
+
+### 5. 下書きファイルの保存
+
+以下の手順で下書きファイルを保存してください：
+
+1. **ディレクトリ構造の作成**:
+
+   ```
+   .claude/pull-requests/drafts/{branchName}/
+   ```
+
+   - ブランチ名に`/`が含まれる場合は、ディレクトリを分割
+   - 例: `feature/create-app` → `.claude/pull-requests/drafts/feature/create-app/`
+
+2. **ファイル名の生成**:
+
+   ```
+   {timestamp}.md
+   ```
+
+   - `timestamp`: `YYYYMMDD-HHMMSS`形式（例: `20241225-143022`）
+
+3. **完全なパス例**:
+
+   ```
+   .claude/pull-requests/drafts/feature/create-app/20241225-143022.md
+   .claude/pull-requests/drafts/hotfix-bug/20241225-150315.md
+   ```
+
+### 6. ユーザー確認プロセス
+
+下書きファイルを作成後、以下の確認を行ってください：
+
+1. **下書き内容の表示**: 生成したPR下書きの内容をユーザーに提示
+2. **確認の取得**: 「このPRを作成しますか？」とユーザーに確認
+3. **選択肢の提示**:
+   - 「はい」: PR作成を実行
+   - 「いいえ」: 下書きのみ保存して終了
+   - 「修正」: 内容の修正が必要な場合の対応
+
+### 7. PR作成の実行
+
+ユーザーが「はい」と回答した場合のみ、以下を実行してください：
+
+1. **PR作成の実行**:
+
+   ```bash
+   gh pr create \
+     --title "自動生成されたPRタイトル" \
+     --body-file .claude/pull-requests/drafts/{branchName}/{timestamp}.md \
+     --base "${BASE_BRANCH}" \
+     --head "${CURRENT_BRANCH}" \
+     --assignee "@me"
+   ```
+
+   - `--title`: 自動生成されたPRタイトル
+   - `--body-file`: 下書きファイルのパス
+   - `--base`: ユーザーが指定したベースブランチ名
+   - `--head`: 現在のブランチ名
+   - `--assignee "@me"`: 作成者を自動アサイン
+
+2. **PR番号の取得**:
+
+   PR作成コマンドの出力URLからPR番号を抽出、またはJSON形式で取得：
+
+   ```bash
+   PR_INFO=$(gh pr create --title "..." --body-file "..." --base "..." --head "..." --assignee "@me" --json number,url,title)
+   PR_NUMBER=$(echo "$PR_INFO" | jq -r '.number')
+   PR_URL=$(echo "$PR_INFO" | jq -r '.url')
+   ```
+
+3. **下書きファイルのリネーム**:
+   - Before: `.claude/pull-requests/drafts/{branchName}/{timestamp}.md`
+   - After: `.claude/pull-requests/{prNumber}.md`
+
+4. **ブランチディレクトリの削除**:
+   下書きファイルのリネーム完了後、**空になった**ブランチディレクトリのみを削除
+   - 削除条件: `.claude/pull-requests/drafts/{branchName}/` が空の場合のみ
+   - 保護条件: 他の下書きファイル（過去の下書き等）が残っている場合は削除しない
+   - ブランチ名に`/`が含まれる場合は、最深のディレクトリから順に空かどうかを確認
+   - 例: `feature/create-app` の場合
+     - `.claude/pull-requests/drafts/feature/create-app/` が空なら削除
+     - `.claude/pull-requests/drafts/feature/` が空なら削除（上位ディレクトリも確認）
+
+## 自動生成ルール
+
+### Issue番号の推定
+
+- **ブランチ名から推定**: `feature/issue-123` → `#123`
+- **コミットメッセージから推定**: `fix: resolve #456` → `#456`
+- **推定不可の場合**: `TBD`と記載
+
+### タイトル生成ルール
+
+1. **機能追加**: `feat: {機能名}`
+2. **バグ修正**: `fix: {修正内容}`
+3. **ドキュメント**: `docs: {更新内容}`
+4. **リファクタリング**: `refactor: {対象範囲}`
+5. **その他**: コミットメッセージの先頭を使用
+
+### チェックリスト自動生成
+
+変更内容に応じて以下のチェック項目を生成：
+
+- **コード変更**: `[ ] コードレビューが完了している`
+- **テスト追加**: `[ ] テストケースが追加されている`
+- **UI変更**: `[ ] デザインレビューが完了している`
+- **API変更**: `[ ] API仕様書が更新されている`
+- **設定変更**: `[ ] 環境設定の影響を確認済み`
+
+## 注意事項
+
+- **ベースブランチの確認**: ユーザーから指定されたベースブランチが正しく存在することを確認
+- **ファイルパスの安全性**: ブランチ名の特殊文字を適切にエスケープ
+- **重複防止**: 同じブランチで既にPRが存在する場合の確認
+- **下書き保存**: PR作成に失敗しても下書きは保存された状態を維持
+- **タイムスタンプの一意性**: 同じ時刻に複数実行された場合の対応
+- **PRテンプレート**: `.github/PULL_REQUEST_TEMPLATE.md`を必ず読み込んで使用すること
+
+## 出力形式
+
+### 成功時
+
+```markdown
+✅ **PR作成完了**
+
+- **PR番号**: #123
+- **タイトル**: feat: ユーザー認証機能の追加
+- **URL**: https://github.com/owner/repo/pull/123
+- **下書きファイル**: `.claude/pull-requests/123.md`
+- **ベースブランチ**: main
+- **ヘッドブランチ**: feature/auth
+
+PRが正常に作成されました。レビューをお待ちください。
+```
+
+### 下書きのみ保存時
+
+```markdown
+📝 **PR下書き保存完了**
+
+- **下書きファイル**: `.claude/pull-requests/drafts/feature/auth/20241225-143022.md`
+- **ブランチ**: feature/auth
+- **ベースブランチ**: main
+
+下書きが保存されました。後でPRを作成する場合は、再度このタスクを実行してください。
+```

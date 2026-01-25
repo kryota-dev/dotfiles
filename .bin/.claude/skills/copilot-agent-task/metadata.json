@@ -1,0 +1,19 @@
+{
+  "name": "copilot-agent-task",
+  "description": "GitHub Copilot coding agent のタスク管理スキル。セッションログの取得、タスク一覧の表示、タスクの作成などを gh agent-task コマンドで操作します。",
+  "version": "1.0.0",
+  "author": "Claude Code",
+  "tags": ["github", "copilot", "agent-task", "session-log", "automation"],
+  "capabilities": [
+    "Copilot agent タスク一覧の取得",
+    "セッションログの取得・表示",
+    "タスクの詳細情報表示",
+    "新規タスクの作成",
+    "リアルタイムログのフォロー"
+  ],
+  "requirements": {
+    "tools": ["gh"],
+    "permissions": ["repo"],
+    "notes": "gh agent-task コマンドはプレビュー機能です"
+  }
+}

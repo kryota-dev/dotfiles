@@ -30,3 +30,10 @@ Temporary Items
 ### macOS Patch ###
 # iCloud generated files
 *.icloud
+
+.bin/.claude/*
+!.bin/.claude/agents/
+!.bin/.claude/commands/
+!.bin/.claude/skills/
+!.bin/.claude/CLAUDE.md
+!.bin/.claude/settings.json
