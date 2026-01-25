@@ -127,41 +127,11 @@ alias vi="nvim"
 alias vim="nvim"
 alias view="nvim -R"
 
-# alias n='node'
-# alias nv='node -v'
-
-# alias y='yarn'
-# alias yv='yarn -v'
-# alias yi='yarn install'
-# alias yd='yarn dev'
-# alias yb='yarn build'
-# alias ys='yarn start'
-# alias yl='yarn lint'
-# alias yf='yarn format'
-# alias yt='yarn test'
-# alias ya='yarn add'
-# alias yad='yarn add -D'
-# alias yag='yarn global add'
-# alias yrm='yarn remove'
-# alias yrmg='yarn remove -g'
-
-alias c='code'
-# alias cle='code --list-extensions'
 alias -g C='| pbcopy'
-
-# alias b='brew'
-# alias bi='brew install'
-# alias bs='brew search'
-# alias bd='brew update'
-# alias bg='brew upgrade'
-# alias bo='brew outdated'
-# alias bl='brew list'
-# alias bd='brew doctor'
 
 alias pn='pnpm'
 alias pni='pnpm install'
 alias pnx='pnpx'
-alias pnv='pnpm -v'
 
 # alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Alert.m4r && \
 #   afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r'
@@ -201,47 +171,3 @@ alias alhelp='cat ${HOME}/.zshrc'
 # ===============================================
 
 eval "$(direnv hook zsh)"
-
-. /opt/homebrew/opt/asdf/libexec/asdf.sh
-
-# The following lines have been added by Docker Desktop to enable Docker CLI completions.
-fpath=(/Users/ryota/.docker/completions $fpath)
-autoload -Uz compinit
-compinit
-# End of Docker CLI completions
-
-# bun completions
-[ -s "/Users/ryota/.bun/_bun" ] && source "/Users/ryota/.bun/_bun"
-
-# bun
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
-
-# Claude Spec-Driven Development configuration
-export CLAUDE_HOME="$HOME/.claude"
-export PATH="$CLAUDE_HOME/scripts:$PATH"
-
-# Aliases for common SDD commands
-alias sdd-new='~/.claude/scripts/create-new-feature.sh'
-alias sdd-plan='~/.claude/scripts/setup-plan.sh'
-alias sdd-tasks='~/.claude/scripts/check-task-prerequisites.sh'
-alias sdd-agent='~/.claude/scripts/update-agent-context.sh'
-
-# Function to get current branch specs directory
-sdd-specs() {
-    local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    if [ -z "$branch" ]; then
-        echo "Error: Not in a git repository"
-        return 1
-    fi
-    local specs_dir="$(git rev-parse --show-toplevel)/specs/$branch"
-    if [ -d "$specs_dir" ]; then
-        echo "$specs_dir"
-        cd "$specs_dir"
-    else
-        echo "No specs directory for branch: $branch"
-        return 1
-    fi
-}
-export PATH="$HOME/.local/bin:$PATH"
-export PATH="$PATH:/Users/ryota/tools/coderabbitai/git-worktree-runner/bin"
