@@ -1,5 +1,8 @@
 ---
+name: create-pr
 description: PRを作成する。baseBranchの指定を引数で指定する。
+argument-hint: "[base-branch]"
+disable-model-invocation: true
 ---
 
 # Pull Request作成タスク

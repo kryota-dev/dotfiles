@@ -1,5 +1,8 @@
 ---
+name: commit
 description: 現在の差分を分析し、適切なブランチを作成して論理的な粒度でコミットを作成する
+argument-hint: "[branch-name]"
+disable-model-invocation: true
 ---
 
 現在の差分を分析し、適切なブランチを作成して論理的な粒度でコミットを作成します。

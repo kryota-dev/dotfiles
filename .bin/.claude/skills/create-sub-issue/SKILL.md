@@ -1,5 +1,8 @@
 ---
+name: create-sub-issue
 description: Sub-issueを作成する。parentIssueの指定を引数で指定する。
+argument-hint: "[parent-issue]"
+disable-model-invocation: true
 ---
 
 # Sub-issue作成タスク

@@ -1,6 +1,9 @@
 ---
-allowed-tools: Bash, Read, TodoWrite, WebFetch
+name: create-issue
 description: GitHub Issueをテンプレートベースで生成・投稿
+argument-hint: "[issue-type] [repository]"
+disable-model-invocation: true
+allowed-tools: Bash, Read, WebFetch
 ---
 
 # GitHub Issue Generator

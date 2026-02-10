@@ -1,4 +1,9 @@
-
+---
+name: specify
+description: "Start new work by creating a specification and branch. Spec-Driven Developmentの第1ステップ。"
+argument-hint: "[work-description]"
+disable-model-invocation: true
+---
 Start new work by creating a specification and branch.
 
 This is the first step in the Spec-Driven Development lifecycle.

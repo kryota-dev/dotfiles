@@ -1,3 +1,9 @@
+---
+name: plan
+description: "Plan how to implement the specified work item. Spec-Driven Developmentの第2ステップ。"
+argument-hint: "[implementation-details]"
+disable-model-invocation: true
+---
 
 Plan how to implement the specified work item.
 

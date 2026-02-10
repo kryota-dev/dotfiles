@@ -1,5 +1,7 @@
 ---
+name: planning
 description: 実装計画を作成する
+disable-model-invocation: true
 ---
 
 # 実行計画の作成

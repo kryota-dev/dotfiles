@@ -1,5 +1,7 @@
 ---
+name: pr-review
 description: Pull Requestに対して、コードレビューを行う。
+disable-model-invocation: true
 ---
 
 # Pull Request コードレビュータスク
@@ -66,8 +68,8 @@ description: Pull Requestに対して、コードレビューを行う。
 ```markdown
 # PR レビュー結果
 
-> 🤖 **AI Code Review**  
-> このレビューは ${AI_MODEL_NAME} によって実行されました。  
+> 🤖 **AI Code Review**
+> このレビューは ${AI_MODEL_NAME} によって実行されました。
 > 日時: ${REVIEW_DATE}
 
 ## レビュー概要
@@ -130,7 +132,7 @@ description: Pull Requestに対して、コードレビューを行う。
 
 ---
 
-> 💡 **Note**  
+> 💡 **Note**
 > このレビューはAIによる自動分析です。重要な変更については人間のレビューも併用することを推奨します。
 ```
 

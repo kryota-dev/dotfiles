@@ -1,4 +1,9 @@
-
+---
+name: tasks
+description: "Break down the plan into executable tasks. Spec-Driven Developmentの第3ステップ。"
+argument-hint: "[context]"
+disable-model-invocation: true
+---
 Break down the plan into executable tasks.
 
 This is the third step in the Spec-Driven Development lifecycle.

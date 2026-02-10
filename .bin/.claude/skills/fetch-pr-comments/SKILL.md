@@ -1,5 +1,7 @@
 ---
-description: PRのコメント・レビューを取得する（coderabbitai除外）。引数: <pr-number-or-url>
+name: fetch-pr-comments
+description: "PRのコメント・レビューを取得する（coderabbitai除外）。引数: <pr-number-or-url>"
+argument-hint: "[pr-number-or-url]"
 ---
 
 # GitHub PR コメント取得タスク

@@ -1,6 +1,8 @@
 ---
+name: renovate-analyzer
 description: Renovate PRを分析し、アップデート可否と修正方針を提示する。PR番号またはURLを引数で指定する。
-argument-hint: [pr-number-or-url]
+argument-hint: "[pr-number-or-url]"
+disable-model-invocation: true
 ---
 
 # Renovate PR 分析コマンド

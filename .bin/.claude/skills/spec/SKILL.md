@@ -1,5 +1,7 @@
 ---
-description: "spec-driven development"
+name: spec
+description: spec-driven development
+disable-model-invocation: true
 ---
 
 **ultrathink**

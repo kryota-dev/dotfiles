@@ -1,5 +1,8 @@
 ---
+name: prompt
 description: プロンプトを作成する。requirementsの指定を引数で指定する。
+argument-hint: "[requirements]"
+disable-model-invocation: true
 ---
 
 天才プロンプトエンジニア目線で、要件それぞれ役立つプロンプトを作成して。
