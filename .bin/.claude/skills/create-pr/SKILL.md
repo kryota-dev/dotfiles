@@ -54,7 +54,13 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 ```
 
 - 現在のブランチで開いているPRを検索
-- 既にPRが存在する場合は、更新するか新規作成するかユーザーに確認
+- 既にPRが存在する場合は、`AskUserQuestion`ツールを使用してユーザーに確認を取ること
+  - question: "既にPRが存在します。どうしますか？"
+  - header: "PR操作"
+  - options:
+    - { label: "既存PRを更新", description: "既存のPRを更新する" }
+    - { label: "新規PR作成", description: "新しいPRを作成する" }
+  - multiSelect: false
 
 ### 4. PR下書きの生成
 
@@ -104,11 +110,14 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 下書きファイルを作成後、以下の確認を行ってください：
 
 1. **下書き内容の表示**: 生成したPR下書きの内容をユーザーに提示
-2. **確認の取得**: 「このPRを作成しますか？」とユーザーに確認
-3. **選択肢の提示**:
-   - 「はい」: PR作成を実行
-   - 「いいえ」: 下書きのみ保存して終了
-   - 「修正」: 内容の修正が必要な場合の対応
+2. **確認の取得**: `AskUserQuestion`ツールを使用してユーザーに確認を取ること
+   - question: "このPRを作成しますか？"
+   - header: "PR作成"
+   - options:
+     - { label: "はい", description: "PR作成を実行する" }
+     - { label: "いいえ", description: "下書きのみ保存して終了する" }
+     - { label: "修正", description: "内容の修正が必要" }
+   - multiSelect: false
 
 ### 7. PR作成の実行
 

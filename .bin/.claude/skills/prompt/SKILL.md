@@ -49,4 +49,10 @@ disable-model-invocation: true
 
 ### 6. プロンプトのユーザー確認フェーズ
 
-- Claude Codeがユーザーに対して、作成したプロンプトを提示し、問題がないかを尋ねる
+- `AskUserQuestion` ツールを使用して、作成したプロンプトを提示し、問題がないかをユーザーに確認する
+  - question: "プロンプトを作成しました。内容を確認してください。問題ありませんか？"
+  - header: "確認"
+  - options:
+    - { label: "問題ない", description: "このプロンプトで確定する" }
+    - { label: "修正が必要", description: "修正箇所をフィードバックする" }
+  - multiSelect: false

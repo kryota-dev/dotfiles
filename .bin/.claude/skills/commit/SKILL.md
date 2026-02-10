@@ -46,8 +46,15 @@ disable-model-invocation: true
       - package.json
       - pnpm-lock.yaml
 
-   この計画でコミットを作成してよろしいですか？ (y/n)
-   変更が必要な場合は、どのような調整が必要か教えてください。
+   `AskUserQuestion`ツールを使用して、この計画でコミットを作成してよいかユーザーに確認を取ること。
+
+   AskUserQuestionパラメータ:
+   - question: "上記のコミット計画で作成してよろしいですか？"
+   - header: "Commit"
+   - options:
+     - { label: "はい", description: "この計画でコミットを作成する" }
+     - { label: "修正が必要", description: "計画の調整が必要な箇所を伝える" }
+   - multiSelect: false
    ```
 
 4. ブランチ作成（main ブランチでない場合のみ）：
@@ -65,7 +72,7 @@ disable-model-invocation: true
 
 5. 論理的なコミット単位で変更をステージング＆コミット：
 
-   ユーザーの承認を得た後、各コミットごとに：
+   ステップ3でユーザーの承認を得た後、各コミットごとに：
 
    - 関連するファイルをグループ化
    - 適切なコミットメッセージを生成
@@ -103,7 +110,7 @@ disable-model-invocation: true
 8. 実行前の確認：
 
    - 重要な変更がある場合は、コミット計画をユーザーに提示
-   - ユーザーの承認を得てから実行
+   - `AskUserQuestion`ツールを使用してユーザーの承認を得てから実行（ステップ3と同様のパラメータを使用）
 
 重要事項：
 

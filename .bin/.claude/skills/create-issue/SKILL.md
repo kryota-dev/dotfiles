@@ -278,12 +278,16 @@ echo "
 "
 
 # 最終確認（必須）
-read -p "このIssueを作成することを許可しますか？ (yes/no): " CONFIRM
-if [ "$CONFIRM" != "yes" ]; then
-    echo "❌ Issue作成をキャンセルしました"
-    echo "内容を修正してから再度実行してください"
-    exit 0
-fi
+# `AskUserQuestion`ツールを使用してユーザーに確認を取ること
+# パラメータ:
+#   question: "このIssueを作成してよろしいですか？"
+#   header: "Issue作成"
+#   options:
+#     - { label: "はい", description: "このIssueを作成する" }
+#     - { label: "いいえ", description: "Issue作成をキャンセルする" }
+#   multiSelect: false
+# ユーザーが "はい" を選択した場合のみ次のステップに進む
+# ユーザーが "いいえ" を選択した場合は「Issue作成をキャンセルしました。内容を修正してから再度実行してください」と表示して終了する
 ```
 
 ### 8. Issue の作成
@@ -383,9 +387,26 @@ if [ -n "$ISSUE_TYPE_ID" ] && [ -n "$ISSUE_URL" ]; then
 fi
 
 # Sub-issue設定（Parent Issueへの追加）
-read -p "このIssueを既存のIssueのsub-issueとして追加しますか？ (y/n): " ADD_AS_SUBISSUE
+# `AskUserQuestion`ツールを使用してユーザーに確認を取ること
+# パラメータ:
+#   question: "このIssueを既存のIssueのsub-issueとして追加しますか？"
+#   header: "Sub-issue"
+#   options:
+#     - { label: "はい", description: "既存Issueのsub-issueとして追加する" }
+#     - { label: "いいえ", description: "sub-issueとして追加しない" }
+#   multiSelect: false
+# ユーザーが "はい" を選択した場合、続けてParent IssueのIssue番号を質問する
+ADD_AS_SUBISSUE="y"  # AskUserQuestionの結果に応じて設定
 if [ "$ADD_AS_SUBISSUE" = "y" ]; then
-    read -p "Parent IssueのIssue番号を入力してください: " PARENT_ISSUE_NUMBER
+    # `AskUserQuestion`ツールを使用してParent IssueのIssue番号を質問すること
+    # パラメータ:
+    #   question: "Parent IssueのIssue番号を入力してください"
+    #   header: "Parent"
+    #   options:
+    #     - { label: "番号を入力", description: "Parent IssueのIssue番号を指定する" }
+    #   multiSelect: false
+    # ※ユーザーは「Other」からIssue番号を自由入力する想定
+    PARENT_ISSUE_NUMBER=""  # AskUserQuestionの結果を設定
 
     # 作成したIssueのNode IDを取得
     SUBISSUE_NODE_ID=$(gh api graphql -f query="
@@ -437,13 +458,28 @@ if [ "$ADD_AS_SUBISSUE" = "y" ]; then
 fi
 
 # プロジェクトボードへの追加（オプション）
-read -p "プロジェクトボードに追加しますか？ (y/n): " ADD_PROJECT
+# `AskUserQuestion`ツールを使用してユーザーに確認を取ること
+# パラメータ:
+#   question: "プロジェクトボードに追加しますか？"
+#   header: "Project"
+#   options:
+#     - { label: "はい", description: "プロジェクトボードに追加する" }
+#     - { label: "いいえ", description: "プロジェクトボードに追加しない" }
+#   multiSelect: false
+ADD_PROJECT="y"  # AskUserQuestionの結果に応じて設定
 if [ "$ADD_PROJECT" = "y" ]; then
-    # 利用可能なプロジェクトを表示
-    echo "利用可能なプロジェクト:"
-    gh project list --owner ${REPO%/*} --format json | jq -r '.projects[].title'
+    # 利用可能なプロジェクトを取得
+    PROJECTS=$(gh project list --owner ${REPO%/*} --format json | jq -r '.projects[].title')
 
-    read -p "プロジェクト名: " PROJECT_NAME
+    # `AskUserQuestion`ツールを使用してプロジェクト名を質問すること
+    # パラメータ:
+    #   question: "追加するプロジェクトを選択してください"
+    #   header: "Project名"
+    #   options: 取得したプロジェクト一覧から最大4件を選択肢として動的に設定
+    #     - { label: "<プロジェクト名1>", description: "このプロジェクトに追加する" }
+    #     - { label: "<プロジェクト名2>", description: "このプロジェクトに追加する" }
+    #   multiSelect: false
+    PROJECT_NAME=""  # AskUserQuestionの結果を設定
     gh issue edit $ISSUE_URL --add-project "$PROJECT_NAME"
 fi
 ```
