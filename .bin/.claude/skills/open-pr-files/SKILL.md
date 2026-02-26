@@ -37,18 +37,22 @@ gh pr view --json number --jq '.number'
 
 ### 2. 変更ファイルの取得と VSCode で開く
 
-以下のワンライナーを実行してください。`{PR特定子}` をステップ1で決定した値に置き換えること。
-
-注意: `gh pr diff --name-only` は日本語パスをオクタルエスケープするため、`gh pr view --json` を使用すること。
+以下のコマンドを実行してください。`{PR番号}` をステップ1で決定した値に置き換えること。
 
 ```bash
-gh pr view {PR特定子} --json files --jq '.files[].path' | while IFS= read -r file; do code "$file" & done
+gh api repos/{owner}/{repo}/pulls/{PR番号}/files --jq '.[] | select(.status == "removed" | not) | .filename' | while IFS= read -r file; do code "$file" & done
 ```
 
 ### 3. 結果の報告
 
-開いたファイルの一覧を番号付きリストで報告してください。以下のコマンドで取得できます。
+変更ファイル（削除以外）の一覧を番号付きリストで報告してください。
 
 ```bash
-gh pr view {PR特定子} --json files --jq '.files[].path' | cat -n
+gh api repos/{owner}/{repo}/pulls/{PR番号}/files --jq '.[] | select(.status == "removed" | not) | .filename' | cat -n
+```
+
+削除されたファイルがある場合は、別途「削除されたファイル」として一覧を報告してください。
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{PR番号}/files --jq '.[] | select(.status == "removed") | .filename' | cat -n
 ```
