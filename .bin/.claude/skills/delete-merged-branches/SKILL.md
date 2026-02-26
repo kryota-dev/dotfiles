@@ -1,6 +1,6 @@
 ---
 name: delete-merged-branches
-description: "ベースブランチにマージ済みのローカルgitブランチを検出して一括削除する。「マージ済みブランチを削除」「merged branches」「ブランチの掃除」などと言及された際に使用。"
+description: "ベースブランチにマージ済みのローカルgitブランチを検出して一括削除する。"
 user-invocable: true
 allowed-tools: Bash, AskUserQuestion
 ---
