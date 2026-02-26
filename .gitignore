@@ -45,3 +45,4 @@ Temporary Items
 
 .bin/.aws/*
 !.bin/.aws/config.template
+
