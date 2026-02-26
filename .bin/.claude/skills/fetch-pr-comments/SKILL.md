@@ -15,7 +15,7 @@ argument-hint: "[pr-number-or-url]"
 $ARGUMENTS
 
 - PR番号（例: `8597`）
-- またはPR URL（例: `https://github.com/route06/acsim/pull/8597`）
+- またはPR URL（例: `https://github.com/<OWNER>/<REPO>/pull/8597`）
 
 ## 実行手順
 

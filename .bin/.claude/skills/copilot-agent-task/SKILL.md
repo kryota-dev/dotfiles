@@ -101,7 +101,7 @@ gh agent-task list
 
 # Step 2: 特定のセッションログを取得
 SESSION_ID="fd97268c-d813-4a7e-9477-d7a9016dd354"
-REPO="route06/acsim"
+REPO="<OWNER>/<REPO>"
 
 # ログを表示
 gh agent-task view $SESSION_ID --log -R $REPO

@@ -222,8 +222,8 @@ mutation {
 #!/bin/bash
 # Epic #123 の全 sub-issues を Enhancement に設定する例
 
-OWNER="route06"
-REPO="acsim"
+OWNER="<OWNER>"
+REPO="<REPO>"
 EPIC_NUMBER=123
 ISSUE_TYPE_NAME="Enhancement"
 
