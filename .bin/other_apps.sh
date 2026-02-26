@@ -36,3 +36,6 @@ function app_dl_curl {
 
 # Logi Options+
 app_dl_curl "Logi Options+" https://download01.logi.com/web/ftp/pub/techsupport/optionsplus/logioptionsplus_installer.zip
+
+# Google 日本語入力
+app_dl_web "Google Japanese Input" "https://tools.google.com/dlpage/japaneseinput/thankyou.html?platform=mac"
