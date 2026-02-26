@@ -6,6 +6,7 @@
     "CLAUDE_CODE_IDE_SKIP_VALID_CHECK": "true",
     "CLAUDE_CODE_ENABLE_TELEMETRY": "false",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "true",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "DISABLE_ERROR_REPORTING": "true",
     "DISABLE_TELEMETRY": "true",
     "DISABLE_AUTOUPDATER": "false",
@@ -23,26 +24,22 @@
       "Read(id_ed25519)",
       "Read(**/*token*)",
       "Read(**/*key*)",
-      "Read(**/.spec-workflow/templates/**)",
       "Write(.env*)",
       "Write(**/secrets/**)",
       "Bash(wget:*)",
       "Bash(nc:*)",
       "Bash(curl:*)",
-      "Bash(npm install:*)",
-      "Bash(npm uninstall:*)",
-      "Bash(npm remove:*)",
       "Bash(psql:*)",
       "Bash(mysql:*)",
       "Bash(mongod:*)",
+      "Bash(*.gmail-mcp*)",
+      "Bash(*.gmail-mcp/credentials.json*)",
+      "Bash(*.gmail-mcp/gcp-oauth.keys.json*)",
       "mcp__supabase__execute_sql"
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "opus",
-  "enabledPlugins": {
-    "ralph-wiggum@claude-plugins-official": true
-  },
   "language": "Japanese",
-  "alwaysThinkingEnabled": true
+  "alwaysThinkingEnabled": true,
+  "skipDangerousModePermissionPrompt": true
 }
