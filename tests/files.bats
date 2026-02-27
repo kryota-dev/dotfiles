@@ -51,8 +51,7 @@ load helpers/setup
 
 @test "run_once scripts exist" {
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
-  [ -f "${HOME_DIR}/run_once_before_01-install-1password-cli.sh.tmpl" ]
-  [ -f "${HOME_DIR}/run_onchange_after_10-brew-bundle.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_30-setup-fonts.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_40-setup-sheldon.sh.tmpl" ]
