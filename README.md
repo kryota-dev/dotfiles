@@ -4,6 +4,8 @@ Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 
 [![CI][ci-badge]][ci-url] ![chezmoi][chezmoi-badge] ![shell: zsh][zsh-badge] ![macOS][macos-badge] [![MIT][mit-badge]](LICENSE)
 
+> English | **[日本語](README.ja.md)**
+
 <!-- TODO: add terminal screenshot
 <p align="center">
   <img src="docs/screenshot.png" width="720" alt="Terminal screenshot" />
