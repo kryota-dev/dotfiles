@@ -1,0 +1,44 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+function ask_yes_no() {
+  while true; do
+    echo -n "$* [Y/n]: (default: y) "
+    read -r ANS
+    case $ANS in
+      [Yy]* | "")
+        return 0
+        ;;
+      [Nn]*)
+        return 1
+        ;;
+    esac
+  done
+}
+
+function app_dl_curl() {
+  local DL_PATH
+  DL_PATH="$HOME/Downloads/$(basename "$2")"
+  if ask_yes_no "Do you want to download $1?"; then
+    echo "Downloading $1..."
+    curl "$2" --output "$DL_PATH"
+    open "$DL_PATH"
+  fi
+}
+
+function app_dl_web() {
+  if ask_yes_no "Do you want to download $1?"; then
+    echo "Opening download page for $1..."
+    open "$2"
+  fi
+}
+
+# Logi Options+
+app_dl_curl "Logi Options+" "https://download01.logi.com/web/ftp/pub/techsupport/optionsplus/logioptionsplus_installer.zip"
+
+# Google Japanese Input
+app_dl_web "Google Japanese Input" "https://tools.google.com/dlpage/japaneseinput/thankyou.html?platform=mac"

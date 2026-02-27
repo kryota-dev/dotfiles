@@ -1,10 +1,10 @@
 [user]
 	name = kryota-dev
-	email = 50436249+kryota-dev@users.noreply.github.com
-	signingkey = ~/.ssh/ssh-key.pub
+	email = {{ .email }}
+	signingkey = {{ .signingkey }}
 [core]
 	excludesfile = ~/.gitignore_global
-	editor = vim
+	editor = nvim
 	ignorecase = false
 [commit]
 	template = ~/.stCommitMsg
