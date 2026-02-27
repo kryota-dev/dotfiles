@@ -1,90 +1,131 @@
 # dotfiles
 
-macOS 開発環境を chezmoi で宣言的に管理するdotfilesリポジトリ。
+Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 
-## Features
+[![CI][ci-badge]][ci-url] ![chezmoi][chezmoi-badge] ![shell: zsh][zsh-badge] ![macOS][macos-badge] [![MIT][mit-badge]](LICENSE)
 
-- **[chezmoi](https://chezmoi.io/)** によるdotfiles管理（テンプレート・シークレット対応）
-- **[sheldon](https://sheldon.cli.rs/)** + **zsh-defer** によるzshプラグイン遅延ロード
-- **[starship](https://starship.rs/)** プロンプト
-- **[Ghostty](https://ghostty.org/)** ターミナル設定
-- **1Password CLI** 連携（SSH signing・シークレット管理）
-- **Bats** テスト + **shellcheck** / **shfmt** による品質保証
-- **GitHub Actions** CI（lint・test・ベンチマーク）
-- **Claude Code** / **Codex** AI設定の統合管理
+<!-- TODO: add terminal screenshot
+<p align="center">
+  <img src="docs/screenshot.png" width="720" alt="Terminal screenshot" />
+</p>
+<p align="center">
+  <sub>Ghostty · Starship (Catppuccin Mocha) · Moralerspace Neon</sub>
+</p>
+-->
 
-## Quick Start
+## Highlights
+
+- **[chezmoi](https://chezmoi.io/)** — template-driven dotfiles with interactive secret prompts
+- **[sheldon](https://sheldon.cli.rs/) + [zsh-defer](https://github.com/romkatv/zsh-defer)** — minimal `.zshrc` core with lazy-loaded modular config
+- **[starship](https://starship.rs/)** — Catppuccin Mocha themed two-line prompt
+- **[Ghostty](https://ghostty.org/)** — Moralerspace Neon font
+- **1Password CLI** — SSH signing, commit verification
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — skills & agents managed as dotfiles
+- **Homebrew** — declarative package management via Brewfile
+- **GitHub Actions** — shellcheck, shfmt, Bats tests, zsh startup benchmark
+
+## Getting Started
+
+> Requires **macOS (Apple Silicon)** and **[1Password](https://1password.com/)** (SSH Agent + CLI).
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/kryota-dev/dotfiles/main/install/install.sh)"
+chezmoi init --apply kryota-dev
 ```
 
-## Requirements
+On first run, chezmoi will prompt for your Git email and SSH signing key path.
+Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, and macOS defaults.
 
-- macOS (Apple Silicon)
-- 1Password（SSH Agent + CLI）
+## Architecture
 
-## Structure
+### Repository Structure
 
 ```
 dotfiles/
-├── .chezmoiroot        # chezmoi source root → home/
-├── home/               # chezmoi managed dotfiles
-│   ├── dot_zshrc.tmpl  # zsh config (~25 lines, sheldon-powered)
+├── .chezmoiroot              # source root → home/
+├── home/
+│   ├── .chezmoi.toml.tmpl    # interactive config prompts
+│   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
 │   ├── dot_config/
-│   │   ├── ghostty/    # Ghostty terminal config
-│   │   ├── sheldon/    # sheldon plugin manager
-│   │   ├── starship.toml
-│   │   └── zsh/        # zsh modules (8 files)
-│   ├── dot_claude/     # Claude Code settings & skills
-│   ├── run_once_*      # Auto-setup scripts
+│   │   ├── ghostty/          # terminal config
+│   │   ├── sheldon/          # plugin manager
+│   │   ├── starship.toml     # prompt theme
+│   │   └── zsh/              # deferred shell modules
+│   ├── dot_claude/           # AI skills & agents
+│   ├── run_once_before_*     # first-time setup
+│   ├── run_onchange_after_*  # re-run on content change
+│   ├── run_once_after_*      # one-time post-setup
 │   └── ...
-├── tests/              # Bats test suite
-├── scripts/            # Benchmark & utility scripts
-├── install/            # One-liner bootstrap
-└── Makefile            # Development commands
+├── tests/                    # Bats test suite
+├── scripts/                  # benchmark utilities
+├── Makefile                  # development commands
+└── LICENSE
 ```
 
-## Usage
+### Zsh Architecture
 
-```bash
-# Apply changes
-make apply
+`.zshrc` is a minimal core that delegates all plugin and module loading to sheldon with zsh-defer for async initialization:
 
-# Show pending changes
-make diff
-
-# Run tests
-make test
-
-# Run linter
-make lint
-
-# Benchmark zsh startup
-make benchmark
-
-# Watch for changes and auto-apply
-make watch
-
-# Dump current brew packages
-make dump-brewfile
 ```
-
-## Zsh Architecture
-
-`.zshrc` は ~25行のコアファイルで、sheldon + zsh-defer により8つのモジュールを遅延ロードする:
+.zprofile                     Homebrew PATH, rbenv, env vars
+    ↓
+.zshrc (minimal core)         setopt, PATH, direnv, starship
+    ↓
+sheldon source                zsh-defer loads everything async
+    ├── community plugins     autosuggestions, syntax-highlighting, completions
+    └── local modules ──→     aliases, git, docker, claude, ...
+```
 
 | Module | Description |
 |--------|-------------|
-| `aliases.zsh` | 一般エイリアス (ll, vi, pn, etc.) |
-| `git.zsh` | Git エイリアス・関数 |
-| `docker.zsh` | Docker / Compose エイリアス |
-| `claude.zsh` | Claude Code 関連関数 |
-| `functions.zsh` | 汎用関数 (yazi, mduch) |
-| `brew-helpers.zsh` | Brewfile 管理ヘルパー |
-| `completions.zsh` | 補完設定 |
-| `wtp.zsh` | wtp 補完・cd フック |
+| `aliases.zsh` | General aliases (ll, vi, pn, etc.) |
+| `git.zsh` | Git aliases & functions |
+| `docker.zsh` | Docker / Compose aliases |
+| `claude.zsh` | Claude Code utilities |
+| `functions.zsh` | General utilities (yazi, mduch) |
+| `brew-helpers.zsh` | Brewfile management helpers |
+| `completions.zsh` | Completion settings |
+| `wtp.zsh` | wtp completions & cd hooks |
+
+### Lifecycle Scripts
+
+chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts execute on first apply, while `run_onchange` scripts re-run when their tracked content changes:
+
+| Phase | Script | Trigger | Description |
+|-------|--------|---------|-------------|
+| 1 | `00-install-prerequisites` | once (before) | Xcode CLI tools, Homebrew |
+| 2 | `01-install-1password-cli` | once (before) | 1Password CLI |
+| 3 | `10-brew-bundle` | on change | Install packages via Brewfile |
+| 4 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
+| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
+| 6 | `40-setup-sheldon` | once (after) | Lock plugin versions |
+| 7 | `90-other-apps` | once (after) | Interactive app downloads |
+
+## Claude Code
+
+AI-native development environment — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) settings, custom skills, and agents are managed declaratively as dotfiles via chezmoi. See `home/dot_claude/` for details.
+
+## Development
+
+| Command | Description |
+|---------|-------------|
+| `make apply` | Apply dotfiles |
+| `make diff` | Preview pending changes |
+| `make watch` | Auto-apply on file changes |
+| `make test` | Run lint + Bats tests |
+| `make lint` | shellcheck + shfmt + zsh syntax |
+| `make benchmark` | Measure zsh startup time |
+| `make dump-brewfile` | Export current Homebrew packages |
+
+**CI pipeline:** Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
 
 ## License
 
 [MIT](LICENSE)
+
+<!-- badge references -->
+[ci-badge]: https://github.com/kryota-dev/dotfiles/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/kryota-dev/dotfiles/actions/workflows/ci.yml
+[chezmoi-badge]: https://img.shields.io/badge/managed%20with-chezmoi-blue
+[zsh-badge]: https://img.shields.io/badge/shell-zsh-informational
+[macos-badge]: https://img.shields.io/badge/platform-macOS-lightgrey?logo=apple
+[mit-badge]: https://img.shields.io/badge/license-MIT-green
