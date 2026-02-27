@@ -1,0 +1,16 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+echo "Installing Moralerspace font..."
+MORALERSPACE_VERSION=2.0.0
+TMPDIR=$(mktemp -d)
+cd "$TMPDIR"
+curl -L -O "https://github.com/yuru7/moralerspace/releases/download/v${MORALERSPACE_VERSION}/Moralerspace_v${MORALERSPACE_VERSION}.zip"
+unzip "Moralerspace_v${MORALERSPACE_VERSION}.zip"
+cp -f "Moralerspace_v${MORALERSPACE_VERSION}"/*.ttf ~/Library/Fonts/
+rm -rf "$TMPDIR"
+echo "Moralerspace font installed."

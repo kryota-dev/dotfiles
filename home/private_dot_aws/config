@@ -1,0 +1,18 @@
+[profile r06-spec-tracker-stag]
+sso_session = r06-spec-tracker-stag
+sso_account_id = 686255951437
+sso_role_name = AdministratorAccess
+region = ap-northeast-1
+[sso-session r06-spec-tracker-stag]
+sso_start_url = https://d-95677bae67.awsapps.com/start/#/?tab=accounts
+sso_region = ap-northeast-1
+sso_registration_scopes = sso:account:access
+[profile r06-spec-tracker-prod]
+sso_session = r06-spec-tracker-prod
+sso_account_id = 038462765147
+sso_role_name = CustomPowerUserAccess
+region = ap-northeast-1
+[sso-session r06-spec-tracker-prod]
+sso_start_url = https://d-95677bae67.awsapps.com/start/#/?tab=accounts
+sso_region = ap-northeast-1
+sso_registration_scopes = sso:account:access

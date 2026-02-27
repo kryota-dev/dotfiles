@@ -1,0 +1,115 @@
+tap "grishka/grishka"
+tap "heroku/brew"
+tap "homebrew/bundle"
+tap "homebrew/services"
+tap "minacle/chntpw"
+tap "smudge/smudge"
+tap "yuitosato/gh-asset"
+brew "act"
+brew "aria2"
+brew "git"
+brew "asdf"
+brew "bash"
+brew "cabextract"
+brew "cdrtools"
+brew "chezmoi"
+brew "cloudflared"
+brew "codex"
+brew "coreutils"
+brew "curl"
+brew "libtiff"
+brew "deno"
+brew "direnv"
+brew "folly"
+brew "fizz"
+brew "wangle"
+brew "fbthrift"
+brew "fb303"
+brew "edencommon"
+brew "fontforge"
+brew "fzf"
+brew "gh"
+brew "git-filter-repo"
+brew "git-secrets"
+brew "httrack"
+brew "lftp"
+brew "libaacs"
+brew "libyaml"
+brew "mas"
+brew "neovim"
+brew "pinact"
+brew "ruby-build"
+brew "rbenv"
+brew "rename"
+brew "rust"
+brew "screen"
+brew "sheldon"
+brew "shellcheck"
+brew "shfmt"
+brew "starship"
+brew "tmux"
+brew "tree"
+brew "uv"
+brew "vim"
+brew "watchman"
+brew "wget"
+brew "wimlib"
+brew "zsh"
+brew "minacle/chntpw/chntpw"
+brew "smudge/smudge/nightlight"
+brew "yuitosato/gh-asset/gh-asset"
+cask "1password", args: { appdir: "/Applications" }
+cask "1password-cli"
+cask "adobe-acrobat-reader"
+cask "adobe-creative-cloud"
+cask "alt-tab", args: { appdir: "/Applications" }
+cask "appcleaner", args: { appdir: "/Applications" }
+cask "betterdisplay"
+cask "bettertouchtool", args: { appdir: "/Applications" }
+cask "brave-browser"
+cask "chatgpt"
+cask "claude"
+cask "claude-code"
+cask "dbeaver-community"
+cask "deepl"
+cask "discord"
+cask "docker-desktop"
+cask "figma", args: { appdir: "/Applications" }
+cask "firefox", args: { appdir: "/Applications" }
+cask "google-chrome", args: { appdir: "/Applications" }
+cask "google-chrome@canary"
+cask "google-drive", args: { appdir: "/Applications" }
+cask "iterm2"
+cask "jordanbaird-ice"
+cask "keyboardcleantool", args: { appdir: "/Applications" }
+cask "keycastr"
+cask "microsoft-edge", args: { appdir: "/Applications" }
+cask "notion", args: { appdir: "/Applications" }
+cask "postman", args: { appdir: "/Applications" }
+cask "raspberry-pi-imager"
+cask "raycast", args: { appdir: "/Applications" }
+cask "rectangle"
+cask "session-manager-plugin"
+cask "slack", args: { appdir: "/Applications" }
+cask "smoothcsv"
+cask "tailscale-app"
+cask "the-unarchiver", args: { appdir: "/Applications" }
+cask "todoist-app", args: { appdir: "/Applications" }
+cask "visual-studio-code", args: { appdir: "/Applications" }
+cask "visual-studio-code@insiders"
+cask "vlc"
+cask "warp", args: { appdir: "/Applications" }
+cask "zoom", args: { appdir: "/Applications" }
+mas "Copilot", id: 6738511300
+mas "Gapplin", id: 768053424
+mas "iMovie", id: 408981434
+mas "LINE", id: 539883307
+mas "Microsoft Excel", id: 462058435
+mas "Microsoft PowerPoint", id: 462062816
+mas "Microsoft Word", id: 462054704
+mas "PicGIF Lite", id: 844918735
+mas "RunCat", id: 1429033973
+mas "Spark Desktop", id: 6445813049
+mas "ToyViewer", id: 414298354
+mas "Windows App", id: 1295203466
+mas "Xcode", id: 497799835
