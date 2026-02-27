@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shfmt
+        run: |
+          SHFMT_VERSION=3.8.0
+          curl -sS -L "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
+          chmod +x /usr/local/bin/shfmt
+
+      - name: Run shellcheck on scripts
+        run: |
+          find home -name "*.sh" -o -name "*.sh.tmpl" | while read -r f; do
+            sed '/^{{/d' "$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086 - || true
+          done
+
+      - name: Run shfmt check
+        run: |
+          find home -name "*.sh" -o -name "*.sh.tmpl" | while read -r f; do
+            sed '/^{{/d' "$f" | shfmt -d -i 2 -ci || true
+          done
+
+      - name: Check zsh syntax
+        run: |
+          for f in home/dot_config/zsh/*.zsh; do
+            zsh -n "$f" || exit 1
+          done
+
+  test:
+    name: Test
+    runs-on: macos-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install bats-core chezmoi
+
+      - name: Run Bats tests
+        run: bats tests/*.bats
+
+  benchmark:
+    name: Benchmark
+    runs-on: macos-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install sheldon starship
+
+      - name: Setup sheldon
+        run: |
+          mkdir -p ~/.config/sheldon
+          cp home/dot_config/sheldon/plugins.toml ~/.config/sheldon/plugins.toml
+          mkdir -p ~/.config/zsh
+          cp home/dot_config/zsh/*.zsh ~/.config/zsh/
+          sheldon lock
+
+      - name: Benchmark zsh startup
+        run: |
+          echo "=== Zsh Startup Benchmark ==="
+          for i in $(seq 1 10); do
+            /usr/bin/time zsh -i -c exit 2>&1
+          done
