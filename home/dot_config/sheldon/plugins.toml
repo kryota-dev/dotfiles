@@ -1,0 +1,63 @@
+shell = "zsh"
+
+# --- deferred loading template ---
+[templates]
+defer = "{{ hooks?.pre | nl }}{% for file in files %}zsh-defer source \"{{ file }}\"\n{% endfor %}{{ hooks?.post | nl }}"
+
+# --- core: zsh-defer (must load first, synchronously) ---
+[plugins.zsh-defer]
+github = "romkatv/zsh-defer"
+
+# --- community plugins (deferred) ---
+[plugins.zsh-autosuggestions]
+github = "zsh-users/zsh-autosuggestions"
+apply = ["defer"]
+
+[plugins.zsh-syntax-highlighting]
+github = "zsh-users/zsh-syntax-highlighting"
+apply = ["defer"]
+
+[plugins.zsh-completions]
+github = "zsh-users/zsh-completions"
+apply = ["defer"]
+
+# --- local modules (deferred) ---
+[plugins.aliases]
+local = "~/.config/zsh"
+use = ["aliases.zsh"]
+apply = ["defer"]
+
+[plugins.git-aliases]
+local = "~/.config/zsh"
+use = ["git.zsh"]
+apply = ["defer"]
+
+[plugins.docker-aliases]
+local = "~/.config/zsh"
+use = ["docker.zsh"]
+apply = ["defer"]
+
+[plugins.claude-helpers]
+local = "~/.config/zsh"
+use = ["claude.zsh"]
+apply = ["defer"]
+
+[plugins.functions]
+local = "~/.config/zsh"
+use = ["functions.zsh"]
+apply = ["defer"]
+
+[plugins.brew-helpers]
+local = "~/.config/zsh"
+use = ["brew-helpers.zsh"]
+apply = ["defer"]
+
+[plugins.wtp]
+local = "~/.config/zsh"
+use = ["wtp.zsh"]
+apply = ["defer"]
+
+[plugins.completions]
+local = "~/.config/zsh"
+use = ["completions.zsh"]
+apply = ["defer"]

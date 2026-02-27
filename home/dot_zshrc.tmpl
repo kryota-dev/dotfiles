@@ -1,0 +1,25 @@
+# ========== zsh options ==========
+setopt auto_pushd
+setopt pushd_ignore_dups
+setopt hist_ignore_dups
+setopt share_history
+setopt inc_append_history
+export HISTSIZE=100000
+export SAVEHIST=100000
+
+# ========== PATH ==========
+export PATH="$HOME/.local/bin:$PATH"
+
+# pnpm
+export PNPM_HOME="{{ .chezmoi.homeDir }}/Library/pnpm"
+case ":$PATH:" in
+  *":$PNPM_HOME:"*) ;;
+  *) export PATH="$PNPM_HOME:$PATH" ;;
+esac
+
+# ========== tools (sync load) ==========
+eval "$(direnv hook zsh)"
+eval "$(starship init zsh)"
+
+# ========== sheldon (deferred plugins) ==========
+eval "$(sheldon source)"

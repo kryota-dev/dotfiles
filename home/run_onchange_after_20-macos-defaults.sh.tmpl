@@ -1,0 +1,48 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+# defaults hash: {{ include (joinPath .chezmoi.sourceDir "run_onchange_after_20-macos-defaults.sh.tmpl") | sha256sum }}
+
+echo "Applying macOS defaults..."
+
+# Base
+defaults write com.apple.HIToolbox AppleFnUsageType -int 2
+defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
+defaults write NSGlobalDomain AppleShowAllExtensions -bool true
+defaults write NSGlobalDomain AppleShowScrollBars -string "Always"
+defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
+defaults write NSGlobalDomain KeyRepeat -int 2
+defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
+defaults write NSGlobalDomain InitialKeyRepeat -int 25
+
+# DesktopServices
+defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
+defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true
+
+# Dock
+defaults write com.apple.dock autohide-delay -float 0
+
+# Finder
+defaults write com.apple.finder AppleShowAllFiles -bool true
+defaults write com.apple.finder ShowExternalHardDrivesOnDesktop -bool true
+defaults write com.apple.finder ShowHardDrivesOnDesktop -bool true
+defaults write com.apple.finder ShowMountedServersOnDesktop -bool true
+defaults write com.apple.finder ShowRemovableMediaOnDesktop -bool true
+defaults write com.apple.finder ShowStatusBar -bool true
+defaults write com.apple.finder ShowPathbar -bool true
+
+# SystemUIServer
+defaults write com.apple.menuextra.clock DateFormat -string 'EEE d MMM HH:mm'
+
+# Terminal
+defaults write com.apple.terminal StringEncodings -array 4
+
+for app in "Dock" "Finder" "SystemUIServer"; do
+  killall "${app}" &>/dev/null || true
+done
+
+echo "macOS defaults applied."

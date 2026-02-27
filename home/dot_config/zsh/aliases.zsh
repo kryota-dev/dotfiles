@@ -1,0 +1,20 @@
+alias c='code'
+alias ll='ls -lF'
+alias la='ls -lAF'
+alias ..='cd ..'
+alias ...='cd ../..'
+alias ....='cd ../../..'
+alias relogin='exec $SHELL -l'
+alias rmtrash='rm -rf ${HOME}/.Trash/* && rm -rf ${HOME}/.Trash/.*'
+alias rmdownloads='mv --backup=numbered ${HOME}/Downloads/{.,}* ${HOME}/.Trash/'
+alias rmnm='rm -rf ./node_modules'
+alias delds='find . -name ".DS_Store" -type f -ls -delete'
+alias vi="nvim"
+alias vim="nvim"
+alias view="nvim -R"
+alias -g C='| pbcopy'
+alias pn='pnpm'
+alias pni='pnpm install'
+alias pnx='pnpx'
+alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r && afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Bamboo.m4r'
+alias alhelp='cat ${HOME}/.zshrc'

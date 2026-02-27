@@ -1,0 +1,15 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+if ! command -v sheldon &>/dev/null; then
+  echo "Installing sheldon..."
+  brew install sheldon
+fi
+
+echo "Locking sheldon plugins..."
+sheldon lock
+echo "Sheldon setup complete."

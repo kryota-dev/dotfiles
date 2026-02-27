@@ -1,0 +1,28 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+echo "Skipping: not macOS"
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+# Xcode CLI tools
+if ! xcode-select -p &>/dev/null; then
+  echo "Installing Xcode CLI tools..."
+  xcode-select --install
+  echo "Please re-run after Xcode CLI tools installation completes."
+  exit 1
+fi
+
+# Homebrew
+if ! command -v brew &>/dev/null; then
+  echo "Installing Homebrew..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  {{ if eq .chezmoi.arch "arm64" -}}
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+  {{ else -}}
+  eval "$(/usr/local/bin/brew shellenv)"
+  {{ end -}}
+fi
+
+echo "Prerequisites installed."
