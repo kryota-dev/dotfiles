@@ -6,9 +6,7 @@ eval "$(/usr/local/bin/brew shellenv)"
 {{ end -}}
 
 # Set rbenv
-[[ -d ~/.rbenv ]] && \
-  export PATH=${HOME}/.rbenv/bin:${PATH} && \
-  eval "$(rbenv init -)"
+command -v rbenv &>/dev/null && eval "$(rbenv init -)"
 
 # Environment variables
 export EDITOR=nvim
