@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install bats-core chezmoi
+        run: brew install bats-core chezmoi shellcheck
 
       - name: Run Bats tests
         run: bats tests/*.bats
