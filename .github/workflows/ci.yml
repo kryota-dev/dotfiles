@@ -35,6 +35,9 @@ jobs:
             sed '/^{{/d' "$f" | shfmt -d -i 2 -ci || true
           done
 
+      - name: Install zsh
+        run: sudo apt-get install -y zsh
+
       - name: Check zsh syntax
         run: |
           for f in home/dot_config/zsh/*.zsh; do
