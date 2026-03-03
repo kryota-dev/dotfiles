@@ -43,7 +43,7 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(aliases git docker claude functions brew-helpers completions wtp)
+  local modules=(aliases git docker claude functions completions wtp)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
@@ -65,9 +65,16 @@ load helpers/setup
   [ "$count" -gt 0 ]
 }
 
-@test "claude skills exist" {
-  [ -d "${HOME_DIR}/dot_claude/skills" ]
+@test "shared agent skills exist" {
+  [ -d "${HOME_DIR}/dot_agent/skills" ]
   local count
-  count=$(find "${HOME_DIR}/dot_claude/skills" -type d -mindepth 1 | wc -l)
+  count=$(find "${HOME_DIR}/dot_agent/skills" -type d -mindepth 1 | wc -l)
   [ "$count" -gt 0 ]
+}
+
+@test "claude and codex skills are symlinked" {
+  [ -f "${HOME_DIR}/dot_claude/symlink_skills" ]
+  [ "$(cat "${HOME_DIR}/dot_claude/symlink_skills")" = "{{ .chezmoi.homeDir }}/.agent/skills" ]
+  [ -f "${HOME_DIR}/dot_codex/symlink_skills" ]
+  [ "$(cat "${HOME_DIR}/dot_codex/symlink_skills")" = "{{ .chezmoi.homeDir }}/.agent/skills" ]
 }
