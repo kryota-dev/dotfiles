@@ -84,7 +84,6 @@ sheldon source                zsh-defer loads everything async
 | `docker.zsh` | Docker / Compose aliases |
 | `claude.zsh` | Claude Code utilities |
 | `functions.zsh` | General utilities (yazi, mduch) |
-| `brew-helpers.zsh` | Brewfile management helpers |
 | `completions.zsh` | Completion settings |
 | `wtp.zsh` | wtp completions & cd hooks |
 
@@ -95,12 +94,11 @@ chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts exec
 | Phase | Script | Trigger | Description |
 |-------|--------|---------|-------------|
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI tools, Homebrew |
-| 2 | `01-install-1password-cli` | once (before) | 1Password CLI |
-| 3 | `10-brew-bundle` | on change | Install packages via Brewfile |
-| 4 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
-| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 6 | `40-setup-sheldon` | once (after) | Lock plugin versions |
-| 7 | `90-other-apps` | once (after) | Interactive app downloads |
+| 2 | `10-brew-bundle` | on change | Install packages via Brewfile |
+| 3 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
+| 4 | `30-setup-fonts` | once (after) | Moralerspace Neon |
+| 5 | `40-setup-sheldon` | once (after) | Lock plugin versions |
+| 6 | `90-other-apps` | once (after) | Interactive app downloads |
 
 ## Claude Code
 

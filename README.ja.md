@@ -84,7 +84,6 @@ sheldon source                zsh-defer がすべてを非同期に読み込み
 | `docker.zsh` | Docker / Compose エイリアス |
 | `claude.zsh` | Claude Code ユーティリティ |
 | `functions.zsh` | 汎用ユーティリティ (yazi, mduch) |
-| `brew-helpers.zsh` | Brewfile 管理ヘルパー |
 | `completions.zsh` | 補完設定 |
 | `wtp.zsh` | wtp 補完 & cd フック |
 
@@ -95,12 +94,11 @@ chezmoi はライフサイクルスクリプトによってセットアップを
 | フェーズ | スクリプト | トリガー | 説明 |
 |---------|-----------|---------|------|
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI ツール、Homebrew |
-| 2 | `01-install-1password-cli` | once (before) | 1Password CLI |
-| 3 | `10-brew-bundle` | on change | Brewfile によるパッケージインストール |
-| 4 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
-| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 6 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |
-| 7 | `90-other-apps` | once (after) | 対話式アプリダウンロード |
+| 2 | `10-brew-bundle` | on change | Brewfile によるパッケージインストール |
+| 3 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
+| 4 | `30-setup-fonts` | once (after) | Moralerspace Neon |
+| 5 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |
+| 6 | `90-other-apps` | once (after) | 対話式アプリダウンロード |
 
 ## Claude Code
 
