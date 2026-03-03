@@ -31,7 +31,7 @@ function app_dl_curl() {
   DL_PATH="$HOME/Downloads/$(basename "$2")"
   if ask_yes_no "Do you want to download $1?"; then
     echo "Downloading $1..."
-    curl "$2" --output "$DL_PATH"
+    curl -fSL "$2" --output "$DL_PATH"
     open "$DL_PATH"
   fi
 }
