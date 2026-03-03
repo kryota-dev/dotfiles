@@ -9,7 +9,7 @@ load helpers/setup
   done
 }
 
-@test "shellcheck: zsh modules have valid syntax" {
+@test "zsh modules exist" {
   for f in "${HOME_DIR}"/dot_config/zsh/*.zsh; do
     [ -f "$f" ]
   done

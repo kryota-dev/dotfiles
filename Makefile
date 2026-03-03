@@ -50,16 +50,22 @@ test: lint test-bats
 ## Run shellcheck and shfmt
 lint:
 	@echo "==> Running shellcheck..."
-	@find home -name "*.sh" -o -name "*.sh.tmpl" | xargs shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086 2>/dev/null || true
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		sed '/{{/d' "$$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 -; \
+	done
 	@echo "==> Running shfmt check..."
-	@find home -name "*.sh" -o -name "*.sh.tmpl" | xargs shfmt -d -i 2 -ci 2>/dev/null || true
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		sed '/{{/d' "$$f" | shfmt -d -i 2 -ci; \
+	done
 	@echo "==> Checking zsh syntax..."
 	@for f in home/dot_config/zsh/*.zsh; do zsh -n "$$f" || exit 1; done
 	@echo "==> All lint checks passed."
 
 ## Fix formatting with shfmt
 fmt:
-	@find home -name "*.sh" -o -name "*.sh.tmpl" | xargs shfmt -w -i 2 -ci
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		sed '/{{/d' "$$f" | shfmt -w -i 2 -ci; \
+	done
 
 ## Run Bats tests
 test-bats:

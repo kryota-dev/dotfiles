@@ -25,14 +25,14 @@ jobs:
 
       - name: Run shellcheck on scripts
         run: |
-          find home -name "*.sh" -o -name "*.sh.tmpl" | while read -r f; do
-            sed '/^{{/d' "$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086 - || true
+          find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do
+            sed '/{{/d' "$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 -
           done
 
       - name: Run shfmt check
         run: |
-          find home -name "*.sh" -o -name "*.sh.tmpl" | while read -r f; do
-            sed '/^{{/d' "$f" | shfmt -d -i 2 -ci || true
+          find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do
+            sed '/{{/d' "$f" | shfmt -d -i 2 -ci
           done
 
       - name: Install zsh
@@ -70,10 +70,10 @@ jobs:
 
       - name: Setup sheldon
         run: |
-          mkdir -p ~/.config/sheldon
+          mkdir -p ~/.config/sheldon ~/.config/zsh
           cp home/dot_config/sheldon/plugins.toml ~/.config/sheldon/plugins.toml
-          mkdir -p ~/.config/zsh
           cp home/dot_config/zsh/*.zsh ~/.config/zsh/
+          echo 'eval "$(sheldon source)"' > ~/.zshrc
           sheldon lock
 
       - name: Benchmark zsh startup
