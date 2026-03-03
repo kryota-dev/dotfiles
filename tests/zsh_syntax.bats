@@ -22,10 +22,6 @@ load helpers/setup
   zsh -n "${HOME_DIR}/dot_config/zsh/functions.zsh"
 }
 
-@test "zsh syntax: brew-helpers.zsh" {
-  zsh -n "${HOME_DIR}/dot_config/zsh/brew-helpers.zsh"
-}
-
 @test "zsh syntax: completions.zsh" {
   zsh -n "${HOME_DIR}/dot_config/zsh/completions.zsh"
 }

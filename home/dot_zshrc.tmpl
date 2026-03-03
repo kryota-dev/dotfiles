@@ -4,6 +4,7 @@ setopt pushd_ignore_dups
 setopt hist_ignore_dups
 setopt share_history
 setopt inc_append_history
+export HISTFILE="$HOME/.zsh_history"
 export HISTSIZE=100000
 export SAVEHIST=100000
 
@@ -22,7 +23,7 @@ case ":$PATH:" in
 esac
 
 # ========== tools (sync load) ==========
-eval "$(direnv hook zsh)"
+zsh-defer eval "$(direnv hook zsh)"
 eval "$(starship init zsh)"
 
 # ========== sheldon (deferred plugins) ==========

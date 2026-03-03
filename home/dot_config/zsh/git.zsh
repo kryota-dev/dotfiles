@@ -5,8 +5,7 @@ alias gca='git commit --amend'
 alias gf='git fetch'
 alias gpl='git pull origin HEAD'
 alias gps='git push origin HEAD'
-alias gac='git reset HEAD .'
-alias gcc='git reset --hard HEAD~'
+alias gun='git reset HEAD .'
 alias gsl='git stash list'
 
 function gcl() {
@@ -35,7 +34,7 @@ function gr() {
 }
 function gss() {
   local MESSAGE=$1
-  git stash save "${MESSAGE}"
+  git stash push -m "${MESSAGE}"
 }
 function gsa() {
   local STASH_NAME=$1
