@@ -23,7 +23,7 @@ case ":$PATH:" in
 esac
 
 # ========== tools (sync load) ==========
-zsh-defer eval "$(direnv hook zsh)"
+eval "$(direnv hook zsh)"
 eval "$(starship init zsh)"
 
 # ========== sheldon (deferred plugins) ==========
