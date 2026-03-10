@@ -18,11 +18,7 @@ Temporary Items
 .apdisk
 *.icloud
 
-.env
-
-# Sensitive files (managed locally, not tracked in public repo)
-home/private_dot_aws/config
-home/dot_agents/skills/daily-planning/SKILL.md
+# Secrets are managed via 1Password + chezmoi templates (*.tmpl)
 
 # Spec workflow
 .spec-workflow/
