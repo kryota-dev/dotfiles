@@ -4,6 +4,7 @@ echo "Skipping: not macOS"
 exit 0
 {{ end -}}
 
+# mise config hash: {{ include "dot_config/mise/config.toml" | sha256sum }}
 set -euo pipefail
 
 if ! command -v mise &>/dev/null; then

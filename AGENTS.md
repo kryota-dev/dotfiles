@@ -68,7 +68,7 @@ Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_o
   - `run_once_before_00-install-prerequisites.sh.tmpl` — Xcode CLI tools, Homebrew
   - `run_onchange_before_10-brew-bundle.sh.tmpl` — runs brew bundle when `dot_Brewfile` hash changes
   - `run_once_after_11-validate-1password.sh.tmpl` — validates 1Password CLI and required secret items
-  - `run_once_after_12-setup-mise.sh.tmpl` — installs mise-managed tools
+  - `run_onchange_after_12-setup-mise.sh.tmpl` — installs mise-managed tools when config changes
   - `run_onchange_after_20-macos-defaults.sh.tmpl` — macOS system preferences
   - `run_once_after_30-setup-fonts.sh.tmpl` — font installation
   - `run_once_after_40-setup-sheldon.sh.tmpl` — sheldon lock

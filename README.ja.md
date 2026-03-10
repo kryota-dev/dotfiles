@@ -100,7 +100,7 @@ chezmoi はライフサイクルスクリプトによってセットアップを
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI ツール、Homebrew |
 | 2 | `10-brew-bundle` | on change | Brewfile によるパッケージインストール |
 | 2.5 | `11-validate-1password` | once (after) | 1Password CLI の検証 |
-| 3 | `12-setup-mise` | once (after) | mise 管理ツールのインストール |
+| 3 | `12-setup-mise` | on change | mise 管理ツールのインストール |
 | 4 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
 | 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
 | 6 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |

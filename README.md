@@ -112,7 +112,7 @@ chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts exec
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI tools, Homebrew |
 | 2 | `10-brew-bundle` | on change | Install packages via Brewfile |
 | 2.5 | `11-validate-1password` | once (after) | Validate 1Password CLI |
-| 3 | `12-setup-mise` | once (after) | Install mise-managed tools |
+| 3 | `12-setup-mise` | on change | Install mise-managed tools |
 | 4 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
 | 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
 | 6 | `40-setup-sheldon` | once (after) | Lock plugin versions |

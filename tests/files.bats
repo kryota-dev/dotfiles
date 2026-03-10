@@ -91,5 +91,5 @@ load helpers/setup
 }
 
 @test "mise setup script exists" {
-  [ -f "${HOME_DIR}/run_once_after_12-setup-mise.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
