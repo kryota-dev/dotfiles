@@ -52,7 +52,10 @@ dotfiles/
 │   │   ├── sheldon/          # プラグインマネージャー
 │   │   ├── starship.toml     # プロンプトテーマ
 │   │   └── zsh/              # 遅延読み込みシェルモジュール
-│   ├── dot_claude/           # AI スキル & エージェント
+│   ├── AGENTS.md             # 共有 AI エージェント指示
+│   ├── dot_claude/           # Claude Code 設定 & エージェント
+│   ├── dot_codex/            # Codex 設定
+│   ├── dot_agents/skills/    # 共有 AI スキル (シンボリックリンク)
 │   ├── run_once_before_*     # 初回セットアップ
 │   ├── run_onchange_after_*  # 内容変更時に再実行
 │   ├── run_once_after_*      # 1回限りのセットアップ後処理
@@ -102,7 +105,7 @@ chezmoi はライフサイクルスクリプトによってセットアップを
 
 ## Claude Code
 
-AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) の設定、カスタムスキル、エージェントを chezmoi 経由で dotfiles として宣言的に管理します。詳細は `home/dot_claude/` を参照してください。
+AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) と [Codex](https://openai.com/index/introducing-codex/) の設定、カスタムスキル、エージェントを chezmoi 経由で dotfiles として宣言的に管理します。スキルは `home/dot_agents/skills/` に一元管理し、`~/.claude/skills` と `~/.codex/skills` にシンボリックリンクで配布します。
 
 ## 開発
 

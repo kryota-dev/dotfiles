@@ -52,7 +52,10 @@ dotfiles/
 │   │   ├── sheldon/          # plugin manager
 │   │   ├── starship.toml     # prompt theme
 │   │   └── zsh/              # deferred shell modules
-│   ├── dot_claude/           # AI skills & agents
+│   ├── AGENTS.md             # shared AI agent instructions
+│   ├── dot_claude/           # Claude Code settings & agents
+│   ├── dot_codex/            # Codex settings
+│   ├── dot_agents/skills/    # shared AI skills (symlinked)
 │   ├── run_once_before_*     # first-time setup
 │   ├── run_onchange_after_*  # re-run on content change
 │   ├── run_once_after_*      # one-time post-setup
@@ -102,7 +105,7 @@ chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts exec
 
 ## Claude Code
 
-AI-native development environment — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) settings, custom skills, and agents are managed declaratively as dotfiles via chezmoi. See `home/dot_claude/` for details.
+AI-native development environment — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://openai.com/index/introducing-codex/) settings, custom skills, and agents are managed declaratively as dotfiles via chezmoi. Skills are centralized in `home/dot_agents/skills/` and symlinked to both `~/.claude/skills` and `~/.codex/skills`.
 
 ## Development
 
