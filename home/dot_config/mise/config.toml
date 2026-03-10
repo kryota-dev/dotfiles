@@ -7,14 +7,13 @@ go = "latest"
 deno = "latest"
 rust = "latest"
 
-# CLI tools (aqua backend - auto-selected via registry)
+# CLI tools (auto-selected via registry)
 act = "latest"
 actionlint = "latest"
 aws-cli = "latest"
 bats = "latest"
 chezmoi = "latest"
 cloudflared = "latest"
-coreutils = "latest"
 direnv = "latest"
 fd = "latest"
 fzf = "latest"
@@ -31,7 +30,6 @@ starship = "latest"
 terraform = "latest"
 tmux = "latest"
 uv = "latest"
-vim = "latest"
 yazi = "latest"
 zoxide = "latest"
 
