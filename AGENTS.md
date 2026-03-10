@@ -4,79 +4,96 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-macOS向けdotfilesリポジトリ。**chezmoi**でホームディレクトリへの配置を管理する。
-chezmoiのsource directoryは`home/`（`.chezmoiroot`で指定）。
+A macOS dotfiles repository managed by **chezmoi** for deploying files to the home directory.
+The chezmoi source directory is `home/` (configured via `.chezmoiroot`).
+
+## Language policy
+
+All written artifacts in this repository must be in English:
+- Commit messages
+- Pull request titles and descriptions
+- Code review comments
+- Documentation and markdown files
+
+Note: Conversational responses to the user remain in Japanese as specified in the global `~/AGENTS.md`.
+
+## Mandatory skill usage
+
+- If changes affect shell scripts, zsh config, Makefile, or CI config, run `$code-change-verification`
+- When committing changes, use `$commit`
+- When creating a PR, use `$create-pr`
+- When code changes are complete and ready for review, run `$pr-draft-summary`
 
 ## Commands
 
 ```bash
-# dotfilesを適用
+# Apply dotfiles
 make apply          # chezmoi apply -v
 
-# 差分確認
+# Show diff
 make diff           # chezmoi diff
 
-# lint（shellcheck + shfmt + zsh syntax check）
+# Lint (shellcheck + shfmt + zsh syntax check)
 make lint
 
-# テスト（lint + bats）
+# Test (lint + bats)
 make test
 
-# batsテストのみ
+# Run bats tests only
 make test-bats      # bats tests/*.bats
 
-# 単一テストファイル
+# Run a single test file
 bats tests/files.bats
 
-# shfmt自動修正
+# Auto-fix with shfmt
 make fmt
 
-# zsh起動ベンチマーク
+# Benchmark zsh startup
 make benchmark
 
-# Brewfile更新
+# Update Brewfile
 make dump-brewfile
 
-# sheldonプラグイン再ロック
+# Re-lock sheldon plugins
 make sheldon-lock
 ```
 
 ## Architecture
 
-### chezmoi source構造（`home/`）
+### chezmoi source structure (`home/`)
 
-chezmoiの命名規則に従う（`dot_` → `.`、`.tmpl` → テンプレート、`run_once_`/`run_onchange_` → スクリプト、`symlink_` → シンボリックリンク、`private_` → パーミッション制限）。
+Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_once_`/`run_onchange_` → scripts, `symlink_` → symlinks, `private_` → permission-restricted).
 
-- **ライフサイクルスクリプト**（番号順に実行）:
+- **Lifecycle scripts** (executed in numbered order):
   - `run_once_before_00-install-prerequisites.sh.tmpl` — Xcode CLI tools, Homebrew
-  - `run_onchange_before_10-brew-bundle.sh.tmpl` — `dot_Brewfile`のハッシュ変更時にbrew bundle
-  - `run_onchange_after_20-macos-defaults.sh.tmpl` — macOSシステム設定
-  - `run_once_after_30-setup-fonts.sh.tmpl` — フォントインストール
+  - `run_onchange_before_10-brew-bundle.sh.tmpl` — runs brew bundle when `dot_Brewfile` hash changes
+  - `run_onchange_after_20-macos-defaults.sh.tmpl` — macOS system preferences
+  - `run_once_after_30-setup-fonts.sh.tmpl` — font installation
   - `run_once_after_40-setup-sheldon.sh.tmpl` — sheldon lock
-  - `run_once_after_90-other-apps.sh.tmpl` — その他アプリ設定
+  - `run_once_after_90-other-apps.sh.tmpl` — other app configurations
 
-- **zsh設定**: `dot_zshrc.tmpl` → sheldon経由で `dot_config/zsh/*.zsh` をdeferred loadingで読み込み
-- **テンプレート変数**: `.chezmoi.toml.tmpl` で `email` と `signingkey` をprompt
-- **AIエージェント設定**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — Claude/Codexの共有スキルは`dot_agents/skills/`に一元管理し、symlink経由で各ツールに配布
+- **zsh config**: `dot_zshrc.tmpl` → loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
+- **Template variables**: `.chezmoi.toml.tmpl` prompts for `email` and `signingkey`
+- **AI agent config**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — shared skills are centralized in `dot_agents/skills/` and distributed to each tool via symlinks
 
-### Lint規約
+### Lint conventions
 
 - shellcheck: `--shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329`
-- shfmt: `-i 2 -ci`（インデント2スペース、case indent）
-- chezmoiテンプレート行（`{{`を含む行）はlint前に`sed`で除去
-- zshファイル（`*.zsh`）は`zsh -n`で構文チェック
+- shfmt: `-i 2 -ci` (2-space indent, case indent)
+- chezmoi template lines (containing `{{`) are stripped with `sed` before linting
+- zsh files (`*.zsh`) are syntax-checked with `zsh -n`
 
-### テスト
+### Tests
 
-Bats（Bash Automated Testing System）を使用。`tests/`ディレクトリに配置。
-- `files.bats` — chezmoiソースファイルの存在確認
-- `shellcheck.bats` — shellcheckパス確認
-- `zsh_syntax.bats` — zsh構文チェック
+Uses Bats (Bash Automated Testing System) in the `tests/` directory.
+- `files.bats` — verifies chezmoi source files exist
+- `shellcheck.bats` — verifies shellcheck passes
+- `zsh_syntax.bats` — verifies zsh syntax
 
 ### CI
 
-GitHub Actions（`.github/workflows/ci.yml`）: lint → test → benchmark（mainのみ）
+GitHub Actions (`.github/workflows/ci.yml`): lint → test → benchmark (main only)
 
-### Git設定
+### Git config
 
-1Password SSH署名によるコミット署名が有効（`dot_gitconfig.tmpl`）。`git commit`時に1Passwordエラーが発生した場合は`notify`コマンドでユーザーに通知すること。
+Commit signing via 1Password SSH signatures is enabled (`dot_gitconfig.tmpl`). If a 1Password error occurs during `git commit`, notify the user with the `notify` command.

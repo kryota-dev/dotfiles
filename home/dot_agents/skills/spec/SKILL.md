@@ -1,6 +1,6 @@
 ---
 name: spec
-description: spec-driven development
+description: Spec-Driven Developmentのワークフロー全体を管理する。spec-workflowのMCPツールを使用して要件定義・設計・タスク分解・実装を段階的に進める。
 disable-model-invocation: true
 ---
 

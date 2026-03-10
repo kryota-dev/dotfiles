@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: PRを作成する。baseBranchの指定を引数で指定する。
+description: ブランチの変更をGitHub PRとして作成する。baseBranch引数でベースブランチを指定。PRタイトル・説明文を生成しghコマンドで投稿する。
 argument-hint: "[base-branch]"
 disable-model-invocation: true
 ---
