@@ -61,11 +61,17 @@ lint:
 	@for f in home/dot_config/zsh/*.zsh; do zsh -n "$$f" || exit 1; done
 	@echo "==> All lint checks passed."
 
-## Fix formatting with shfmt
+## Show shfmt formatting suggestions (template files need manual fixes)
 fmt:
 	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
-		sed '/{{/d' "$$f" | shfmt -w -i 2 -ci; \
+		diff=$$(sed '/{{/d' "$$f" | shfmt -d -i 2 -ci 2>&1) && true; \
+		if [ -n "$$diff" ]; then \
+			echo "$$f needs formatting:"; \
+			echo "$$diff"; \
+			echo ""; \
+		fi; \
 	done
+	@echo "Note: Template files (.tmpl) must be fixed manually due to chezmoi {{ }} syntax."
 
 ## Run Bats tests
 test-bats:
