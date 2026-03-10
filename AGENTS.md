@@ -7,6 +7,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A macOS dotfiles repository managed by **chezmoi** for deploying files to the home directory.
 The chezmoi source directory is `home/` (configured via `.chezmoiroot`).
 
+## Language policy
+
+All written artifacts in this repository must be in English:
+- Commit messages
+- Pull request titles and descriptions
+- Code review comments
+- Documentation and markdown files
+
+Note: Conversational responses to the user remain in Japanese as specified in the global `~/AGENTS.md`.
+
 ## Mandatory skill usage
 
 - If changes affect shell scripts, zsh config, Makefile, or CI config, run `$code-change-verification`
