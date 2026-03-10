@@ -1,15 +1,6 @@
-{{- $email := env "GIT_EMAIL" | default (get . "email" | default "") -}}
-{{- $signingkey := env "GIT_SIGNING_KEY" | default (get . "signingkey" | default "") -}}
-{{- if eq $email "" -}}
-{{-   $email = promptStringOnce . "email" "Git email address" -}}
-{{- end -}}
-{{- if eq $signingkey "" -}}
-{{-   $signingkey = promptStringOnce . "signingkey" "SSH signing key path (e.g. ~/.ssh/ssh-key.pub)" -}}
-{{- end -}}
-
 [data]
-  email = {{ $email | quote }}
-  signingkey = {{ $signingkey | quote }}
+  email = "50436249+kryota-dev@users.noreply.github.com"
+  signingkey = "~/.ssh/ssh-key.pub"
 
 [diff]
   exclude = ["scripts"]
