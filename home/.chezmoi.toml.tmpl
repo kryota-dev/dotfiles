@@ -1,0 +1,9 @@
+{{- $email := promptStringOnce . "email" "Git email address" -}}
+{{- $signingkey := promptStringOnce . "signingkey" "SSH signing key path (e.g. ~/.ssh/ssh-key.pub)" -}}
+
+[data]
+  email = {{ $email | quote }}
+  signingkey = {{ $signingkey | quote }}
+
+[diff]
+  exclude = ["scripts"]

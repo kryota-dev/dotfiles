@@ -1,0 +1,22 @@
+# Set Homebrew
+{{ if eq .chezmoi.arch "arm64" -}}
+eval "$(/opt/homebrew/bin/brew shellenv)"
+{{ else -}}
+eval "$(/usr/local/bin/brew shellenv)"
+{{ end -}}
+
+# Set rbenv
+command -v rbenv &>/dev/null && eval "$(rbenv init -)"
+
+# Environment variables
+export EDITOR=nvim
+export VISUAL=nvim
+export PAGER=less
+export LANG=ja_JP.UTF-8
+
+# PATH deduplication
+typeset -gU path
+
+# Less settings
+export LESS='-R -M -i -W -z-4'
+export LESSCHARSET=utf-8
