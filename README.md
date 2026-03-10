@@ -61,7 +61,7 @@ dotfiles/
 │   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
 │   ├── dot_config/
 │   │   ├── ghostty/          # terminal config
-│   │   ├── mise/              # tool version manager
+│   │   ├── mise/             # tool version manager
 │   │   ├── sheldon/          # plugin manager
 │   │   ├── starship.toml     # prompt theme
 │   │   └── zsh/              # deferred shell modules

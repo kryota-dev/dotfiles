@@ -49,7 +49,7 @@ dotfiles/
 │   ├── dot_zshrc.tmpl        # 最小コア、sheldon 駆動
 │   ├── dot_config/
 │   │   ├── ghostty/          # ターミナル設定
-│   │   ├── mise/              # ツールバージョンマネージャー
+│   │   ├── mise/             # ツールバージョンマネージャー
 │   │   ├── sheldon/          # プラグインマネージャー
 │   │   ├── starship.toml     # プロンプトテーマ
 │   │   └── zsh/              # 遅延読み込みシェルモジュール
