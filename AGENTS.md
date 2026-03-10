@@ -66,14 +66,15 @@ Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_o
 
 - **Lifecycle scripts** (executed in numbered order):
   - `run_once_before_00-install-prerequisites.sh.tmpl` — Xcode CLI tools, Homebrew
-  - `run_once_after_11-validate-1password.sh.tmpl` — validates 1Password CLI and required secret items
   - `run_onchange_before_10-brew-bundle.sh.tmpl` — runs brew bundle when `dot_Brewfile` hash changes
+  - `run_once_after_11-validate-1password.sh.tmpl` — validates 1Password CLI and required secret items
+  - `run_once_after_12-setup-mise.sh.tmpl` — installs mise-managed tools
   - `run_onchange_after_20-macos-defaults.sh.tmpl` — macOS system preferences
   - `run_once_after_30-setup-fonts.sh.tmpl` — font installation
   - `run_once_after_40-setup-sheldon.sh.tmpl` — sheldon lock
   - `run_once_after_90-other-apps.sh.tmpl` — other app configurations
 
-- **zsh config**: `dot_zshrc.tmpl` → loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
+- **zsh config**: `dot_zshrc.tmpl` → activates mise, direnv, starship synchronously, then loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
 - **Template variables**: `.chezmoi.toml` defines `email` and `signingkey`
 - **1Password secrets**: `private_dot_aws/config.tmpl`, `dot_agents/skills/daily-planning/SKILL.md.tmpl` — rendered from 1Password Secure Notes via `onepasswordRead`
 - **AI agent config**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — shared skills are centralized in `dot_agents/skills/` and distributed to each tool via symlinks

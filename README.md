@@ -23,7 +23,8 @@ Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 - **[Ghostty](https://ghostty.org/)** — Moralerspace Neon font
 - **1Password CLI** — SSH signing, commit verification, secret management
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — skills & agents managed as dotfiles
-- **Homebrew** — declarative package management via Brewfile
+- **[mise](https://mise.jdx.dev/)** — unified tool/runtime version manager (Node, Python, Ruby, Go, CLI tools)
+- **Homebrew** — system packages, GUI apps, and libraries via Brewfile
 - **GitHub Actions** — shellcheck, shfmt, Bats tests, zsh startup benchmark
 
 ## Getting Started
@@ -60,6 +61,7 @@ dotfiles/
 │   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
 │   ├── dot_config/
 │   │   ├── ghostty/          # terminal config
+│   │   ├── mise/              # tool version manager
 │   │   ├── sheldon/          # plugin manager
 │   │   ├── starship.toml     # prompt theme
 │   │   └── zsh/              # deferred shell modules
@@ -82,9 +84,9 @@ dotfiles/
 `.zshrc` is a minimal core that delegates all plugin and module loading to sheldon with zsh-defer for async initialization:
 
 ```
-.zprofile                     Homebrew PATH, rbenv, env vars
+.zprofile                     Homebrew PATH, env vars
     ↓
-.zshrc (minimal core)         setopt, PATH, direnv, starship
+.zshrc (minimal core)         setopt, PATH, mise, direnv, starship
     ↓
 sheldon source                zsh-defer loads everything async
     ├── community plugins     autosuggestions, syntax-highlighting, completions
@@ -109,10 +111,12 @@ chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts exec
 |-------|--------|---------|-------------|
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI tools, Homebrew |
 | 2 | `10-brew-bundle` | on change | Install packages via Brewfile |
-| 3 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
-| 4 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 5 | `40-setup-sheldon` | once (after) | Lock plugin versions |
-| 6 | `90-other-apps` | once (after) | Interactive app downloads |
+| 2.5 | `11-validate-1password` | once (after) | Validate 1Password CLI |
+| 3 | `12-setup-mise` | once (after) | Install mise-managed tools |
+| 4 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
+| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
+| 6 | `40-setup-sheldon` | once (after) | Lock plugin versions |
+| 7 | `90-other-apps` | once (after) | Interactive app downloads |
 
 ## Claude Code
 
