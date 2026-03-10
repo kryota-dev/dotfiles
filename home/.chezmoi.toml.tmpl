@@ -1,5 +1,11 @@
-{{- $email := promptStringOnce . "email" "Git email address" -}}
-{{- $signingkey := promptStringOnce . "signingkey" "SSH signing key path (e.g. ~/.ssh/ssh-key.pub)" -}}
+{{- $email := env "GIT_EMAIL" | default (get . "email" | default "") -}}
+{{- $signingkey := env "GIT_SIGNING_KEY" | default (get . "signingkey" | default "") -}}
+{{- if eq $email "" -}}
+{{-   $email = promptStringOnce . "email" "Git email address" -}}
+{{- end -}}
+{{- if eq $signingkey "" -}}
+{{-   $signingkey = promptStringOnce . "signingkey" "SSH signing key path (e.g. ~/.ssh/ssh-key.pub)" -}}
+{{- end -}}
 
 [data]
   email = {{ $email | quote }}
