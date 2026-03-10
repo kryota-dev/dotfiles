@@ -1,0 +1,17 @@
+#!/bin/bash
+{{ if ne .chezmoi.os "darwin" -}}
+echo "Skipping: not macOS"
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+if ! command -v mise &>/dev/null; then
+  echo "WARNING: mise is not installed. Skipping tool installation."
+  echo "Install it with: brew install mise"
+  exit 0
+fi
+
+echo "==> Installing mise-managed tools..."
+mise install --yes
+echo "==> mise tools installed successfully."
