@@ -76,3 +76,12 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/symlink_skills.tmpl" ]
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
+
+@test "1password-backed secret templates exist" {
+  [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
+  [ -f "${HOME_DIR}/dot_agents/skills/daily-planning/SKILL.md.tmpl" ]
+}
+
+@test "1password validation script exists" {
+  [ -f "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl" ]
+}

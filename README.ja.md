@@ -34,7 +34,7 @@ chezmoi による宣言的な macOS (Apple Silicon) 開発環境。
 chezmoi init --apply kryota-dev
 ```
 
-初回実行時、chezmoi が Git メールアドレスと SSH 署名鍵のパスを対話的に尋ねます。
+ライフサイクルスクリプトが前提条件、Homebrew パッケージ、フォント、macOS 設定を自動で処理します。
 ライフサイクルスクリプトが前提条件のインストール、Homebrew パッケージ、フォント、macOS 設定を自動的に処理します。
 
 ## アーキテクチャ
@@ -45,7 +45,7 @@ chezmoi init --apply kryota-dev
 dotfiles/
 ├── .chezmoiroot              # ソースルート → home/
 ├── home/
-│   ├── .chezmoi.toml.tmpl    # 対話式設定プロンプト
+│   ├── .chezmoi.toml         # chezmoi 設定（email、signingkey）
 │   ├── dot_zshrc.tmpl        # 最小コア、sheldon 駆動
 │   ├── dot_config/
 │   │   ├── ghostty/          # ターミナル設定

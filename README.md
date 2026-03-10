@@ -21,7 +21,7 @@ Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 - **[sheldon](https://sheldon.cli.rs/) + [zsh-defer](https://github.com/romkatv/zsh-defer)** — minimal `.zshrc` core with lazy-loaded modular config
 - **[starship](https://starship.rs/)** — Catppuccin Mocha themed two-line prompt
 - **[Ghostty](https://ghostty.org/)** — Moralerspace Neon font
-- **1Password CLI** — SSH signing, commit verification
+- **1Password CLI** — SSH signing, commit verification, secret management
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — skills & agents managed as dotfiles
 - **Homebrew** — declarative package management via Brewfile
 - **GitHub Actions** — shellcheck, shfmt, Bats tests, zsh startup benchmark
@@ -34,8 +34,19 @@ Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 chezmoi init --apply kryota-dev
 ```
 
-On first run, chezmoi will prompt for your Git email and SSH signing key path.
 Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, and macOS defaults.
+
+### 1Password Secret Setup
+
+Sensitive files (AWS config, agent skills) are stored as [1Password Secure Notes](https://developer.1password.com/docs/cli/) and rendered via chezmoi templates at apply time. Before running `chezmoi apply`, ensure:
+
+1. **1Password desktop app** is installed with CLI integration enabled (Settings > Developer > Integrate with 1Password CLI)
+2. The following Secure Notes exist in the `kryota.dev` vault:
+
+   | Item Title | Content |
+   |-----------|---------|
+   | `Dotfiles - AWS Config` | `~/.aws/config` content |
+   | `Dotfiles - Daily Planning Skill` | Daily planning SKILL.md content |
 
 ## Architecture
 
@@ -45,7 +56,7 @@ Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, 
 dotfiles/
 ├── .chezmoiroot              # source root → home/
 ├── home/
-│   ├── .chezmoi.toml.tmpl    # interactive config prompts
+│   ├── .chezmoi.toml         # chezmoi config (email, signingkey)
 │   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
 │   ├── dot_config/
 │   │   ├── ghostty/          # terminal config
