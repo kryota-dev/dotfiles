@@ -14,7 +14,10 @@ fi
 function ask_yes_no() {
   while true; do
     echo -n "$* [Y/n]: (default: y) "
-    read -r -t 30 ANS || { echo; return 1; }
+    read -r -t 30 ANS || {
+      echo
+      return 1
+    }
     case $ANS in
       [Yy]* | "")
         return 0
