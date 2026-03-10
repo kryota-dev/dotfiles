@@ -134,7 +134,9 @@ AI-native development environment — [Claude Code](https://docs.anthropic.com/e
 | `make benchmark` | Measure zsh startup time |
 | `make dump-brewfile` | Export current Homebrew packages |
 
-**CI pipeline:** Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
+**CI pipelines:**
+- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
+- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → file verification → zsh startup (macos)
 
 ## License
 

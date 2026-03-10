@@ -122,7 +122,9 @@ AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/d
 | `make benchmark` | zsh 起動時間を計測 |
 | `make dump-brewfile` | 現在の Homebrew パッケージをエクスポート |
 
-**CI パイプライン:** Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
+**CI パイプライン:**
+- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
+- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → ファイル検証 → zsh 起動検証 (macos)
 
 ## ライセンス
 
