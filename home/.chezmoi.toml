@@ -1,0 +1,6 @@
+[data]
+  email = "50436249+kryota-dev@users.noreply.github.com"
+  signingkey = "~/.ssh/ssh-key.pub"
+
+[diff]
+  exclude = ["scripts"]
