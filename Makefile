@@ -1,38 +1,99 @@
-# Do everything.
-all: init link defaults brew setup other_apps
+.PHONY: all apply init diff verify update watch test lint fmt benchmark dump-brewfile help
 
-# Set initial preference.
+# Default target
+all: apply
+
+# ========================================
+# chezmoi operations
+# ========================================
+
+## Apply dotfiles with chezmoi
+apply:
+	@chezmoi apply -v
+
+## Initialize chezmoi (first time or re-init)
 init:
-	@echo "\033[0;34mRun init.sh\033[0m"
-	@.bin/init.sh
-	@echo "\033[0;34mDone.\033[0m"
+	@chezmoi init --source=$(CURDIR) --apply
 
-# Link dotfiles.
-link:
-	@echo "\033[0;34mRun link.sh\033[0m"
-	@.bin/link.sh
-	@echo "\033[0;32mDone.\033[0m"
+## Show pending changes
+diff:
+	@chezmoi diff
 
-# Set macOS system preferences.
-defaults:
-	@echo "\033[0;34mRun defaults.sh\033[0m"
-	@.bin/defaults.sh
-	@echo "\033[0;32mDone.\033[0m"
+## Verify no drift from desired state
+verify:
+	@chezmoi verify
 
-# Install macOS applications.
-brew:
-	@echo "\033[0;34mRun brew.sh\033[0m"
-	@.bin/brew.sh
-	@echo "\033[0;32mDone.\033[0m"
+## Pull remote changes and apply
+update:
+	@chezmoi update -v
 
-# Setup tools.
-setup:
-	@echo "\033[0;34mRun setup.sh\033[0m"
-	@.bin/setup.sh
-	@echo "\033[0;32mDone.\033[0m"
+# ========================================
+# Development
+# ========================================
 
-# Setup Other apps
-other_apps:
-	@echo "\033[0;34mRun other_apps.sh\033[0m"
-	@.bin/other_apps.sh
-	@echo "\033[0;32mDone.\033[0m"
+## Watch for changes and auto-apply
+watch:
+	@echo "Watching for changes in home/..."
+	@fswatch -o home/ | xargs -n1 -I{} chezmoi apply -v
+
+## Re-lock sheldon plugins
+sheldon-lock:
+	@sheldon lock
+
+# ========================================
+# Testing
+# ========================================
+
+## Run all tests
+test: lint test-bats
+
+## Run shellcheck and shfmt
+lint:
+	@echo "==> Running shellcheck..."
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		sed '/{{/d' "$$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 -; \
+	done
+	@echo "==> Running shfmt check..."
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		sed '/{{/d' "$$f" | shfmt -d -i 2 -ci; \
+	done
+	@echo "==> Checking zsh syntax..."
+	@for f in home/dot_config/zsh/*.zsh; do zsh -n "$$f" || exit 1; done
+	@echo "==> All lint checks passed."
+
+## Show shfmt formatting suggestions (template files need manual fixes)
+fmt:
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+		diff=$$(sed '/{{/d' "$$f" | shfmt -d -i 2 -ci 2>&1) && true; \
+		if [ -n "$$diff" ]; then \
+			echo "$$f needs formatting:"; \
+			echo "$$diff"; \
+			echo ""; \
+		fi; \
+	done
+	@echo "Note: Template files (.tmpl) must be fixed manually due to chezmoi {{ }} syntax."
+
+## Run Bats tests
+test-bats:
+	@bats tests/*.bats
+
+## Run zsh startup benchmark
+benchmark:
+	@scripts/benchmark.sh
+
+# ========================================
+# Utilities
+# ========================================
+
+## Dump current brew packages to Brewfile
+dump-brewfile:
+	@rm -f home/dot_Brewfile
+	@brew bundle dump --file home/dot_Brewfile
+	@echo "Brewfile updated at home/dot_Brewfile"
+
+## Show help
+help:
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## /  /'

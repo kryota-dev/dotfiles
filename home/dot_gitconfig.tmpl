@@ -1,0 +1,18 @@
+[user]
+	name = kryota-dev
+	email = {{ .email }}
+	signingkey = {{ .signingkey }}
+[core]
+	excludesfile = ~/.gitignore_global
+	editor = nvim
+	ignorecase = false
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
+[init]
+	defaultBranch = main
+[gpg "ssh"]
+	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
+[extensions]
+	worktreeConfig = true
