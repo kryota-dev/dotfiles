@@ -1,6 +1,6 @@
 ---
 name: planning
-description: 実装計画を作成する
+description: 新機能や変更の実装前に実装計画を作成する。コードベースを分析し、変更対象ファイル・手順・影響範囲を整理した計画書を出力する。
 disable-model-invocation: true
 ---
 
