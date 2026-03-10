@@ -6,7 +6,6 @@ exit 0
 set -euo pipefail
 
 # defaults hash: {{ include (joinPath .chezmoi.sourceDir "run_onchange_after_20-macos-defaults.sh.tmpl") | sha256sum }}
-
 echo "Applying macOS defaults..."
 
 # Base
