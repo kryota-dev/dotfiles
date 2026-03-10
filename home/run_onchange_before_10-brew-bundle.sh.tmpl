@@ -7,5 +7,5 @@ set -euo pipefail
 
 # Brewfile hash: {{ include "dot_Brewfile" | sha256sum }}
 echo "Running brew bundle..."
-brew bundle --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"
+brew bundle --no-upgrade --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 echo "Brew bundle complete."
