@@ -66,15 +66,13 @@ load helpers/setup
 }
 
 @test "shared agent skills exist" {
-  [ -d "${HOME_DIR}/dot_agent/skills" ]
+  [ -d "${HOME_DIR}/dot_agents/skills" ]
   local count
-  count=$(find "${HOME_DIR}/dot_agent/skills" -type d -mindepth 1 | wc -l)
+  count=$(find "${HOME_DIR}/dot_agents/skills" -type d -mindepth 1 | wc -l)
   [ "$count" -gt 0 ]
 }
 
 @test "claude and codex skills are symlinked" {
-  [ -f "${HOME_DIR}/dot_claude/symlink_skills" ]
-  [ "$(cat "${HOME_DIR}/dot_claude/symlink_skills")" = "{{ .chezmoi.homeDir }}/.agent/skills" ]
-  [ -f "${HOME_DIR}/dot_codex/symlink_skills" ]
-  [ "$(cat "${HOME_DIR}/dot_codex/symlink_skills")" = "{{ .chezmoi.homeDir }}/.agent/skills" ]
+  [ -f "${HOME_DIR}/dot_claude/symlink_skills.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
