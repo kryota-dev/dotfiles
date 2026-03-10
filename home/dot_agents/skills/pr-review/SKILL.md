@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Pull Requestに対して、コードレビューを行う。
+description: PR番号またはURLを指定してコードレビューを実施する。差分を分析し、バグ・設計・セキュリティの観点からレビューコメントを生成する。
 disable-model-invocation: true
 ---
 
