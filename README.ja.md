@@ -34,7 +34,6 @@ chezmoi による宣言的な macOS (Apple Silicon) 開発環境。
 chezmoi init --apply kryota-dev
 ```
 
-ライフサイクルスクリプトが前提条件、Homebrew パッケージ、フォント、macOS 設定を自動で処理します。
 ライフサイクルスクリプトが前提条件のインストール、Homebrew パッケージ、フォント、macOS 設定を自動的に処理します。
 
 ## アーキテクチャ
