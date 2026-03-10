@@ -19,3 +19,7 @@ Temporary Items
 *.icloud
 
 .env
+
+# Sensitive files (managed locally, not tracked in public repo)
+home/private_dot_aws/config
+home/dot_agents/skills/daily-planning/SKILL.md
