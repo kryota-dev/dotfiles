@@ -63,16 +63,13 @@ jobs:
           grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
-      - name: Install chezmoi
-        run: brew install chezmoi
-
       - name: Apply dotfiles with chezmoi
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
-          chezmoi init --apply --source="$(pwd)"
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply --source="$(pwd)"
 
       - name: Verify mise tools
         run: |
@@ -157,11 +154,6 @@ jobs:
           grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
-      - name: Install chezmoi
-        run: |
-          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          brew install chezmoi
-
       - name: Exclude CI-incompatible files
         run: |
           mkdir -p /tmp/chezmoi-excluded
@@ -184,7 +176,7 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
-          chezmoi init --apply --source="$(pwd)"
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply --source="$(pwd)"
 
       - name: Verify mise tools
         run: |
