@@ -5,15 +5,23 @@ alias ..='cd ..'
 alias ...='cd ../..'
 alias ....='cd ../../..'
 alias relogin='exec $SHELL -l'
+{{ if eq .chezmoi.os "darwin" -}}
 alias rmtrash='rm -rf ${HOME}/.Trash/* && rm -rf ${HOME}/.Trash/.*'
 alias rmdownloads='gmv --backup=numbered ${HOME}/Downloads/{.,}* ${HOME}/.Trash/'
+{{ end -}}
 alias rmnm='rm -rf ./node_modules'
+{{ if eq .chezmoi.os "darwin" -}}
 alias delds='find . -name ".DS_Store" -type f -ls -delete'
+{{ end -}}
 alias vi="nvim"
 alias vim="nvim"
 alias view="nvim -R"
+{{ if eq .chezmoi.os "darwin" -}}
 alias -g C='| pbcopy'
+{{ end -}}
 alias pn='pnpm'
 alias pni='pnpm install'
 alias pnx='pnpx'
+{{ if eq .chezmoi.os "darwin" -}}
 alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r && afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Bamboo.m4r'
+{{ end -}}
