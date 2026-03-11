@@ -219,5 +219,5 @@ jobs:
           done
 
       - name: Verify zsh shell starts
-        run: zsh -c 'echo "zsh started successfully"'
+        run: zsh -i -c exit
         timeout-minutes: 2
