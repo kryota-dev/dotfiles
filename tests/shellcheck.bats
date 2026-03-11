@@ -10,7 +10,7 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  for f in "${HOME_DIR}"/dot_config/zsh/*.zsh; do
+  for f in "${HOME_DIR}"/dot_config/zsh/*.zsh "${HOME_DIR}"/dot_config/zsh/*.zsh.tmpl; do
     [ -f "$f" ]
   done
 }

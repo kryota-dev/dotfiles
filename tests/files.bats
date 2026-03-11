@@ -43,10 +43,12 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(aliases git docker claude functions completions wtp)
+  local modules=(git docker claude functions completions wtp)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
+  # aliases.zsh is now a chezmoi template
+  [ -f "${HOME_DIR}/dot_config/zsh/aliases.zsh.tmpl" ]
 }
 
 @test "run_once scripts exist" {

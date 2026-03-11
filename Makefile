@@ -59,6 +59,7 @@ lint:
 	done
 	@echo "==> Checking zsh syntax..."
 	@for f in home/dot_config/zsh/*.zsh; do zsh -n "$$f" || exit 1; done
+	@for f in home/dot_config/zsh/*.zsh.tmpl; do sed '/{{/d' "$$f" | zsh -n || exit 1; done
 	@echo "==> All lint checks passed."
 
 ## Show shfmt formatting suggestions (template files need manual fixes)
