@@ -3,8 +3,16 @@ name: Setup Validation
 on:
   push:
     branches: [main]
+    paths:
+      - 'home/**'
+      - '.chezmoiroot'
+      - '.github/workflows/setup-validation.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'home/**'
+      - '.chezmoiroot'
+      - '.github/workflows/setup-validation.yml'
   workflow_dispatch:
 
 concurrency:
