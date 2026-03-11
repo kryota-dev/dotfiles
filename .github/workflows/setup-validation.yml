@@ -22,8 +22,8 @@ concurrency:
 permissions: {}
 
 jobs:
-  setup-validation:
-    name: Validate dotfiles setup
+  setup-validation-macos:
+    name: Validate dotfiles setup (macOS)
     runs-on: macos-latest
     timeout-minutes: 15
     permissions:
@@ -117,4 +117,115 @@ jobs:
 
       - name: Verify zsh shell starts
         run: zsh -i -c exit
+        timeout-minutes: 2
+
+  setup-validation-ubuntu:
+    name: Validate dotfiles setup (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Linuxbrew prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl file git zsh
+
+      - name: Cache Linuxbrew
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: /home/linuxbrew/.linuxbrew
+          key: ${{ runner.os }}-linuxbrew-${{ hashFiles('home/dot_Brewfile') }}
+          restore-keys: |
+            ${{ runner.os }}-linuxbrew-
+
+      - name: Install Homebrew (Linuxbrew)
+        run: |
+          if [ ! -d /home/linuxbrew/.linuxbrew/bin ]; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          fi
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew --version
+
+      - name: Install Homebrew formulas only
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
+          brew bundle --no-upgrade --file=/tmp/Brewfile.ci
+
+      - name: Install chezmoi
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew install chezmoi
+
+      - name: Exclude CI-incompatible files
+        run: |
+          mkdir -p /tmp/chezmoi-excluded
+          for f in \
+            home/private_dot_aws/config.tmpl \
+            home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
+            home/run_once_before_00-install-prerequisites.sh.tmpl \
+            home/run_onchange_before_10-brew-bundle.sh.tmpl \
+            home/run_once_after_11-validate-1password.sh.tmpl; do
+            if [ -f "$f" ]; then
+              mv "$f" /tmp/chezmoi-excluded/
+              echo "Excluded: $f"
+            fi
+          done
+
+      - name: Apply dotfiles with chezmoi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          mkdir -p ~/.config/chezmoi
+          cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
+          chezmoi init --apply --source="$(pwd)"
+
+      - name: Verify mise tools
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          eval "$(mise activate bash)"
+          echo "==> Verifying key tools..."
+          node --version
+          python3 --version
+          go version
+
+      - name: Verify deployed files
+        run: |
+          files=(
+            ~/.zshrc
+            ~/.zprofile
+            ~/.gitconfig
+            ~/.config/starship.toml
+            ~/.config/sheldon/plugins.toml
+            ~/.config/mise/config.toml
+          )
+          for f in "${files[@]}"; do
+            if [ -f "$f" ]; then
+              echo "OK: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify zsh modules deployed
+        run: |
+          for mod in aliases git docker claude functions completions wtp; do
+            f=~/.config/zsh/${mod}.zsh
+            if [ -f "$f" ]; then
+              echo "OK: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify zsh shell starts
+        run: zsh -c 'echo "zsh started successfully"'
         timeout-minutes: 2

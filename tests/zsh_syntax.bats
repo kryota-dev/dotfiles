@@ -2,8 +2,8 @@
 
 load helpers/setup
 
-@test "zsh syntax: aliases.zsh" {
-  zsh -n "${HOME_DIR}/dot_config/zsh/aliases.zsh"
+@test "zsh syntax: aliases.zsh.tmpl" {
+  sed '/{{/d' "${HOME_DIR}/dot_config/zsh/aliases.zsh.tmpl" | zsh -n
 }
 
 @test "zsh syntax: git.zsh" {
