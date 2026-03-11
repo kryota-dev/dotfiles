@@ -18,7 +18,8 @@ Temporary Items
 .apdisk
 *.icloud
 
-# Secrets are managed via 1Password + chezmoi templates (*.tmpl)
-
 # Spec workflow
 .spec-workflow/
+
+# Environment variables
+.env
