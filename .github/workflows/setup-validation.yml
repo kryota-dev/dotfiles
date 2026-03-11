@@ -47,7 +47,7 @@ jobs:
           done
 
       - name: Install Homebrew formulas only
-        run: brew bundle --no-upgrade --no-lock --file=home/dot_Brewfile --only=brew
+        run: brew bundle --no-upgrade --file=home/dot_Brewfile --only=brew
 
       - name: Install chezmoi
         run: brew install chezmoi
