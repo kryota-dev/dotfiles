@@ -1,7 +1,7 @@
 {
   "files.associations": {
-    "home/Library/Application Support/Code/User/settings.json": "jsonc",
-    "home/Library/Application Support/Code/User/keybindings.json": "jsonc",
-    ".github/renovate.json5": "json5"
+    "**/Library/Application Support/Code/User/settings.json": "jsonc",
+    "**/Library/Application Support/Code/User/keybindings.json": "jsonc",
+    "**/.github/renovate.json5": "jsonc"
   }
 }
