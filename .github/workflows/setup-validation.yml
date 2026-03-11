@@ -53,7 +53,7 @@ jobs:
 
       - name: Verify mise tools
         run: |
-          eval "$(/opt/homebrew/bin/brew shellenv)"
+          eval "$(brew shellenv)"
           eval "$(mise activate bash)"
           mise install --yes
           echo "==> Verifying key tools..."
@@ -95,3 +95,4 @@ jobs:
 
       - name: Verify zsh shell starts
         run: zsh -i -c exit
+        timeout-minutes: 2
