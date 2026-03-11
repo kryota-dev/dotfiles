@@ -63,12 +63,9 @@ jobs:
           chezmoi init --apply --source="$(pwd)"
 
       - name: Verify mise tools
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
           eval "$(brew shellenv)"
           eval "$(mise activate bash)"
-          mise install --yes
           echo "==> Verifying key tools..."
           node --version
           python3 --version
