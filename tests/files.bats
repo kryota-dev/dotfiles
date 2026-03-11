@@ -93,3 +93,15 @@ load helpers/setup
 @test "mise setup script exists" {
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
+
+@test "chezmoi source files exist: VS Code settings.json" {
+  [ -f "${HOME_DIR}/Library/Application Support/Code/User/settings.json" ]
+}
+
+@test "chezmoi source files exist: VS Code keybindings.json" {
+  [ -f "${HOME_DIR}/Library/Application Support/Code/User/keybindings.json" ]
+}
+
+@test "chezmoi source files exist: VS Code mcp.json" {
+  [ -f "${HOME_DIR}/Library/Application Support/Code/User/mcp.json" ]
+}
