@@ -1,0 +1,98 @@
+name: Setup Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  setup-validation:
+    name: Validate dotfiles setup
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-brew-${{ hashFiles('home/dot_Brewfile') }}
+          restore-keys: |
+            ${{ runner.os }}-brew-
+
+      - name: Exclude CI-incompatible files
+        run: |
+          mkdir -p /tmp/chezmoi-excluded
+          for f in \
+            home/private_dot_aws/config.tmpl \
+            home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
+            home/run_once_before_00-install-prerequisites.sh.tmpl \
+            home/run_once_after_11-validate-1password.sh.tmpl \
+            home/run_once_after_30-setup-fonts.sh.tmpl \
+            home/run_once_after_90-other-apps.sh.tmpl; do
+            if [ -f "$f" ]; then
+              mv "$f" /tmp/chezmoi-excluded/
+              echo "Excluded: $f"
+            fi
+          done
+
+      - name: Install chezmoi
+        run: brew install chezmoi
+
+      - name: Apply dotfiles with chezmoi
+        run: chezmoi init --apply --source="$(pwd)"
+
+      - name: Verify mise tools
+        run: |
+          eval "$(brew shellenv)"
+          eval "$(mise activate bash)"
+          mise install --yes
+          echo "==> Verifying key tools..."
+          node --version
+          python3 --version
+          go version
+
+      - name: Verify deployed files
+        run: |
+          files=(
+            ~/.zshrc
+            ~/.zprofile
+            ~/.gitconfig
+            ~/.config/starship.toml
+            ~/.config/sheldon/plugins.toml
+            ~/.config/ghostty/config
+            ~/.config/mise/config.toml
+          )
+          for f in "${files[@]}"; do
+            if [ -f "$f" ]; then
+              echo "OK: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify zsh modules deployed
+        run: |
+          for mod in aliases git docker claude functions completions wtp; do
+            f=~/.config/zsh/${mod}.zsh
+            if [ -f "$f" ]; then
+              echo "OK: $f"
+            else
+              echo "MISSING: $f"
+              exit 1
+            fi
+          done
+
+      - name: Verify zsh shell starts
+        run: zsh -i -c exit
+        timeout-minutes: 2

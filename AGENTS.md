@@ -95,7 +95,9 @@ Uses Bats (Bash Automated Testing System) in the `tests/` directory.
 
 ### CI
 
-GitHub Actions (`.github/workflows/ci.yml`): lint → test → benchmark (main only)
+GitHub Actions:
+- `.github/workflows/ci.yml`: lint → test → benchmark (main only)
+- `.github/workflows/setup-validation.yml`: chezmoi apply → mise install → file verification → zsh startup (macOS)
 
 ### Git config
 
