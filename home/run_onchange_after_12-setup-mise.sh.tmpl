@@ -14,5 +14,18 @@ if ! command -v mise &>/dev/null; then
 fi
 
 echo "==> Installing mise-managed tools..."
+
+# Set GITHUB_TOKEN from gh CLI to avoid GitHub API rate limiting.
+# On initial setup, gh may not yet be installed (it's managed by mise),
+# so this is a best-effort approach — if gh is unavailable, mise install
+# proceeds without authentication and may hit rate limits.
+if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+  if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+    GITHUB_TOKEN=$(gh auth token)
+    export GITHUB_TOKEN
+    echo "GITHUB_TOKEN set from gh CLI."
+  fi
+fi
+
 mise install --yes
 echo "==> mise tools installed successfully."
