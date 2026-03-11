@@ -1,7 +1,37 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":pinAllExceptPeerDependencies",
+    "mergeConfidence:all-badges",
+    ":disableRateLimiting",
+    ":prConcurrentLimit10",
+    "group:definitelyTyped",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "rebaseWhen": "conflicted",
+  "automergeType": "pr",
+  "minor": {
+    "automerge": false
+  },
+  "patch": {
+    "automerge": true
+  },
+  "pin": {
+    "automerge": true
+  },
+  "ignoreTests": false,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["\\.github/workflows/ci\\.yml$"],
+      "matchStrings": [
+        "SHFMT_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "mvdan/sh",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
+    }
   ],
   "mise": {
     "fileMatch": [
