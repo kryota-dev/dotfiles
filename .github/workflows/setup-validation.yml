@@ -36,6 +36,7 @@ jobs:
             home/private_dot_aws/config.tmpl \
             home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
+            home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
             home/run_once_after_30-setup-fonts.sh.tmpl \
             home/run_once_after_90-other-apps.sh.tmpl; do
@@ -44,6 +45,9 @@ jobs:
               echo "Excluded: $f"
             fi
           done
+
+      - name: Install Homebrew formulas only
+        run: brew bundle --no-upgrade --no-lock --file=home/dot_Brewfile --only=brew
 
       - name: Install chezmoi
         run: brew install chezmoi
