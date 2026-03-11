@@ -29,26 +29,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-brew-
 
-      - name: Exclude 1Password-dependent templates
+      - name: Exclude CI-incompatible files
         run: |
+          mkdir -p /tmp/chezmoi-excluded
           for f in \
             home/private_dot_aws/config.tmpl \
-            home/dot_agents/skills/daily-planning/SKILL.md.tmpl; do
-            if [ -f "$f" ]; then
-              mv "$f" "${f}.skip"
-              echo "Excluded: $f"
-            fi
-          done
-
-      - name: Exclude CI-incompatible scripts
-        run: |
-          for f in \
+            home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
             home/run_once_after_30-setup-fonts.sh.tmpl \
             home/run_once_after_90-other-apps.sh.tmpl; do
             if [ -f "$f" ]; then
-              mv "$f" "${f}.skip"
+              mv "$f" /tmp/chezmoi-excluded/
               echo "Excluded: $f"
             fi
           done
