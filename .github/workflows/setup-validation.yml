@@ -47,7 +47,9 @@ jobs:
           done
 
       - name: Install Homebrew formulas only
-        run: brew bundle --no-upgrade --file=home/dot_Brewfile --only=brew
+        run: |
+          grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
+          brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
       - name: Install chezmoi
         run: brew install chezmoi
