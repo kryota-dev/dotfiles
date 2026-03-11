@@ -55,12 +55,16 @@ jobs:
         run: brew install chezmoi
 
       - name: Apply dotfiles with chezmoi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
           chezmoi init --apply --source="$(pwd)"
 
       - name: Verify mise tools
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           eval "$(brew shellenv)"
           eval "$(mise activate bash)"
