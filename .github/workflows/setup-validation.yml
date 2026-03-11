@@ -55,7 +55,10 @@ jobs:
         run: brew install chezmoi
 
       - name: Apply dotfiles with chezmoi
-        run: chezmoi init --apply --source="$(pwd)"
+        run: |
+          mkdir -p ~/.config/chezmoi
+          cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
+          chezmoi init --apply --source="$(pwd)"
 
       - name: Verify mise tools
         run: |
