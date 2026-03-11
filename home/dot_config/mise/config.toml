@@ -1,0 +1,37 @@
+[tools]
+# Language runtimes (core backend)
+node = "latest"
+python = "latest"
+ruby = "latest"
+go = "latest"
+deno = "latest"
+rust = "latest"
+
+# CLI tools (auto-selected via registry)
+act = "latest"
+actionlint = "latest"
+aws-cli = "latest"
+bats = "latest"
+chezmoi = "latest"
+cloudflared = "latest"
+direnv = "latest"
+fd = "latest"
+fzf = "latest"
+gh = "latest"
+ghq = "latest"
+jq = "latest"
+mas = "latest"
+neovim = "latest"
+pinact = "latest"
+ripgrep = "latest"
+shellcheck = "latest"
+shfmt = "latest"
+starship = "latest"
+terraform = "latest"
+tmux = "latest"
+uv = "latest"
+yazi = "latest"
+zoxide = "latest"
+
+# npm backend
+gemini-cli = "latest"
