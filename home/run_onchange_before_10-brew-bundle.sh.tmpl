@@ -1,11 +1,18 @@
+{{ if eq .chezmoi.os "darwin" -}}
 #!/bin/bash
-{{ if ne .chezmoi.os "darwin" -}}
-exit 0
-{{ end -}}
-
 set -euo pipefail
 
 # Brewfile hash: {{ include "dot_Brewfile" | sha256sum }}
 echo "Running brew bundle..."
 brew bundle --no-upgrade --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 echo "Brew bundle complete."
+{{ else if eq .chezmoi.os "linux" -}}
+#!/bin/bash
+set -euo pipefail
+
+# Brewfile hash: {{ include "dot_Brewfile" | sha256sum }}
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+echo "Running brew bundle (cask/mas entries will be auto-skipped on Linux)..."
+brew bundle --no-upgrade --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"
+echo "Brew bundle complete."
+{{ end -}}

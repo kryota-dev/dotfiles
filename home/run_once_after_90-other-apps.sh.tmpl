@@ -1,8 +1,5 @@
+{{ if eq .chezmoi.os "darwin" -}}
 #!/bin/bash
-{{ if ne .chezmoi.os "darwin" -}}
-exit 0
-{{ end -}}
-
 set -euo pipefail
 
 # 非対話的環境ではスキップ
@@ -51,3 +48,4 @@ app_dl_curl "Logi Options+" "https://download01.logi.com/web/ftp/pub/techsupport
 
 # Google Japanese Input
 app_dl_web "Google Japanese Input" "https://tools.google.com/dlpage/japaneseinput/thankyou.html?platform=mac"
+{{ end -}}
