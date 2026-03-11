@@ -1,8 +1,26 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":pinAllExceptPeerDependencies",
+    "mergeConfidence:all-badges",
+    ":disableRateLimiting",
+    ":prConcurrentLimit10",
+    "group:definitelyTyped",
+    "helpers:pinGitHubActionDigests"
   ],
+  "rebaseWhen": "conflicted",
+  "automergeType": "pr",
+  "minor": {
+    "automerge": false
+  },
+  "patch": {
+    "automerge": true
+  },
+  "pin": {
+    "automerge": true
+  },
+  "ignoreTests": false,
   "mise": {
     "fileMatch": [
       "home/dot_config/mise/config\\.toml"
