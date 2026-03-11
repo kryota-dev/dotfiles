@@ -1,0 +1,15 @@
+name: Setup PR
+on:
+  pull_request:
+    branches: [main]
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  auto-assign:
+    permissions:
+      pull-requests: write
+    uses: kryota-dev/actions/.github/workflows/auto-assign-pr.yml@0543a5553cf56bf46ff4a15ac9c8f25c9ecf02f2 # v0.1.0
+    with:
+      bot-assignees: "kryota-dev"
