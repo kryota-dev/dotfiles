@@ -85,3 +85,11 @@ load helpers/setup
 @test "1password validation script exists" {
   [ -f "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl" ]
 }
+
+@test "mise config exists" {
+  [ -f "${HOME_DIR}/dot_config/mise/config.toml" ]
+}
+
+@test "mise setup script exists" {
+  [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
+}

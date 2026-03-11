@@ -23,7 +23,8 @@ chezmoi による宣言的な macOS (Apple Silicon) 開発環境。
 - **[Ghostty](https://ghostty.org/)** — Moralerspace Neon フォント
 - **1Password CLI** — SSH 署名、コミット検証
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — スキルとエージェントを dotfiles として管理
-- **Homebrew** — Brewfile による宣言的パッケージ管理
+- **[mise](https://mise.jdx.dev/)** — 統合ツール/ランタイムバージョンマネージャー (Node, Python, Ruby, Go, CLI ツール)
+- **Homebrew** — システムパッケージ、GUI アプリ、ライブラリの管理
 - **GitHub Actions** — shellcheck、shfmt、Bats テスト、zsh 起動ベンチマーク
 
 ## はじめに
@@ -48,6 +49,7 @@ dotfiles/
 │   ├── dot_zshrc.tmpl        # 最小コア、sheldon 駆動
 │   ├── dot_config/
 │   │   ├── ghostty/          # ターミナル設定
+│   │   ├── mise/             # ツールバージョンマネージャー
 │   │   ├── sheldon/          # プラグインマネージャー
 │   │   ├── starship.toml     # プロンプトテーマ
 │   │   └── zsh/              # 遅延読み込みシェルモジュール
@@ -70,9 +72,9 @@ dotfiles/
 `.zshrc` は最小限のコアで、すべてのプラグインとモジュールの読み込みを sheldon に委譲し、zsh-defer で非同期初期化を行います：
 
 ```
-.zprofile                     Homebrew PATH、rbenv、環境変数
+.zprofile                     Homebrew PATH、環境変数
     ↓
-.zshrc (最小コア)              setopt、PATH、direnv、starship
+.zshrc (最小コア)              setopt、PATH、mise、direnv、starship
     ↓
 sheldon source                zsh-defer がすべてを非同期に読み込み
     ├── コミュニティプラグイン   autosuggestions、syntax-highlighting、completions
@@ -97,10 +99,12 @@ chezmoi はライフサイクルスクリプトによってセットアップを
 |---------|-----------|---------|------|
 | 1 | `00-install-prerequisites` | once (before) | Xcode CLI ツール、Homebrew |
 | 2 | `10-brew-bundle` | on change | Brewfile によるパッケージインストール |
-| 3 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
-| 4 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 5 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |
-| 6 | `90-other-apps` | once (after) | 対話式アプリダウンロード |
+| 2.5 | `11-validate-1password` | once (after) | 1Password CLI の検証 |
+| 3 | `12-setup-mise` | on change | mise 管理ツールのインストール |
+| 4 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
+| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
+| 6 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |
+| 7 | `90-other-apps` | once (after) | 対話式アプリダウンロード |
 
 ## Claude Code
 
@@ -118,7 +122,9 @@ AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/d
 | `make benchmark` | zsh 起動時間を計測 |
 | `make dump-brewfile` | 現在の Homebrew パッケージをエクスポート |
 
-**CI パイプライン:** Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
+**CI パイプライン:**
+- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
+- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → ファイル検証 → zsh 起動検証 (macos)
 
 ## ライセンス
 
