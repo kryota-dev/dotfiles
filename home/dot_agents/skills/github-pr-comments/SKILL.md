@@ -277,6 +277,71 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews/{review_id}/comments \
 ※ すべてのコメントに署名を付与すること
 ```
 
+## Review Conversation の Resolve
+
+### 概要
+
+レビューコメントのスレッド（conversation）を resolve する。`minimizeComment` ではなく `resolveReviewThread` を使用する。
+
+> **注意**: `minimizeComment` はコメントを折りたたんで非表示にする操作であり、resolve とは異なる。
+
+### 1. Review Thread ID の取得
+
+```bash
+gh api graphql -f query='
+{
+  repository(owner: "{owner}", name: "{repo}") {
+    pullRequest(number: {PR番号}) {
+      reviewThreads(first: 50) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes {
+              path
+              author { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}'
+```
+
+### 2. スレッドを Resolve する
+
+```bash
+gh api graphql -f query='
+mutation {
+  resolveReviewThread(input: { threadId: "{thread_id}" }) {
+    thread { isResolved }
+  }
+}'
+```
+
+### 3. 全スレッドを一括 Resolve する
+
+```bash
+# Thread ID を取得してループで resolve
+gh api graphql -f query='...' | \
+  jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id' | \
+  while read -r tid; do
+    gh api graphql -f query="mutation { resolveReviewThread(input: { threadId: \"$tid\" }) { thread { isResolved } } }"
+  done
+```
+
+### 4. Resolve を取り消す（Unresolve）
+
+```bash
+gh api graphql -f query='
+mutation {
+  unresolveReviewThread(input: { threadId: "{thread_id}" }) {
+    thread { isResolved }
+  }
+}'
+```
+
 ## 注意事項
 
 1. **`gh pr view --comments` は使用しない**: プレーンテキスト形式で出力されるため、jq でフィルタリングできない

@@ -53,6 +53,47 @@ gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate | \
   jq '[.[] | {user: .user.login, body: .body}]'
 ```
 
+### 6. Review Conversation の Resolve
+
+レビューコメントのスレッド（conversation）を resolve するには、GraphQL API の `resolveReviewThread` mutation を使用する。
+
+> **注意**: `minimizeComment` はコメントを折りたたんで非表示にする操作であり、resolve とは異なる。
+
+```bash
+# Thread ID の取得
+gh api graphql -f query='
+{
+  repository(owner: "{owner}", name: "{repo}") {
+    pullRequest(number: {PR番号}) {
+      reviewThreads(first: 50) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes { path, author { login } }
+          }
+        }
+      }
+    }
+  }
+}'
+
+# スレッドを Resolve
+gh api graphql -f query='
+mutation {
+  resolveReviewThread(input: { threadId: "{thread_id}" }) {
+    thread { isResolved }
+  }
+}'
+
+# 全未解決スレッドを一括 Resolve
+gh api graphql -f query='...' | \
+  jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id' | \
+  while read -r tid; do
+    gh api graphql -f query="mutation { resolveReviewThread(input: { threadId: \"$tid\" }) { thread { isResolved } } }"
+  done
+```
+
 ## 出力形式
 
 取得した情報を以下の形式で整理して報告してください：
