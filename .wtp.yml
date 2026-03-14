@@ -1,0 +1,13 @@
+version: "1.0"
+defaults:
+  base_dir: "../worktrees/dotfiles"
+
+hooks:
+  post_create:
+    - type: symlink
+      from: ".env"
+      to: ".env"
+
+    - type: symlink
+      from: ".spec-workflow"
+      to: ".spec-workflow"
