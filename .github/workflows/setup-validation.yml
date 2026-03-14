@@ -126,7 +126,14 @@ jobs:
           done
 
       - name: Verify zsh shell starts
-        run: zsh -i -c exit
+        run: |
+          zsh_stderr=$(zsh -i -c exit 2>&1 >/dev/null) || true
+          if echo "$zsh_stderr" | grep -qE 'command not found|parse error|not found'; then
+            echo "ERROR: zsh startup errors detected:"
+            echo "$zsh_stderr"
+            exit 1
+          fi
+          echo "OK: zsh starts cleanly"
         timeout-minutes: 2
 
   setup-validation-ubuntu:
@@ -245,5 +252,12 @@ jobs:
           done
 
       - name: Verify zsh shell starts
-        run: zsh -i -c exit
+        run: |
+          zsh_stderr=$(zsh -i -c exit 2>&1 >/dev/null) || true
+          if echo "$zsh_stderr" | grep -qE 'command not found|parse error|not found'; then
+            echo "ERROR: zsh startup errors detected:"
+            echo "$zsh_stderr"
+            exit 1
+          fi
+          echo "OK: zsh starts cleanly"
         timeout-minutes: 2
