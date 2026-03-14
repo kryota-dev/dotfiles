@@ -69,7 +69,18 @@ jobs:
         run: |
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply --source="$(pwd)"
+          for attempt in 1 2 3; do
+            if installer=$(curl -fsLS get.chezmoi.io) && [ -n "$installer" ]; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed to download chezmoi installer (attempt ${attempt}/3), retrying..."
+              sleep $((attempt * 5))
+            else
+              echo "ERROR: Failed to download chezmoi installer after 3 attempts."
+              exit 1
+            fi
+          done
+          sh -c "$installer" -- init --apply --source="$(pwd)"
 
       - name: Verify mise tools
         run: |
@@ -176,7 +187,18 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply --source="$(pwd)"
+          for attempt in 1 2 3; do
+            if installer=$(curl -fsLS get.chezmoi.io) && [ -n "$installer" ]; then
+              break
+            elif [ "$attempt" -lt 3 ]; then
+              echo "Failed to download chezmoi installer (attempt ${attempt}/3), retrying..."
+              sleep $((attempt * 5))
+            else
+              echo "ERROR: Failed to download chezmoi installer after 3 attempts."
+              exit 1
+            fi
+          done
+          sh -c "$installer" -- init --apply --source="$(pwd)"
 
       - name: Verify mise tools
         run: |
