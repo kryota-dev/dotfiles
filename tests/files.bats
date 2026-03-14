@@ -30,6 +30,10 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_Brewfile" ]
 }
 
+@test "chezmoi source files exist: .chezmoiexternal.toml" {
+  [ -f "${HOME_DIR}/.chezmoiexternal.toml" ]
+}
+
 @test "chezmoi source files exist: starship.toml" {
   [ -f "${HOME_DIR}/dot_config/starship.toml" ]
 }
