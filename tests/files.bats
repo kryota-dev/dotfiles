@@ -96,6 +96,10 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
 
+@test "bootstrap script exists" {
+  [ -f "${REPO_ROOT}/install/install.sh" ]
+}
+
 @test "chezmoi source files exist: VS Code settings.json" {
   [ -f "${HOME_DIR}/Library/Application Support/Code/User/settings.json" ]
 }
