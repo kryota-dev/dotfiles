@@ -89,6 +89,15 @@ jobs:
           eval "$(brew shellenv)"
           eval "$(mise activate bash)"
           echo "==> Verifying key tools..."
+          mise_dir="$HOME/.local/share/mise/installs"
+          for tool in node python go; do
+            tool_path=$(which "$tool")
+            echo "$tool: $tool_path"
+            if [[ "$tool_path" != *"$mise_dir"* && "$tool_path" != *".local/share/mise"* ]]; then
+              echo "ERROR: $tool is not managed by mise (expected path under $mise_dir)"
+              exit 1
+            fi
+          done
           node --version
           python3 --version
           go version
@@ -216,6 +225,15 @@ jobs:
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           eval "$(mise activate bash)"
           echo "==> Verifying key tools..."
+          mise_dir="$HOME/.local/share/mise/installs"
+          for tool in node python go; do
+            tool_path=$(which "$tool")
+            echo "$tool: $tool_path"
+            if [[ "$tool_path" != *"$mise_dir"* && "$tool_path" != *".local/share/mise"* ]]; then
+              echo "ERROR: $tool is not managed by mise (expected path under $mise_dir)"
+              exit 1
+            fi
+          done
           node --version
           python3 --version
           go version
