@@ -41,6 +41,7 @@ jobs:
           path: |
             /opt/homebrew/Cellar
             /opt/homebrew/opt
+            /opt/homebrew/Library/Taps
             ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-brew-${{ hashFiles('home/dot_Brewfile') }}
           restore-keys: |
