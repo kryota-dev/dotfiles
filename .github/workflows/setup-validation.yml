@@ -35,13 +35,29 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Cache Homebrew downloads
+      - name: Cache Homebrew
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
-          path: ~/Library/Caches/Homebrew
+          path: |
+            /opt/homebrew/Cellar
+            /opt/homebrew/opt
+            /opt/homebrew/Library/Taps
+            ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-brew-${{ hashFiles('home/dot_Brewfile') }}
           restore-keys: |
             ${{ runner.os }}-brew-
+
+      - name: Relink cached Homebrew formulas
+        run: |
+          grep -E '^brew ' home/dot_Brewfile \
+            | sed 's/brew "\([^"]*\)".*/\1/' \
+            | while IFS= read -r pkg; do
+                name=$(basename "$pkg")
+                if [ -d "/opt/homebrew/Cellar/$name" ]; then
+                  brew link --overwrite "$name" 2>/dev/null \
+                    || echo "Warning: failed to relink $name (will be handled by brew bundle)"
+                fi
+              done
 
       - name: Exclude CI-incompatible files
         run: |
