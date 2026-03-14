@@ -29,7 +29,16 @@ chezmoi による宣言的な macOS (Apple Silicon) 開発環境。
 
 ## はじめに
 
-> **macOS (Apple Silicon)** と **[1Password](https://1password.com/)** (SSH Agent + CLI) が必要です。
+> **macOS (Apple Silicon)** または **Ubuntu** と **[1Password](https://1password.com/)** (SSH Agent + CLI) が必要です。
+
+新規マシンの場合（`curl` と `bash` 以外の前提条件は不要）：
+
+```bash
+# 実行前にスクリプトの内容を確認: https://github.com/kryota-dev/dotfiles/blob/main/install/install.sh
+bash <(curl -fsLS https://raw.githubusercontent.com/kryota-dev/dotfiles/main/install/install.sh)
+```
+
+chezmoi がインストール済みの場合：
 
 ```bash
 chezmoi init --apply kryota-dev
@@ -44,6 +53,7 @@ chezmoi init --apply kryota-dev
 ```
 dotfiles/
 ├── .chezmoiroot              # ソースルート → home/
+├── install/                   # ブートストラップスクリプト
 ├── home/
 │   ├── .chezmoi.toml         # chezmoi 設定（email、signingkey）
 │   ├── dot_zshrc.tmpl        # 最小コア、sheldon 駆動
