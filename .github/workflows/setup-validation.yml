@@ -37,7 +37,6 @@ jobs:
 
       - name: Cache Homebrew
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
-        id: brew-cache
         with:
           path: |
             /opt/homebrew/Cellar
@@ -52,8 +51,10 @@ jobs:
           grep -E '^brew ' home/dot_Brewfile \
             | sed 's/brew "\([^"]*\)".*/\1/' \
             | while IFS= read -r pkg; do
-                if [ -d "/opt/homebrew/Cellar/$pkg" ]; then
-                  brew link --overwrite "$pkg" 2>/dev/null || true
+                name=$(basename "$pkg")
+                if [ -d "/opt/homebrew/Cellar/$name" ]; then
+                  brew link --overwrite "$name" 2>/dev/null \
+                    || echo "Warning: failed to relink $name (will be handled by brew bundle)"
                 fi
               done
 
