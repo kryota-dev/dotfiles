@@ -27,5 +27,15 @@ if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   fi
 fi
 
-mise install --yes
-echo "==> mise tools installed successfully."
+for attempt in 1 2 3; do
+  if mise install --yes; then
+    echo "==> mise tools installed successfully."
+    break
+  elif [[ $attempt -lt 3 ]]; then
+    echo "WARNING: mise install failed (attempt ${attempt}/3), retrying in $((attempt * 10)) seconds..."
+    sleep $((attempt * 10))
+  else
+    echo "ERROR: mise install failed after 3 attempts."
+    exit 1
+  fi
+done
