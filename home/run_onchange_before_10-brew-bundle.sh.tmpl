@@ -4,7 +4,15 @@ set -euo pipefail
 # Brewfile hash: {{ include "dot_Brewfile" | sha256sum }}
 {{ if eq .chezmoi.os "linux" -}}
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-{{ end -}}
+echo "Running brew bundle (Linux: filtering incompatible formulas)..."
+BREWFILE="{{ .chezmoi.sourceDir }}/dot_Brewfile"
+EXCLUDE="{{ .chezmoi.sourceDir }}/../.brewfile-linux-exclude"
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+grep -E '^(tap |brew )' "$BREWFILE" | grep -v -E -f "$EXCLUDE" >"$TMPFILE"
+brew bundle --no-upgrade --file="$TMPFILE"
+{{ else -}}
 echo "Running brew bundle..."
 brew bundle --no-upgrade --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"
+{{ end -}}
 echo "Brew bundle complete."
