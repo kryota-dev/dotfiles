@@ -19,7 +19,7 @@ Temporary Items
 *.icloud
 
 # Spec workflow
-.spec-workflow/
+.spec-workflow
 
 # Environment variables
 .env
