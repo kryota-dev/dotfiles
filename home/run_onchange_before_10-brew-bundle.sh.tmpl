@@ -7,9 +7,10 @@ eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 echo "Running brew bundle (Linux: filtering incompatible formulas)..."
 BREWFILE="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 EXCLUDE="{{ .chezmoi.sourceDir }}/../.brewfile-linux-exclude"
-grep -v -E -f "$EXCLUDE" "$BREWFILE" >/tmp/Brewfile.linux
-brew bundle --no-upgrade --file=/tmp/Brewfile.linux
-rm -f /tmp/Brewfile.linux
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+grep -E '^(tap |brew )' "$BREWFILE" | grep -v -E -f "$EXCLUDE" >"$TMPFILE"
+brew bundle --no-upgrade --file="$TMPFILE"
 {{ else -}}
 echo "Running brew bundle..."
 brew bundle --no-upgrade --file="{{ .chezmoi.sourceDir }}/dot_Brewfile"

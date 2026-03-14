@@ -6,12 +6,14 @@ on:
     paths:
       - 'home/**'
       - '.chezmoiroot'
+      - '.brewfile-linux-exclude'
       - '.github/workflows/setup-validation.yml'
   pull_request:
     branches: [main]
     paths:
       - 'home/**'
       - '.chezmoiroot'
+      - '.brewfile-linux-exclude'
       - '.github/workflows/setup-validation.yml'
   workflow_dispatch:
 
