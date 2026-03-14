@@ -162,7 +162,9 @@ jobs:
       - name: Install Homebrew formulas only
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
+          grep -E '^(tap |brew )' home/dot_Brewfile \
+            | grep -v -E -f .brewfile-linux-exclude \
+            > /tmp/Brewfile.ci
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
       - name: Exclude CI-incompatible files
