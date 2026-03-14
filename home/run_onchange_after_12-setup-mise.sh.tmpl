@@ -10,6 +10,13 @@ fi
 
 echo "==> Installing mise-managed tools..."
 
+{{ if eq .chezmoi.os "linux" -}}
+# Disable Node.js GPG signature verification on Linux.
+# GPG keyring may not have Node.js release signing keys imported,
+# causing "gpg: Can't check signature: No public key" errors.
+export MISE_NODE_VERIFY=false
+{{ end -}}
+
 # Set GITHUB_TOKEN from gh CLI to avoid GitHub API rate limiting.
 # On initial setup, gh may not yet be installed (it's managed by mise),
 # so this is a best-effort approach — if gh is unavailable, mise install
