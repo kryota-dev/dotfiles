@@ -19,11 +19,15 @@ if [ "$OS" = "Darwin" ]; then
 # --- Linux prerequisites ---
 elif [ "$OS" = "Linux" ]; then
   echo "Installing prerequisites..."
+  if ! command -v apt-get &>/dev/null; then
+    echo "Error: Unsupported Linux distribution. This script requires apt-get (Ubuntu/Debian)."
+    exit 1
+  fi
   if ! command -v sudo &>/dev/null; then
     echo "Error: sudo is required for package installation on Linux."
     exit 1
   fi
-  sudo apt-get update -y
+  sudo apt-get update
   sudo apt-get install -y build-essential curl file git
 
 else
