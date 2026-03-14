@@ -11,3 +11,6 @@ hooks:
     - type: symlink
       from: ".spec-workflow"
       to: ".spec-workflow"
+
+    - type: command
+      command: "direnv allow"
