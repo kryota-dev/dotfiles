@@ -31,6 +31,16 @@
       "depNameTemplate": "mvdan/sh",
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["home/\\.chezmoiexternal\\.toml$"],
+      "matchStrings": [
+        "url\\s*=\\s*\"https://github\\.com/(?<depName>[^/]+/[^/]+)/archive/(?<currentDigest>[a-f0-9]+)\\.tar\\.gz\""
+      ],
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "currentValueTemplate": "main"
     }
   ],
   "mise": {
