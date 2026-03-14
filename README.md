@@ -29,7 +29,16 @@ Declarative macOS (Apple Silicon) development environment powered by chezmoi.
 
 ## Getting Started
 
-> Requires **macOS (Apple Silicon)** and **[1Password](https://1password.com/)** (SSH Agent + CLI).
+> Requires **macOS (Apple Silicon)** or **Ubuntu** and **[1Password](https://1password.com/)** (SSH Agent + CLI).
+
+On a fresh machine (no prerequisites needed beyond `curl` and `bash`):
+
+```bash
+# Review the script before running: https://github.com/kryota-dev/dotfiles/blob/main/install/install.sh
+bash <(curl -fsLS https://raw.githubusercontent.com/kryota-dev/dotfiles/main/install/install.sh)
+```
+
+If chezmoi is already installed:
 
 ```bash
 chezmoi init --apply kryota-dev
@@ -56,6 +65,7 @@ Sensitive files (AWS config, agent skills) are stored as [1Password Secure Notes
 ```
 dotfiles/
 ├── .chezmoiroot              # source root → home/
+├── install/                   # bootstrap script
 ├── home/
 │   ├── .chezmoi.toml         # chezmoi config (email, signingkey)
 │   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
