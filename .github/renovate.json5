@@ -1,62 +1,68 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":pinAllExceptPeerDependencies",
-    "mergeConfidence:all-badges",
-    ":disableRateLimiting",
-    ":prConcurrentLimit10",
-    "group:definitelyTyped",
-    "helpers:pinGitHubActionDigests"
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':pinAllExceptPeerDependencies',
+    'mergeConfidence:all-badges',
+    ':disableRateLimiting',
+    ':prConcurrentLimit10',
+    'group:definitelyTyped',
+    'helpers:pinGitHubActionDigests',
   ],
-  "rebaseWhen": "conflicted",
-  "automergeType": "pr",
-  "minor": {
-    "automerge": false
+  rebaseWhen: 'conflicted',
+  automergeType: 'pr',
+  minor: {
+    automerge: false,
   },
-  "patch": {
-    "automerge": true
+  patch: {
+    automerge: true,
   },
-  "pin": {
-    "automerge": true
+  pin: {
+    automerge: true,
   },
-  "ignoreTests": false,
-  "customManagers": [
+  ignoreTests: false,
+  customManagers: [
     {
-      "customType": "regex",
-      "fileMatch": ["\\.github/workflows/ci\\.yml$"],
-      "matchStrings": [
-        "SHFMT_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      customType: 'regex',
+      managerFilePatterns: [
+        '/\\.github/workflows/ci\\.yml$/',
       ],
-      "depNameTemplate": "mvdan/sh",
-      "datasourceTemplate": "github-releases",
-      "extractVersionTemplate": "^v(?<version>.+)$"
+      matchStrings: [
+        'SHFMT_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)',
+      ],
+      depNameTemplate: 'mvdan/sh',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
     },
     {
-      "customType": "regex",
-      "fileMatch": ["home/\\.chezmoidata\\.toml$"],
-      "matchStrings": [
-        "anthropic_commit\\s*=\\s*\"(?<currentDigest>[a-f0-9]+)\""
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
       ],
-      "depNameTemplate": "anthropics/skills",
-      "datasourceTemplate": "git-refs",
-      "packageNameTemplate": "https://github.com/anthropics/skills",
-      "currentValueTemplate": "main"
+      matchStrings: [
+        'anthropic_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'anthropics/skills',
+      datasourceTemplate: 'git-refs',
+      packageNameTemplate: 'https://github.com/anthropics/skills',
+      currentValueTemplate: 'main',
     },
     {
-      "customType": "regex",
-      "fileMatch": ["home/\\.chezmoidata\\.toml$"],
-      "matchStrings": [
-        "moralerspace_font\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
       ],
-      "depNameTemplate": "yuru7/moralerspace",
-      "datasourceTemplate": "github-releases",
-      "extractVersionTemplate": "^v(?<version>.+)$"
-    }
+      matchStrings: [
+        'moralerspace_font\\s*=\\s*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"',
+      ],
+      depNameTemplate: 'yuru7/moralerspace',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+    },
   ],
-  "mise": {
-    "fileMatch": [
-      "home/dot_config/mise/config\\.toml"
-    ]
-  }
+  mise: {
+    managerFilePatterns: [
+      '/home/dot_config/mise/config\\.toml/',
+    ],
+  },
 }
