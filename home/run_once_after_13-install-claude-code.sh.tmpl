@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+if command -v claude &>/dev/null; then
+  echo "==> Claude Code is already installed: $(claude --version 2>/dev/null || echo 'unknown version')"
+  exit 0
+fi
+
+echo "==> Installing Claude Code..."
+
+if ! curl -fsSL https://claude.ai/install.sh | bash; then
+  echo "WARNING: Claude Code installation failed."
+  echo "You can install it manually with: curl -fsSL https://claude.ai/install.sh | bash"
+  exit 0
+fi
+
+if command -v claude &>/dev/null; then
+  echo "==> Claude Code installed successfully: $(claude --version 2>/dev/null || echo 'unknown version')"
+else
+  echo "WARNING: claude command not found in PATH. You may need to restart your shell."
+fi
