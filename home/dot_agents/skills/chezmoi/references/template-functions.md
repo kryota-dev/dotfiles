@@ -1,119 +1,119 @@
-# chezmoi Template Functions Reference
+# chezmoi Template関数 Reference
 
-## Table of Contents
-1. [Data Format Functions](#data-format-functions)
-2. [File System Functions](#file-system-functions)
-3. [Command Execution](#command-execution)
-4. [Include Functions](#include-functions)
-5. [Text Processing](#text-processing)
-6. [1Password Functions](#1password-functions)
-7. [Init-Time Functions](#init-time-functions)
-8. [GitHub Functions](#github-functions)
+## 目次
+1. [Data Format関数](#data-format関数)
+2. [File System関数](#file-system関数)
+3. [Command実行](#command実行)
+4. [Include関数](#include関数)
+5. [Text処理](#text処理)
+6. [1Password関数](#1password関数)
+7. [Init-Time関数](#init-time関数)
+8. [GitHub関数](#github関数)
 
 ---
 
-## Data Format Functions
+## Data Format関数
 
-### Parsing
-- **`fromJson`** *jsontext* - Parse JSON. Integers returned as int64, floats as float64, overflows as string.
-- **`fromJsonc`** *jsonctext* - Parse JSONC (JSON with comments).
-- **`fromToml`** *tomltext* - Parse TOML. Example: `{{ (fromToml "[section]\nkey = \"value\"").section.key }}`
-- **`fromYaml`** *yamltext* - Parse YAML. Example: `{{ (fromYaml "key: value").key }}`
-- **`fromIni`** *initext* - Parse INI. Example: `{{ (fromIni "[section]\nkey = value").section.key }}`
+### Parse
+- **`fromJson`** *jsontext* - JSONをparse。integerはint64、floatはfloat64、overflowはstringで返される。
+- **`fromJsonc`** *jsonctext* - JSONC（comment付きJSON）をparse。
+- **`fromToml`** *tomltext* - TOMLをparse。例: `{{ (fromToml "[section]\nkey = \"value\"").section.key }}`
+- **`fromYaml`** *yamltext* - YAMLをparse。例: `{{ (fromYaml "key: value").key }}`
+- **`fromIni`** *initext* - INIをparse。例: `{{ (fromIni "[section]\nkey = value").section.key }}`
 
-### Serializing
-- **`toPrettyJson`** [*indent*] *value* - JSON with indentation (default 2 spaces). Example: `{{ dict "a" "b" | toPrettyJson "\t" }}`
-- **`toToml`** *value* - Serialize to TOML.
-- **`toYaml`** *value* - Serialize to YAML.
-- **`toIni`** *value* - Serialize to INI (input must be dict).
+### Serialize
+- **`toPrettyJson`** [*indent*] *value* - indent付きJSON（default 2 spaces）。例: `{{ dict "a" "b" | toPrettyJson "\t" }}`
+- **`toToml`** *value* - TOMLにserialize。
+- **`toYaml`** *value* - YAMLにserialize。
+- **`toIni`** *value* - INIにserialize（入力はdictである必要あり）。
 
-### Data Manipulation
-- **`jq`** *query* *input* - Run jq query. Returns list. Example: `{{ dict "key" "value" | jq ".key" | first }}`
-- **`setValueAtPath`** *path* *value* *dict* - Set nested value. Example: `{{ fromJson .chezmoi.stdin | setValueAtPath "key.nested" "val" | toPrettyJson }}`
-- **`deleteValueAtPath`** *path* *dict* - Delete nested value.
-- **`pruneEmptyDicts`** *dict* - Remove empty nested dicts.
+### Data操作
+- **`jq`** *query* *input* - jq queryを実行。listを返す。例: `{{ dict "key" "value" | jq ".key" | first }}`
+- **`setValueAtPath`** *path* *value* *dict* - nestedされた値を設定。例: `{{ fromJson .chezmoi.stdin | setValueAtPath "key.nested" "val" | toPrettyJson }}`
+- **`deleteValueAtPath`** *path* *dict* - nestedされた値を削除。
+- **`pruneEmptyDicts`** *dict* - 空のnested dictを削除。
 
-## File System Functions
+## File System関数
 
-- **`lookPath`** *file* - Search PATH for executable. Returns empty string if not found. Result is cached.
+- **`lookPath`** *file* - PATHからexecutableを検索。見つからない場合は空stringを返す。結果はcacheされる。
   ```
   {{ if lookPath "mise" }}eval "$(mise activate zsh)"{{ end }}
   ```
 
-- **`findExecutable`** *file* *path-list* - Find executable in specific directories (relative to $HOME). Cached.
+- **`findExecutable`** *file* *path-list* - 特定のdirectory（$HOMEからの相対path）からexecutableを検索。cacheされる。
   ```
   {{ if findExecutable "mise" (list "bin" ".local/bin" ".cargo/bin") }}...{{ end }}
   ```
 
-- **`findOneExecutable`** *file-list* *path-list* - Find first matching executable from list. Cached.
+- **`findOneExecutable`** *file-list* *path-list* - listから最初にmatchするexecutableを検索。cacheされる。
   ```
   {{ findOneExecutable (list "eza" "exa" "ls") (list ".cargo/bin" ".local/bin") }}
   ```
 
-- **`stat`** *name* - Returns file info or false if not exists. Fields: `name`, `size`, `mode`, `perm`, `modTime`, `isDir`, `type`.
+- **`stat`** *name* - file情報を返す。存在しない場合はfalse。field: `name`、`size`、`mode`、`perm`、`modTime`、`isDir`、`type`。
   ```
-  {{ if stat (joinPath .chezmoi.homeDir ".pyenv") }}# pyenv exists{{ end }}
+  {{ if stat (joinPath .chezmoi.homeDir ".pyenv") }}# pyenvが存在する{{ end }}
   ```
 
-- **`lstat`** *name* - Like `stat` but does not follow symlinks.
+- **`lstat`** *name* - `stat` と同様だがsymlinkをfollowしない。
 
-- **`glob`** *pattern* - Match files in destination directory using doublestar patterns.
+- **`glob`** *pattern* - destination directoryでdoublestar patternでfileをmatch。
 
-- **`joinPath`** *element*... - Join path elements with OS separator.
+- **`joinPath`** *element*... - OS固有のseparatorでpath要素を結合。
 
-- **`isExecutable`** *name* - Returns true if file exists and is executable.
+- **`isExecutable`** *name* - fileが存在し実行可能な場合にtrueを返す。
 
-## Command Execution
+## Command実行
 
-- **`output`** *name* [*arg*...] - Execute command, return stdout. Runs every template execution; must be idempotent and fast.
+- **`output`** *name* [*arg*...] - commandを実行しstdoutを返す。template実行のたびに実行される。idempotentかつ高速であること。
   ```
   current-context: {{ output "kubectl" "config" "current-context" | trim }}
   ```
 
-- **`exec`** *name* [*arg*...] - Execute command, return true/false for success/failure. Output is discarded.
+- **`exec`** *name* [*arg*...] - commandを実行し、成功/失敗をtrue/falseで返す。出力はdiscardされる。
 
-## Include Functions
+## Include関数
 
-- **`include`** *filename* - Return literal file contents. Relative paths interpreted relative to source directory.
+- **`include`** *filename* - file内容をそのまま返す。相対pathはsource directory基準。
 
-- **`includeTemplate`** *filename* [*data*] - Execute file as template and return result. Searches `.chezmoitemplates` first, then source directory.
+- **`includeTemplate`** *filename* [*data*] - fileをtemplateとして実行し結果を返す。`.chezmoitemplates` を先に検索し、次にsource directoryを検索。
   ```
   {{ includeTemplate "part.tmpl" . }}
   ```
 
-## Text Processing
+## Text処理
 
-- **`comment`** *prefix* *text* - Prefix each line with comment marker.
+- **`comment`** *prefix* *text* - 各行にcomment markerをprefix。
   ```
   {{ "line1\nline2\n" | comment "# " }}
   ```
 
-- **`warnf`** *format* [*arg*...] - Print warning to stderr, returns empty string.
+- **`warnf`** *format* [*arg*...] - stderrに警告を出力し、空stringを返す。
 
-- **`replaceAllRegex`** *pattern* *replacement* *input* - Regex replace.
+- **`replaceAllRegex`** *pattern* *replacement* *input* - 正規表現で置換。
 
-- **`eqFold`** *str1* *str2* - Case-insensitive string comparison.
+- **`eqFold`** *str1* *str2* - case-insensitiveな文字列比較。
 
-- **`hexEncode`** / **`hexDecode`** - Hex encoding/decoding.
+- **`hexEncode`** / **`hexDecode`** - hex encoding/decoding。
 
-- **`quoteList`** *list* - Quote each element.
+- **`quoteList`** *list* - 各要素をquote。
 
-- **`toString`** / **`toStrings`** - Convert to string(s).
+- **`toString`** / **`toStrings`** - stringに変換。
 
-- **`abortEmpty`** *value* - Abort with error if value is empty.
+- **`abortEmpty`** *value* - 値が空の場合errorでabort。
 
-- **`ensureLinePrefix`** *prefix* *text* - Add prefix only to lines that don't already have it.
+- **`ensureLinePrefix`** *prefix* *text* - まだprefixがない行にのみprefixを追加。
 
-## 1Password Functions
+## 1Password関数
 
-All functions cache results per invocation. If no valid session exists, user is interactively prompted to sign in (unless `onepassword.prompt = false`).
+全関数は呼び出しごとに結果をcacheする。有効なsessionがない場合、userに対話的にsign-inを求める（`onepassword.prompt = false` でない限り）。
 
-- **`onepasswordRead`** *url* [*account*] - Read via `op read --no-newline`. Preferred for simple secret retrieval.
+- **`onepasswordRead`** *url* [*account*] - `op read --no-newline` 経由で読み取り。単純なsecret取得に推奨。
   ```
   {{ onepasswordRead "op://vault/item/field" }}
   ```
 
-- **`onepassword`** *uuid* [*vault* [*account*]] - Get item as parsed JSON via `op item get --format json`.
+- **`onepassword`** *uuid* [*vault* [*account*]] - `op item get --format json` 経由でitemをparse済みJSONとして取得。
   ```
   {{ range (onepassword "UUID").fields -}}
   {{   if and (eq .label "password") (eq .purpose "PASSWORD") -}}
@@ -122,55 +122,55 @@ All functions cache results per invocation. If no valid session exists, user is 
   {{ end }}
   ```
 
-- **`onepasswordDocument`** *uuid* [*vault* [*account*]] - Get document contents. Not available with 1Password Connect.
+- **`onepasswordDocument`** *uuid* [*vault* [*account*]] - documentの内容を取得。1Password Connectでは利用不可。
 
-- **`onepasswordDetailsFields`** *uuid* [*vault* [*account*]] - Fields indexed by label for easy access.
+- **`onepasswordDetailsFields`** *uuid* [*vault* [*account*]] - labelでindexされたfield。
   ```
   {{ (onepasswordDetailsFields "UUID").password.value }}
   ```
 
-- **`onepasswordItemFields`** *uuid* [*vault* [*account*]] - Item fields indexed by label.
+- **`onepasswordItemFields`** *uuid* [*vault* [*account*]] - labelでindexされたitem field。
   ```
   {{ (onepasswordItemFields "UUID").exampleLabel.value }}
   ```
 
-### 1Password Modes
-Set in config `[onepassword]`: `mode = "account"` (default), `"connect"`, or `"service"`.
+### 1Password Mode
+configの `[onepassword]` で指定: `mode = "account"`（default）、`"connect"`、または `"service"`。
 
-## Init-Time Functions
+## Init-Time関数
 
-These functions only work during `chezmoi init` (in `.chezmoi.$FORMAT.tmpl`).
+これらの関数は `chezmoi init` 実行中（`.chezmoi.$FORMAT.tmpl` 内）でのみ動作する。
 
-- **`promptString`** *prompt* [*default*] - Prompt for string input.
-- **`promptStringOnce`** *map* *path* *prompt* [*default*] - Return existing value or prompt. Most common for config templates.
+- **`promptString`** *prompt* [*default*] - string入力を要求。
+- **`promptStringOnce`** *map* *path* *prompt* [*default*] - 既存値を返すか、なければ入力を要求。config templateで最もよく使われる。
   ```
   {{ $email := promptStringOnce . "email" "Email address" }}
   ```
-- **`promptBool`** *prompt* [*default*] - Prompt for boolean (yes/no, true/false, 1/0).
+- **`promptBool`** *prompt* [*default*] - boolean値を要求（yes/no、true/false、1/0）。
 - **`promptBoolOnce`** *map* *path* *prompt* [*default*]
-- **`promptInt`** *prompt* [*default*] - Prompt for integer.
+- **`promptInt`** *prompt* [*default*] - integer値を要求。
 - **`promptIntOnce`** *map* *path* *prompt* [*default*]
-- **`promptChoice`** *prompt* *choices* [*default*] - Choose from list.
+- **`promptChoice`** *prompt* *choices* [*default*] - listから選択。
   ```
   {{ $type := promptChoice "Host type" (list "desktop" "laptop" "server") }}
   ```
 - **`promptChoiceOnce`** *map* *path* *prompt* *choices* [*default*]
-- **`promptMultichoice`** *prompt* *choices* [*defaults*] - Choose multiple.
+- **`promptMultichoice`** *prompt* *choices* [*defaults*] - 複数選択。
 - **`promptMultichoiceOnce`** *map* *path* *prompt* *choices* [*defaults*]
-- **`stdinIsATTY`** - Returns true if stdin is a terminal (useful for CI).
-- **`writeToStdout`** *string*... - Write to stdout during init.
-- **`exit`** - Exit init without error.
+- **`stdinIsATTY`** - stdinがterminalの場合trueを返す（CI環境で有用）。
+- **`writeToStdout`** *string*... - init中にstdoutに出力。
+- **`exit`** - errorなしでinitを終了。
 
-## GitHub Functions
+## GitHub関数
 
-- **`gitHubKeys`** *user* - Get SSH public keys.
+- **`gitHubKeys`** *user* - SSH public keyを取得。
   ```
   {{ range gitHubKeys "username" }}{{ .Key }}{{ end }}
   ```
-- **`gitHubLatestRelease`** *owner/repo* - Latest release info.
-- **`gitHubLatestReleaseAssetURL`** *owner/repo* *pattern* - URL of latest release asset matching pattern.
-- **`gitHubLatestTag`** *owner/repo* - Latest tag name.
-- **`gitHubRelease`** *owner/repo* *tag* - Specific release info.
-- **`gitHubReleaseAssetURL`** *owner/repo* *tag* *pattern* - Specific release asset URL.
-- **`gitHubReleases`** *owner/repo* - All releases.
-- **`gitHubTags`** *owner/repo* - All tags.
+- **`gitHubLatestRelease`** *owner/repo* - 最新release情報。
+- **`gitHubLatestReleaseAssetURL`** *owner/repo* *pattern* - patternにmatchする最新release assetのURL。
+- **`gitHubLatestTag`** *owner/repo* - 最新tag名。
+- **`gitHubRelease`** *owner/repo* *tag* - 特定release情報。
+- **`gitHubReleaseAssetURL`** *owner/repo* *tag* *pattern* - 特定release assetのURL。
+- **`gitHubReleases`** *owner/repo* - 全release。
+- **`gitHubTags`** *owner/repo* - 全tag。

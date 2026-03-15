@@ -1,59 +1,59 @@
-# chezmoi Commands Reference
+# chezmoi Command Reference
 
-## Table of Contents
+## 目次
 1. [Core Workflow](#core-workflow)
-2. [Editing and Managing](#editing-and-managing)
-3. [Inspection and Debugging](#inspection-and-debugging)
-4. [State Management](#state-management)
-5. [Git Integration](#git-integration)
-6. [Encryption](#encryption)
+2. [編集と管理](#編集と管理)
+3. [検査とDebug](#検査とdebug)
+4. [State管理](#state管理)
+5. [Git連携](#git連携)
+6. [暗号化](#暗号化)
 
 ---
 
 ## Core Workflow
 
 ### `chezmoi init [repo]`
-Initialize chezmoi. If `repo` is given, clone it as source directory.
-- `--apply` - Apply after init
-- `--one-shot` - Init, apply, then remove chezmoi data (for ephemeral environments)
-- Generates config from `.chezmoi.$FORMAT.tmpl` if it exists
+chezmoiを初期化する。`repo` が指定された場合、source directoryとしてcloneする。
+- `--apply` - init後にapply
+- `--one-shot` - init、apply後にchezmoiのdataを削除（ephemeral環境用）
+- `.chezmoi.$FORMAT.tmpl` が存在する場合、configを生成する
 
 ### `chezmoi add [flags] targets...`
-Add targets to the source state.
-- `--template` - Add as template
-- `--encrypt` - Encrypt the file
-- `--exact` - Add directory as exact
-- `--follow` - Follow symlinks
+Targetをsource stateに追加する。
+- `--template` - templateとして追加
+- `--encrypt` - fileを暗号化
+- `--exact` - directoryをexactとして追加
+- `--follow` - symlinkをfollow
 
 ### `chezmoi apply [targets...]`
-Update destination to match target state.
-- `-v` / `--verbose` - Print changes
-- `--dry-run` / `-n` - Don't make changes
-- `-R` / `--refresh-externals` - Force re-download externals
+Destinationをtarget stateに合わせて更新する。
+- `-v` / `--verbose` - 変更内容を表示
+- `--dry-run` / `-n` - 変更を実行しない
+- `-R` / `--refresh-externals` - externalを強制再download
 
 ### `chezmoi update`
-Pull latest changes and apply. Runs `git pull --autostash --rebase` then `chezmoi apply`.
+最新の変更をpullしてapplyする。`git pull --autostash --rebase` を実行後、`chezmoi apply` を実行。
 
 ### `chezmoi diff [targets...]`
-Show differences between target state and destination.
-- `--reverse` - Reverse diff direction
-- `--pager` / `--no-pager` - Control pager
+Target stateとdestinationの差分を表示する。
+- `--reverse` - diffの方向を反転
+- `--pager` / `--no-pager` - pagerの制御
 
-## Editing and Managing
+## 編集と管理
 
 ### `chezmoi edit [targets...]`
-Edit source file(s). With no args, opens source directory.
-- `--apply` - Apply changes after editor exits
-- `--watch` - Apply on every save
-- Handles encryption/decryption transparently
-- Creates temp files with target-like names for correct syntax highlighting
+Source fileを編集する。引数なしの場合、source directoryを開く。
+- `--apply` - editor終了後に変更をapply
+- `--watch` - 保存のたびにapply
+- 暗号化/復号化を透過的に処理
+- 正しいsyntax highlightのためtargetに似たfile名でtemp fileを作成
 
 ### `chezmoi re-add [targets...]`
-Re-add modified target files back to source state. Does NOT work with templates.
+変更されたtarget fileをsource stateに再追加する。Templateでは動作しない。
 
 ### `chezmoi chattr attributes targets...`
-Change attributes on source files.
-- `+template` / `-template` - Add/remove template attribute
+Source fileのattributeを変更する。
+- `+template` / `-template` - template attributeの追加/削除
 - `+executable` / `-executable`
 - `+private` / `-private`
 - `+readonly` / `-readonly`
@@ -62,102 +62,102 @@ Change attributes on source files.
 - `+encrypted` / `-encrypted`
 
 ### `chezmoi forget targets...`
-Remove targets from source state (does not remove from destination).
+Targetをsource stateから削除する（destinationからは削除しない）。
 
 ### `chezmoi destroy targets...`
-Remove from both source state AND destination.
+Source stateとdestinationの両方から削除する。
 
 ### `chezmoi manage targets...`
-Alias for `add`.
+`add` のalias。
 
 ### `chezmoi unmanage targets...`
-Alias for `forget`.
+`forget` のalias。
 
 ### `chezmoi merge targets...`
-Three-way merge between source, target, and destination state.
+Source、target、destination state間の三方向merge。
 
 ### `chezmoi merge-all`
-Merge all files that differ between source and destination.
+Sourceとdestination間で異なる全fileをmerge。
 
-## Inspection and Debugging
+## 検査とDebug
 
 ### `chezmoi cat targets...`
-Print target state of files (what would be applied).
+Fileのtarget state（applyされる内容）を出力する。
 
 ### `chezmoi diff`
-Show what would change on next `apply`.
+次回 `apply` で変更される内容を表示する。
 
 ### `chezmoi status [targets...]`
-Print status of targets. Status codes:
+Targetのstatusを表示する。Status code:
 - `A` - Added
 - `D` - Deleted
 - `M` - Modified
 - `R` - Script to Run
 
 ### `chezmoi data [--format json|toml|yaml]`
-Print template data. Default format is JSON.
+Template dataを出力する。Default formatはJSON。
 
 ### `chezmoi managed [--path-style absolute|relative|source-absolute|source-relative]`
-List all managed entries.
+全managed entryをlist表示する。
 
 ### `chezmoi unmanaged`
-List entries in destination not managed by chezmoi.
+chezmoiが管理していないdestination内のentryをlist表示する。
 
 ### `chezmoi ignored`
-List entries ignored by `.chezmoiignore`.
+`.chezmoiignore` で無視されているentryをlist表示する。
 
 ### `chezmoi source-path [targets...]`
-Print source path for targets.
+Targetのsource pathを表示する。
 
 ### `chezmoi target-path [sources...]`
-Print target path for source files.
+Source fileのtarget pathを表示する。
 
 ### `chezmoi execute-template [templates...]`
-Execute template strings and print results. Without args, reads from stdin.
-- `--init` - Enable init-time functions
-- `--promptString key=value` - Pre-set prompt responses for testing
+Template stringを実行し結果を表示する。引数なしの場合、stdinから読み取る。
+- `--init` - init-time関数を有効化
+- `--promptString key=value` - test用にprompt responseを事前設定
 - `--promptBool key=value`
 - `--promptInt key=value`
 - `--promptChoice key=value`
 
 ### `chezmoi doctor`
-Check for potential problems. Reports `ok`, `warning`, or `error` for each check.
+潜在的な問題をcheckする。各項目について `ok`、`warning`、または `error` を報告。
 
 ### `chezmoi dump [targets...]`
-Dump target state as JSON.
+Target stateをJSONでdumpする。
 
 ### `chezmoi dump-config`
-Dump parsed configuration.
+Parse済みconfigをdumpする。
 
 ### `chezmoi cat-config`
-Print config file contents.
+Config fileの内容を表示する。
 
 ### `chezmoi verify`
-Verify destination matches target state. Exits 0 if matches, 1 if not.
+Destinationがtarget stateと一致するかverifyする。一致の場合はexit code 0、不一致の場合は1。
 
-## State Management
+## State管理
 
 ### `chezmoi state`
-Manage chezmoi's persistent state database.
-- `chezmoi state delete-bucket --bucket=scriptState` - Clear run_once_ state
-- `chezmoi state delete-bucket --bucket=entryState` - Clear run_onchange_ state
-- `chezmoi state dump` - Dump all state
+chezmoiのpersistent state databaseを管理する。
+- `chezmoi state delete-bucket --bucket=scriptState` - run_once_のstateをclear
+- `chezmoi state delete-bucket --bucket=entryState` - run_onchange_のstateをclear
+- `chezmoi state dump` - 全stateをdump
 
-## Git Integration
+## Git連携
 
 ### `chezmoi cd`
-Open shell in source directory. Exit shell to return.
+Source directoryでshellを開く。Shellを終了すると元に戻る。
 
 ### `chezmoi git -- args...`
-Run git command in source directory. Use `--` to separate chezmoi flags from git flags.
+Source directoryでgit commandを実行する。chezmoiのflagとgitのflagを分離するために `--` を使用。
 ```
 chezmoi git -- add .
 chezmoi git -- commit -m "Update dotfiles"
 chezmoi git -- push
 ```
 
-### Auto-commit/push
-Configure in chezmoi config:
+### Auto commit/push
+Chezmoi configで設定:
 ```toml
 [git]
     autoCommit = true
@@ -165,15 +165,15 @@ Configure in chezmoi config:
     commitMessageTemplate = "{{ promptString \"Commit message\" }}"
 ```
 
-## Encryption
+## 暗号化
 
 ### `chezmoi encrypt file`
-Encrypt a file.
+Fileを暗号化する。
 
 ### `chezmoi decrypt file`
-Decrypt a file.
+Fileを復号化する。
 
-### age Encryption Configuration
+### age暗号化設定
 ```toml
 encryption = "age"
 [age]
@@ -181,23 +181,23 @@ encryption = "age"
     recipient = "age1..."
 ```
 
-Generate key: `chezmoi age-keygen --output ~/.config/chezmoi/key.txt`
+Keyの生成: `chezmoi age-keygen --output ~/.config/chezmoi/key.txt`
 
-## Other Commands
+## その他のCommand
 
 ### `chezmoi import archive`
-Import archive into source state.
-- `--strip-components N` - Strip leading path components
-- `--destination path` - Destination prefix
+Archiveをsource stateにimportする。
+- `--strip-components N` - 先頭path componentを除去
+- `--destination path` - destination prefix
 
 ### `chezmoi archive [--format tar|zip]`
-Create archive of target state.
+Target stateのarchiveを作成する。
 
 ### `chezmoi completion shell`
-Generate shell completion script.
+Shell completion scriptを生成する。
 
 ### `chezmoi generate git-commit-message`
-Generate commit message from changes.
+変更からcommit messageを生成する。
 
 ### `chezmoi secret`
-Interact with secret managers. Subcommands vary by manager.
+Secret managerと連携する。Subcommandはmanagerにより異なる。
