@@ -1,52 +1,52 @@
-# chezmoi Externals Reference
+# chezmoi External Reference
 
-## Overview
+## 概要
 
-`.chezmoiexternal.$FORMAT` files (with optional `.tmpl` extension) define external files and archives to include as if they were part of the source state. They are always interpreted as templates.
+`.chezmoiexternal.$FORMAT` file（optional `.tmpl` extension付き）は、source stateの一部として外部fileやarchiveをincludeする定義を行う。常にtemplateとして解釈される。
 
-Multiple `.chezmoiexternal.$FORMAT` files can exist anywhere in the source state. Entries are indexed by target name relative to the file's directory.
+複数の `.chezmoiexternal.$FORMAT` fileがsource state内の任意の場所に存在可能。Entryはfileのdirectoryからの相対target nameでindexされる。
 
-## Entry Fields
+## Entry Field
 
-| Field                        | Type     | Default      | Description                                            |
-|------------------------------|----------|--------------|--------------------------------------------------------|
-| `type`                       | string   | required     | `file`, `archive`, `archive-file`, or `git-repo`      |
-| `url`                        | string   | required     | https://, http://, or file:// URL                      |
-| `urls`                       | []string | none         | Fallback URLs tried in order                           |
-| `refreshPeriod`              | duration | `0` (never)  | How often to re-download (`24h`, `168h`, `672h`)       |
-| `executable`                 | bool     | false        | Set executable permissions                             |
-| `private`                    | bool     | false        | Set private permissions                                |
-| `readonly`                   | bool     | false        | Set readonly permissions                               |
-| `encrypted`                  | bool     | false        | External is encrypted                                  |
-| `decompress`                 | string   | none         | `bzip2`, `gzip`, `xz`, or `zstd`                      |
-| `exact`                      | bool     | false        | Treat directories as exact (remove unmanaged entries)  |
-| `stripComponents`            | int      | 0            | Strip leading path components from archive             |
-| `format`                     | string   | autodetect   | Archive format: tar, tar.gz, tgz, zip, etc.           |
-| `path`                       | string   | none         | Path to file within archive (for `archive-file`)       |
-| `include`                    | []string | none         | Patterns to include from archive                       |
-| `exclude`                    | []string | none         | Patterns to exclude from archive                       |
-| `checksum.sha256`            | string   | none         | Expected SHA256 checksum                               |
-| `checksum.sha384`            | string   | none         | Expected SHA384 checksum                               |
-| `checksum.sha512`            | string   | none         | Expected SHA512 checksum                               |
-| `checksum.size`              | int      | none         | Expected size in bytes                                 |
-| `clone.args`                 | []string | none         | Extra args to `git clone`                              |
-| `pull.args`                  | []string | none         | Extra args to `git pull`                               |
-| `filter.command`             | string   | none         | Filter command for content                             |
-| `filter.args`                | []string | none         | Args for filter command                                |
-| `archive.extractAppleDouble` | bool     | false        | Extract AppleDouble files                              |
-| `targetPath`                 | string   | none         | Override target path (allows multiple entries to one dir) |
+| Field                        | Type     | Default      | 説明                                                  |
+|------------------------------|----------|--------------|------------------------------------------------------|
+| `type`                       | string   | required     | `file`、`archive`、`archive-file`、または `git-repo`   |
+| `url`                        | string   | required     | https://、http://、または file:// URL                  |
+| `urls`                       | []string | none         | 順番に試行されるfallback URL                           |
+| `refreshPeriod`              | duration | `0`（none）   | 再download間隔（`24h`、`168h`、`672h`）                |
+| `executable`                 | bool     | false        | 実行権限を設定                                         |
+| `private`                    | bool     | false        | private permissionを設定                               |
+| `readonly`                   | bool     | false        | readonly permissionを設定                              |
+| `encrypted`                  | bool     | false        | externalが暗号化されている                              |
+| `decompress`                 | string   | none         | `bzip2`、`gzip`、`xz`、または `zstd`                  |
+| `exact`                      | bool     | false        | directoryをexactとして扱う（管理外entryを削除）         |
+| `stripComponents`            | int      | 0            | archiveから先頭path componentを除去                    |
+| `format`                     | string   | autodetect   | archive format: tar、tar.gz、tgz、zip等               |
+| `path`                       | string   | none         | archive内のfile path（`archive-file` 用）              |
+| `include`                    | []string | none         | archiveからincludeするpattern                         |
+| `exclude`                    | []string | none         | archiveから除外するpattern                            |
+| `checksum.sha256`            | string   | none         | 期待されるSHA256 checksum                              |
+| `checksum.sha384`            | string   | none         | 期待されるSHA384 checksum                              |
+| `checksum.sha512`            | string   | none         | 期待されるSHA512 checksum                              |
+| `checksum.size`              | int      | none         | 期待されるsize（byte）                                 |
+| `clone.args`                 | []string | none         | `git clone` への追加args                               |
+| `pull.args`                  | []string | none         | `git pull` への追加args                                |
+| `filter.command`             | string   | none         | contentのfilter command                               |
+| `filter.args`                | []string | none         | filter commandのargs                                  |
+| `archive.extractAppleDouble` | bool     | false        | AppleDouble fileを抽出                                |
+| `targetPath`                 | string   | none         | target pathをoverride（複数entryから1つのdirectoryへ）  |
 
 ## Include/Exclude Algorithm
 
-1. If name matches any `exclude` pattern -> excluded (and all children if directory)
-2. If name matches any `include` pattern -> included
-3. If only `include` specified -> excluded
-4. If only `exclude` specified -> included
-5. Otherwise -> included
+1. 名前が `exclude` patternにmatch → 除外（directoryの場合は全子要素も除外）
+2. 名前が `include` patternにmatch → include
+3. `include` のみ指定されている場合 → 除外
+4. `exclude` のみ指定されている場合 → include
+5. それ以外 → include
 
 ## Type: `file`
 
-Single file from URL.
+URLからの単一file。
 
 ```toml
 [".vim/autoload/plug.vim"]
@@ -57,7 +57,7 @@ Single file from URL.
 
 ## Type: `archive`
 
-Directory from archive URL.
+Archive URLからのdirectory。
 
 ```toml
 [".oh-my-zsh"]
@@ -78,7 +78,7 @@ Directory from archive URL.
 
 ## Type: `archive-file`
 
-Single file extracted from archive. Requires `path` field.
+Archiveから抽出した単一file。`path` fieldが必要。
 
 ```toml
 {{ $ageVersion := "1.1.1" -}}
@@ -89,11 +89,11 @@ Single file extracted from archive. Requires `path` field.
     executable = true
 ```
 
-Note: Check archive paths carefully. Some archives use `./` prefix, others don't.
+注意: archive内のpathを慎重に確認すること。`./` prefixがあるものとないものがある。
 
 ## Type: `git-repo`
 
-Clone/pull a git repository. Uses `git clone` if target doesn't exist, `git pull` if it does.
+Git repositoryのclone/pull。Targetが存在しない場合は `git clone`、存在する場合は `git pull` を使用。
 
 ```toml
 [".vim/pack/alker0/chezmoi.vim"]
@@ -104,13 +104,13 @@ Clone/pull a git repository. Uses `git clone` if target doesn't exist, `git pull
         args = ["--ff-only"]
 ```
 
-Limitations:
-- Requires `git` in `$PATH`
-- Delegates management to git (not shown in `chezmoi diff` or `chezmoi dump`)
-- Listed by `chezmoi unmanaged`
-- Cannot manage extra files in the directory
+制限事項:
+- `$PATH` に `git` が必要
+- 管理をgitに委譲（`chezmoi diff` や `chezmoi dump` に表示されない）
+- `chezmoi unmanaged` でlist表示される
+- directory内の追加fileを管理できない
 
-## Using `targetPath` for Multiple Sources to One Directory
+## `targetPath` で複数sourceから1つのdirectoryへ
 
 ```toml
 [p10k_fonts]
@@ -127,7 +127,7 @@ Limitations:
     targetPath = "Library/Fonts"
 ```
 
-## Using Filters
+## Filterの使用
 
 ```toml
 [".Software/anki"]
@@ -138,9 +138,9 @@ Limitations:
     format = "tar"
 ```
 
-## Private Git Repos
+## Private Git Repository
 
-Use `stat` to conditionally include:
+`stat` を使って条件付きでinclude:
 
 ```toml
 {{ if stat (joinPath .chezmoi.homeDir ".ssh" "id_rsa") }}
@@ -150,13 +150,13 @@ Use `stat` to conditionally include:
 {{ end }}
 ```
 
-## Refreshing
+## Refresh
 
-- Default refresh period is `0` (never auto-refresh)
-- Force refresh: `chezmoi apply -R` or `chezmoi apply --refresh-externals`
-- Typical periods: `24h` (daily), `168h` (weekly), `672h` (4 weeks)
-- For tagged/versioned URLs, no refresh period needed (bump version manually)
+- Default refresh periodは `0`（auto refreshなし）
+- 強制refresh: `chezmoi apply -R` または `chezmoi apply --refresh-externals`
+- 一般的なperiod: `24h`（daily）、`168h`（weekly）、`672h`（4 weeks）
+- Tag付き/version付きURLにはrefresh period不要（versionを手動で更新）
 
 ## `.chezmoiexternals/` Directory
 
-Files in `.chezmoiexternals/` directories are treated as `.chezmoiexternal.$FORMAT` files relative to the source directory. Does not support externals for subdirectories within the directory itself.
+`.chezmoiexternals/` directory内のfileは、source directoryからの相対pathで `.chezmoiexternal.$FORMAT` fileとして扱われる。directory自体のsubdirectoryに対するexternalはsupportされていない。

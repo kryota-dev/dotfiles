@@ -1,34 +1,34 @@
-# chezmoi Skill Update Procedure
+# chezmoi Skill更新手順
 
-This document describes how to update the chezmoi skill when the official chezmoi documentation changes.
+chezmoi公式ドキュメントが変更された際にskill fileを更新する方法を記述する。
 
-## When to Update
+## 更新タイミング
 
-- chezmoi releases a new version with new features, commands, or template functions
-- The user explicitly requests an update (e.g. "chezmoi skill update", "chezmoi docs refresh")
+- chezmoiが新機能、command、template関数を含む新versionをreleaseした時
+- Userが明示的に更新を要求した時（例: 「chezmoiスキルを更新」「chezmoi docs refresh」）
 
-## Update Steps
+## 更新手順
 
-### Step 1: Fetch the Latest Documentation Index
+### Step 1: 最新ドキュメントindexの取得
 
-List all markdown documentation files in the chezmoi repository:
+Chezmoi repositoryの全markdownドキュメントfileをlist:
 
 ```bash
 gh api "repos/twpayne/chezmoi/git/trees/master?recursive=1" \
   --jq '.tree[] | select(.path | startswith("assets/chezmoi.io/docs/")) | select(.path | endswith(".md") or endswith(".md.tmpl")) | .path'
 ```
 
-### Step 2: Download Key Documentation Files
+### Step 2: 主要ドキュメントfileのdownload
 
-Download each file using the GitHub API and base64 decode:
+GitHub APIを使用して各fileをdownloadしbase64 decode:
 
 ```bash
 gh api "repos/twpayne/chezmoi/contents/assets/chezmoi.io/docs/$PATH" --jq '.content' | base64 -d
 ```
 
-The following documentation categories must be covered:
+以下のドキュメントcategoryをcoverする必要がある:
 
-#### Core Reference (highest priority - changes here affect SKILL.md directly)
+#### Core Reference（最優先 - ここの変更はSKILL.mdに直接影響）
 - `docs/reference/concepts.md`
 - `docs/reference/source-state-attributes.md`
 - `docs/reference/target-types.md`
@@ -47,7 +47,7 @@ The following documentation categories must be covered:
 - `docs/user-guide/frequently-asked-questions/usage.md`
 - `docs/user-guide/frequently-asked-questions/troubleshooting.md`
 
-#### Special Files and Directories
+#### Special File / Directory
 - `docs/reference/special-files/chezmoiroot.md`
 - `docs/reference/special-files/chezmoiignore.md`
 - `docs/reference/special-files/chezmoiexternal-format.md`
@@ -57,50 +57,50 @@ The following documentation categories must be covered:
 - `docs/reference/special-directories/chezmoiscripts.md`
 - `docs/reference/special-directories/chezmoitemplates.md`
 
-#### Template Functions (update `references/template-functions.md`)
+#### Template関数（`references/template-functions.md` を更新）
 - `docs/reference/templates/variables.md`
 - `docs/reference/templates/directives.md`
-- `docs/reference/templates/functions/` - all `.md` files
-- `docs/reference/templates/1password-functions/` - all `.md` files
-- `docs/reference/templates/init-functions/` - all `.md` files
-- `docs/reference/templates/github-functions/` - all `.md` files
-- Other password manager function directories as needed
+- `docs/reference/templates/functions/` - 全 `.md` file
+- `docs/reference/templates/1password-functions/` - 全 `.md` file
+- `docs/reference/templates/init-functions/` - 全 `.md` file
+- `docs/reference/templates/github-functions/` - 全 `.md` file
+- その他のpassword manager関数directoryも必要に応じて
 
-#### Commands (update `references/commands.md`)
-- `docs/reference/commands/` - all `.md` files
+#### Command（`references/commands.md` を更新）
+- `docs/reference/commands/` - 全 `.md` file
 
-#### Configuration (update relevant sections)
+#### Configuration（関連sectionを更新）
 - `docs/reference/configuration-file/index.md`
 - `docs/reference/configuration-file/hooks.md`
 - `docs/reference/configuration-file/interpreters.md`
 - `docs/reference/configuration-file/editor.md`
 - `docs/reference/configuration-file/variables.md.tmpl`
 
-### Step 3: Identify Changes
+### Step 3: 変更の特定
 
-Compare downloaded content against existing skill files. Focus on:
+Downloadした内容を既存のskill fileと比較する。以下に注目:
 
-1. **New prefixes or suffixes** in source state attributes
-2. **New or changed commands** and their flags
-3. **New template functions** (especially new password manager integrations)
-4. **New special files or directories**
-5. **New configuration options**
-6. **Changed behavior** in existing features
-7. **New troubleshooting entries**
+1. **新しいprefixまたはsuffix** - source state attribute
+2. **新規または変更されたcommand** - flagを含む
+3. **新しいtemplate関数** - 特に新しいpassword manager連携
+4. **新しいspecial file / directory**
+5. **新しいconfiguration option**
+6. **既存機能の動作変更**
+7. **新しいtroubleshooting項目**
 
-Use this script to quickly detect new template function files:
+新しいtemplate関数fileを素早く検出するscript:
 
 ```bash
-# List all template function docs
+# 全template関数ドキュメントをlist
 gh api "repos/twpayne/chezmoi/git/trees/master?recursive=1" \
   --jq '.tree[] | select(.path | startswith("assets/chezmoi.io/docs/reference/templates/")) | select(.path | endswith(".md")) | .path' \
   | sort > /tmp/chezmoi-upstream-functions.txt
 
-# Compare with functions documented in the skill
+# Skillに記載されている関数と比較
 echo "Review /tmp/chezmoi-upstream-functions.txt for new entries not in references/template-functions.md"
 ```
 
-Use this script to detect new commands:
+新しいcommandを検出するscript:
 
 ```bash
 gh api "repos/twpayne/chezmoi/git/trees/master?recursive=1" \
@@ -110,58 +110,58 @@ gh api "repos/twpayne/chezmoi/git/trees/master?recursive=1" \
 echo "Review /tmp/chezmoi-upstream-commands.txt for new entries not in references/commands.md"
 ```
 
-### Step 4: Update Skill Files
+### Step 4: Skill Fileの更新
 
-Update the following files in order:
+以下のfileを順番に更新する:
 
-1. **`SKILL.md`** - Update if there are changes to:
-   - Core concepts or terminology
-   - Source state attribute prefixes/suffixes
+1. **`SKILL.md`** - 以下に変更がある場合に更新:
+   - Core conceptsまたは用語
+   - Source state attributeのprefix/suffix
    - Application order
    - Template variable table
-   - Essential template functions list
-   - Special files/directories list
-   - Common commands table
+   - 主要template関数list
+   - Special file/directory list
+   - 主要command table
    - Troubleshooting section
 
-2. **`references/template-functions.md`** - Update if there are:
-   - New template functions
-   - Changed function signatures or behavior
-   - New password manager integrations
-   - New init-time functions
+2. **`references/template-functions.md`** - 以下がある場合に更新:
+   - 新しいtemplate関数
+   - 関数signatureまたは動作の変更
+   - 新しいpassword manager連携
+   - 新しいinit-time関数
 
-3. **`references/externals.md`** - Update if there are:
-   - New external types
-   - New entry fields
-   - Changed include/exclude behavior
+3. **`references/externals.md`** - 以下がある場合に更新:
+   - 新しいexternal type
+   - 新しいentry field
+   - Include/exclude動作の変更
 
-4. **`references/commands.md`** - Update if there are:
-   - New commands
-   - New flags on existing commands
-   - Changed command behavior
+4. **`references/commands.md`** - 以下がある場合に更新:
+   - 新しいcommand
+   - 既存commandの新しいflag
+   - Command動作の変更
 
-### Step 5: Verify
+### Step 5: 検証
 
-After updating, verify the skill files:
+更新後、skill fileを検証する:
 
 ```bash
-# Check no broken internal references
+# 内部referenceが壊れていないか確認
 grep -r 'references/' home/dot_agents/skills/chezmoi/SKILL.md
 
-# Check file sizes are reasonable (SKILL.md should stay under 500 lines)
+# File sizeが適切か確認（SKILL.mdは500行以下に保つ）
 wc -l home/dot_agents/skills/chezmoi/SKILL.md home/dot_agents/skills/chezmoi/references/*.md
 ```
 
-## Parallelization Tips
+## 並列化のヒント
 
-To speed up downloads, use subagents to download documentation categories in parallel:
-- Agent 1: Core reference + special files/directories
-- Agent 2: Template functions (all subdirectories)
-- Agent 3: Commands + configuration + user guide
+Downloadを高速化するため、subagentを使ってドキュメントcategoryを並列download:
+- Agent 1: Core reference + special file/directory
+- Agent 2: Template関数（全subdirectory）
+- Agent 3: Command + configuration + user guide
 
-## Notes
+## 注意事項
 
-- The `gh api` approach is preferred over `git clone` because it avoids downloading the entire chezmoi repository (which is large)
-- Files are base64-encoded in the GitHub API response; pipe through `base64 -d` to decode
-- Some files like `variables.md.tmpl` are Go templates themselves and contain template syntax - their rendered output differs from raw content, but the raw template source is sufficient for understanding the available variables
-- The `.md.yaml` files (e.g., `articles.md.yaml`) are data files for generating link pages and can be ignored
+- `gh api` approachは `git clone` より推奨される。Chezmoi repository全体（大容量）のdownloadを避けられるため
+- GitHub API responseのfileはbase64 encodeされている。`base64 -d` でdecodeする
+- `variables.md.tmpl` のようなfileはGo template自体であり、template syntaxを含む。Rendering後の出力と生の内容は異なるが、利用可能な変数の理解には生のtemplate sourceで十分
+- `.md.yaml` file（例: `articles.md.yaml`）はlink page生成用のdata fileであり、無視してよい

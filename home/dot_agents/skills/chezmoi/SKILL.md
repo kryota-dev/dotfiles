@@ -1,147 +1,147 @@
 ---
 name: chezmoi
-description: "Comprehensive chezmoi dotfiles management skill. Use when working with chezmoi source directories, templates (.tmpl files), source state attributes (dot_, private_, run_once_, etc.), .chezmoiexternal, .chezmoiignore, chezmoi config files, or any dotfiles managed by chezmoi. Also trigger when the user mentions chezmoi commands (chezmoi add, apply, diff, edit, init, update), template functions (onepasswordRead, lookPath, output, include, etc.), or asks about managing dotfiles across multiple machines. This skill covers the full chezmoi workflow: file naming conventions, templates, scripts, externals, encryption, and 1Password integration."
+description: "chezmoi dotfiles管理の包括的スキル。chezmoiのsource directory、template（.tmplファイル）、source state attributes（dot_、private_、run_once_等）、.chezmoiexternal、.chezmoiignore、chezmoi設定ファイル、またはchezmoiで管理されるdotfilesを扱う際に使用する。chezmoiコマンド（chezmoi add、apply、diff、edit、init、update）、template関数（onepasswordRead、lookPath、output、include等）、複数マシン間でのdotfiles管理について言及された際にもトリガーする。ファイル命名規則、template、script、externals、暗号化、1Password連携を含むchezmoiワークフロー全体をカバーする。"
 user-invocable: true
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 ---
 
-# chezmoi Dotfiles Management
+# chezmoi dotfiles管理
 
 ## Core Concepts
 
-chezmoi manages dotfiles by computing a **target state** from a **source state** and applying it to the **destination directory** (your home directory).
+chezmoiは **source state** から **target state** を計算し、**destination directory**（ホームディレクトリ）に適用することでdotfilesを管理する。
 
-- **Source directory**: Where chezmoi stores the source state (`~/.local/share/chezmoi` by default, can be overridden with `.chezmoiroot`)
-- **Config file**: Machine-specific data (`~/.config/chezmoi/chezmoi.toml`)
-- **Target state**: Desired state computed from source state + config + destination state
-- **Working tree**: The git working tree (normally same as source directory, but can be a parent when using `.chezmoiroot`)
+- **Source directory**: chezmoiがsource stateを保存する場所（default: `~/.local/share/chezmoi`、`.chezmoiroot`で変更可能）
+- **Config file**: マシン固有のデータ（`~/.config/chezmoi/chezmoi.toml`）
+- **Target state**: source state + config + destination stateから計算される目標状態
+- **Working tree**: gitのworking tree（通常はsource directoryと同じだが、`.chezmoiroot`使用時は親ディレクトリになる場合がある）
 
-## Source State Attributes (File Naming Conventions)
+## Source State Attributes（ファイル命名規則）
 
-File and directory names in the source state encode attributes via prefixes and suffixes. The order of prefixes matters.
+source stateのファイル名・ディレクトリ名はprefixとsuffixで属性をencodeする。prefixの順序は重要。
 
-### Prefixes
+### Prefix
 
-| Prefix        | Effect                                                       |
+| Prefix        | 効果                                                         |
 |---------------|--------------------------------------------------------------|
-| `after_`      | Run script after updating destination                        |
-| `before_`     | Run script before updating destination                       |
-| `create_`     | Create file only if it doesn't exist                         |
-| `dot_`        | Rename to leading dot (e.g. `dot_zshrc` -> `.zshrc`)        |
-| `empty_`      | Keep file even if empty                                      |
-| `encrypted_`  | File is encrypted in source state                            |
-| `exact_`      | Remove anything not managed by chezmoi (directories)         |
-| `executable_` | Set executable permissions                                   |
-| `external_`   | Ignore attributes in child entries (for git submodules)      |
-| `literal_`    | Stop parsing prefix attributes                               |
-| `modify_`     | Script that modifies existing file (receives stdin, writes stdout) |
-| `once_`       | Run script only if contents never ran successfully before    |
-| `onchange_`   | Run script only if contents changed since last successful run |
-| `private_`    | Remove group and world permissions (0700/0600)               |
-| `readonly_`   | Remove write permissions                                     |
-| `remove_`     | Remove the target entry                                      |
-| `run_`        | Execute as script                                            |
-| `symlink_`    | Create symlink (file contents = link target)                 |
+| `after_`      | destination更新後にscriptを実行                               |
+| `before_`     | destination更新前にscriptを実行                               |
+| `create_`     | ファイルが存在しない場合のみ作成                               |
+| `dot_`        | 先頭にdotを付与（例: `dot_zshrc` → `.zshrc`）                |
+| `empty_`      | 空でもファイルを保持                                          |
+| `encrypted_`  | source stateで暗号化されたファイル                             |
+| `exact_`      | chezmoiが管理していないentryを削除（directory用）              |
+| `executable_` | 実行権限を設定                                                |
+| `external_`   | 子entryの属性を無視（git submodule用）                        |
+| `literal_`    | prefix属性のparseを停止                                      |
+| `modify_`     | 既存ファイルを変更するscript（stdinで受け取りstdoutに出力）    |
+| `once_`       | 内容が一度もrun成功していない場合のみscriptを実行              |
+| `onchange_`   | 前回のrun成功から内容が変更された場合のみscriptを実行          |
+| `private_`    | group・otherのpermissionを削除（0700/0600）                   |
+| `readonly_`   | write permissionを削除                                       |
+| `remove_`     | target entryを削除                                           |
+| `run_`        | scriptとして実行                                              |
+| `symlink_`    | symlinkを作成（ファイル内容 = link先）                        |
 
-### Suffixes
+### Suffix
 
-| Suffix     | Effect                            |
+| Suffix     | 効果                              |
 |------------|-----------------------------------|
-| `.tmpl`    | Interpret as Go text/template     |
-| `.literal` | Stop parsing suffix attributes    |
-| `.age`     | Stripped when age encryption used |
+| `.tmpl`    | Go text/templateとして解釈        |
+| `.literal` | suffix属性のparseを停止           |
+| `.age`     | age暗号化使用時に除去される        |
 
 ### Target Type Reference
 
-| Target type   | Allowed prefixes (in order)                                               | Suffixes |
-|---------------|---------------------------------------------------------------------------|----------|
-| Directory     | `remove_`, `external_`, `exact_`, `private_`, `readonly_`, `dot_`        | none     |
-| Regular file  | `encrypted_`, `private_`, `readonly_`, `empty_`, `executable_`, `dot_`   | `.tmpl`  |
-| Create file   | `create_`, `encrypted_`, `private_`, `readonly_`, `empty_`, `executable_`, `dot_` | `.tmpl` |
-| Modify file   | `modify_`, `encrypted_`, `private_`, `readonly_`, `executable_`, `dot_`  | `.tmpl`  |
-| Remove        | `remove_`, `dot_`                                                         | none     |
-| Script        | `run_`, `once_` or `onchange_`, `before_` or `after_`                    | `.tmpl`  |
-| Symlink       | `symlink_`, `dot_`                                                        | `.tmpl`  |
+| Target type    | 許可されるprefix（順序通り）                                              | Suffix   |
+|----------------|---------------------------------------------------------------------------|----------|
+| Directory      | `remove_`, `external_`, `exact_`, `private_`, `readonly_`, `dot_`        | なし     |
+| Regular file   | `encrypted_`, `private_`, `readonly_`, `empty_`, `executable_`, `dot_`   | `.tmpl`  |
+| Create file    | `create_`, `encrypted_`, `private_`, `readonly_`, `empty_`, `executable_`, `dot_` | `.tmpl` |
+| Modify file    | `modify_`, `encrypted_`, `private_`, `readonly_`, `executable_`, `dot_`  | `.tmpl`  |
+| Remove         | `remove_`, `dot_`                                                         | なし     |
+| Script         | `run_`, `once_` or `onchange_`, `before_` or `after_`                    | `.tmpl`  |
+| Symlink        | `symlink_`, `dot_`                                                        | `.tmpl`  |
 
 ## Application Order
 
-1. Read source state
-2. Read destination state
-3. Compute target state
-4. Run `run_before_` scripts in alphabetical order
-5. Update entries (files, directories, externals, scripts, symlinks) in alphabetical order of target name. Directories are updated before their contents.
-6. Run `run_after_` scripts in alphabetical order
+1. Source stateを読み込む
+2. Destination stateを読み込む
+3. Target stateを計算する
+4. `run_before_` scriptをalphabetical orderで実行
+5. Entry（file、directory、external、script、symlink）をtarget nameのalphabetical orderで更新。Directoryはその中身より先に更新される。
+6. `run_after_` scriptをalphabetical orderで実行
 
-Target names are considered after all attributes are stripped. For example, `modify_dot_beta` targets `.beta`, which sorts before `alpha` from `create_alpha`.
+Target nameは全attributeを除去した後に判定される。例: `modify_dot_beta` のtargetは `.beta` で、`create_alpha` の `alpha` より前にsortされる。
 
-## Templates
+## Template
 
-chezmoi uses Go's `text/template` syntax extended with [sprig functions](http://masterminds.github.io/sprig/).
+chezmoiはGoの `text/template` 構文を[sprig関数](http://masterminds.github.io/sprig/)で拡張して使用する。
 
-A file is treated as a template when:
-- It has a `.tmpl` suffix, OR
-- It is in the `.chezmoitemplates` directory
+ファイルがtemplateとして扱われる条件:
+- `.tmpl` suffixを持つ、または
+- `.chezmoitemplates` directory内にある
 
-### Key Template Variables
+### 主要Template変数
 
-| Variable               | Description                              |
-|------------------------|------------------------------------------|
-| `.chezmoi.os`          | OS: `darwin`, `linux`, `windows`         |
-| `.chezmoi.arch`        | Architecture: `amd64`, `arm64`           |
-| `.chezmoi.hostname`    | Hostname (up to first `.`)               |
-| `.chezmoi.fqdnHostname`| Fully qualified domain name              |
-| `.chezmoi.username`    | Current username                         |
-| `.chezmoi.homeDir`     | Home directory path                      |
-| `.chezmoi.sourceDir`   | Source directory path                    |
-| `.chezmoi.sourceFile`  | Relative path of current template        |
-| `.chezmoi.targetFile`  | Absolute path of target file             |
-| `.chezmoi.kernel`      | Kernel info (Linux only, useful for WSL) |
-| `.chezmoi.osRelease`   | `/etc/os-release` data (Linux only)      |
+| Variable               | 説明                              |
+|------------------------|-----------------------------------|
+| `.chezmoi.os`          | OS: `darwin`, `linux`, `windows`  |
+| `.chezmoi.arch`        | Architecture: `amd64`, `arm64`    |
+| `.chezmoi.hostname`    | hostname（最初の `.` まで）        |
+| `.chezmoi.fqdnHostname`| FQDN                             |
+| `.chezmoi.username`    | 現在のuser名                      |
+| `.chezmoi.homeDir`     | home directory path               |
+| `.chezmoi.sourceDir`   | source directory path             |
+| `.chezmoi.sourceFile`  | 現在のtemplateの相対path          |
+| `.chezmoi.targetFile`  | target fileの絶対path             |
+| `.chezmoi.kernel`      | kernel情報（Linux専用、WSL検出用） |
+| `.chezmoi.osRelease`   | `/etc/os-release` data（Linux専用）|
 
-Custom variables are defined in the config file under `[data]` or in `.chezmoidata.$FORMAT` files.
+custom変数はconfig fileの `[data]` sectionまたは `.chezmoidata.$FORMAT` fileで定義する。
 
-### Essential Template Functions
+### 主要Template関数
 
-For complete reference, see `references/template-functions.md`.
+完全なreferenceは `references/template-functions.md` を参照。
 
 **Data access:**
-- `output "cmd" "arg"...` - Execute command, return stdout (cached per template execution)
-- `include "file"` - Return literal file contents (relative to source dir)
-- `includeTemplate "file" data` - Execute template and return result
-- `fromJson`, `fromToml`, `fromYaml`, `fromIni` - Parse data formats
-- `toPrettyJson`, `toToml`, `toYaml`, `toIni` - Serialize data formats
-- `jq "query" input` - Run jq query against data
+- `output "cmd" "arg"...` - commandを実行しstdoutを返す（template実行ごとにcache）
+- `include "file"` - ファイル内容をそのまま返す（source directoryからの相対path）
+- `includeTemplate "file" data` - templateを実行し結果を返す
+- `fromJson`, `fromToml`, `fromYaml`, `fromIni` - data formatをparse
+- `toPrettyJson`, `toToml`, `toYaml`, `toIni` - data formatにserialize
+- `jq "query" input` - dataに対してjq queryを実行
 
 **File system:**
-- `lookPath "cmd"` - Find executable in PATH (empty string if not found)
-- `findExecutable "cmd" (list "bin" ".local/bin")` - Find executable in specific dirs
-- `stat path` - Get file info (returns false if not exists)
-- `joinPath .chezmoi.homeDir ".config"` - Join path elements
-- `glob "pattern"` - Match files in destination dir
+- `lookPath "cmd"` - PATHからexecutableを検索（見つからない場合は空文字列）
+- `findExecutable "cmd" (list "bin" ".local/bin")` - 特定directoryからexecutableを検索
+- `stat path` - file情報を取得（存在しない場合はfalse）
+- `joinPath .chezmoi.homeDir ".config"` - path要素を結合
+- `glob "pattern"` - destination directoryでfileをmatch
 
-**Text processing:**
-- `comment "# " text` - Prefix each line with comment marker
-- `warnf "format" args...` - Print warning to stderr
+**Text処理:**
+- `comment "# " text` - 各行にcomment markerをprefix
+- `warnf "format" args...` - stderrに警告を出力
 
-**1Password integration:**
-- `onepasswordRead "op://vault/item/field"` - Read secret via `op read`
-- `onepassword "UUID"` - Get item as structured data
-- `onepasswordDocument "UUID"` - Get document contents
-- `onepasswordDetailsFields "UUID"` - Get fields indexed by label
-- `onepasswordItemFields "UUID"` - Get item fields indexed by label
+**1Password連携:**
+- `onepasswordRead "op://vault/item/field"` - `op read` 経由でsecretを読み取る
+- `onepassword "UUID"` - itemを構造化dataとして取得
+- `onepasswordDocument "UUID"` - documentの内容を取得
+- `onepasswordDetailsFields "UUID"` - labelでindexされたfieldを取得
+- `onepasswordItemFields "UUID"` - labelでindexされたitem fieldを取得
 
-**Init-time functions (only during `chezmoi init`):**
-- `promptString "prompt" [default]` - Ask for string input
-- `promptStringOnce . "key" "prompt" [default]` - Ask only if not already set
-- `promptBool "prompt" [default]` - Ask for boolean
-- `promptChoice "prompt" choices [default]` - Ask to choose from list
-- `promptChoiceOnce . "key" "prompt" choices [default]` - Choose only if not set
-- `stdinIsATTY` - Check if interactive terminal
-- `writeToStdout "text"` - Write to stdout during init
+**Init-time関数（`chezmoi init` 実行時のみ）:**
+- `promptString "prompt" [default]` - 文字列入力を要求
+- `promptStringOnce . "key" "prompt" [default]` - 未設定の場合のみ入力を要求
+- `promptBool "prompt" [default]` - boolean値を要求
+- `promptChoice "prompt" choices [default]` - listから選択
+- `promptChoiceOnce . "key" "prompt" choices [default]` - 未設定の場合のみ選択
+- `stdinIsATTY` - 対話式terminalかcheck
+- `writeToStdout "text"` - init中にstdoutに出力
 
 ### Template Directives
 
-Set per-file template options with comments like:
+file固有のtemplate optionをcommentで設定:
 
 ```
 chezmoi:template:left-delimiter="<<" right-delimiter=">>"
@@ -149,152 +149,152 @@ chezmoi:template:missing-key=zero
 chezmoi:template:line-endings=native
 ```
 
-### Common Template Patterns
+### よく使うTemplate Pattern
 
-**OS-conditional content:**
+**OS条件分岐:**
 ```
 {{ if eq .chezmoi.os "darwin" -}}
-# macOS config
+# macOS設定
 {{ else if eq .chezmoi.os "linux" -}}
-# Linux config
+# Linux設定
 {{ end -}}
 ```
 
-**Check if command exists:**
+**commandの存在check:**
 ```
 {{ if lookPath "mise" -}}
 eval "$(mise activate zsh)"
 {{ end -}}
 ```
 
-**Whitespace control:** Use `{{-` and `-}}` to trim surrounding whitespace.
+**Whitespace制御:** `{{-` と `-}}` で前後のwhitespaceを除去する。
 
-**Literal `{{` in templates:**
+**Template内でliteral `{{` を記述:**
 ```
 {{ "{{" }} and {{ "}}" }}
 ```
 
-## Scripts
+## Script
 
-Scripts have the `run_` prefix and are executed during `chezmoi apply`.
+Scriptは `run_` prefixを持ち、`chezmoi apply` 時に実行される。
 
-- `run_` - Run every time
-- `run_once_` - Run only if contents haven't run successfully before (tracks SHA256)
-- `run_onchange_` - Run when contents change (even if same content ran before under different name)
-- `run_before_` / `run_after_` - Control execution timing relative to file updates
+- `run_` - 毎回実行
+- `run_once_` - 内容がrun成功したことがない場合のみ実行（SHA256で追跡）
+- `run_onchange_` - 内容が変更された場合に実行（別ファイル名で同内容がrun済みでも再実行）
+- `run_before_` / `run_after_` - file更新に対する実行timingを制御
 
-Scripts must include a `#!` shebang line. They don't need the executable bit set in source.
+Scriptには `#!` shebang行が必要。sourceでexecutable bitを設定する必要はない。
 
-**Trigger script on file change:**
+**ファイル変更時にscriptを実行:**
 ```bash
 #!/bin/bash
 # hash: {{ include "Brewfile" | sha256sum }}
 brew bundle --file={{ joinPath .chezmoi.sourceDir "Brewfile" | quote }}
 ```
 
-**Disable script conditionally:** If a `.tmpl` script renders to empty/whitespace, it won't execute.
+**Scriptを条件付きで無効化:** `.tmpl` scriptが空/whitespaceのみにrenderされると実行されない。
 
-**Environment variables:** chezmoi sets `CHEZMOI=1`, `CHEZMOI_OS`, `CHEZMOI_ARCH`, etc. Extra vars can be set in `[scriptEnv]` config.
+**環境変数:** chezmoiは `CHEZMOI=1`、`CHEZMOI_OS`、`CHEZMOI_ARCH` 等を設定する。追加の変数はconfigの `[scriptEnv]` で設定可能。
 
-## Special Files and Directories
+## Special Files / Directories
 
-### Files
-- **`.chezmoiroot`** - Specifies subdirectory as source root (single line, relative path)
-- **`.chezmoiignore`** - Patterns to ignore (supports templates, `!` exclusions)
-- **`.chezmoiremove`** - Patterns of targets to remove
-- **`.chezmoiexternal.$FORMAT`** - External files/archives to include
-- **`.chezmoidata.$FORMAT`** - Static template data (json/jsonc/toml/yaml, NOT templates)
-- **`.chezmoiversion`** - Minimum chezmoi version required
-- **`.chezmoi.$FORMAT.tmpl`** - Config file template (executed during `chezmoi init`)
+### File
+- **`.chezmoiroot`** - subdirectoryをsource rootとして指定（1行、相対path）
+- **`.chezmoiignore`** - 無視するpattern（template対応、`!` による除外）
+- **`.chezmoiremove`** - 削除対象のpattern
+- **`.chezmoiexternal.$FORMAT`** - 外部file/archiveのinclude
+- **`.chezmoidata.$FORMAT`** - 静的template data（json/jsonc/toml/yaml、template非対応）
+- **`.chezmoiversion`** - 必要最低chezmoiバージョン
+- **`.chezmoi.$FORMAT.tmpl`** - config file template（`chezmoi init` 時に実行）
 
-### Directories
-- **`.chezmoitemplates/`** - Shared templates (available via `{{ template "name" . }}`)
-- **`.chezmoidata/`** - Directory of data files (merged, supports subdirs)
-- **`.chezmoiscripts/`** - Scripts that don't create target directories
-- **`.chezmoiexternals/`** - Directory of external definitions
+### Directory
+- **`.chezmoitemplates/`** - 共有template（`{{ template "name" . }}` で利用可能）
+- **`.chezmoidata/`** - data fileのdirectory（mergeされる、subdirectory対応）
+- **`.chezmoiscripts/`** - target directoryを作成しないscript
+- **`.chezmoiexternals/`** - external定義のdirectory
 
-## Externals (`.chezmoiexternal.$FORMAT`)
+## Externals（`.chezmoiexternal.$FORMAT`）
 
-Include files from URLs as if part of source state. Types:
-- `file` - Single file from URL
-- `archive` - Directory from archive URL (tar, tar.gz, zip, etc.)
-- `archive-file` - Single file extracted from archive
-- `git-repo` - Clone/pull a git repository
+URLからfileをsource stateの一部としてincludeする。Type:
+- `file` - URLからの単一file
+- `archive` - archive URLからのdirectory（tar、tar.gz、zip等）
+- `archive-file` - archiveから抽出した単一file
+- `git-repo` - git repositoryのclone/pull
 
-Key fields: `type`, `url`, `refreshPeriod`, `stripComponents`, `exact`, `include`, `exclude`, `executable`, `path` (for archive-file), `checksum.sha256`.
+主要field: `type`、`url`、`refreshPeriod`、`stripComponents`、`exact`、`include`、`exclude`、`executable`、`path`（archive-file用）、`checksum.sha256`。
 
-For detailed external configuration, see `references/externals.md`.
+詳細なexternal設定は `references/externals.md` を参照。
 
-## Modify Templates
+## Modify Template
 
-Files with `modify_` prefix containing `chezmoi:modify-template` are treated as modify templates. The existing file content is available as `.chezmoi.stdin`:
+`modify_` prefixを持ち `chezmoi:modify-template` を含むfileはmodify templateとして扱われる。既存fileの内容は `.chezmoi.stdin` で利用可能:
 
 ```
 {{- /* chezmoi:modify-template */ -}}
 {{ fromJson .chezmoi.stdin | setValueAtPath "key" "value" | toPrettyJson }}
 ```
 
-Modify templates must NOT have a `.tmpl` extension.
+Modify templateには `.tmpl` extensionを付けてはならない。
 
-## Configuration File
+## Config File
 
-Located at `~/.config/chezmoi/chezmoi.$FORMAT`. Key sections:
+場所: `~/.config/chezmoi/chezmoi.$FORMAT`。主要section:
 
 ```toml
-sourceDir = "~/.dotfiles"     # Override source directory
-[data]                        # Template variables
+sourceDir = "~/.dotfiles"     # source directoryをoverride
+[data]                        # template変数
     email = "user@example.com"
 [git]
-    autoCommit = true         # Auto-commit on changes
-    autoPush = true           # Auto-push on changes
+    autoCommit = true         # 変更時にauto commit
+    autoPush = true           # 変更時にauto push
 [diff]
-    exclude = ["scripts"]     # Exclude scripts from diff output
+    exclude = ["scripts"]     # diff出力からscriptを除外
 [scriptEnv]
-    MY_VAR = "value"          # Environment variables for scripts
+    MY_VAR = "value"          # script用環境変数
 [hooks.apply.post]
-    command = "echo"          # Hook commands
+    command = "echo"          # hook command
     args = ["applied"]
 ```
 
-## Common Commands
+## 主要Command
 
-| Command | Description |
-|---------|-------------|
-| `chezmoi add [--template] FILE` | Add file to source state |
-| `chezmoi apply [-v]` | Apply target state to destination |
-| `chezmoi diff` | Show differences between target and destination |
-| `chezmoi edit [--apply] FILE` | Edit source file |
-| `chezmoi edit --watch FILE` | Edit with auto-apply on save |
-| `chezmoi cd` | Open shell in source directory |
-| `chezmoi init [--apply] REPO` | Initialize from repo |
-| `chezmoi update` | Pull and apply changes |
-| `chezmoi data` | Show template data |
-| `chezmoi managed` | List managed files |
-| `chezmoi unmanaged` | List unmanaged files |
-| `chezmoi re-add` | Re-add modified targets to source |
-| `chezmoi chattr +template FILE` | Change file attributes |
-| `chezmoi execute-template 'TPL'` | Test template expressions |
-| `chezmoi doctor` | Check for problems |
-| `chezmoi forget FILE` | Remove from source state |
-| `chezmoi merge FILE` | Three-way merge |
-| `chezmoi cat FILE` | Show target state of file |
-| `chezmoi status` | Show status of targets |
-| `chezmoi state delete-bucket --bucket=scriptState` | Clear run_once state |
-| `chezmoi state delete-bucket --bucket=entryState` | Clear run_onchange state |
+| Command | 説明 |
+|---------|------|
+| `chezmoi add [--template] FILE` | fileをsource stateに追加 |
+| `chezmoi apply [-v]` | target stateをdestinationに適用 |
+| `chezmoi diff` | targetとdestinationの差分を表示 |
+| `chezmoi edit [--apply] FILE` | source fileを編集 |
+| `chezmoi edit --watch FILE` | 保存時にauto applyで編集 |
+| `chezmoi cd` | source directoryでshellを開く |
+| `chezmoi init [--apply] REPO` | repositoryから初期化 |
+| `chezmoi update` | 変更をpullしてapply |
+| `chezmoi data` | template dataを表示 |
+| `chezmoi managed` | 管理中のfileを一覧表示 |
+| `chezmoi unmanaged` | 管理外のfileを一覧表示 |
+| `chezmoi re-add` | 変更されたtargetをsourceに再追加 |
+| `chezmoi chattr +template FILE` | file attributeを変更 |
+| `chezmoi execute-template 'TPL'` | template式をtest |
+| `chezmoi doctor` | 問題をcheck |
+| `chezmoi forget FILE` | source stateから削除 |
+| `chezmoi merge FILE` | 三方向merge |
+| `chezmoi cat FILE` | fileのtarget stateを表示 |
+| `chezmoi status` | targetのstatusを表示 |
+| `chezmoi state delete-bucket --bucket=scriptState` | run_onceのstateをclear |
+| `chezmoi state delete-bucket --bucket=entryState` | run_onchangeのstateをclear |
 
 ## Troubleshooting
 
-- **`exec format error` in template scripts**: Remove newline before `#!` by using `{{- }}` (minus sign for whitespace trimming)
-- **`permission denied` executing scripts**: Set `scriptTempDir` in config if `/tmp` has `noexec`
-- **`timeout` errors**: Another chezmoi instance holds the lock on `chezmoistate.boltdb`
-- **Broken diff colors**: Set `LESS=-R` or configure `pager = "less -R"` in config
-- **Blank buffer in `chezmoi edit`**: Configure editor to stay in foreground (`vim -f`, `code --wait`)
-- **`no such file or directory` when adding**: Create parent directory manually in source state with `.keep`
-- **`/bin/bash` not found on Nix/Termux**: Use `#!{{ lookPath "bash" }}` in template scripts
-- **Group-writable SSH config**: Set `umask = 0o022` in chezmoi config
+- **Template scriptで `exec format error`**: `#!` の前の改行を `{{- }}` で除去する（minus記号でwhitespaceをtrim）
+- **Script実行時に `permission denied`**: `/tmp` が `noexec` の場合、configで `scriptTempDir` を指定
+- **`timeout` error**: 別のchezmoi instanceが `chezmoistate.boltdb` のlockを保持している
+- **diffの色が壊れる**: `LESS=-R` を設定するか、configで `pager = "less -R"` を指定
+- **`chezmoi edit` で空buffer**: editorをforegroundで動作するよう設定（`vim -f`、`code --wait`）
+- **追加時に `no such file or directory`**: source stateで親directoryを手動作成し `.keep` を配置
+- **Nix/Termuxで `/bin/bash` が見つからない**: template scriptで `#!{{ lookPath "bash" }}` を使用
+- **SSH configがgroup writable**: chezmoi configで `umask = 0o022` を指定
 
-For complete reference documentation on template functions, externals, and commands, see the files in `references/`.
+Template関数、external、commandの完全なreferenceは `references/` 内のfileを参照。
 
-## Updating This Skill
+## このスキルの更新
 
-When chezmoi is updated and the official documentation changes, run the update procedure described in `references/update-procedure.md` to refresh this skill's content. The procedure downloads the latest documentation from `twpayne/chezmoi` via `gh api` and regenerates all skill files.
+chezmoiがupdateされ公式ドキュメントが変更された場合、`references/update-procedure.md` に記載された更新手順を実行してこのスキルの内容を更新する。手順では `twpayne/chezmoi` から `gh api` 経由で最新ドキュメントをdownloadし、全skill fileを再生成する。
