@@ -34,6 +34,10 @@ load helpers/setup
   [ -f "${HOME_DIR}/.chezmoiexternal.toml" ]
 }
 
+@test "chezmoi source files exist: .chezmoidata.toml" {
+  [ -f "${HOME_DIR}/.chezmoidata.toml" ]
+}
+
 @test "chezmoi source files exist: starship.toml" {
   [ -f "${HOME_DIR}/dot_config/starship.toml" ]
 }
@@ -59,8 +63,7 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
-  [ -f "${HOME_DIR}/run_once_after_30-setup-fonts.sh.tmpl" ]
-  [ -f "${HOME_DIR}/run_once_after_40-setup-sheldon.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_onchange_after_40-setup-sheldon.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_90-other-apps.sh.tmpl" ]
 }
 
