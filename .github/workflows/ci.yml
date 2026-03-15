@@ -92,13 +92,17 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
-        run: brew install sheldon starship
+        run: brew install chezmoi sheldon starship
 
       - name: Setup sheldon
         run: |
           mkdir -p ~/.config/sheldon ~/.config/zsh
           cp home/dot_config/sheldon/plugins.toml ~/.config/sheldon/plugins.toml
           cp home/dot_config/zsh/*.zsh ~/.config/zsh/
+          for f in home/dot_config/zsh/*.zsh.tmpl; do
+            [ -e "$f" ] || continue
+            chezmoi execute-template -f "$f" > ~/.config/zsh/"$(basename "${f%.tmpl}")"
+          done
           echo 'eval "$(sheldon source)"' > ~/.zshrc
           sheldon lock
 
