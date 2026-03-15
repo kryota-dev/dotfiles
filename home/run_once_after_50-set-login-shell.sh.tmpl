@@ -9,7 +9,12 @@ if [[ -z "$ZSH_PATH" ]]; then
   exit 0
 fi
 
-CURRENT_SHELL="$(getent passwd "$(whoami)" | cut -d: -f7)"
+CURRENT_SHELL="$(getent passwd "$(whoami)" 2>/dev/null | cut -d: -f7 || awk -F: -v user="$(whoami)" '$1 == user {print $NF}' /etc/passwd || true)"
+if [[ -z "$CURRENT_SHELL" ]]; then
+  echo "WARNING: Could not determine current login shell. Skipping."
+  echo "Run manually: chsh -s '$ZSH_PATH'"
+  exit 0
+fi
 if [[ "$CURRENT_SHELL" == "$ZSH_PATH" ]]; then
   echo "==> Login shell is already zsh ($ZSH_PATH). Skipping."
   exit 0
@@ -20,6 +25,11 @@ echo "==> Changing login shell to zsh ($ZSH_PATH)..."
 # Ensure zsh is listed in /etc/shells
 if ! grep -qx "$ZSH_PATH" /etc/shells 2>/dev/null; then
   echo "==> Adding $ZSH_PATH to /etc/shells..."
+  if ! sudo -n true 2>/dev/null; then
+    echo "WARNING: sudo requires a password. Cannot add zsh to /etc/shells."
+    echo "Run manually: echo '$ZSH_PATH' | sudo tee -a /etc/shells && chsh -s '$ZSH_PATH'"
+    exit 0
+  fi
   if ! echo "$ZSH_PATH" | sudo tee -a /etc/shells >/dev/null; then
     echo "WARNING: Failed to add zsh to /etc/shells."
     echo "Run manually: echo '$ZSH_PATH' | sudo tee -a /etc/shells && chsh -s '$ZSH_PATH'"
