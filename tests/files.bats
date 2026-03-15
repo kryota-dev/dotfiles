@@ -65,6 +65,7 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_40-setup-sheldon.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_13-install-claude-code.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_once_after_50-set-login-shell.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_90-other-apps.sh.tmpl" ]
 }
 
