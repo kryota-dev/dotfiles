@@ -59,7 +59,7 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_config/zsh/aliases.zsh.tmpl" ]
 }
 
-@test "run_once scripts exist" {
+@test "lifecycle scripts exist" {
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]

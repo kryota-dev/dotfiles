@@ -130,5 +130,5 @@
     url = "https://github.com/yuru7/moralerspace/releases/download/v{{ .versions.moralerspace_font }}/Moralerspace_v{{ .versions.moralerspace_font }}.zip"
     stripComponents = 1
     include = ["*.ttf"]
-    refreshPeriod = "672h"
+    refreshPeriod = "672h"  # 28 days — fonts update infrequently; version pinned in .chezmoidata.toml
 {{ end -}}
