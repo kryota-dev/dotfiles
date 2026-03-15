@@ -81,6 +81,14 @@ jobs:
           grep -E '^(tap |brew )' home/dot_Brewfile > /tmp/Brewfile.ci
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
+      - name: Cache mise tool installations
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.local/share/mise/installs
+          key: ${{ runner.os }}-mise-${{ hashFiles('home/dot_config/mise/config.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-mise-
+
       - name: Apply dotfiles with chezmoi
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -200,6 +208,14 @@ jobs:
             | grep -v -E -f .brewfile-linux-exclude \
             > /tmp/Brewfile.ci
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
+
+      - name: Cache mise tool installations
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        with:
+          path: ~/.local/share/mise/installs
+          key: ${{ runner.os }}-mise-${{ hashFiles('home/dot_config/mise/config.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-mise-
 
       - name: Exclude CI-incompatible files
         run: |
