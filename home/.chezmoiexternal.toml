@@ -1,123 +1,134 @@
 # Official skills from https://github.com/anthropics/skills
-# Pinned to commit b0cbd3df1533b396d281a6886d5132f623393a9c
+# Pinned commit hash is defined in .chezmoidata.toml [skills.anthropic_commit]
 # All entries share the same tarball URL — chezmoi caches by URL SHA256,
 # so only one download occurs regardless of how many entries exist.
 
 [".agents/skills/algorithmic-art"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/algorithmic-art/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/brand-guidelines"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/brand-guidelines/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/canvas-design"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/canvas-design/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/claude-api"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/claude-api/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/doc-coauthoring"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/doc-coauthoring/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/docx"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/docx/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/frontend-design"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/frontend-design/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/internal-comms"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/internal-comms/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/mcp-builder"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/mcp-builder/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/pdf"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/pdf/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/pptx"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/pptx/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/skill-creator"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/skill-creator/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/slack-gif-creator"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/slack-gif-creator/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/theme-factory"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/theme-factory/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/web-artifacts-builder"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/web-artifacts-builder/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/webapp-testing"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/webapp-testing/**"]
     refreshPeriod = "168h"
 
 [".agents/skills/xlsx"]
     type = "archive"
-    url = "https://github.com/anthropics/skills/archive/b0cbd3df1533b396d281a6886d5132f623393a9c.tar.gz"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz"
     stripComponents = 3
     include = ["*/skills/xlsx/**"]
     refreshPeriod = "168h"
+
+# Moralerspace font (macOS only)
+# Version is defined in .chezmoidata.toml [versions.moralerspace_font]
+{{ if eq .chezmoi.os "darwin" -}}
+["Library/Fonts"]
+    type = "archive"
+    url = "https://github.com/yuru7/moralerspace/releases/download/v{{ .versions.moralerspace_font }}/Moralerspace_v{{ .versions.moralerspace_font }}.zip"
+    stripComponents = 1
+    include = ["*.ttf"]
+    refreshPeriod = "672h"  # 28 days — fonts update infrequently; version pinned in .chezmoidata.toml
+{{ end -}}

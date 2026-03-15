@@ -1,0 +1,5 @@
+[versions]
+  moralerspace_font = "2.0.0"
+
+[skills]
+  anthropic_commit = "b0cbd3df1533b396d281a6886d5132f623393a9c"
