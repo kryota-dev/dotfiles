@@ -1,5 +1,12 @@
 #!/bin/bash
+# sheldon config hash: {{ include "dot_config/sheldon/plugins.toml" | sha256sum }}
 set -euo pipefail
+
+if ! command -v sheldon &>/dev/null; then
+  echo "WARNING: sheldon is not installed. Skipping plugin lock."
+  echo "Install it with: brew install sheldon"
+  exit 0
+fi
 
 echo "Locking sheldon plugins..."
 sheldon lock
