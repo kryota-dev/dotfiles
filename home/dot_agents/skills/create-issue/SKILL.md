@@ -2,7 +2,6 @@
 name: create-issue
 description: GitHub Issueを作成する際に使用。リポジトリのIssueテンプレートに準拠した内容を生成し、ghコマンドで投稿する。
 argument-hint: "[issue-type] [repository]"
-disable-model-invocation: true
 allowed-tools: Bash, Read, WebFetch
 ---
 

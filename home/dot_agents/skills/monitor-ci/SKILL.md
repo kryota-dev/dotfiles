@@ -1,7 +1,6 @@
 ---
 name: monitor-ci
 description: PR作成後やCI実行中にStatus Checksの状態を監視する。チェック完了まで定期的にステータスを確認し、結果を報告する。
-disable-model-invocation: true
 ---
 
 # Monitor CI Checks
