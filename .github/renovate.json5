@@ -34,13 +34,24 @@
     },
     {
       "customType": "regex",
-      "fileMatch": ["home/\\.chezmoiexternal\\.toml$"],
+      "fileMatch": ["home/\\.chezmoidata\\.toml$"],
       "matchStrings": [
-        "url\\s*=\\s*\"https://github\\.com/(?<depName>[^/]+/[^/]+)/archive/(?<currentDigest>[a-f0-9]+)\\.tar\\.gz\""
+        "anthropic_commit\\s*=\\s*\"(?<currentDigest>[a-f0-9]+)\""
       ],
+      "depNameTemplate": "anthropics/skills",
       "datasourceTemplate": "git-refs",
-      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "packageNameTemplate": "https://github.com/anthropics/skills",
       "currentValueTemplate": "main"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["home/\\.chezmoidata\\.toml$"],
+      "matchStrings": [
+        "moralerspace_font\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "depNameTemplate": "yuru7/moralerspace",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>.+)$"
     }
   ],
   "mise": {
