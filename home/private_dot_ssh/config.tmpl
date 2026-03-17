@@ -1,0 +1,12 @@
+Host *
+	# ForwardAgent enables SSH Agent Forwarding to trusted remote hosts for commit signing
+	AddKeysToAgent yes
+	ForwardAgent yes
+{{- if eq .chezmoi.os "darwin" }}
+	IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+{{- else if eq .chezmoi.os "linux" }}
+{{-   $agentSock := joinPath .chezmoi.homeDir ".1password/agent.sock" }}
+{{-   if stat $agentSock }}
+	IdentityAgent ~/.1password/agent.sock
+{{-   end }}
+{{- end }}

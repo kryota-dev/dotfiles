@@ -12,11 +12,15 @@
 	format = ssh
 [init]
 	defaultBranch = main
+{{- $opSign := "" }}
+{{- if stat "/Applications/1Password.app/Contents/MacOS/op-ssh-sign" }}
+{{-   $opSign = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign" }}
+{{- else if stat "/opt/1Password/op-ssh-sign" }}
+{{-   $opSign = "/opt/1Password/op-ssh-sign" }}
+{{- end }}
+{{- if $opSign }}
 [gpg "ssh"]
-{{- if eq .chezmoi.os "darwin" }}
-	program = /Applications/1Password.app/Contents/MacOS/op-ssh-sign
-{{- else if eq .chezmoi.os "linux" }}
-	program = /opt/1Password/op-ssh-sign
+	program = {{ $opSign }}
 {{- end }}
 [extensions]
 	worktreeConfig = true
