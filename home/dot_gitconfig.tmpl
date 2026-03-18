@@ -20,7 +20,7 @@
 {{- end }}
 {{- if $opSign }}
 [gpg "ssh"]
-	program = {{ $opSign }}
+	program = "{{ $opSign }}"
 {{- end }}
 [extensions]
 	worktreeConfig = true
