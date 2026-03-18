@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache Homebrew
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: |
             /opt/homebrew/Cellar
@@ -83,7 +83,7 @@ jobs:
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
       - name: Cache mise tool installations
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ~/.local/share/mise/installs
           key: ${{ runner.os }}-mise-${{ hashFiles('home/dot_config/mise/config.toml') }}
@@ -188,7 +188,7 @@ jobs:
           sudo apt-get install -y build-essential curl file git zsh
 
       - name: Cache Linuxbrew
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: /home/linuxbrew/.linuxbrew
           key: ${{ runner.os }}-linuxbrew-${{ hashFiles('home/dot_Brewfile') }}
@@ -212,7 +212,7 @@ jobs:
           brew bundle --no-upgrade --file=/tmp/Brewfile.ci
 
       - name: Cache mise tool installations
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: ~/.local/share/mise/installs
           key: ${{ runner.os }}-mise-${{ hashFiles('home/dot_config/mise/config.toml') }}
