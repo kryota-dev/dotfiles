@@ -1,0 +1,13 @@
+Host pve-homelab dev smb tailscale devcontainer-*
+	ForwardAgent yes
+
+Host *
+	AddKeysToAgent yes
+{{- if eq .chezmoi.os "darwin" }}
+	IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+{{- else if eq .chezmoi.os "linux" }}
+{{-   $agentSock := joinPath .chezmoi.homeDir ".1password/agent.sock" }}
+{{-   if stat $agentSock }}
+	IdentityAgent ~/.1password/agent.sock
+{{-   end }}
+{{- end }}

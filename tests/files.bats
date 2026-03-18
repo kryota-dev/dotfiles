@@ -14,6 +14,10 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_gitconfig.tmpl" ]
 }
 
+@test "chezmoi source files exist: private_dot_ssh/config.tmpl" {
+  [ -f "${HOME_DIR}/private_dot_ssh/config.tmpl" ]
+}
+
 @test "chezmoi source files exist: dot_vimrc" {
   [ -f "${HOME_DIR}/dot_vimrc" ]
 }
