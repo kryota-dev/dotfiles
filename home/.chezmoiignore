@@ -24,3 +24,8 @@
 # AWS cache
 .aws/cli
 .aws/sso
+
+# macOS-only: VS Code settings (on Linux, VS Code Server uses ~/.vscode-server/)
+{{ if ne .chezmoi.os "darwin" }}
+Library/
+{{ end }}
