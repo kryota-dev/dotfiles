@@ -15,6 +15,9 @@ cursor-style-blink = true
 # Shell
 shell-integration = zsh
 
+# Terminal
+term = xterm-256color
+
 # Clipboard
 copy-on-select = clipboard
 
