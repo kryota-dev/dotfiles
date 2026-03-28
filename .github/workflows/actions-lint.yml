@@ -16,4 +16,4 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: kryota-dev/actions/.github/workflows/actions-lint.yml@aaf45e6452e1e6bdeee70730be0da0cbad2c9bd0 # v0.1.1
+    uses: kryota-dev/actions/.github/workflows/actions-lint.yml@a90284f8283e93f69308dfa2f1153fd47440fea3 # v0.2.1
