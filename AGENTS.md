@@ -15,6 +15,9 @@ All written artifacts in this repository must be in English:
 - Code review comments
 - Documentation and markdown files
 
+Exceptions — the following must be written in Japanese:
+- Agent skill files (`SKILL.md`) and their script comments
+
 Note: Conversational responses to the user remain in Japanese as specified in the global `~/AGENTS.md`.
 
 ## Mandatory skill usage
