@@ -1,4 +1,4 @@
-alias cld='claude'
+alias cld='claude --effort max'
 alias ccdcmds='ccdcommands'
 
 function ccdpaths() {
