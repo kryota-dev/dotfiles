@@ -5,7 +5,7 @@ python = "3.14.3"
 ruby = "4.0.2"
 go = "1.26.1"
 deno = "2.7.7"
-rust = "1.94.0"
+rust = "1.94.1"
 
 # CLI tools (auto-selected via registry)
 act = "0.2.85"
