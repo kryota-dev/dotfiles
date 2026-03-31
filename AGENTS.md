@@ -79,7 +79,7 @@ Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_o
 
 - **zsh config**: `dot_zshrc.tmpl` → activates mise, direnv, starship synchronously, then loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
 - **Template variables**: `.chezmoi.toml` defines `email` and `signingkey`
-- **1Password secrets**: `private_dot_aws/config.tmpl`, `dot_agents/skills/daily-planning/SKILL.md.tmpl` — rendered from 1Password Secure Notes via `onepasswordRead`
+- **1Password secrets**: `private_dot_aws/config.tmpl` — rendered from 1Password Secure Notes via `onepasswordRead`
 - **AI agent config**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — shared skills are centralized in `dot_agents/skills/` and distributed to each tool via symlinks
 
 ### Lint conventions
