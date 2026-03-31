@@ -48,7 +48,7 @@ Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, 
 
 ### 1Password Secret Setup
 
-Sensitive files (AWS config, agent skills) are stored as [1Password Secure Notes](https://developer.1password.com/docs/cli/) and rendered via chezmoi templates at apply time. Before running `chezmoi apply`, ensure:
+Sensitive files (AWS config) are stored as [1Password Secure Notes](https://developer.1password.com/docs/cli/) and rendered via chezmoi templates at apply time. Before running `chezmoi apply`, ensure:
 
 1. **1Password desktop app** is installed with CLI integration enabled (Settings > Developer > Integrate with 1Password CLI)
 2. The following Secure Notes exist in the `kryota.dev` vault:
@@ -56,7 +56,6 @@ Sensitive files (AWS config, agent skills) are stored as [1Password Secure Notes
    | Item Title | Content |
    |-----------|---------|
    | `Dotfiles - AWS Config` | `~/.aws/config` content |
-   | `Dotfiles - Daily Planning Skill` | Daily planning SKILL.md content |
 
 ## Architecture
 
