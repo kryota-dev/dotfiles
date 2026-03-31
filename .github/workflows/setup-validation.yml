@@ -64,7 +64,6 @@ jobs:
           mkdir -p /tmp/chezmoi-excluded
           for f in \
             home/private_dot_aws/config.tmpl \
-            home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
@@ -224,7 +223,6 @@ jobs:
           mkdir -p /tmp/chezmoi-excluded
           for f in \
             home/private_dot_aws/config.tmpl \
-            home/dot_agents/skills/daily-planning/SKILL.md.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
