@@ -92,6 +92,13 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
 
+@test "claude-r06 work profile symlinks exist" {
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_CLAUDE.md.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_skills.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_settings.json.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_agents.tmpl" ]
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }

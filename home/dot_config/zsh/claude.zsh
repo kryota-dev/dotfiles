@@ -1,4 +1,5 @@
 alias cld='claude --effort max'
+alias cld-r06='CLAUDE_CONFIG_DIR=$HOME/.claude-r06 claude --effort max'
 alias ccdcmds='ccdcommands'
 
 function ccdpaths() {
@@ -20,7 +21,8 @@ function ccdcommands() {
 }
 
 function claude-rc() {
-  local settings=~/.claude/settings.json
+  local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  local settings="$config_dir/settings.json"
   local backup=$(mktemp)
   cp "$settings" "$backup"
   jq '.env |= with_entries(select(.key | test("DISABLE_TELEMETRY|CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC") | not))' "$settings" > "${settings}.tmp" && mv "${settings}.tmp" "$settings"
