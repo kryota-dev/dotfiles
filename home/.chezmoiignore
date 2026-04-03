@@ -3,6 +3,7 @@
 .claude/chrome
 .claude/debug
 .claude/file-history
+.claude/gh-assets
 .claude/history.jsonl
 .claude/ide
 .claude/paste-cache
@@ -10,11 +11,32 @@
 .claude/plugins
 .claude/projects
 .claude/session-env
+.claude/settings.local.json
 .claude/shell-snapshots
 .claude/stats-cache.json
 .claude/tasks
 .claude/teams
 .claude/todos
+
+# Claude Code runtime data (work account)
+.claude-r06/backups
+.claude-r06/chrome
+.claude-r06/debug
+.claude-r06/file-history
+.claude-r06/gh-assets
+.claude-r06/history.jsonl
+.claude-r06/ide
+.claude-r06/paste-cache
+.claude-r06/plans
+.claude-r06/plugins
+.claude-r06/projects
+.claude-r06/session-env
+.claude-r06/settings.local.json
+.claude-r06/shell-snapshots
+.claude-r06/stats-cache.json
+.claude-r06/tasks
+.claude-r06/teams
+.claude-r06/todos
 
 # Codex runtime data
 .codex/.personality_migration
