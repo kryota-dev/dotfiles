@@ -8,7 +8,7 @@ deno = "2.7.11"
 rust = "1.94.1"
 
 # CLI tools (auto-selected via registry)
-act = "0.2.85"
+act = "0.2.87"
 actionlint = "1.7.12"
 aws-cli = "2.34.23"
 bats = "1.13.0"
