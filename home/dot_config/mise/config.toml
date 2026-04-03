@@ -10,7 +10,7 @@ rust = "1.94.1"
 # CLI tools (auto-selected via registry)
 act = "0.2.87"
 actionlint = "1.7.12"
-aws-cli = "2.34.23"
+aws-cli = "2.34.24"
 bats = "1.13.0"
 chezmoi = "2.70.0"
 cloudflared = "2026.3.0"
