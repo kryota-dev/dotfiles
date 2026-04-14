@@ -83,9 +83,10 @@ Agent:
   description: "Steering docs・規約調査"
   prompt: |
     以下を調査して報告:
-    1. .spec-workflow/steering/ ディレクトリの有無を確認
-       - 存在する場合: product.md, tech.md, structure.md をすべて読み込んで全文報告
-       - 存在しない場合: 「Steering ドキュメントなし」と報告
+    ※ .spec-workflow/ 配下は gitignore されている可能性がある。Glob/Grep ではなく Bash `ls` + Read ツールで確認すること
+    1. Bash で `ls .spec-workflow/steering/` を実行してディレクトリ内容を確認
+       - ファイルが存在する場合: Read ツールで product.md, tech.md, structure.md を読み込んで全文報告
+       - ディレクトリが存在しないかファイルがない場合: 「Steering ドキュメントなし」と報告
     2. プロジェクトルートの CLAUDE.md を読み込み、コーディング規約・技術スタックを報告
     3. README.md があれば概要を報告
 ```
@@ -105,18 +106,14 @@ Agent:
     5. CI/CD 設定（.github/workflows/ 等）
 ```
 
-**調査3: 要件テンプレート取得**
+**テンプレート取得（Leader 自身が実行）**
 
-```
-Agent:
-  subagent_type: "Explore"
-  description: "要件テンプレート取得"
-  prompt: |
-    以下の順序でテンプレートを探して全文報告:
-    1. .spec-workflow/user-templates/requirements-template.md（あれば優先）
-    2. .spec-workflow/templates/requirements-template.md（なければこちら）
-    見つからない場合は「テンプレートなし」と報告
-```
+テンプレートは gitignore されている可能性があるため、サブエージェント（Glob/Grep 依存）ではなく **Leader 自身が Bash `ls` + Read ツール** で直接取得する:
+
+1. `ls .spec-workflow/user-templates/requirements-template.md 2>/dev/null` で存在確認
+2. 存在すれば Read ツールで全文読み込み（優先）
+3. 存在しなければ `ls .spec-workflow/templates/requirements-template.md 2>/dev/null` で確認
+4. いずれも存在しなければ「テンプレートなし」として進行
 
 ### 1-2. requirements.md の作成
 
@@ -156,18 +153,14 @@ Agent:
     具体的なファイルパスとコード内容を含めて報告
 ```
 
-**調査2: 設計テンプレート取得**
+**テンプレート取得（Leader 自身が実行）**
 
-```
-Agent:
-  subagent_type: "Explore"
-  description: "設計テンプレート取得"
-  prompt: |
-    以下の順序でテンプレートを探して全文報告:
-    1. .spec-workflow/user-templates/design-template.md（あれば優先）
-    2. .spec-workflow/templates/design-template.md（なければこちら）
-    見つからない場合は「テンプレートなし」と報告
-```
+テンプレートは gitignore されている可能性があるため、**Leader 自身が Bash `ls` + Read ツール** で直接取得する:
+
+1. `ls .spec-workflow/user-templates/design-template.md 2>/dev/null` で存在確認
+2. 存在すれば Read ツールで全文読み込み（優先）
+3. 存在しなければ `ls .spec-workflow/templates/design-template.md 2>/dev/null` で確認
+4. いずれも存在しなければ「テンプレートなし」として進行
 
 ### 2-2. design.md の作成
 
@@ -189,18 +182,14 @@ Agent:
 
 ## Phase 3: タスク分解
 
-### 3-1. タスクテンプレート調査
+### 3-1. タスクテンプレート取得（Leader 自身が実行）
 
-```
-Agent:
-  subagent_type: "Explore"
-  description: "タスクテンプレート取得"
-  prompt: |
-    以下の順序でテンプレートを探して全文報告:
-    1. .spec-workflow/user-templates/tasks-template.md（あれば優先）
-    2. .spec-workflow/templates/tasks-template.md（なければこちら）
-    見つからない場合は「テンプレートなし」と報告
-```
+テンプレートは gitignore されている可能性があるため、**Leader 自身が Bash `ls` + Read ツール** で直接取得する:
+
+1. `ls .spec-workflow/user-templates/tasks-template.md 2>/dev/null` で存在確認
+2. 存在すれば Read ツールで全文読み込み（優先）
+3. 存在しなければ `ls .spec-workflow/templates/tasks-template.md 2>/dev/null` で確認
+4. いずれも存在しなければ「テンプレートなし」として進行
 
 ### 3-2. tasks.md の作成
 
@@ -618,3 +607,4 @@ notify
 10. **コスト最適化**: Leader = Opus（inherit）、調査 = Haiku（Explore 型）、レビュー = Sonnet
 11. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 7 の完了時のみ。例外は Git 操作エラー時（`notify` + `AskUserQuestion` で待機）
 12. **フォアグラウンド実行**: レビューエージェントは MCP ツールや対話が必要なため、フォアグラウンドで実行
+13. **gitignore 対象ファイルへのアクセス**: `.spec-workflow/` 配下のファイル（テンプレート・Steering docs 等）は gitignore されている可能性がある。Glob/Grep は ripgrep ベースで gitignore を尊重するため検出できない。必ず Bash `ls` + Read ツールで直接アクセスすること
