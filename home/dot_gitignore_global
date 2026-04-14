@@ -198,6 +198,12 @@ dist
 .claude/issues/**/*.md
 .claude/plans/
 
+# Dogfood
+dogfood-output/
+
+# Playwright MCP
+.playwright-mcp/
+
 # Personal files
 .kryota-dev
 *.local.*
