@@ -48,14 +48,22 @@ MY_LOGIN=$(gh api user --jq .login)
 
 ---
 
-## Phase 1: 未解決レビュースレッド取得
+## Phase 1: 未解決レビューコメント取得
 
-### 1-1. 未解決・未返信のスレッドのみを取得
+GitHub PR のレビューには **2 種類のコメント** がある。両方を取得する必要がある:
 
-GraphQL で取得し、jq パイプで即座に絞り込む。解決済み・返信済みのデータがコンテキストに入るのを防ぐため、**取得と絞り込みは必ず 1 コマンドで行う**。
+| 種類 | 内容 | API | resolve 可否 |
+|------|------|-----|-------------|
+| **Review threads** | ファイルの特定行に対するインラインコメント | GraphQL `reviewThreads` | ✅ `resolveReviewThread` |
+| **Review body** | レビュー全体のサマリーコメント（APPROVE/REQUEST_CHANGES/COMMENT と共に投稿） | REST `pulls/{PR}/reviews` | ❌ スレッドではないため不可 |
+
+### 1-1. 未解決・未返信のスレッドのみを取得（review threads）
+
+GraphQL で取得し、jq パイプで即座に絞り込む。解決済み・返信済みのデータがコンテキストに入るのを防ぐため、**取得と絞り込みは必ず 1 コマンドで行う**。結果は**一時ファイルに出力**する（GitHub API レスポンスに制御文字が含まれる場合、シェル変数経由だと jq パースエラーになるため）。
 
 ```bash
 MY_LOGIN=$(gh api user --jq .login)
+TMP_THREADS=$(mktemp)
 
 gh api graphql -f query='{
   repository(owner: "{owner}", name: "{repo}") {
@@ -84,6 +92,7 @@ gh api graphql -f query='{
   .data.repository.pullRequest.reviewThreads.nodes[]
   | select(.isResolved == false)
   | {
+      type: "review_thread",
       id,
       path,
       line,
@@ -95,10 +104,10 @@ gh api graphql -f query='{
       comments: [.comments.nodes[] | {author: .author.login, body: .body[:200], url: .url}]
     }
   | select(.hasMyReply == false)
-]'
+]' > "$TMP_THREADS"
 ```
 
-**設計意図**: 解決済みスレッドや返信済みスレッドのコメント本文がコンテキストに入ると、分析の判断精度が落ちる。jq の `select` と `body[:200]` で不要データを除去し、対応が必要なスレッドのみを最小限のフィールドで取得する。
+**設計意図**: 解決済みスレッドや返信済みスレッドのコメント本文がコンテキストに入ると、分析の判断精度が落ちる。jq の `select` と `body[:200]` で不要データを除去し、対応が必要なスレッドのみを最小限のフィールドで取得する。結果は一時ファイル（`$TMP_THREADS`）に出力し、後続 Phase で `jq` で読み取る。
 
 100 件を超える場合は `after` カーソルでページネーションする。
 
@@ -115,17 +124,73 @@ gh api graphql -f query='{
 
 **ボット判定**: jq の `test()` で正規表現マッチ。Claude Code の Bash では `!` が履歴展開として解釈されるため、否定には `| not` を使用する。
 
+### 1-1b. 未返信の review body を取得
+
+review body は `reviewThreads` には含まれないため、別途 REST API で取得する。返信済み判定には Issue comment 内の hidden marker（`<!-- review-body-reply: {reviewId} -->`）を使用する。
+
+```bash
+MY_LOGIN=$(gh api user --jq .login)
+TMP_REVIEWS=$(mktemp)
+TMP_REPLIED=$(mktemp)
+
+# Step 1: body が空でない review を取得
+gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews --paginate --jq '
+[
+  .[]
+  | select(.body | length > 0)
+  | select(.state != "DISMISSED")
+  | {
+      type: "review_body",
+      reviewId: .id,
+      reviewer: .user.login,
+      isBot: (.user.login | test("^(coderabbitai|claude|devin-ai-integration|copilot|github-actions|dependabot)")),
+      state: .state,
+      body: .body[:500],
+      submittedAt: .submitted_at
+    }
+]' > "$TMP_REVIEWS"
+
+# Step 2: 自分が返信済みの review ID を取得（hidden marker で判定）
+gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
+  [.[] | select(.user.login == "'"$MY_LOGIN"'") | select(.body | test("<!-- review-body-reply:")) | .body | capture("<!-- review-body-reply: (?<id>[0-9]+) -->") | .id] | unique // []
+' > "$TMP_REPLIED"
+
+# Step 3: 未返信の review body のみフィルタ
+jq --slurpfile replied "$TMP_REPLIED" '
+  [.[] | select((.reviewId | tostring) as $rid | ($replied[0] | map(tostring) | index($rid)) | not)]
+' "$TMP_REVIEWS"
+
+rm -f "$TMP_REVIEWS" "$TMP_REPLIED"
+```
+
+**設計意図**: review body は制御文字を含む場合があるため、シェル変数ではなく一時ファイル経由で処理する。hidden marker 方式により、スキル再実行時の重複処理を防止する。
+
+**出力フィールド**:
+
+| フィールド | 用途 |
+|-----------|------|
+| `reviewId` | Phase 4 の返信マーカーに使用 |
+| `reviewer` | 対応方針テーブルでのレビュアー名表示 |
+| `isBot` | ボット判定 |
+| `body[:500]` | 指摘内容の概要 |
+
 ### 1-2. 処理対象がなければ完了
 
-出力が空配列 `[]` なら Phase 8（完了報告）へ直行する。
+Phase 1-1 と Phase 1-1b の両方の出力が空配列 `[]` なら Phase 8（完了報告）へ直行する。
 
 ### 1-3. 詳細コメント本文の取得（必要な場合）
 
 Phase 1-1 で取得した `body[:200]` では指摘内容が切り詰められている場合、Phase 2 の分析時に個別コメントの全文を取得する:
 
 ```bash
+# review thread のコメント全文
 gh api repos/{owner}/{repo}/pulls/comments/{databaseId} --jq '.body'
+
+# review body の全文
+gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews/{reviewId} --jq '.body'
 ```
+
+review body に画像（`<img>` タグや `![image](url)`）が含まれている場合は、`gh-asset` や認証付き curl で画像をダウンロードし、Read ツールで内容を確認する。**画像のダウンロードに失敗した場合は、ユーザーに画像 URL を報告し手動ダウンロードを依頼する。「テキスト部分で十分判断できる」等の独断は禁止** — 画像が判断に必要かどうかの判断自体をユーザーに委ねること。
 
 ---
 
@@ -221,9 +286,11 @@ COMMIT_SHA=$(git rev-parse HEAD)
 
 ## Phase 4: レビューコメントへの返信
 
-各スレッドの最初のコメントの `databaseId` に対して返信する。
-
 ### 4-1. 返信の投稿
+
+**review thread への返信**（インラインコメント）:
+
+各スレッドの最初のコメントの `databaseId` に対して返信する。
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{PR番号}/comments/{databaseId}/replies \
@@ -231,12 +298,42 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/comments/{databaseId}/replies \
   -f body="{返信内容}"
 ```
 
+**review body への返信**（レビュー全体のサマリーコメント）:
+
+review body はスレッドではないため、Issue comment として投稿する。返信済み判定用の hidden marker を必ず含める。
+
+```bash
+gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
+  --method POST \
+  -f body="{返信内容}
+
+<!-- review-body-reply: {reviewId} -->"
+```
+
+### 4-1b. 人間レビュアーへの返信内容のユーザー承認
+
+**人間レビュアー（`isBot == false`）への返信は、投稿前に必ず `AskUserQuestion` でユーザーに返信内容を提示し承認を得る。** ボットレビューへの返信は定型文のため承認不要。
+
+提示形式:
+
+```markdown
+## 返信内容の確認
+
+**スレッド**: {path}:{line} ({reviewer})
+
+> {返信内容案}
+
+この内容で返信してよいですか？
+```
+
 ### 4-2. 返信テンプレート
+
+**人間レビュアーへの返信**: 冒頭に `@{reviewer}` メンションを付ける。ボットへの返信にはメンション不要。
 
 **対応済み（コード変更あり）:**
 
 ```markdown
-**対応しました（ {COMMIT_SHA} ）**
+@{reviewer} **対応しました（ {COMMIT_SHA} ）**
 
 {変更内容の簡潔な説明}
 
@@ -249,7 +346,7 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/comments/{databaseId}/replies \
 **対応不要（根拠付き）:**
 
 ```markdown
-**対応不要と判断しました**
+@{reviewer} **対応不要と判断しました**
 
 {根拠の説明。以下のパターンから適切なものを選択:}
 - 変更前から同じ挙動であり、本PRによる退行ではありません
@@ -261,19 +358,37 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/comments/{databaseId}/replies \
 *Co-Authored-By: {モデル名} <noreply@anthropic.com>*
 ```
 
+**review body への返信（Issue comment として投稿）:**
+
+review body への返信は Issue comment として投稿する。hidden marker を必ず末尾に含める（Phase 1-1b の返信済み判定に使用）:
+
+```markdown
+@{reviewer} > {review body の指摘を引用}
+
+{返信内容}
+
+<!-- review-body-reply: {reviewId} -->
+---
+*Co-Authored-By: {モデル名} <noreply@anthropic.com>*
+```
+
+> **Note**: ボットレビューへの返信では `@{reviewer}` メンションを省略する。
+
 ### 4-3. 返信時の注意事項
 
+- **`@` を含む body の投稿**: `gh api` の `-F` フラグでは `@` で始まる値がファイル参照として解釈される。返信内容に `@` メンションを含む場合は、一時ファイルに書き出してから `-F body=@/tmp/reply.txt` で渡すこと
 - **ローカルのみのドキュメントを根拠にしない**: `.spec-workflow/`, `.claude/` 等のパスは PR コメントの根拠として不適切。GitHub 上で閲覧可能なファイルのみ参照する
 - **コードの実際の挙動を根拠にする**: `api-error-handle.ts:44` のように具体的なファイルと行番号で根拠を示す
 - **前回回答済みの場合**: 前回の返信 URL を引用して重複を避ける
 
 ---
 
-## Phase 5: スレッド Resolve
+## Phase 5: スレッド Resolve（ボットのみ）
 
-返信済みの全スレッドを一括 resolve する:
+**ボットレビュー（`isBot == true`）のスレッドのみ** 自動 resolve する。**人間レビュー（`isBot == false`）のスレッドは resolve しない** — レビュアー本人が確認して resolve する。
 
 ```bash
+# ボットレビューのスレッドのみ resolve
 gh api graphql -f query='
 mutation {
   resolveReviewThread(input: { threadId: "{thread_id}" }) {
@@ -281,6 +396,24 @@ mutation {
   }
 }'
 ```
+
+**注意**:
+- review body はスレッドではないため `resolveReviewThread` の対象外。Phase 4 で Issue comment として返信し、hidden marker を含めることで「対応済み」を表現する。
+- outdated スレッドであっても、人間レビューの場合は resolve しない。
+
+---
+
+## Phase 5b: 人間レビュアーへの Re-request review
+
+人間レビュアーに返信した場合、返信完了後に Re-request review を行う。ボットレビューには不要。
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{PR番号}/requested_reviewers \
+  --method POST \
+  -f 'reviewers[]={reviewer}'
+```
+
+これにより、レビュアーに「返信があったので再確認してほしい」という通知が届く。
 
 ---
 
@@ -346,3 +479,5 @@ notify
 | CI flaky 失敗 | 1 回のみ自動リトライ。2 回目も失敗なら報告 |
 | 自分が起点のスレッド | スキップ（他者の指摘ではない） |
 | author が null（deleted ユーザー） | ボット扱いで自律対応 |
+| 画像添付あり | **ユーザーに報告し手動ダウンロードを依頼**（独断で「テキストで十分」と判断しない） |
+| review body の API レスポンスに制御文字 | シェル変数ではなく一時ファイル経由で jq 処理（Phase 1-1b 参照） |
