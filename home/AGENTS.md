@@ -26,6 +26,12 @@
   - ユーザー操作が必要な場面の一例:
     - `git commit` 時の1Passwordエラー
 
+### gitignore 対象ファイルへのアクセス
+
+- **Glob / Grep ツールは内部で ripgrep を使用しており、`.gitignore`（グローバル gitignore 含む）対象ファイルをスキップする**
+  - gitignore されたファイルを探す際は、Bash `ls` コマンドまたは Read ツール（絶対パス指定）を使用すること
+  - 該当例: `.spec-workflow/user-templates/`、`.spec-workflow/steering/` 等
+
 ### ツール使用
 
 - **GitHub 関連の指示や URL を受け取った際は、`gh`コマンドを使用すること**
