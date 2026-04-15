@@ -12,7 +12,6 @@
     "DISABLE_AUTOUPDATER": "false",
     "DISABLE_MICROCOMPACT": "true",
     "MAX_THINKING_TOKENS": "31999",
-    "CLAUDE_CODE_NO_FLICKER": "1",
     "CLAUDE_CODE_DISABLE_MOUSE": "1"
   },
   "permissions": {
