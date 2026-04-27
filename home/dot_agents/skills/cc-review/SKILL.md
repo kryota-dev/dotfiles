@@ -14,12 +14,16 @@ argument-hint: "[PR番号 | PR URL | ブランチ名 | ファイルパス | --st
 現在のセッションに蓄積されたバイアスのない、フレッシュな視点でレビューが得られる。
 プロジェクトの CLAUDE.md は自動的に読み込まれるため、プロジェクト固有の規約を踏まえたレビューになる。
 
+## SSOT としての位置づけ
+
+本 skill は **コードレビュー用 `claude -p` 起動の Single Source of Truth**。`multi-review` skill から並列呼び出しされる場合も、本ファイルの起動オプション・プロンプトテンプレート・コマンド例に従う。multi-review 側で重複定義しない。
+
 ## 起動オプション
 
 | オプション | 値 | 理由 |
 |------------|-----|------|
 | `--allowedTools` | `"Read,Glob,Grep"` | 読み取り専用。周辺コードの参照を許可しつつ書き込みは禁止 |
-| `--max-turns` | `6`（単体） / `10`（multi-review 内で並列実行時） | 差分読解 + 2-3ファイル参照で十分。multi-review からは深掘り余地のため `10` に上げる |
+| `--max-turns` | `10` | 差分読解 + 周辺コード参照を許容。深掘り余地確保のため単独/並列共通で `10` |
 | `--effort` | `max` | レビュー品質を最大化 |
 | `--output-format` | `text` | 人間が読みやすいテキスト形式 |
 
@@ -88,7 +92,7 @@ argument-hint: "[PR番号 | PR URL | ブランチ名 | ファイルパス | --st
 # PR差分レビュー
 gh pr diff 123 | claude -p \
   --allowedTools "Read,Glob,Grep" \
-  --max-turns 6 \
+  --max-turns 10 \
   --effort max \
   --output-format text \
   "$(cat <<'PROMPT'
@@ -100,7 +104,7 @@ PROMPT
 # ブランチ差分レビュー
 git diff main...HEAD | claude -p \
   --allowedTools "Read,Glob,Grep" \
-  --max-turns 6 \
+  --max-turns 10 \
   --effort max \
   --output-format text \
   "$(cat <<'PROMPT'
