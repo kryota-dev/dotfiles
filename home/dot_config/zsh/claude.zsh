@@ -1,5 +1,5 @@
-alias cld='claude --effort max'
-alias cld-r06='CLAUDE_CONFIG_DIR=$HOME/.claude-r06 claude --effort max'
+alias cld='claude'
+alias cld-r06='CLAUDE_CONFIG_DIR=$HOME/.claude-r06 claude'
 alias ccdcmds='ccdcommands'
 
 function ccdpaths() {
