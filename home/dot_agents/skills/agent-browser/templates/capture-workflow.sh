@@ -25,7 +25,8 @@ mkdir -p "$OUTPUT_DIR"
 #     agent-browser state load "./auth-state.json"
 # fi
 
-# Navigate to target
+# Navigate to target (set the skill default viewport 1920x1200 before opening)
+agent-browser set viewport 1920 1200
 agent-browser open "$TARGET_URL"
 agent-browser wait --load networkidle
 
