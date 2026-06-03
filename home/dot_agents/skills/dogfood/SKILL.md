@@ -12,17 +12,20 @@ Systematically explore a web application, find issues, and produce a report with
 
 Only the **Target URL** is required. Everything else has sensible defaults -- use them unless the user explicitly provides an override.
 
-| Parameter | Default | Example override |
-|-----------|---------|-----------------|
-| **Target URL** | _(required)_ | `vercel.com`, `http://localhost:3000` |
-| **Session name** | Slugified domain (e.g., `vercel.com` -> `vercel-com`) | `--session my-session` |
-| **Output directory** | `./dogfood-output/` | `Output directory: /tmp/qa` |
-| **Scope** | Full app | `Focus on the billing page` |
-| **Authentication** | None | `Sign in to user@example.com` |
+| Parameter            | Default                                               | Example override                      |
+| -------------------- | ----------------------------------------------------- | ------------------------------------- |
+| **Target URL**       | _(required)_                                          | `vercel.com`, `http://localhost:3000` |
+| **Session name**     | Slugified domain (e.g., `vercel.com` -> `vercel-com`) | `--session my-session`                |
+| **Output directory** | `./dogfood-output/`                                   | `Output directory: /tmp/qa`           |
+| **Scope**            | Full app                                              | `Focus on the billing page`           |
+| **Authentication**   | None                                                  | `Sign in to user@example.com`         |
+| **Viewport**         | `1920x1200`                                           | `Use viewport 1366x768`               |
 
 If the user says something like "dogfood vercel.com", start immediately with defaults. Do not ask clarifying questions unless authentication is mentioned but credentials are missing.
 
 Always use `agent-browser` directly -- never `npx agent-browser`. The direct binary uses the fast Rust client. `npx` routes through Node.js and is significantly slower.
+
+**Always set the viewport to `1920x1200` before navigating.** The CLI default of `1280x720` is too narrow for most frontend layouts and causes false-positive layout findings. Only switch to a smaller viewport when intentionally validating responsive behavior, then restore `1920x1200`.
 
 ## Workflow
 
@@ -47,9 +50,10 @@ Copy the report template into the output directory and fill in the header fields
 cp {SKILL_DIR}/templates/dogfood-report-template.md {OUTPUT_DIR}/report.md
 ```
 
-Start a named session:
+Start a named session. Set the viewport to `1920x1200` **before** `open` so the initial page load uses the correct dimensions:
 
 ```bash
+agent-browser --session {SESSION} set viewport 1920 1200
 agent-browser --session {SESSION} open {TARGET_URL}
 agent-browser --session {SESSION} wait --load networkidle
 ```
@@ -209,12 +213,12 @@ agent-browser --session {SESSION} close
 
 ## References
 
-| Reference | When to Read |
-|-----------|--------------|
+| Reference                                                    | When to Read                                                                           |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
 | [references/issue-taxonomy.md](references/issue-taxonomy.md) | Start of session -- calibrate what to look for, severity levels, exploration checklist |
 
 ## Templates
 
-| Template | Purpose |
-|----------|---------|
+| Template                                                                     | Purpose                                       |
+| ---------------------------------------------------------------------------- | --------------------------------------------- |
 | [templates/dogfood-report-template.md](templates/dogfood-report-template.md) | Copy into output directory as the report file |
