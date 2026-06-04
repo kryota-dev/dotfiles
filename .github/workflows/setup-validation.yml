@@ -328,6 +328,7 @@ jobs:
     name: Guard ruby install without baseruby
     runs-on: ubuntu-latest
     container: ubuntu:24.04
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -365,4 +366,3 @@ jobs:
           # kills it so this job fails fast instead of hanging indefinitely.
           timeout --kill-after=30s 300 mise install ruby
           mise ls ruby
-        timeout-minutes: 10
