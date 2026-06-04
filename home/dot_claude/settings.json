@@ -124,6 +124,6 @@
     "defaultMode": "auto"
   },
   "language": "Japanese",
-  "alwaysThinkingEnabled": true,
+  "alwaysThinkingEnabled": false,
   "cleanupPeriodDays": 20
 }
