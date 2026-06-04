@@ -92,6 +92,10 @@ jobs:
       - name: Apply dotfiles with chezmoi
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Force a precompiled CPython flavor that ships lib/ (see #104).
+          # Latest mise otherwise selects freethreaded+install_only_stripped,
+          # which omits lib/ and fails: "Python installation is missing a `lib` directory".
+          MISE_PYTHON_PRECOMPILED_FLAVOR: install_only
         run: |
           mkdir -p ~/.config/chezmoi
           cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
@@ -236,6 +240,10 @@ jobs:
       - name: Apply dotfiles with chezmoi
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Force a precompiled CPython flavor that ships lib/ (see #104).
+          # Latest mise otherwise selects freethreaded+install_only_stripped,
+          # which omits lib/ and fails: "Python installation is missing a `lib` directory".
+          MISE_PYTHON_PRECOMPILED_FLAVOR: install_only
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
           mkdir -p ~/.config/chezmoi
