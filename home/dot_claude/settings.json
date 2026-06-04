@@ -87,7 +87,6 @@
       "Bash(sudo:*)",
       "Bash(rm -rf:*)",
       "Bash(git reset:*)",
-      "Bash(git rebase:*)",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
 
@@ -102,19 +101,8 @@
       "Write(**/.env*)",
       "Write(**/secrets/**)",
 
-      "Bash(wget:*)",
-      "Bash(nc:*)",
-      "Bash(curl:*)",
-      "Bash(ssh:*)",
-      "Bash(scp:*)",
-      "Bash(rsync:*)",
-
       "Bash(env:*)",
       "Bash(printenv:*)",
-
-      "Bash(psql:*)",
-      "Bash(mysql:*)",
-      "Bash(mongod:*)",
 
       "Bash(*.gmail-mcp*)",
       "Bash(*.gmail-mcp/credentials.json*)",
