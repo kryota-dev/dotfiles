@@ -40,3 +40,7 @@ gemini-cli = "0.45.0"
 # selects freethreaded+install_only_stripped, which omits lib/ and fails with
 # "Python installation is missing a `lib` directory" on fresh installs (see #121, #104).
 python.precompiled_flavor = "install_only"
+# Use precompiled ruby; a source build deadlocks on fresh installs without a
+# baseruby on PATH, because ruby-build's configure probe re-enters the mise
+# shim for the in-progress version and blocks on the install lock (see #122).
+ruby.compile = false
