@@ -19,6 +19,10 @@ on:
       - '.github/workflows/ci.yml'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
@@ -62,7 +66,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -73,42 +77,9 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
-        run: brew install bats-core chezmoi shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats shellcheck zsh
 
       - name: Run Bats tests
         run: bats tests/*.bats
-
-  benchmark:
-    name: Benchmark
-    runs-on: macos-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Install dependencies
-        run: brew install chezmoi sheldon starship
-
-      - name: Setup sheldon
-        run: |
-          mkdir -p ~/.config/sheldon ~/.config/zsh
-          cp home/dot_config/sheldon/plugins.toml ~/.config/sheldon/plugins.toml
-          cp home/dot_config/zsh/*.zsh ~/.config/zsh/
-          for f in home/dot_config/zsh/*.zsh.tmpl; do
-            [ -e "$f" ] || continue
-            chezmoi execute-template -f "$f" > ~/.config/zsh/"$(basename "${f%.tmpl}")"
-          done
-          echo 'eval "$(sheldon source)"' > ~/.zshrc
-          sheldon lock
-
-      - name: Benchmark zsh startup
-        run: |
-          echo "=== Zsh Startup Benchmark ==="
-          for i in $(seq 1 10); do
-            /usr/bin/time zsh -i -c exit 2>&1
-          done
