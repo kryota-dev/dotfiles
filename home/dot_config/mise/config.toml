@@ -34,3 +34,9 @@ zoxide = "0.9.9"
 
 # npm backend
 gemini-cli = "0.45.0"
+
+[settings]
+# Pin precompiled CPython to a flavor that ships lib/; latest mise otherwise
+# selects freethreaded+install_only_stripped, which omits lib/ and fails with
+# "Python installation is missing a `lib` directory" on fresh installs (see #121, #104).
+python.precompiled_flavor = "install_only"
