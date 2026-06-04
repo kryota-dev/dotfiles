@@ -33,28 +33,32 @@ echo "Authentication workflow: $LOGIN_URL"
 # SAVED STATE: Skip login if valid saved state exists
 # ================================================================
 if [[ -f "$STATE_FILE" ]]; then
-    echo "Loading saved state from $STATE_FILE..."
-    if agent-browser --state "$STATE_FILE" open "$LOGIN_URL" 2>/dev/null; then
-        agent-browser wait --load networkidle
+  echo "Loading saved state from $STATE_FILE..."
+  # Set the skill default viewport 1920x1200 before opening
+  agent-browser set viewport 1920 1200
+  if agent-browser --state "$STATE_FILE" open "$LOGIN_URL" 2>/dev/null; then
+    agent-browser wait --load networkidle
 
-        CURRENT_URL=$(agent-browser get url)
-        if [[ "$CURRENT_URL" != *"login"* ]] && [[ "$CURRENT_URL" != *"signin"* ]]; then
-            echo "Session restored successfully"
-            agent-browser snapshot -i
-            exit 0
-        fi
-        echo "Session expired, performing fresh login..."
-        agent-browser close 2>/dev/null || true
-    else
-        echo "Failed to load state, re-authenticating..."
+    CURRENT_URL=$(agent-browser get url)
+    if [[ "$CURRENT_URL" != *"login"* ]] && [[ "$CURRENT_URL" != *"signin"* ]]; then
+      echo "Session restored successfully"
+      agent-browser snapshot -i
+      exit 0
     fi
-    rm -f "$STATE_FILE"
+    echo "Session expired, performing fresh login..."
+    agent-browser close 2>/dev/null || true
+  else
+    echo "Failed to load state, re-authenticating..."
+  fi
+  rm -f "$STATE_FILE"
 fi
 
 # ================================================================
 # DISCOVERY MODE: Shows form structure (delete after setup)
 # ================================================================
 echo "Opening login page..."
+# Set the skill default viewport 1920x1200 before opening
+agent-browser set viewport 1920 1200
 agent-browser open "$LOGIN_URL"
 agent-browser wait --load networkidle
 
@@ -83,6 +87,8 @@ exit 0
 # agent-browser wait --load networkidle
 # agent-browser snapshot -i
 #
+# # Set the skill default viewport 1920x1200 before opening
+# agent-browser set viewport 1920 1200
 # # Fill credentials (update refs to match your form)
 # agent-browser fill @e1 "$APP_USERNAME"
 # agent-browser fill @e2 "$APP_PASSWORD"
