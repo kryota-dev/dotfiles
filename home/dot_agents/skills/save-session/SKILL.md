@@ -17,6 +17,13 @@ allowed-tools: Bash(bash ${CLAUDE_SKILL_DIR}/*), Agent
 RAW_FILE=$(bash ${CLAUDE_SKILL_DIR}/scripts/capture.sh "${CLAUDE_SESSION_ID}" "$ARGUMENTS")
 ```
 
+`capture.sh` は次の優先順でセッションファイルを探索する:
+
+1. `$CLAUDE_CONFIG_DIR/projects/` （環境変数が設定されている場合に最優先）
+2. `$HOME/.claude*/projects/` （標準 `~/.claude` と派生環境 `~/.claude-r06` 等を一括カバー）
+
+引数 `label` に `/` を含めて渡してもファイル名は安全化される（`/` → `-`）。
+
 ### 2. サブエージェントでサマリー生成
 
 **メインのコンテキストを圧迫しないよう、必ずAgentツール（subagent）に委譲すること。**

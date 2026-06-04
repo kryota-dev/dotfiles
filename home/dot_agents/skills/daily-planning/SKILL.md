@@ -78,39 +78,68 @@ JST 今日の範囲（`START_UTC` 〜 `END_UTC`）を使って、以下の情報
 **重要: `updated` ではなく、実際にユーザーがアクションを起こしたものだけを抽出すること。**
 
 **「やったこと」に含めるアクション:**
-- 自分の**コミット push**（PR）
-- 自分の**マージ操作**（PR）
-- 自分の**Issue close**
-- 自分が**assignee の Issue で今日コメント**したもの
+- 自分が **author または assignee の PR** に対して、JST 今日に**いずれかのアクション**を起こしたもの:
+  - **コミット push**
+  - **マージ操作**
+  - **クローズ操作**（merge を伴わない close も含む）
+  - **レビュー submit**（自身のPRに対する self-review も含む）
+  - **レビューコメント（インライン）**
+  - **PR コメント**（issue comment 形式の返信）
+- 自分が **assignee の Issue** に対して、JST 今日に**コメント**または **close** したもの
 - 自分が**作成した Issue**
 
 **「レビュー」に含めるアクション:**
 - 自分が**レビュワーとして request** されており、かつ JST 今日に**レビュー submit** または**レビューコメント（インライン）**を残したもの
 
 **含めない:**
-- 自分が author でない Issue にコメントしただけのもの
-- レビュワー request されていない PR にコメントしただけのもの
-- 自分が author の PR への自己レビュー
+- 自分が author でも assignee でもない PR にコメントしただけのもの
+- 自分が author でも assignee でもない Issue にコメントしただけのもの
+- レビュワー request されていない PR で行ったレビュー（コメント／submit）
 
-#### 3a. 今日コミット / マージしたPR
+#### 3a. 今日アクションした自分のPR
 
-自分がauthorまたはassigneeのPRのうち、JST 今日にコミット push、または自分でマージしたものを特定する。
+自分が author または assignee の PR のうち、JST 今日に何らかの自分のアクション（コミット push / マージ / クローズ / レビュー submit / レビューコメント / PR コメント）が1件以上あるものを特定する。
+
+**重要:**
+- merge を伴わない close も「やったこと」として記録する。GitHub の events では merge 時に `merged` と `closed` の両方が発生するため、`closed` のみで両方を捕捉できる（merge を別判定にしたい場合は別途 `merged` を確認）。
+- 自分のPRに対する self-review（submit / インラインコメント / issue comment）も「やったこと」に含める。
+  - 「レビュー」セクションでは self-review を除外するが、「やったこと」では PR を進めた行動として記録する。
 
 ```bash
 # まず候補となるPRを取得（author + assignee、JST 今日に対応する2日間レンジで更新されたもの）
 gh search prs --repo "${REPO_FULLNAME}" --author "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
 gh search prs --repo "${REPO_FULLNAME}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
 
-# 各PRについて、JST 今日の自分のコミット数を確認
+# 各PRについて、以下6つの指標を確認し、いずれか1以上なら「やったこと」に含める。
+
+# 1. JST 今日の自分のコミット数
 gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/commits" --paginate \
   --jq ".[] | select(.author.login == \"${GH_USER}\") | select(.commit.author.date >= \"${START_UTC}\" and .commit.author.date < \"${END_UTC}\") | .sha" | wc -l | tr -d ' '
 
-# 各PRについて、JST 今日に自分がマージしたかを確認
+# 2. JST 今日に自分がマージしたか
 gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
   --jq ".[] | select(.actor.login == \"${GH_USER}\") | select(.event == \"merged\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
+
+# 3. JST 今日に自分がクローズしたか（merge を伴う close もここでカウントされる）
+gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
+  --jq ".[] | select(.actor.login == \"${GH_USER}\") | select(.event == \"closed\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
+
+# 4. JST 今日の自分のレビュー submit 数（self-review も含む）
+gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/reviews" \
+  --jq "[.[] | select(.user.login == \"${GH_USER}\") | select(.submitted_at >= \"${START_UTC}\" and .submitted_at < \"${END_UTC}\")] | length"
+
+# 5. JST 今日の自分のレビューコメント（インライン）数
+gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/comments" --paginate \
+  --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
+
+# 6. JST 今日の自分の PR コメント（issue comment 形式）数
+gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/comments" --paginate \
+  --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 ```
 
-コミットまたはマージのいずれかが1以上なら「やったこと」に含める。
+1〜6 のいずれかが1以上なら「やったこと」に含める。
+
+**注意:** 旧版（〜2026-05-08）では 1 と 2（コミット / マージ）のみで判定していたため、レビュー・コメント返信のみで進めた自分のPRや、merge を伴わない close（採用方針変更等で閉じたPR）が漏れていた。今は上記6指標で漏らさず捕捉する。
 
 #### 3b. 今日レビューしたPR（レビュワーとしてrequestされたもの限定）
 
@@ -177,6 +206,8 @@ gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SE
   - フィルタを `startswith("${TODAY}")` から JST 範囲（`START_UTC..END_UTC`）に変更（タイムゾーン取りこぼし解消）
   - レビューを `/reviews` だけでなく `/pulls/{num}/comments`（インラインコメント）まで対象化
   - PR マージ・Issue close も明示的に「やったこと」へ統合
+- 2026-05 の見直し:
+  - 3a「やったこと（PR）」の判定をコミット/マージのみから6指標（コミット/マージ/クローズ/レビュー submit/レビューコメント/PR コメント）に拡張。レビューや返信のみで進めたPR、merge を伴わない close が漏れる問題を解消
 
 ### 4. 前日の投稿を取得
 
@@ -258,7 +289,7 @@ AskUserQuestionを使って以下を質問する。
 ```
 
 **テンプレートのルール:**
-- 「やったこと」は **3a（コミット / マージしたPR）** + **3c（コメント / クローズしたIssue）** をまとめて1つのリストとして列挙する
+- 「やったこと」は **3a（今日アクションした自分のPR）** + **3c（コメント / クローズしたIssue）** をまとめて1つのリストとして列挙する
 - 「作成したIssue」が0件の場合は「作成したIssue:」セクション自体を省略する
 - 「レビュー」が0件の場合は「レビュー:」セクション自体を省略する
 - 「離席」が無い場合は「離席:」行自体を省略する
@@ -323,7 +354,7 @@ GitHub API の `created_at` / `submitted_at` / `commit.author.date` は **UTC** 
 
 - **Issue → やったこと**: `--assignee` で検索したIssueのみ対象。`--commenter` のみのIssueは除外する。
 - **PR → レビュー**: `--reviewed-by` で検索した後、`/issues/{num}/events` で `review_requested` イベントを確認し、自分がレビュワーとしてrequestされたPRのみ対象。requestされていないPRは除外する。`/reviews` だけでなく `/pulls/{num}/comments`（インライン）も確認し、いずれか1以上なら採用。
-- **PR → やったこと**: author または assignee であり、JST 今日にコミット push またはマージしたもの。
+- **PR → やったこと**: author または assignee であり、JST 今日に**コミット push / マージ / クローズ / レビュー submit / レビューコメント（インライン）/ PR コメント（issue comment 形式）のいずれか**を行ったもの。merge を伴わない close も含む。author 自身の self-review もこの判定では含める（「レビュー」セクションでは除外するが「やったこと」では PR を進めた行動として残す）。
 - **Issue作成**: author であること。
 
 ### `gh api --paginate --jq length` の落とし穴

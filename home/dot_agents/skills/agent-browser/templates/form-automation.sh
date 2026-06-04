@@ -17,7 +17,8 @@ FORM_URL="${1:?Usage: $0 <form-url>}"
 
 echo "Form automation: $FORM_URL"
 
-# Step 1: Navigate to form
+# Step 1: Navigate to form (set the skill default viewport 1920x1200 before opening)
+agent-browser set viewport 1920 1200
 agent-browser open "$FORM_URL"
 agent-browser wait --load networkidle
 

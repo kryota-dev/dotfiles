@@ -1,0 +1,22 @@
+[
+  {"query": "i'm starting work on the feature/payments branch a coworker pushed to origin yesterday. set me up an isolated checkout of it so i don't disturb the changes in my current dir", "should_trigger": true},
+  {"query": "wtp add -b hotfix/login-bug is branching off my local main but i want it based on origin/main instead, what's the right syntax", "should_trigger": true},
+  {"query": "the auth feature is merged and done, nuke its worktree and the branch in one shot", "should_trigger": true},
+  {"query": "jump me over to my worktree for the redesign branch", "should_trigger": true},
+  {"query": "every time i spin up a new worktree i manually copy .env and run npm ci. can i automate that?", "should_trigger": true},
+  {"query": "set up tab completion and the auto-cd behavior for wtp in my ~/.zshrc", "should_trigger": true},
+  {"query": "feature/shared exists on both origin and upstream and wtp add throws a multiple remotes error, how do i get past it", "should_trigger": true},
+  {"query": "print just the absolute path of my main worktree so i can use it in a script", "should_trigger": true},
+  {"query": "run the go test suite inside my feature/api worktree without me cd-ing into it first", "should_trigger": true},
+  {"query": "what .wtp.yml hook do i use to symlink node_modules from the main checkout into every new worktree", "should_trigger": true},
+  {"query": "how do i create a worktree using plain git worktree add, i don't want to install any extra cli tools", "should_trigger": false},
+  {"query": "delete all my local branches that are already merged into main", "should_trigger": false},
+  {"query": "i need to copy my .env and a few dotfiles into a new project i'm scaffolding with chezmoi", "should_trigger": false},
+  {"query": "switch me over to the develop branch", "should_trigger": false},
+  {"query": "write a bash script that symlinks my ~/.config files into the right places", "should_trigger": false},
+  {"query": "i keep losing track of which tmux pane i'm in, help me set up a status bar", "should_trigger": false},
+  {"query": "stash my current changes and switch context for a sec", "should_trigger": false},
+  {"query": "set up a devcontainer so dependencies install automatically when the repo opens", "should_trigger": false},
+  {"query": "go through all my worktrees, find the ones whose branches are already merged into main, and remove them in bulk", "should_trigger": false},
+  {"query": "rebase my feature branch onto the latest main", "should_trigger": false}
+]
