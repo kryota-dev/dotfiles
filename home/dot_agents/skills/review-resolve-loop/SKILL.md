@@ -617,27 +617,36 @@ gh pr checks {PR番号} --repo {owner}/{repo} --watch
 
 **`gh pr checks` の出力を `tail` / `head` 等で切り詰めることは禁止。** 全行を確認すること。
 
-`--watch` 完了後、**必ず別コマンドで** fail 件数を数値として取得する:
+`--watch` 完了後、**必ず別コマンドで** fail 件数を数値として取得する。
+
+**重要 — チェック名による誤検知を避ける**: `gh pr checks` の出力はタブ区切りで、第 1 列が **チェック名**、第 2 列が **ステータス**（`pass` / `fail` / `skipping` / `pending` 等）。`grep -ic "fail"` は **チェック名に "fail" を含む行**（例: `notify-on-schedule-failure`、`check-failure-handler`）も数えてしまい、ステータスが `skipping`/`pass` でも fail と誤判定する。**必ず第 2 列（ステータス列）が厳密に `fail` の行のみ**を数えること:
 
 ```bash
-FAIL_COUNT=$(gh pr checks {PR番号} --repo {owner}/{repo} | grep -ic "fail")
+# 第 2 列（ステータス）が厳密に "fail" の行のみを数える（チェック名の "fail" は無視）
+FAIL_COUNT=$(gh pr checks {PR番号} --repo {owner}/{repo} | awk -F'\t' '$2=="fail"' | grep -c .)
 echo "Failed checks: $FAIL_COUNT"
+
+# 参考: ステータス別の内訳を確認する
+gh pr checks {PR番号} --repo {owner}/{repo} | awk -F'\t' '{print $2}' | sort | uniq -c
 ```
 
 ### 6-2b. 禁止事項
 
 以下の操作は明示的に禁止する:
 
-- `gh pr checks` の出力を `tail`, `head`, `sed`, `awk` 等で切り詰めること
+- `gh pr checks` の出力を `tail`, `head`, `sed -n` 等で **行を間引いて** 一部の check を見ないこと（全 check を確認する）
 - 一部の check のみを確認して「全 pass」と判断すること
 - `--watch` なしで `gh pr checks` を実行し、pending の check を無視すること
 - Phase 6 自体をスキップすること（push の有無に関わらず）
+- **`grep -ic "fail"` のように行全体（チェック名を含む）で fail を数えること**（チェック名の "fail" を誤検知する。6-2 のとおりステータス列で判定する）
+
+なお、`awk -F'\t' '$2=="fail"'` のような **ステータス列の抽出・判定** は禁止に当たらない（出力を間引くのではなく、全行を対象に列で判定しているため）。
 
 ### 6-3. fail 時の対応
 
 ```bash
-# 失敗した check の一覧
-gh pr checks {PR番号} --repo {owner}/{repo} | grep -i "fail"
+# 失敗した check の一覧（ステータス列が fail の行のみ。チェック名の "fail" は拾わない）
+gh pr checks {PR番号} --repo {owner}/{repo} | awk -F'\t' '$2=="fail"'
 
 # 失敗した run のログ
 gh run view {run_id} --repo {owner}/{repo} --log-failed
@@ -659,26 +668,38 @@ gh run view {run_id} --repo {owner}/{repo} --log-failed
 Phase 6 完了後に実行する。Phase 6 の `--watch` が全 check 完了を待っているため、
 review ワークフロー（ボットレビュー）も完了済みであることが保証されている。
 
+### セッショントリアージ台帳（無限ループ防止）
+
+**重要**: Phase 2 で一度トリアージした項目のうち、**こちらの追加アクションでは状態が変わらないもの**（下記）は、Phase 7 で再取得しても **再度ループバックさせてはならない**。これらをループ継続条件に含めると、永遠に同じ項目を再提示し続ける無限ループになる。
+
+セッション中、トリアージした項目の識別子と判断を台帳として保持する（識別子: review thread = `thread id` / review body = `reviewId` / CI コメント = `commentId@updatedAt`）。次の項目は「処理済み（state-stable）」として **Phase 7 の再トリガー判定から除外**する:
+
+- **人間スレッドで「返信不要」と決定したもの**: 人間スレッドは自動 resolve しない（Phase 5）ため、返信もしないと未解決・未返信のまま残るが、これは想定どおり。レビュアー本人の resolve に委ねる。
+- **ack / approve のみの review body**（LGTM・👍・No Issues 等、Phase 2-3b で返信不要としたもの）。
+- **`commentId@updatedAt` が変化していない CI レビューコメント**（内容が更新されておらず、既にトリアージ済み）。
+
 ### 7-1. 未解決スレッドの再取得
 
-Phase 1-1 と同じ GraphQL クエリを再実行し、新規の未解決・未返信 review threads を確認する。
+Phase 1-1 と同じ GraphQL クエリを再実行し、未解決・未返信 review threads を取得する。**台帳に載っている（トリアージ済みで state-stable な）スレッドは除外**し、新規スレッドのみを対象とする。
 
 ### 7-2. 未返信 review body の再取得
 
-Phase 1-1b と同じ REST API クエリを再実行し、新規の未返信 review body を確認する。
+Phase 1-1b と同じ REST API クエリを再実行する。**台帳に載っている reviewId は除外**し、新規の未返信 review body のみを対象とする。
 
 ### 7-2b. 未返信 CI レビューコメントの再取得
 
-Phase 1-1c と同じクエリを再実行し、新規・更新（`commentId@updatedAt` が変わった）の未返信 CI レビューコメントを確認する。Phase 6 の `--watch` で `claude-review` / `claude-self-merge-check` ワークフローの完了を待っているため、この時点で最新の CI コメントが投稿済みであることが保証される。
+Phase 1-1c と同じクエリを再実行し、`commentId@updatedAt` が **新規または変化した** CI レビューコメントのみを対象とする（変化なし = 台帳済みは除外）。Phase 6 の `--watch` で `claude-review` / `claude-self-merge-check` ワークフローの完了を待っているため、この時点で最新の CI コメントが投稿済みであることが保証される。
 
 ### 7-3. 判定
 
-- **7-1 / 7-2 / 7-2b のいずれかで 1 件以上あり** → **Phase 1** に戻る（新ラウンド開始）
-- **すべて 0 件** → **Phase 8** に進む
+台帳除外後に残った項目で判定する:
+
+- **7-1 / 7-2 / 7-2b のいずれかに「台帳に未登録の新規・変化した項目」が 1 件以上あり** → **Phase 1** に戻る（新ラウンド開始）
+- **新規・変化した項目が 0 件**（残りはすべて台帳済みの state-stable 項目のみ） → **Phase 8** に進む
 
 ### 遷移
-- 新規の未解決スレッド / 未返信 review body / 未返信 CI レビューコメントあり → **Phase 1** に戻る
-- すべてなし → **Phase 8** に進む
+- 台帳未登録の新規 / 変化した項目あり → **Phase 1** に戻る
+- なし（残りは state-stable のみ） → **Phase 8** に進む
 
 ---
 
@@ -727,3 +748,6 @@ notify
 | CI レビューコメントが再実行で更新された | upsert で同一 comment id のまま本文が変わる。返信済み判定は `commentId@updatedAt` をキーにし、`updatedAt` が変われば再評価する（Phase 1-1c） |
 | `claude-self-merge-check` のサマリのみ | Phase 2-3c で「返信不要」分類。actionable な指摘がなければ返信しない |
 | `github-actions[bot]` へのメンション | `@github-actions` は通知効果を持たないが、返信対象の明示のため一貫して付与する（Phase 4-2） |
+| `gh pr checks` の fail 誤検知 | `grep -ic "fail"` はチェック名（`notify-on-schedule-failure` 等）にも一致する。ステータス列で `awk -F'\t' '$2=="fail"'` と判定する（Phase 6-2） |
+| 人間スレッドを「返信不要」と決定 | 人間スレッドは自動 resolve しないため未解決のまま残る。セッショントリアージ台帳に記録し Phase 7 の再トリガーから除外する（無限ループ防止、Phase 7）。レビュアー本人の resolve に委ねる |
+| ack/approve のみで残る review body・更新されない CI コメント | 台帳に記録し Phase 7 で除外。新規・変化した項目のみでループ継続を判定する（Phase 7） |
