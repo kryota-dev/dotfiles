@@ -318,3 +318,51 @@ jobs:
           fi
           echo "OK: zsh starts cleanly"
         timeout-minutes: 2
+
+  # Regression guard for #122: in an environment with no baseruby on PATH, a ruby
+  # source build deadlocks because ruby-build's configure probe re-enters the mise
+  # shim for the in-progress version and blocks on the install lock. Standard runners
+  # ship a system ruby and never reproduce this, so we run on a minimal container with
+  # no ruby and assert `mise install ruby` finishes (precompiled) instead of hanging.
+  ruby-no-baseruby-guard:
+    name: Guard ruby install without baseruby
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Install minimal prerequisites
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git xz-utils
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Assert no baseruby on PATH
+        run: |
+          if command -v ruby >/dev/null 2>&1; then
+            echo "ERROR: ruby found on PATH ($(command -v ruby)); this guard must run without a baseruby."
+            exit 1
+          fi
+          echo "OK: no ruby on PATH."
+
+      - name: Install mise
+        run: |
+          curl -fsSL https://mise.run | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install ruby via mise (precompiled; must not deadlock)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          # Use the repo's mise config (with [settings] ruby.compile = false) as the active config.
+          cp home/dot_config/mise/config.toml ./mise.toml
+          mise trust ./mise.toml
+          # With ruby.compile = false, mise fetches a precompiled build and finishes quickly.
+          # If that setting regresses, the source build deadlocks (see #122); the timeout then
+          # kills it so this job fails fast instead of hanging indefinitely.
+          timeout --kill-after=30s 300 mise install ruby
+          mise ls ruby
+        timeout-minutes: 10
