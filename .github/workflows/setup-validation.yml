@@ -204,6 +204,11 @@ jobs:
             NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
           fi
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          # Refresh Homebrew on cache hits: the cached install otherwise pins an
+          # old snapshot whose cask API parser crashes with
+          # "undefined method 'first' for nil" (cask.rb) when brew bundle checks
+          # cask conflicts for formulas like aqua/lychee. See #104.
+          brew update --force --quiet
           brew --version
 
       - name: Install Homebrew formulas only
