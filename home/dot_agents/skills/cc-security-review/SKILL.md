@@ -1,176 +1,68 @@
 ---
 name: cc-security-review
 description: |
-  Claude Code CLI（claude -p）を使用して独立したコンテキストでセキュリティレビューを実行する。
+  `cc-security-review` エージェントを起動して独立したコンテキストでセキュリティレビューを実行する。
   OWASP Top 10 および一般的なセキュリティベストプラクティスに基づいた分析を行う。
   トリガー: "cc-security-review", "ccでセキュリティレビュー", "脆弱性チェック", "セキュリティ分析", "security check"
   使用場面: (1) PR差分のセキュリティ分析 (2) コードベースのセキュリティ監査 (3) 特定ファイル/ディレクトリのセキュリティレビュー
 argument-hint: "[PR番号 | PR URL | ブランチ名 | ファイルパス | ディレクトリパス]（省略可）"
 ---
 
-# Claude Code セキュリティレビュー
+# セキュリティレビュー
 
-`claude -p`（非対話型モード）で別の Claude Code インスタンスを起動し、セキュリティ専門の観点でコードレビューを実行する。
-OWASP Top 10 を含む包括的なセキュリティチェックリストが `--append-system-prompt-file` 経由で注入される。
+`cc-security-review` エージェント（`~/.claude/agents/cc-security-review.md`）を Agent ツールで起動し、セキュリティ専門の観点でコードレビューを実行する。OWASP Top 10 を含む包括的なチェックリストはエージェント定義の system prompt に内蔵されている。
 
 ## SSOT としての位置づけ
 
-本 skill は **セキュリティレビュー用 `claude -p` 起動の Single Source of Truth**。`multi-review` skill から並列呼び出しされる場合も、本ファイルの起動オプション・プロンプトテンプレート・チェックリスト参照ロジック・コマンド例に従う。multi-review 側で重複定義しない。
-
-## 起動オプション
-
-| オプション | 値 | 理由 |
-|------------|-----|------|
-| `--allowedTools` | `"Read,Glob,Grep,Bash(grep *),Bash(find *),Bash(git log *),Bash(cat *)"` | 読み取り + 機密情報パターン検索 |
-| `--max-turns` | `10` | セキュリティ分析は広範囲のファイル参照が必要 |
-| `--effort` | `max` | セキュリティレビューの品質を最大化 |
-| `--output-format` | `text` | 人間が読みやすいテキスト形式 |
-| `--append-system-prompt-file` | チェックリストファイルパス | OWASP Top 10 + 追加チェック項目を注入 |
-
-**注意**: `--bare` は使わない（OAuth 認証が通らなくなる）。`--model` はデフォルト（ユーザー設定を継承）。
-
-## チェックリストファイルの参照
-
-`references/security-checklist.md` を `--append-system-prompt-file` で注入する。
-パスは以下の優先順で解決する:
-
-```bash
-# 1. chezmoi 展開先（通常はこちら）
-CHECKLIST="$HOME/.agents/skills/cc-security-review/references/security-checklist.md"
-
-# 2. 存在しない場合はチェックリストなしで実行（警告を出力）
-if [ ! -f "$CHECKLIST" ]; then
-  echo "警告: セキュリティチェックリストが見つかりません: $CHECKLIST"
-  echo "チェックリストなしでレビューを実行します"
-  CHECKLIST=""
-fi
-```
+- **セキュリティレビューのペルソナ・OWASP チェックリスト・出力形式・「（未確認）」ルール・差分取得方法** は **エージェント定義** `~/.claude/agents/cc-security-review.md` が Single Source of Truth。本 skill では再定義しない。
+- **本 skill** はレビュー対象の特定とエージェント起動を担うオーケストレーション層。
+- `multi-review` skill から呼ばれる場合も、同じ `cc-security-review` エージェントを起動する。
 
 ## 引数の解釈
 
 `$ARGUMENTS` を以下の優先順で判定する:
 
-1. **PR番号** (`^\d+$` または `^#\d+$`): `gh pr diff <番号>` で差分取得
-2. **PR URL** (`github.com` を含む URL): URL から PR 番号を抽出し、`gh pr diff` で差分取得
-3. **ファイルパス** (`.` を含む拡張子): `cat <path>` でファイル内容を取得
-4. **ディレクトリパス** (ディレクトリとして存在): そのディレクトリを対象にレビュー
-5. **ブランチ名** (上記に該当しない文字列): `git diff <branch>...HEAD` で差分取得
-6. **引数なし**: デフォルトブランチとの差分を取得
-
-## プロンプトのルール
-
-**重要**: `claude -p` に渡すプロンプトには、以下の指示を必ず含めること:
-
-> 「確認や質問は不要です。具体的な分析結果と修正案を自主的に出力してください。」
-
-## プロンプトテンプレート
-
-```
-あなたはセキュリティエンジニアです。以下のコードをセキュリティ観点でレビューしてください。
-システムプロンプトで提供されたセキュリティチェックリストに基づいて網羅的に分析してください。
-
-## 分析の進め方
-
-1. まず差分を読み、変更の全体像を把握する
-2. セキュリティ上重要な変更を特定する（認証、認可、入力処理、機密情報、外部通信）
-3. 必要に応じて Read ツールで周辺コードを参照し、コンテキストを補完する
-4. 各脆弱性について、実際の攻撃経路が存在するかを評価する
-
-## 出力形式
-
-### セキュリティサマリー
-- 総合リスクレベル: Critical / High / Medium / Low
-- 検出された脆弱性数: N件（重大度別）
-
-### 脆弱性一覧
-（チェックリストの出力フォーマットに従う）
-
-### 良い実装
-セキュリティ上、適切に実装されている点を列挙
-
-### 推奨事項
-追加で検討すべきセキュリティ改善策
-
-## 重要: 技術的主張の確実性
-
-ライブラリ・脆弱性 CVE・セキュリティ機能の有無について断定する場合、確信が持てないなら必ず本文に **「（未確認）」** または **「（要検証）」** と明示してください。学習データのカットオフ後の変更（CVE 発覚、ライブラリ機能追加等）を見落とすリスクがあるため、自信満々に誤情報を出力するのは避けてください。
-
-確認や質問は不要です。具体的な分析結果と修正案を自主的に出力してください。
-```
+1. **PR番号** (`^\d+$` または `^#\d+$`)
+2. **PR URL** (`github.com` を含む URL): URL から PR 番号を抽出
+3. **ファイルパス** (`.` を含む拡張子)
+4. **ディレクトリパス** (ディレクトリとして存在)
+5. **ブランチ名** (上記に該当しない文字列): `<branch>...HEAD` の差分
+6. **引数なし**: デフォルトブランチとの差分
 
 ## 実行手順
 
 1. **引数を解析**してレビュー対象を特定する
-2. **差分/対象を取得**する。差分が空の場合は「レビュー対象がありません」と報告して終了
-3. **チェックリストファイルのパスを解決**する（上記「チェックリストファイルの参照」参照）
-4. **プロンプトを構築**する（heredoc 使用。シェルのクォート問題を回避）
-5. **`claude -p` を実行**する（Bash の timeout は **600000ms = 10分** に設定）
-   - チェックリストが存在する場合: `--append-system-prompt-file` を付与
-   - チェックリストが存在しない場合: プロンプト本文に基本的な OWASP 観点を含める
-6. **結果をユーザーに表示**する
+2. **`cc-security-review` エージェントを起動**する（Agent ツール、`subagent_type: cc-security-review`）。プロンプトには「レビュー対象の指定 + 差分取得コマンド + 作業ディレクトリの絶対パス」を渡す。**差分はエージェント自身が取得**するため、本 skill 側で差分を取得・埋め込みしない。チェックリスト・出力形式もエージェント定義に内蔵されているため再掲しない。
+3. **エージェントの最終メッセージ（分析結果）をユーザーに提示**する
 
-### コマンド例
+### Agent ツール呼び出し例
 
-```bash
-# PR差分のセキュリティレビュー
-CHECKLIST="$HOME/.agents/skills/cc-security-review/references/security-checklist.md"
-
-gh pr diff 123 | claude -p \
-  --allowedTools "Read,Glob,Grep,Bash(grep *),Bash(find *),Bash(git log *),Bash(cat *)" \
-  --max-turns 10 \
-  --effort max \
-  --output-format text \
-  --append-system-prompt-file "$CHECKLIST" \
-  "$(cat <<'PROMPT'
-あなたはセキュリティエンジニアです。以下のコードをセキュリティ観点でレビューしてください。
-...（プロンプトテンプレート）
-PROMPT
-)"
-
-# デフォルトブランチとの差分（引数なし）
-DEFAULT_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD 2>/dev/null | sed 's|origin/||')
-git diff "${DEFAULT_BRANCH:-main}...HEAD" | claude -p \
-  --allowedTools "Read,Glob,Grep,Bash(grep *),Bash(find *),Bash(git log *),Bash(cat *)" \
-  --max-turns 10 \
-  --effort max \
-  --output-format text \
-  --append-system-prompt-file "$CHECKLIST" \
-  "$(cat <<'PROMPT'
-...（プロンプトテンプレート）
-PROMPT
-)"
-
-# ディレクトリ全体のセキュリティ監査（ファイル指定不要、Read ツールで自律探索）
-claude -p \
-  --allowedTools "Read,Glob,Grep,Bash(grep *),Bash(find *),Bash(git log *),Bash(cat *)" \
-  --max-turns 15 \
-  --effort max \
-  --output-format text \
-  --append-system-prompt-file "$CHECKLIST" \
-  "$(cat <<'PROMPT'
-src/features/auth/ ディレクトリのセキュリティ監査を実施してください。
-...（プロンプトテンプレート）
-PROMPT
-)"
 ```
+Agent(
+  subagent_type: "cc-security-review",
+  description: "PR #123 のセキュリティレビュー",
+  prompt: """
+  GitHub PR #123（リポジトリ <owner>/<repo>）のコード差分をセキュリティ観点でレビューしてください。
+  作業ディレクトリ: <repo の絶対パス>
+  差分取得: `gh pr diff 123`
+
+  認証・認可・入力処理・機密情報・外部通信・シリアライズに関わる変更を重点的に、周辺コードを Read/Grep で確認してから評価してください。
+  """
+)
+```
+
+- ディレクトリ全体の監査では差分の代わりに対象ディレクトリのパスを渡し、エージェントに Read/Glob/Grep で自律探索させる。
+- `multi-review` から並列起動する場合は `run_in_background: true` を付ける。
+- エージェントは Bash を `gh` / `git diff` / `grep` / `find` / `git log` / `cat` 等の読み取り専用にのみ使う。
 
 ## 注意事項
 
 ### コスト管理
-
-- デフォルトモデルで実行される。セキュリティレビューは `--max-turns 10` で通常のレビューより多くのターンを消費する
-- コストを抑えたい場合は `--model sonnet` を追加する。ただし CLAUDE.md が大きいプロジェクトでは "Prompt is too long" エラーが発生する場合がある（sonnet の context window は 200k）
-- ディレクトリ全体の監査（`--max-turns 15`）は特にコストが高い。対象を絞ることを推奨
+- エージェントはメインセッションのモデルを継承（`model: inherit`）。ディレクトリ全体監査はターン数が増えコストが高い。対象を絞ることを推奨。
 
 ### エラーハンドリング
-
-- `claude` コマンドが見つからない場合: Claude Code CLI のインストールを案内
-- 空の差分: 事前チェックで即座に報告
-- タイムアウト: Bash の timeout 600000ms で保護
-- "Prompt is too long": CLAUDE.md が大きいプロジェクトで sonnet を使用した場合に発生。モデルを変更するか、`--bare` + `ANTHROPIC_API_KEY` 環境変数を設定
-- チェックリスト不在: 警告を出力し、基本的なセキュリティ観点のみでレビュー続行
+- 差分が空: エージェントがその旨を報告
+- エージェントが途中でスキップ/失敗した場合: 1 回リトライ。再失敗ならその旨を報告
 
 ### チェックリストのカスタマイズ
-
-`references/security-checklist.md` を編集することで、チェック項目を追加・変更できる。
-プロジェクト固有のセキュリティ要件がある場合は、プロジェクトの `.claude/skills/` にカスタマイズ版を配置することを推奨する。
+- チェック項目を追加・変更する場合は **エージェント定義** `~/.claude/agents/cc-security-review.md`（ソース: `~/dotfiles/home/dot_claude/agents/cc-security-review.md`）の OWASP チェックリスト節を編集する。
