@@ -97,6 +97,11 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_skills.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_settings.json.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_agents.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_statusline.sh.tmpl" ]
+}
+
+@test "claude statusline script exists" {
+  [ -f "${HOME_DIR}/dot_claude/executable_statusline.sh" ]
 }
 
 @test "1password-backed secret template exists" {
