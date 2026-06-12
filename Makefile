@@ -50,11 +50,11 @@ test: lint test-bats
 ## Run shellcheck and shfmt
 lint:
 	@echo "==> Running shellcheck..."
-	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 -; \
 	done
 	@echo "==> Running shfmt check..."
-	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shfmt -d -i 2 -ci; \
 	done
 	@echo "==> Checking zsh syntax..."
@@ -64,7 +64,7 @@ lint:
 
 ## Show shfmt formatting suggestions (template files need manual fixes)
 fmt:
-	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) | while read -r f; do \
+	@find home \( -name '*.sh' -o -name '*.sh.tmpl' \) ! -name 'symlink_*' | while read -r f; do \
 		diff=$$(sed '/{{/d' "$$f" | shfmt -d -i 2 -ci 2>&1) && true; \
 		if [ -n "$$diff" ]; then \
 			echo "$$f needs formatting:"; \
