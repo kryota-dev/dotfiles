@@ -36,6 +36,18 @@ MOCK_JSON='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"work
   [[ "$output" == *"(session)"* ]]
 }
 
+@test "statusline shows a profile badge for a non-default CLAUDE_CONFIG_DIR" {
+  run bash -c "printf '%s' '${MOCK_JSON}' | CLAUDE_CONFIG_DIR='${HOME}/.claude-r06' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *R06* ]]
+}
+
+@test "statusline shows no profile badge for the default profile" {
+  run bash -c "printf '%s' '${MOCK_JSON}' | CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *R06* ]]
+}
+
 @test "statusline emits at least the two always-present lines" {
   run bash -c "printf '%s' '${MOCK_JSON}' | bash '${SCRIPT}'"
   [ "$status" -eq 0 ]

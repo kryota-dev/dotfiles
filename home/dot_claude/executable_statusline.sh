@@ -48,6 +48,8 @@ BLUE=$'\033[34m'
 MAGENTA=$'\033[35m'
 CYAN=$'\033[36m'
 RED_BOLD=$'\033[1;31m'
+BOLD=$'\033[1m'
+REVERSE=$'\033[7m'
 SEP="${DIM} | ${RST}"
 
 # Nerd Font glyphs (raw UTF-8 bytes; see header note)
@@ -231,7 +233,22 @@ JPY_RATE=$(usd_jpy_rate)
 # ---------------------------------------------------------------------------
 # Line 1: host | dir | branch *dirty ⇡ahead⇣behind | worktree
 # ---------------------------------------------------------------------------
-line1="${I_HOST} ${MAGENTA}$(hostname -s)${RST}"
+# Config profile badge: prominent (reverse video) when launched with a
+# non-default CLAUDE_CONFIG_DIR (e.g. `cld-r06` -> R06). Empty for the
+# default ~/.claude profile, so the badge's presence alone signals the profile.
+profile=${CLAUDE_CONFIG_DIR##*/}
+profile_badge=""
+case "$profile" in
+  '' | '.claude') ;;
+  *)
+    tag=${profile#.claude-}
+    tag=${tag#.}
+    tag=$(printf '%s' "$tag" | tr '[:lower:]' '[:upper:]')
+    profile_badge="${REVERSE}${BOLD} ${tag} ${RST}"
+    ;;
+esac
+
+line1="${profile_badge:+$profile_badge }${I_HOST} ${MAGENTA}$(hostname -s)${RST}"
 
 if [ -n "$project" ] && [ "$cwd" != "$project" ] && [[ "$cwd" == "$project"/* ]]; then
   rel_path="$(basename "$project")/${cwd#"$project"/}"
