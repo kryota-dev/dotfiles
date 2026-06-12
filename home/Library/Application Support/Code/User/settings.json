@@ -112,7 +112,7 @@
     "FIG_NEW_SESSION": "1",
     "Q_NEW_SESSION": "1",
   },
-  "terminal.integrated.fontFamily": "Moralerspace Neon",
+  "terminal.integrated.fontFamily": "Moralerspace Neon, Symbols Nerd Font Mono",
   "terminal.integrated.fontSize": 12,
   "terminal.integrated.inheritEnv": false,
   "terminal.integrated.sendKeybindingsToShell": false,
