@@ -113,5 +113,9 @@
   },
   "language": "Japanese",
   "alwaysThinkingEnabled": false,
-  "cleanupPeriodDays": 20
+  "cleanupPeriodDays": 20,
+  "statusLine": {
+    "type": "command",
+    "command": "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh"
+  }
 }
