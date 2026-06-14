@@ -117,5 +117,6 @@
   "statusLine": {
     "type": "command",
     "command": "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh"
-  }
+  },
+  "model": "claude-opus-4-8[1m]"
 }
