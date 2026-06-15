@@ -39,9 +39,58 @@
 .claude-r06/todos
 
 # Codex runtime data
+# config.toml is intentionally unmanaged (Codex writes trust_level etc. dynamically);
+# auth.json holds login tokens and must never be added to the source tree.
+.codex/.codex-global-state.json
 .codex/.personality_migration
+.codex/.tmp
+.codex/auth.json
+.codex/cache
+.codex/config.toml
+.codex/goals_*.sqlite*
+.codex/history.jsonl
+.codex/installation_id
+.codex/log
+.codex/logs_*.sqlite*
+.codex/memories
+.codex/memories_*.sqlite*
+.codex/models_cache.json
+.codex/plugins
+.codex/session_index.jsonl
+.codex/sessions
+.codex/shell_snapshots
 .codex/skills/.system
+.codex/sqlite
+.codex/state_*.sqlite*
 .codex/tmp
+.codex/vendor_imports
+.codex/version.json
+
+# Codex runtime data (work account)
+.codex-r06/.codex-global-state.json
+.codex-r06/.personality_migration
+.codex-r06/.tmp
+.codex-r06/auth.json
+.codex-r06/cache
+.codex-r06/config.toml
+.codex-r06/goals_*.sqlite*
+.codex-r06/history.jsonl
+.codex-r06/installation_id
+.codex-r06/log
+.codex-r06/logs_*.sqlite*
+.codex-r06/memories
+.codex-r06/memories_*.sqlite*
+.codex-r06/models_cache.json
+.codex-r06/plugins
+.codex-r06/session_index.jsonl
+.codex-r06/sessions
+.codex-r06/shell_snapshots
+.codex-r06/skills/.system
+.codex-r06/sqlite
+.codex-r06/state_*.sqlite*
+.codex-r06/tmp
+.codex-r06/vendor_imports
+.codex-r06/version.json
 
 # AWS cache
 .aws/cli
