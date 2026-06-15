@@ -55,7 +55,7 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(git docker claude functions completions wtp)
+  local modules=(git docker claude codex functions completions wtp)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
@@ -90,6 +90,17 @@ load helpers/setup
 @test "claude and codex skills are symlinked" {
   [ -f "${HOME_DIR}/dot_claude/symlink_skills.tmpl" ]
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
+}
+
+@test "codex-r06 work profile sources exist" {
+  [ -f "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex-r06/symlink_skills.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex-r06/private_shared.config.toml.tmpl" ]
+}
+
+@test "codex shared config SSOT exists" {
+  [ -f "${HOME_DIR}/.chezmoitemplates/codex-shared-config.toml" ]
+  [ -f "${HOME_DIR}/dot_codex/private_shared.config.toml.tmpl" ]
 }
 
 @test "claude-r06 work profile symlinks exist" {

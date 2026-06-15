@@ -18,6 +18,10 @@ load helpers/setup
   zsh -n "${HOME_DIR}/dot_config/zsh/claude.zsh"
 }
 
+@test "zsh syntax: codex.zsh" {
+  zsh -n "${HOME_DIR}/dot_config/zsh/codex.zsh"
+}
+
 @test "zsh syntax: functions.zsh" {
   zsh -n "${HOME_DIR}/dot_config/zsh/functions.zsh"
 }
