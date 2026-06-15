@@ -42,6 +42,11 @@ local = "~/.config/zsh"
 use = ["claude.zsh"]
 apply = ["defer"]
 
+[plugins.codex-helpers]
+local = "~/.config/zsh"
+use = ["codex.zsh"]
+apply = ["defer"]
+
 [plugins.functions]
 local = "~/.config/zsh"
 use = ["functions.zsh"]
