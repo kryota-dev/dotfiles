@@ -61,7 +61,46 @@ BASE_BRANCH=$(git branch --show-current)
 
 この値を最後まで保持する（コミット・PR作成時に使用）。
 
-### 0-4. Spec ディレクトリ作成
+### 0-4. ワークツリー戦略の選択
+
+**SDD の本格着手前に、`AskUserQuestion` でワークツリー戦略をユーザーに確認する。**
+これは SDD 全体で唯一のユーザー確認ポイントであり、これ以降は完全自律で実行する（「重要な注意事項」#1 参照）。
+
+```
+AskUserQuestion:
+  questions:
+    - header: "Worktree"
+      question: "SDD を専用の Git ワークツリーで実行しますか、それとも現在のディレクトリで実行しますか？"
+      multiSelect: false
+      options:
+        - label: "ワークツリーを作成"
+          description: "wtp で専用ワークツリー（新規ブランチ）を作成し、そこへ移動して作業する。メインの作業ディレクトリを汚さずに並行作業できる。"
+        - label: "現在の場所で作業"
+          description: "ワークツリーを作成せず、現在のディレクトリでそのまま作業する。"
+```
+
+#### 「ワークツリーを作成」を選択した場合
+
+`wtp` スキルに従い、Phase 6-1 と同じ命名規約のブランチで専用ワークツリーを作成して移動する:
+
+- ブランチ名: Issue 番号がある場合は `claude/{issue-number}/{spec-name}`、ない場合は `claude/{spec-name}`
+
+```bash
+# 新規ブランチ + ワークツリーを BASE_BRANCH ベースで作成し、絶対パスを取得して移動
+WORKTREE_DIR=$(wtp add -b {branch-name} "$BASE_BRANCH" --quiet)
+cd "$WORKTREE_DIR"
+```
+
+以降の全フェーズ（Spec ディレクトリ作成・実装・コミット・PR 作成）はこのワークツリー内で行う。
+**このケースではブランチが既に作成済みのため、Phase 6-1 のブランチ作成はスキップする。**
+
+`wtp` が利用できない、または作成に失敗した場合は、その旨を踏まえて「現在の場所で作業」にフォールバックする。
+
+#### 「現在の場所で作業」を選択した場合
+
+ワークツリーは作成せず、現在のディレクトリのまま次のステップへ進む。Phase 6-1 で通常どおりブランチを作成する。
+
+### 0-5. Spec ディレクトリ作成
 
 ```bash
 mkdir -p .spec-workflow/specs/{spec-name}
@@ -462,6 +501,10 @@ TeamDelete
 
 ### 6-1. ブランチ作成
 
+**Phase 0-4 で「ワークツリーを作成」を選択した場合は、ブランチが既に作成済みのためこのステップをスキップする。**
+
+それ以外の場合:
+
 ```bash
 CURRENT=$(git branch --show-current)
 # ベースブランチ（main/master）にいる場合のみ新しいブランチを作成
@@ -595,7 +638,7 @@ notify
 
 ## 重要な注意事項
 
-1. **完全自律実行**: ユーザー承認フローは存在しない。Phase 0 から Phase 7 まで一切止まらずに実行する
+1. **完全自律実行**: ユーザー確認は Phase 0-4 のワークツリー戦略の選択（`AskUserQuestion`）のみ。それ以降は Phase 7 まで承認フローを挟まず一切止まらずに実行する
 2. **MCP ツール不使用**: spec-workflow MCP のツール（approvals, spec-status, log-implementation 等）は一切使用しない
 3. **sleep / polling 禁止**: `sleep` コマンドや `while` ループでの待機は**絶対に使わない**。チームメイトからのメッセージは自動配信される
 4. **Leader = 司令塔 + 作業者**: ドキュメント作成・コード実装は Leader 自身が行う。調査のみサブエージェントに委任
