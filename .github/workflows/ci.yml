@@ -83,3 +83,41 @@ jobs:
 
       - name: Run Bats tests
         run: bats tests/*.bats
+
+  sync-ghq-completion:
+    name: Sync ghq completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Same-repo PRs only: fork PRs would receive a read-only GITHUB_TOKEN
+    # (so the push step would fail anyway), but skipping them up front avoids
+    # executing fork-side Makefile code in CI.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Run sync-ghq-completion
+        run: make sync-ghq-completion
+
+      - name: Commit & push if changed
+        run: |
+          if git diff --quiet home/dot_config/zsh/completions/_ghq; then
+            echo "No change to _ghq; skipping commit."
+            exit 0
+          fi
+          version=$(grep -E '^ghq[[:space:]]*=' home/dot_config/mise/config.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: Unexpected ghq version format: $version"
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add home/dot_config/zsh/completions/_ghq
+          git commit -m "chore: sync _ghq completion for ghq v${version}"
+          git push
