@@ -55,12 +55,20 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(git docker claude codex functions completions wtp)
+  local modules=(git docker claude codex functions completions wtp ghq)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
   # aliases.zsh is now a chezmoi template
   [ -f "${HOME_DIR}/dot_config/zsh/aliases.zsh.tmpl" ]
+}
+
+@test "chezmoi source files exist: dot_config/zsh/completions/_ghq" {
+  [ -f "${HOME_DIR}/dot_config/zsh/completions/_ghq" ]
+}
+
+@test "ghq zsh completion has compdef directive on first line" {
+  head -n1 "${HOME_DIR}/dot_config/zsh/completions/_ghq" | grep -q '^#compdef ghq'
 }
 
 @test "lifecycle scripts exist" {

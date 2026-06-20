@@ -1,5 +1,5 @@
 [user]
-	name = kryota-dev
+	name = {{ .name }}
 	email = {{ .email }}
 	signingkey = {{ .signingkey }}
 [core]
@@ -24,3 +24,6 @@
 {{- end }}
 [extensions]
 	worktreeConfig = true
+[ghq]
+	root = ~/ghq
+	user = {{ .ghq_user }}

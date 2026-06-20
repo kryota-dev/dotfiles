@@ -61,3 +61,8 @@ apply = ["defer"]
 local = "~/.config/zsh"
 use = ["completions.zsh"]
 apply = ["defer"]
+
+[plugins.ghq]
+local = "~/.config/zsh"
+use = ["ghq.zsh"]
+apply = ["defer"]
