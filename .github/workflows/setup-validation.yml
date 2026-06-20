@@ -161,8 +161,8 @@ jobs:
 
       - name: Verify ghq config applied
         run: |
-          ghq_root=$(git config --type path --global --get ghq.root)
-          ghq_user=$(git config --global --get ghq.user)
+          ghq_root=$(git config --type path --global --get ghq.root || true)
+          ghq_user=$(git config --global --get ghq.user || true)
           if [ "$ghq_root" != "$HOME/ghq" ]; then
             echo "ghq.root mismatch: expected $HOME/ghq, got $ghq_root"
             exit 1
@@ -328,8 +328,8 @@ jobs:
 
       - name: Verify ghq config applied
         run: |
-          ghq_root=$(git config --type path --global --get ghq.root)
-          ghq_user=$(git config --global --get ghq.user)
+          ghq_root=$(git config --type path --global --get ghq.root || true)
+          ghq_user=$(git config --global --get ghq.user || true)
           if [ "$ghq_root" != "$HOME/ghq" ]; then
             echo "ghq.root mismatch: expected $HOME/ghq, got $ghq_root"
             exit 1

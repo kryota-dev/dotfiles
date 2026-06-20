@@ -1,4 +1,4 @@
-.PHONY: all apply init diff verify update watch test lint fmt benchmark dump-brewfile sync-ghq-completion help
+.PHONY: all apply init diff verify update watch test lint fmt benchmark dump-brewfile sheldon-lock sync-ghq-completion help
 
 # Default target
 all: apply
