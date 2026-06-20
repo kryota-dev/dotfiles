@@ -99,13 +99,20 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: true
+          # persist-credentials must stay false (ghalint policy 013); the
+          # push step below uses an ephemeral token URL instead.
+          persist-credentials: false
+
+      - name: Install zsh (required by the sync target's syntax check)
+        run: sudo apt-get update && sudo apt-get install -y zsh
 
       - name: Run sync-ghq-completion
         run: make sync-ghq-completion
 
       - name: Commit & push if changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           if git diff --quiet home/dot_config/zsh/completions/_ghq; then
             echo "No change to _ghq; skipping commit."
@@ -116,4 +123,6 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add home/dot_config/zsh/completions/_ghq
           git commit -m "chore: sync _ghq completion for ghq v${version}"
-          git push
+          # Push with an ephemeral token URL — credentials are never written
+          # back to .git/config (ghalint policy 013).
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:${HEAD_REF}"
