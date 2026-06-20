@@ -55,9 +55,10 @@ dotfiles/
 ├── .chezmoiroot              # ソースルート → home/
 ├── install/                   # ブートストラップスクリプト
 ├── home/
-│   ├── .chezmoi.toml         # chezmoi 設定（email、signingkey）
+│   ├── .chezmoidata.toml     # テンプレートデータ（email、signingkey、name、ghq_user、versions、skills）
 │   ├── dot_zshrc.tmpl        # 最小コア、sheldon 駆動
 │   ├── dot_config/
+│   │   ├── chezmoi/          # chezmoi 挙動設定（自動 deploy）
 │   │   ├── ghostty/          # ターミナル設定
 │   │   ├── mise/             # ツールバージョンマネージャー
 │   │   ├── sheldon/          # プラグインマネージャー

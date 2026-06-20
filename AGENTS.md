@@ -78,7 +78,7 @@ Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_o
   - `run_once_after_90-other-apps.sh.tmpl` — other app configurations
 
 - **zsh config**: `dot_zshrc.tmpl` → activates mise, direnv, starship synchronously, then loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
-- **Template variables**: `.chezmoi.toml` defines `email` and `signingkey`
+- **Template variables**: `home/.chezmoidata.toml` defines `email`, `signingkey`, `name`, and `ghq_user` (auto-loaded from the source tree, no per-machine config required). Chezmoi behavior config (e.g., `[diff]`) lives in `home/dot_config/chezmoi/chezmoi.toml` and is auto-deployed.
 - **1Password secrets**: `private_dot_aws/config.tmpl` — rendered from 1Password Secure Notes via `onepasswordRead`
 - **AI agent config**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — shared skills are centralized in `dot_agents/skills/` and distributed to each tool via symlinks
 

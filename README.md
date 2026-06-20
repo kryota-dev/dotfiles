@@ -66,9 +66,10 @@ dotfiles/
 ├── .chezmoiroot              # source root → home/
 ├── install/                   # bootstrap script
 ├── home/
-│   ├── .chezmoi.toml         # chezmoi config (email, signingkey)
+│   ├── .chezmoidata.toml     # template data (email, signingkey, name, ghq_user, versions, skills)
 │   ├── dot_zshrc.tmpl        # minimal core, sheldon-powered
 │   ├── dot_config/
+│   │   ├── chezmoi/          # chezmoi behavior config (auto-deployed)
 │   │   ├── ghostty/          # terminal config
 │   │   ├── mise/             # tool version manager
 │   │   ├── sheldon/          # plugin manager
