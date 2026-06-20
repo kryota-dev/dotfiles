@@ -93,8 +93,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p ~/.config/chezmoi
-          cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
           for attempt in 1 2 3; do
             if installer=$(curl -fsLS get.chezmoi.io) && [ -n "$installer" ]; then
               break

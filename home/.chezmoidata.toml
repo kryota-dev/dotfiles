@@ -1,3 +1,8 @@
+email = "50436249+kryota-dev@users.noreply.github.com"
+signingkey = "~/.ssh/ssh-key.pub"
+name = "kryota-dev"
+ghq_user = "kryota-dev"
+
 [versions]
   moralerspace_font = "2.0.0"
 
