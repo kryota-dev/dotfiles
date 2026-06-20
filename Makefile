@@ -1,4 +1,4 @@
-.PHONY: all apply init diff verify update watch test lint fmt benchmark dump-brewfile help
+.PHONY: all apply init diff verify update watch test lint fmt benchmark dump-brewfile sync-ghq-completion help
 
 # Default target
 all: apply
@@ -39,6 +39,35 @@ watch:
 ## Re-lock sheldon plugins
 sheldon-lock:
 	@sheldon lock
+
+## Sync vendored _ghq completion from the mise-pinned upstream ghq version
+sync-ghq-completion:
+	@version=$$(grep -E '^ghq[[:space:]]*=' home/dot_config/mise/config.toml | sed -E 's/.*"([^"]+)".*/\1/'); \
+	if [ -z "$$version" ]; then \
+		echo "ERROR: Could not extract ghq version from home/dot_config/mise/config.toml"; \
+		exit 1; \
+	fi; \
+	if ! printf '%s' "$$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "ERROR: Unexpected ghq version format: $$version"; \
+		exit 1; \
+	fi; \
+	echo "Syncing _ghq from x-motemen/ghq@v$$version..."; \
+	url="https://raw.githubusercontent.com/x-motemen/ghq/v$$version/misc/zsh/_ghq"; \
+	tmpfile=$$(mktemp); \
+	if ! curl -fsSL "$$url" -o "$$tmpfile"; then \
+		echo "ERROR: failed to fetch $$url"; \
+		rm -f "$$tmpfile"; \
+		exit 1; \
+	fi; \
+	mkdir -p home/dot_config/zsh/completions; \
+	{ \
+		head -n1 "$$tmpfile"; \
+		echo "# vendored: x-motemen/ghq@v$$version misc/zsh/_ghq"; \
+		echo "# Run 'make sync-ghq-completion' to refresh."; \
+		tail -n +2 "$$tmpfile"; \
+	} > home/dot_config/zsh/completions/_ghq; \
+	rm -f "$$tmpfile"; \
+	echo "Done."
 
 # ========================================
 # Testing
