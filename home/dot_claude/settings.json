@@ -9,8 +9,7 @@
     "DISABLE_ERROR_REPORTING": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "95",
-    "MAX_THINKING_TOKENS": "31999",
-    "CLAUDE_CODE_DISABLE_MOUSE": "1"
+    "MAX_THINKING_TOKENS": "127999"
   },
   "permissions": {
     "allow": [
@@ -118,5 +117,10 @@
     "type": "command",
     "command": "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh"
   },
-  "model": "claude-opus-4-8[1m]"
+  "model": "claude-opus-4-8[1m]",
+  "enabledPlugins": {
+    "codex@openai-codex": true
+  },
+  "extraKnownMarketplaces": {},
+  "agentPushNotifEnabled": true
 }
