@@ -149,7 +149,7 @@ jobs:
 
       - name: Verify zsh modules deployed
         run: |
-          for mod in aliases git docker claude functions completions wtp; do
+          for mod in aliases git docker claude functions completions wtp ghq; do
             f=~/.config/zsh/${mod}.zsh
             if [ -f "$f" ]; then
               echo "OK: $f"
@@ -158,6 +158,24 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify ghq config applied
+        run: |
+          ghq_root=$(git config --type path --global --get ghq.root)
+          ghq_user=$(git config --global --get ghq.user)
+          if [ "$ghq_root" != "$HOME/ghq" ]; then
+            echo "ghq.root mismatch: expected $HOME/ghq, got $ghq_root"
+            exit 1
+          fi
+          if [ "$ghq_user" != "kryota-dev" ]; then
+            echo "ghq.user mismatch: expected kryota-dev, got $ghq_user"
+            exit 1
+          fi
+          if [ ! -f ~/.config/zsh/completions/_ghq ]; then
+            echo "MISSING: ~/.config/zsh/completions/_ghq"
+            exit 1
+          fi
+          echo "OK: ghq config (root=$ghq_root, user=$ghq_user) and _ghq completion deployed"
 
       - name: Verify zsh shell starts
         run: |
@@ -298,7 +316,7 @@ jobs:
 
       - name: Verify zsh modules deployed
         run: |
-          for mod in aliases git docker claude functions completions wtp; do
+          for mod in aliases git docker claude functions completions wtp ghq; do
             f=~/.config/zsh/${mod}.zsh
             if [ -f "$f" ]; then
               echo "OK: $f"
@@ -307,6 +325,24 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Verify ghq config applied
+        run: |
+          ghq_root=$(git config --type path --global --get ghq.root)
+          ghq_user=$(git config --global --get ghq.user)
+          if [ "$ghq_root" != "$HOME/ghq" ]; then
+            echo "ghq.root mismatch: expected $HOME/ghq, got $ghq_root"
+            exit 1
+          fi
+          if [ "$ghq_user" != "kryota-dev" ]; then
+            echo "ghq.user mismatch: expected kryota-dev, got $ghq_user"
+            exit 1
+          fi
+          if [ ! -f ~/.config/zsh/completions/_ghq ]; then
+            echo "MISSING: ~/.config/zsh/completions/_ghq"
+            exit 1
+          fi
+          echo "OK: ghq config (root=$ghq_root, user=$ghq_user) and _ghq completion deployed"
 
       - name: Verify zsh shell starts
         run: |
