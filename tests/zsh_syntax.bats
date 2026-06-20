@@ -33,3 +33,7 @@ load helpers/setup
 @test "zsh syntax: wtp.zsh" {
   zsh -n "${HOME_DIR}/dot_config/zsh/wtp.zsh"
 }
+
+@test "zsh syntax: ghq.zsh" {
+  zsh -n "${HOME_DIR}/dot_config/zsh/ghq.zsh"
+}
