@@ -42,30 +42,38 @@ sheldon-lock:
 
 ## Sync vendored _ghq completion from the mise-pinned upstream ghq version
 sync-ghq-completion:
-	@version=$$(grep -E '^ghq[[:space:]]*=' home/dot_config/mise/config.toml | sed -E 's/.*"([^"]+)".*/\1/'); \
-	if [ -z "$$version" ]; then \
-		echo "ERROR: Could not extract ghq version from home/dot_config/mise/config.toml"; \
-		exit 1; \
-	fi; \
-	if ! printf '%s' "$$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
-		echo "ERROR: Unexpected ghq version format: $$version"; \
-		exit 1; \
-	fi; \
+	@version=$$(scripts/ghq-version.sh) || exit 1; \
 	echo "Syncing _ghq from x-motemen/ghq@v$$version..."; \
 	url="https://raw.githubusercontent.com/x-motemen/ghq/v$$version/misc/zsh/_ghq"; \
 	tmpfile=$$(mktemp); \
+	tmpout=$$(mktemp); \
 	if ! curl -fsSL "$$url" -o "$$tmpfile"; then \
 		echo "ERROR: failed to fetch $$url"; \
-		rm -f "$$tmpfile"; \
+		rm -f "$$tmpfile" "$$tmpout"; \
 		exit 1; \
 	fi; \
+	if [ ! -s "$$tmpfile" ]; then \
+		echo "ERROR: fetched _ghq is empty"; \
+		rm -f "$$tmpfile" "$$tmpout"; \
+		exit 1; \
+	fi; \
+	case "$$(head -n1 "$$tmpfile")" in \
+		'#compdef ghq'*) ;; \
+		*) echo "ERROR: fetched file does not start with '#compdef ghq'"; rm -f "$$tmpfile" "$$tmpout"; exit 1 ;; \
+	esac; \
 	mkdir -p home/dot_config/zsh/completions; \
 	{ \
 		head -n1 "$$tmpfile"; \
 		echo "# vendored: x-motemen/ghq@v$$version misc/zsh/_ghq"; \
 		echo "# Run 'make sync-ghq-completion' to refresh."; \
 		tail -n +2 "$$tmpfile"; \
-	} > home/dot_config/zsh/completions/_ghq; \
+	} > "$$tmpout"; \
+	if ! zsh -n "$$tmpout" 2>/dev/null; then \
+		echo "ERROR: vendored _ghq fails zsh syntax check"; \
+		rm -f "$$tmpfile" "$$tmpout"; \
+		exit 1; \
+	fi; \
+	mv "$$tmpout" home/dot_config/zsh/completions/_ghq; \
 	rm -f "$$tmpfile"; \
 	echo "Done."
 
@@ -89,6 +97,7 @@ lint:
 	@echo "==> Checking zsh syntax..."
 	@for f in home/dot_config/zsh/*.zsh; do zsh -n "$$f" || exit 1; done
 	@for f in home/dot_config/zsh/*.zsh.tmpl; do sed '/{{/d' "$$f" | zsh -n || exit 1; done
+	@if [ -f home/dot_config/zsh/completions/_ghq ]; then zsh -n home/dot_config/zsh/completions/_ghq || exit 1; fi
 	@echo "==> All lint checks passed."
 
 ## Show shfmt formatting suggestions (template files need manual fixes)

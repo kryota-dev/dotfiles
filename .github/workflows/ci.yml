@@ -111,11 +111,7 @@ jobs:
             echo "No change to _ghq; skipping commit."
             exit 0
           fi
-          version=$(grep -E '^ghq[[:space:]]*=' home/dot_config/mise/config.toml | sed -E 's/.*"([^"]+)".*/\1/')
-          if ! printf '%s' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "ERROR: Unexpected ghq version format: $version"
-            exit 1
-          fi
+          version=$(scripts/ghq-version.sh)
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add home/dot_config/zsh/completions/_ghq
