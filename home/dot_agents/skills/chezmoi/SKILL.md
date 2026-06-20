@@ -12,7 +12,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 chezmoiは **source state** から **target state** を計算し、**destination directory**（ホームディレクトリ）に適用することでdotfilesを管理する。
 
 - **Source directory**: chezmoiがsource stateを保存する場所（default: `~/.local/share/chezmoi`、`.chezmoiroot`で変更可能）
-- **Config file**: マシン固有のデータ（`~/.config/chezmoi/chezmoi.toml`）
+- **Config file**: chezmoiの挙動設定とテンプレートデータ（`~/.config/chezmoi/chezmoi.toml`）。テンプレートデータは `.chezmoidata.<format>` を source dir に置くことで auto-load も可能
 - **Target state**: source state + config + destination stateから計算される目標状態
 - **Working tree**: gitのworking tree（通常はsource directoryと同じだが、`.chezmoiroot`使用時は親ディレクトリになる場合がある）
 
