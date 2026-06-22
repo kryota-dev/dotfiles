@@ -12,7 +12,11 @@
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "95",
     "MAX_THINKING_TOKENS": "127999",
-    "ECC_GOVERNANCE_CAPTURE": "1"
+    "ECC_GOVERNANCE_CAPTURE": "1",
+    "ECC_HOOK_PROFILE": "strict",
+    "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete",
+    "ECC_QUALITY_GATE_FIX": "true",
+    "GATEGUARD_BASH_EXTRA_DESTRUCTIVE": "\\b(?:chezmoi\\s+(?:destroy|forget|purge)\\b|terraform\\s+(?:destroy|state\\s+rm|workspace\\s+delete|force-unlock)\\b|terraform\\s+apply\\s+(?:[^&|;]*\\s)?-{1,2}auto-approve\\b|kubectl\\s+delete\\b|helm\\s+(?:uninstall|delete)\\b|docker\\s+(?:system\\s+prune|volume\\s+(?:rm|prune)|image\\s+prune|container\\s+prune|network\\s+prune)\\b|docker\\s+(?:rm|rmi)\\b(?=[^&|;]*\\s(?:--force\\b|-[a-zA-Z]*f\\b))|brew\\s+(?:uninstall|autoremove|untap)\\b|mas\\s+uninstall\\b|mise\\s+(?:uninstall|implode|prune)\\b|aqua\\s+(?:rm|prune)\\b|gh\\s+(?:repo\\s+delete|release\\s+delete|secret\\s+(?:delete|remove)|cache\\s+delete|run\\s+delete)\\b|aws\\s+s3\\s+r[mb]\\b|aws\\s+(?:ec2\\s+terminate-instances|iam\\s+delete-|dynamodb\\s+delete-table|rds\\s+delete-)|aws\\s+\\S+\\s+delete-|gcloud\\s+(?:\\S+\\s+){1,5}delete\\b|supabase\\s+db\\s+reset\\b|supabase\\s+projects\\s+delete\\b|pnpm\\s+(?:purge|store\\s+prune)\\b|npm\\s+(?:unpublish|publish)\\b|yarn\\s+(?:unpublish|publish)\\b|defaults\\s+delete\\b|git\\s+filter-(?:repo|branch)\\b)"
   },
   "permissions": {
     "allow": [
@@ -189,6 +193,18 @@
         "id": "pre:governance-capture"
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/pre-bash-dispatcher.js",
+            "timeout": 15
+          }
+        ],
+        "description": "Bash safety dispatcher (Theme H, strict profile). Runs block-no-verify, auto-tmux-dev, tmux-reminder, git-push-reminder, commit-quality, and pre:bash:gateguard-fact-force (which gates both the first non-read-only Bash per session and destructive commands) in sequence; each sub-hook self-gates on ECC_HOOK_PROFILE/ECC_DISABLED_HOOKS. The gateguard's destructive set honours GATEGUARD_BASH_EXTRA_DESTRUCTIVE (task #12).",
+        "id": "pre:bash:dispatcher"
+      },
+      {
         "matcher": "mcp__.*",
         "hooks": [
           {
@@ -248,6 +264,79 @@
         ],
         "description": "Capture governance events from tool outputs to per-account state.db (pairs with pre:governance-capture)",
         "id": "post:governance-capture"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/post-bash-dispatcher.js",
+            "async": true,
+            "timeout": 30
+          }
+        ],
+        "description": "Post-Bash dispatcher (Theme H). Runs pr-created detection; command-log-audit/cost and build-complete are disabled via ECC_DISABLED_HOOKS (audit is replaced by the account-aware fork below).",
+        "id": "post:bash:dispatcher"
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks-fork/post-bash-command-log.js\" audit",
+            "timeout": 10
+          }
+        ],
+        "description": "Append each executed Bash command to a per-account bash-commands.log. Forked from ECC to resolve the log dir via getClaudeDir() (ECC_AGENT_DATA_HOME-aware) instead of a hardcoded ~/.claude, so cld and cld-r06 keep separate histories (task #11). Replaces the dispatcher's disabled command-log-audit sub-hook.",
+        "id": "post:bash:command-log-audit"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:accumulate scripts/hooks/post-edit-accumulator.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Accumulate edited JS/TS file paths for the Stop-time batched format/typecheck (D2, feeds stop:format-typecheck)",
+        "id": "post:edit:accumulate"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:quality-gate scripts/hooks/quality-gate.js standard,strict",
+            "timeout": 30
+          }
+        ],
+        "description": "Per-edit quality gate: auto-format .json/.md/.go/.py via biome/prettier/gofmt/ruff (D3, ECC_QUALITY_GATE_FIX=true). Runs synchronously: FIX rewrites the file, so an async format would race a following read/edit of the same file. JS/TS in Biome projects are handled by stop:format-typecheck instead.",
+        "id": "post:quality-gate"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:design-quality-check scripts/hooks/design-quality-check.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Per-edit frontend design-quality checklist warnings (D6)",
+        "id": "post:edit:design-quality-check"
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:console-warn scripts/hooks/post-edit-console-warn.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Warn (with line numbers) when an edited JS/TS file still contains console.log statements (D4)",
+        "id": "post:edit:console-warn"
       }
     ],
     "PostToolUseFailure": [
@@ -303,6 +392,31 @@
         ],
         "description": "Send desktop notification (macOS/WSL) with task summary when Claude responds",
         "id": "stop:desktop-notify"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:format-typecheck scripts/hooks/stop-format-typecheck.js standard,strict",
+            "async": true,
+            "timeout": 300
+          }
+        ],
+        "description": "At Stop, batch-format (biome/prettier) and typecheck (tsc --noEmit) the JS/TS files edited this session (D1, fed by post:edit:accumulate). Runs async (like the other Stop hooks) so tsc never blocks the response; no-op when no JS/TS was edited or tooling is unavailable.",
+        "id": "stop:format-typecheck"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:check-console-log scripts/hooks/check-console-log.js standard,strict",
+            "timeout": 15
+          }
+        ],
+        "description": "At Stop, aggregate console.log warnings across git-modified JS/TS files (excluding tests/scripts) (D5, pairs with post:edit:console-warn). Sync (fast grep) so warnings surface.",
+        "id": "stop:check-console-log"
       }
     ]
   },
