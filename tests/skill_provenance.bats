@@ -24,11 +24,16 @@ load helpers/setup
     echo "agent-browser discovery stub missing from source"
     false
   }
-  # The specialized skills are loaded at runtime, not vendored (would go stale).
+  # The specialized skills are loaded at runtime, not vendored (would go stale), and
+  # their previously-deployed copies must be removed via .chezmoiremove.
   local s
   for s in electron slack dogfood; do
     [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
       echo "agent-browser skill '$s' should be CLI-served, not vendored in source"
+      false
+    }
+    grep -qFx ".agents/skills/${s}" "${HOME_DIR}/.chezmoiremove" || {
+      echo ".chezmoiremove is missing the runtime removal target for '$s'"
       false
     }
   done
