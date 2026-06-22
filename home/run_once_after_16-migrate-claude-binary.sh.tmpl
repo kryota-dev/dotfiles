@@ -1,0 +1,40 @@
+#!/bin/bash
+# Point the canonical claude launcher (~/.local/bin/claude) at the mise-managed binary.
+#
+# claude is pinned in dot_config/mise/config.toml and installed by mise
+# (run_onchange_after_12-setup-mise). Claude Code classifies any out-of-tree binary as a
+# "native" install — its detection falls back to "native" for anything that is not npm or
+# a recognised package manager (mise is neither) — and then expects a launcher at
+# ~/.local/bin/claude. We therefore keep one there as a symlink to mise's version-stable
+# "latest" path (mise repoints installs/claude/latest on every update, so the symlink
+# always follows the pinned version without dangling). Combined with
+# DISABLE_INSTALLATION_CHECKS=1 in settings.json, this lets mise own the binary while
+# Claude Code's native-install self-check stays satisfied.
+#
+# The native install under ~/.local/share/claude is intentionally left in place. Its
+# ClaudeCode.app bundle (com.anthropic.claude-code) gives the CLI a macOS app identity for
+# microphone/voice-dictation and Apple Events (URL/app control) that the bare mise-managed
+# binary lacks; it is the CLI's own .app bundle, distinct from the /Applications/Claude.app
+# desktop app. We keep it rather than reclaim the disk.
+set -euo pipefail
+
+launcher="${HOME}/.local/bin/claude"
+mise_claude="${HOME}/.local/share/mise/installs/claude/latest/claude"
+
+# Act only once mise has installed claude and the binary actually runs, so the user is
+# never left without a working claude.
+if [ ! -x "$mise_claude" ] || ! "$mise_claude" --version &>/dev/null; then
+  echo "WARNING: mise-managed claude is not functional yet; leaving ${launcher} as-is." >&2
+  echo "         Run 'mise install claude' then re-run 'chezmoi apply'." >&2
+  exit 0
+fi
+
+# Already a symlink to the mise binary? nothing to do.
+if [ -L "$launcher" ] && [ "$(readlink "$launcher")" = "$mise_claude" ]; then
+  exit 0
+fi
+
+mkdir -p "$(dirname "$launcher")"
+ln -sfn "$mise_claude" "$launcher"
+echo "==> Pointed ${launcher} -> ${mise_claude}"
+echo "    mise now manages claude: $("$mise_claude" --version 2>/dev/null | head -n1)"
