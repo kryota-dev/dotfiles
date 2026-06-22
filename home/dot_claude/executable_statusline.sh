@@ -24,6 +24,8 @@ input=$(cat)
 
 # Single jq extraction. The \x1f (Unit Separator) field delimiter is used
 # instead of a tab because tabs collapse empty fields under IFS word splitting.
+# session_id is read last, so any \x1f inside its value can only spill into
+# itself and never corrupts an earlier field.
 IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct sd_reset session_id < <(echo "$input" | jq -r '[
   (.model.display_name // "Claude"),
   (.effort.level // ""),
@@ -240,8 +242,11 @@ JPY_RATE=$(usd_jpy_rate)
 write_harness_cost() {
   local cost="$1" sid="$2"
   [ -n "$cost" ] && [ -n "$sid" ] || return 0
-  # Cost must be a bare decimal — guards against emitting malformed JSON.
-  case "$cost" in '' | *[!0-9.]*) return 0 ;; esac
+  # Accept only a JSON number (including jq's scientific form, e.g. 1E-7 for
+  # costs below 1e-6) so a malformed value can never reach the JSON body or the
+  # filename. A naive [0-9.]-only filter both let "1.2.3" through and silently
+  # dropped jq's 1E-7, which cost-tracker.js accepts via Number().
+  [[ "$cost" =~ ^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$ ]] || return 0
   # Match ECC sanitizeSessionId: reject traversal, map any char outside
   # [A-Za-z0-9_-] to '_', cap at 64 chars.
   case "$sid" in *..* | */* | *\\*) return 0 ;; esac
@@ -249,10 +254,25 @@ write_harness_cost() {
   [ -n "$sid" ] || return 0
   local tmp="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
   tmp="${tmp%/}"
-  local target="$tmp/harness-cost-$sid.json" tmpf
-  tmpf="$tmp/harness-cost-$sid.$$.tmp"
-  printf '{"ts":%s,"cost_usd":%s}' "$(date +%s)" "$cost" >"$tmpf" 2>/dev/null &&
-    mv -f "$tmpf" "$target" 2>/dev/null
+  # Write a mktemp file (umask 077, O_EXCL random name) then atomically rename.
+  # The final name is fixed by the cost-tracker contract and lives in a shared
+  # tmpdir (world-writable /tmp on Linux), so a predictable ".$$.tmp" name would
+  # be a symlink/TOCTOU target for a co-located local user; mktemp's random
+  # O_EXCL name avoids that. The closing rename(2) replaces the target link
+  # itself, so the final hop never follows a planted symlink either.
+  local target="$tmp/harness-cost-$sid.json" tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "$tmp/harness-cost-$sid.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
+  if printf '{"ts":%s,"cost_usd":%s}' "$(date +%s)" "$cost" >"$tmpf" 2>/dev/null; then
+    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  else
+    rm -f "$tmpf" 2>/dev/null
+  fi
 }
 write_harness_cost "$cost" "$session_id"
 

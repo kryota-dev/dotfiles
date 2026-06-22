@@ -10,6 +10,15 @@ load helpers/setup
 SCRIPT="${HOME_DIR}/dot_claude/executable_statusline.sh"
 MOCK_JSON='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":1.23},"session_id":"bats-statusline"}'
 
+# Every test that pipes MOCK_JSON exercises write_harness_cost (the harness-cost
+# contract), which writes a cache file keyed by session_id into the resolved
+# tmpdir. Clean it up so the suite leaves no stray tmpdir artifacts.
+HARNESS_COST_FILE="${TMPDIR:-/tmp}"
+HARNESS_COST_FILE="${HARNESS_COST_FILE%/}/harness-cost-bats-statusline.json"
+teardown() {
+  rm -f "$HARNESS_COST_FILE" 2>/dev/null || true
+}
+
 @test "statusline script is present" {
   [ -f "$SCRIPT" ]
 }
@@ -52,4 +61,16 @@ MOCK_JSON='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"work
   run bash -c "printf '%s' '${MOCK_JSON}' | bash '${SCRIPT}'"
   [ "$status" -eq 0 ]
   [ "${#lines[@]}" -ge 2 ]
+}
+
+# Guards the harness-cost contract (#2): the statusline must persist the
+# harness-authoritative cost to <tmpdir>/harness-cost-<session_id>.json as
+# {ts, cost_usd} so ECC's stop:cost-tracker can prefer it over its estimate.
+@test "statusline writes a valid harness-cost cache file for the session" {
+  rm -f "$HARNESS_COST_FILE"
+  run bash -c "printf '%s' '${MOCK_JSON}' | bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [ -f "$HARNESS_COST_FILE" ]
+  run jq -e '.cost_usd == 1.23 and (.ts | type == "number")' "$HARNESS_COST_FILE"
+  [ "$status" -eq 0 ]
 }
