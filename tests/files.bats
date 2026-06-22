@@ -127,6 +127,12 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
 }
 
+@test "ecc governance-capture fork exists and passes node syntax check" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
+  [ -f "$fork" ]
+  node --check "$fork"
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }
