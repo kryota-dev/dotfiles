@@ -24,7 +24,9 @@ input=$(cat)
 
 # Single jq extraction. The \x1f (Unit Separator) field delimiter is used
 # instead of a tab because tabs collapse empty fields under IFS word splitting.
-IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct sd_reset < <(echo "$input" | jq -r '[
+# session_id is read last, so any \x1f inside its value can only spill into
+# itself and never corrupts an earlier field.
+IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct sd_reset session_id < <(echo "$input" | jq -r '[
   (.model.display_name // "Claude"),
   (.effort.level // ""),
   (.workspace.current_dir // .cwd // ""),
@@ -35,7 +37,8 @@ IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct 
   (.rate_limits.five_hour.used_percentage // "" | tostring),
   (.rate_limits.five_hour.resets_at // "" | tostring),
   (.rate_limits.seven_day.used_percentage // "" | tostring),
-  (.rate_limits.seven_day.resets_at // "" | tostring)
+  (.rate_limits.seven_day.resets_at // "" | tostring),
+  (.session_id // "")
 ] | join("\u001f")')
 
 # ANSI colors
@@ -229,6 +232,49 @@ claude_status() {
 }
 
 JPY_RATE=$(usd_jpy_rate)
+
+# Harness-cost contract (task #2): persist the harness-authoritative session
+# cost so ECC's `stop:cost-tracker` hook can prefer it over its rate-table
+# estimate. Path and format match what cost-tracker.js reads: Node's
+# os.tmpdir()/harness-cost-<session_id>.json holding {ts, cost_usd}. os.tmpdir()
+# is resolved the same way Node does (TMPDIR/TMP/TEMP, trailing slash stripped,
+# else /tmp) so the bash writer and the node reader agree on the path.
+write_harness_cost() {
+  local cost="$1" sid="$2"
+  [ -n "$cost" ] && [ -n "$sid" ] || return 0
+  # Accept only a JSON number (including jq's scientific form, e.g. 1E-7 for
+  # costs below 1e-6) so a malformed value can never reach the JSON body or the
+  # filename. A naive [0-9.]-only filter both let "1.2.3" through and silently
+  # dropped jq's 1E-7, which cost-tracker.js accepts via Number().
+  [[ "$cost" =~ ^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$ ]] || return 0
+  # Match ECC sanitizeSessionId: reject traversal, map any char outside
+  # [A-Za-z0-9_-] to '_', cap at 64 chars.
+  case "$sid" in *..* | */* | *\\*) return 0 ;; esac
+  sid=$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-64)
+  [ -n "$sid" ] || return 0
+  local tmp="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+  tmp="${tmp%/}"
+  # Write a mktemp file (umask 077, O_EXCL random name) then atomically rename.
+  # The final name is fixed by the cost-tracker contract and lives in a shared
+  # tmpdir (world-writable /tmp on Linux), so a predictable ".$$.tmp" name would
+  # be a symlink/TOCTOU target for a co-located local user; mktemp's random
+  # O_EXCL name avoids that. The closing rename(2) replaces the target link
+  # itself, so the final hop never follows a planted symlink either.
+  local target="$tmp/harness-cost-$sid.json" tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "$tmp/harness-cost-$sid.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
+  if printf '{"ts":%s,"cost_usd":%s}' "$(date +%s)" "$cost" >"$tmpf" 2>/dev/null; then
+    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  else
+    rm -f "$tmpf" 2>/dev/null
+  fi
+}
+write_harness_cost "$cost" "$session_id"
 
 # ---------------------------------------------------------------------------
 # Line 1: host | dir | branch *dirty ⇡ahead⇣behind | worktree

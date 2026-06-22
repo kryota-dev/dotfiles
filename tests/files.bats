@@ -123,6 +123,10 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_statusline.sh" ]
 }
 
+@test "ecc hook launcher script exists" {
+  [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }

@@ -112,6 +112,114 @@
     ],
     "defaultMode": "auto"
   },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/session-start-bootstrap.js"
+          }
+        ],
+        "description": "Load previous context and detect package manager on new session",
+        "id": "session:start"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:compact scripts/hooks/pre-compact.js standard,strict"
+          }
+        ],
+        "description": "Save state before context compaction",
+        "id": "pre:compact"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:edit-write:suggest-compact scripts/hooks/suggest-compact.js standard,strict"
+          }
+        ],
+        "description": "Suggest manual compaction at logical intervals",
+        "id": "pre:edit-write:suggest-compact"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:ecc-metrics-bridge scripts/hooks/ecc-metrics-bridge.js minimal,standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Maintain running session metrics aggregate for statusline and context monitor",
+        "id": "post:ecc-metrics-bridge"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:ecc-context-monitor scripts/hooks/ecc-context-monitor.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Inject agent warnings on context exhaustion, high cost, scope creep, or tool loops",
+        "id": "post:ecc-context-monitor"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:session-end scripts/hooks/session-end.js minimal,standard,strict",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Persist session state after each response (Stop carries transcript_path)",
+        "id": "stop:session-end"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:cost-tracker scripts/hooks/cost-tracker.js minimal,standard,strict",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Track token and cost metrics per session",
+        "id": "stop:cost-tracker"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:desktop-notify scripts/hooks/desktop-notify.js standard,strict",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Send desktop notification (macOS/WSL) with task summary when Claude responds",
+        "id": "stop:desktop-notify"
+      }
+    ]
+  },
   "language": "Japanese",
   "alwaysThinkingEnabled": false,
   "cleanupPeriodDays": 20,
