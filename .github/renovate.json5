@@ -59,6 +59,19 @@
       datasourceTemplate: 'github-releases',
       extractVersionTemplate: '^v(?<version>.+)$',
     },
+    {
+      // ECC is pinned to a semver release tag in [ecc].version; track upstream releases.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        '\\[ecc\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"',
+      ],
+      depNameTemplate: 'affaan-m/ECC',
+      datasourceTemplate: 'github-releases',
+      extractVersionTemplate: '^v(?<version>.+)$',
+    },
   ],
   mise: {
     managerFilePatterns: [

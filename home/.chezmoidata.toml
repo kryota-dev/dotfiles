@@ -8,3 +8,7 @@ ghq_user = "kryota-dev"
 
 [skills]
   anthropic_commit = "57546260929473d4e0d1c1bb75297be2fdfa1949"
+
+[ecc]
+  # Everything Claude Code — https://github.com/affaan-m/ECC (pinned to a semver release tag)
+  version = "2.0.0"

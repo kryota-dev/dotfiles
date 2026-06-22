@@ -122,6 +122,17 @@
     include = ["*/skills/xlsx/**"]
     refreshPeriod = "168h"
 
+# Everything Claude Code (ECC) hook runtime — https://github.com/affaan-m/ECC
+# Only scripts/hooks + scripts/lib are fetched here (the hook runtime that later PRs wire
+# into settings.json). Skills / agents / rules are managed separately. The tarball is large,
+# but chezmoi extracts only the included paths. Version pinned in .chezmoidata.toml [ecc].version.
+[".agents/skills/ecc/scripts"]
+    type = "archive"
+    url = "https://github.com/affaan-m/ECC/archive/refs/tags/v{{ .ecc.version }}.tar.gz"
+    stripComponents = 2
+    include = ["*/scripts/hooks/**", "*/scripts/lib/**"]
+    refreshPeriod = "168h"
+
 # Moralerspace font (macOS only)
 # Version is defined in .chezmoidata.toml [versions.moralerspace_font]
 {{ if eq .chezmoi.os "darwin" -}}
