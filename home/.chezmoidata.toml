@@ -8,3 +8,11 @@ ghq_user = "kryota-dev"
 
 [skills]
   anthropic_commit = "57546260929473d4e0d1c1bb75297be2fdfa1949"
+
+[ecc]
+  # Everything Claude Code — https://github.com/affaan-m/ECC
+  # Pinned to an immutable commit (the v2.0.0 release commit) so the executable hook runtime
+  # cannot change under a moved tag. Renovate (github-tags) tracks release tags and bumps both
+  # version and commit together; ECC is never auto-merged (see packageRules in renovate.json5).
+  version = "2.0.0"
+  commit = "8ad4151095e453301ce0e50374103bcd8f50ded2"
