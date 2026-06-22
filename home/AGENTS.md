@@ -10,7 +10,7 @@
 
 ## Skill provenance（スキルの出自分類）
 
-`~/.agents/skills/` 配下の各 skill は次の 5 分類のいずれかに属する。新規 skill は `curated`（chezmoi 管理）で追加し、外部 skill は `external`（chezmoi external）で宣言的に取得する。**`unmanaged` を残さないこと**（削除するか `curated` / `external` へ取り込む）。
+skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ `~/.agents/skills/` の外に置かれる）。新規 skill は `curated`（chezmoi 管理）で追加し、外部 skill は `external`（chezmoi external）で宣言的に取得する。**`unmanaged` を残さないこと**（削除するか `curated` / `external` へ取り込む）。Anthropic 公式 skill でも `.chezmoiexternal.toml` で宣言したものは `external`、宣言せず `.system/` に配布されるものは `system` とする（公式かどうかではなく管理方法で分類する）。
 
 | 分類 | 定義 | 配置 |
 |------|------|------|

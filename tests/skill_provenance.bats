@@ -32,8 +32,10 @@ load helpers/setup
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
-    # A well-formed skill has at least one regular file (SKILL.md, or a
-    # trigger-eval.json for discovery-only skills such as wtp-workspace).
+    # Non-empty check (not strict structural validation): a skill must contain at
+    # least one regular file. maxdepth 2 also counts files one level down
+    # (references/, templates/), so discovery-only skills like wtp-workspace
+    # (trigger-eval.json) and skills whose files live only in subdirs still pass.
     if [ -z "$(find "$dir" -maxdepth 2 -type f -print -quit)" ]; then
       echo "empty curated skill dir: $name"
       false
@@ -43,9 +45,29 @@ load helpers/setup
 
 @test "skill provenance: external skills are declared in .chezmoiexternal.toml" {
   [ -f "${HOME_DIR}/.chezmoiexternal.toml" ]
-  # The ECC runtime and the Anthropic skill set are fetched as externals.
-  grep -q '\.agents/skills/ecc' "${HOME_DIR}/.chezmoiexternal.toml"
-  grep -qE '\[".agents/skills/[a-z0-9-]+' "${HOME_DIR}/.chezmoiexternal.toml"
+  # The ECC hook runtime must be declared as an external.
+  grep -q '\.agents/skills/ecc' "${HOME_DIR}/.chezmoiexternal.toml" || {
+    echo "ECC is not declared in .chezmoiexternal.toml"
+    false
+  }
+  # Sanity: at least one [".agents/skills/<name>..."] external entry exists.
+  # (<name> may carry a subpath such as ecc/scripts, hence the '/' in the class.)
+  grep -qE '\[".agents/skills/[a-z0-9/_-]+' "${HOME_DIR}/.chezmoiexternal.toml" || {
+    echo "no [\".agents/skills/...\"] external entries found"
+    false
+  }
+}
+
+@test "skill provenance: no skill is both curated and external" {
+  local dir name
+  for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    if grep -Eq "^\[\"\.agents/skills/${name}(/|\")" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null; then
+      echo "skill '$name' is declared both curated (source) and external (.chezmoiexternal.toml)"
+      false
+    fi
+  done
 }
 
 @test "skill provenance: AGENTS.md documents all five categories" {
@@ -94,8 +116,10 @@ load helpers/setup
     name="$(basename "$dir")"
     # curated: present in the chezmoi source tree
     [ -d "${HOME_DIR}/dot_agents/skills/${name}" ] && continue
-    # external: declared in .chezmoiexternal.toml (matches "ecc" in ".agents/skills/ecc/scripts" too)
-    grep -q "\.agents/skills/${name}\b" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null && continue
+    # external: declared as a [".agents/skills/<name>"] or [".agents/skills/<name>/..."]
+    # table header. Anchor to the path segment so a prefix name (e.g. "slack") is not
+    # matched against a longer external entry ("slack-gif-creator").
+    grep -Eq "^\[\"\.agents/skills/${name}(/|\")" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null && continue
     # system (.system) is a dotfile and not matched by */ ; anything else is unmanaged
     unmanaged+=("$name")
   done
