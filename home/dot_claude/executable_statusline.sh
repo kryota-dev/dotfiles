@@ -24,7 +24,7 @@ input=$(cat)
 
 # Single jq extraction. The \x1f (Unit Separator) field delimiter is used
 # instead of a tab because tabs collapse empty fields under IFS word splitting.
-IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct sd_reset < <(echo "$input" | jq -r '[
+IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct sd_reset session_id < <(echo "$input" | jq -r '[
   (.model.display_name // "Claude"),
   (.effort.level // ""),
   (.workspace.current_dir // .cwd // ""),
@@ -35,7 +35,8 @@ IFS=$'\x1f' read -r model effort cwd project wt ctx cost fh_pct fh_reset sd_pct 
   (.rate_limits.five_hour.used_percentage // "" | tostring),
   (.rate_limits.five_hour.resets_at // "" | tostring),
   (.rate_limits.seven_day.used_percentage // "" | tostring),
-  (.rate_limits.seven_day.resets_at // "" | tostring)
+  (.rate_limits.seven_day.resets_at // "" | tostring),
+  (.session_id // "")
 ] | join("\u001f")')
 
 # ANSI colors
@@ -229,6 +230,31 @@ claude_status() {
 }
 
 JPY_RATE=$(usd_jpy_rate)
+
+# Harness-cost contract (task #2): persist the harness-authoritative session
+# cost so ECC's `stop:cost-tracker` hook can prefer it over its rate-table
+# estimate. Path and format match what cost-tracker.js reads: Node's
+# os.tmpdir()/harness-cost-<session_id>.json holding {ts, cost_usd}. os.tmpdir()
+# is resolved the same way Node does (TMPDIR/TMP/TEMP, trailing slash stripped,
+# else /tmp) so the bash writer and the node reader agree on the path.
+write_harness_cost() {
+  local cost="$1" sid="$2"
+  [ -n "$cost" ] && [ -n "$sid" ] || return 0
+  # Cost must be a bare decimal — guards against emitting malformed JSON.
+  case "$cost" in '' | *[!0-9.]*) return 0 ;; esac
+  # Match ECC sanitizeSessionId: reject traversal, map any char outside
+  # [A-Za-z0-9_-] to '_', cap at 64 chars.
+  case "$sid" in *..* | */* | *\\*) return 0 ;; esac
+  sid=$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-64)
+  [ -n "$sid" ] || return 0
+  local tmp="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+  tmp="${tmp%/}"
+  local target="$tmp/harness-cost-$sid.json" tmpf
+  tmpf="$tmp/harness-cost-$sid.$$.tmp"
+  printf '{"ts":%s,"cost_usd":%s}' "$(date +%s)" "$cost" >"$tmpf" 2>/dev/null &&
+    mv -f "$tmpf" "$target" 2>/dev/null
+}
+write_harness_cost "$cost" "$session_id"
 
 # ---------------------------------------------------------------------------
 # Line 1: host | dir | branch *dirty ⇡ahead⇣behind | worktree
