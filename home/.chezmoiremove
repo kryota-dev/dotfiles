@@ -1,0 +1,11 @@
+# Targets chezmoi must ensure are absent from the destination on every apply.
+# (Removing a file from the source tree does not delete an already-deployed copy;
+# this directive does.)
+
+# Orphaned SDD agents retired in Phase 4-1 (PR6). They are no longer in the source
+# tree (git rm), carry project-specific knowledge and global-rule conflicts, and
+# duplicate the active cc-code-review / cc-security-review / multi-review agents.
+.claude/agents/sdd-designer.md
+.claude/agents/sdd-worker.md
+.claude/agents/sdd-work-reviewer.md
+.claude/agents/sdd-design-reviewer.md
