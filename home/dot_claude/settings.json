@@ -11,7 +11,8 @@
     "DISABLE_INSTALLATION_CHECKS": "1",
     "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "95",
-    "MAX_THINKING_TOKENS": "127999"
+    "MAX_THINKING_TOKENS": "127999",
+    "ECC_GOVERNANCE_CAPTURE": "1"
   },
   "permissions": {
     "allow": [
@@ -150,6 +151,65 @@
         ],
         "description": "Suggest manual compaction at logical intervals",
         "id": "pre:edit-write:suggest-compact"
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:config-protection scripts/hooks/config-protection.js standard,strict",
+            "timeout": 5
+          }
+        ],
+        "description": "Block edits to linter/formatter config files (bypass with ECC_DISABLED_HOOKS=pre:config-protection)",
+        "id": "pre:config-protection"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:edit-write:gateguard-fact-force scripts/hooks/gateguard-fact-force.js standard,strict",
+            "timeout": 5
+          }
+        ],
+        "description": "Fact-forcing gate: require articulating impact before the first Edit/Write per file",
+        "id": "pre:edit-write:gateguard-fact-force"
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks-fork/governance-capture.js\"",
+            "timeout": 10
+          }
+        ],
+        "description": "Capture governance events (secrets, approval-required commands, sensitive paths) to per-account state.db. Forked from ECC to add persistence; enable with ECC_GOVERNANCE_CAPTURE=1",
+        "id": "pre:governance-capture"
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_EVENT_NAME=PreToolUse $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Probe MCP server health before MCP tool execution (matcher narrowed to mcp__.* per task #13 so non-MCP tools never pay the hook cost). CLAUDE_HOOK_EVENT_NAME is set explicitly because Claude Code does not export it and mcp-health-check.js selects its handler from that env var.",
+        "id": "pre:mcp-health-check"
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:write:doc-file-warning scripts/hooks/doc-file-warning.js standard,strict"
+          }
+        ],
+        "description": "Warn when creating non-standard scratch documentation files (TODO.md/NOTES.md/etc.) outside structured directories",
+        "id": "pre:write:doc-file-warning"
       }
     ],
     "PostToolUse": [
@@ -176,6 +236,32 @@
         ],
         "description": "Inject agent warnings on context exhaustion, high cost, scope creep, or tool loops",
         "id": "post:ecc-context-monitor"
+      },
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$HOME/.claude/hooks-fork/governance-capture.js\"",
+            "timeout": 10
+          }
+        ],
+        "description": "Capture governance events from tool outputs to per-account state.db (pairs with pre:governance-capture)",
+        "id": "post:governance-capture"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict",
+            "timeout": 10
+          }
+        ],
+        "description": "Track failed MCP tool calls, mark unhealthy servers, and attempt reconnect. CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure is set explicitly because Claude Code does not export it and mcp-health-check.js would otherwise default to the PreToolUse handler.",
+        "id": "post:mcp-health-check"
       }
     ],
     "Stop": [
