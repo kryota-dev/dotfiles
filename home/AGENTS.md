@@ -22,6 +22,8 @@ skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ
 
 分類整合性は `tests/skill_provenance.bats` で enforcement する（source の `curated` / `external` 宣言を deterministic に検証し、runtime に `unmanaged` が残っていれば警告する）。
 
+なお `agent-browser` のように **CLI が specialized skill を runtime 配信する**ツールでは、discovery stub のみを `curated` で管理し、専用 skill（electron/slack/dogfood 等）は vendoring しない（`agent-browser skills get <name>` で version-matched に取得）。CLI 本体は mise で管理する（`npm:agent-browser`）。
+
 ## 運用ルール
 
 ### 基本
