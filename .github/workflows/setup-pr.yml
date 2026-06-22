@@ -14,6 +14,6 @@ jobs:
   auto-assign:
     permissions:
       pull-requests: write
-    uses: kryota-dev/actions/.github/workflows/auto-assign-pr.yml@f8009e36b4c6db991e969e3052b87ee8c6577531 # v0.2.3
+    uses: kryota-dev/actions/.github/workflows/auto-assign-pr.yml@1b0a97fd1b3e970f119d09fd2949be8d7fc45959 # v0.2.4
     with:
       bot-assignees: "kryota-dev"
