@@ -8,6 +8,20 @@
 - GitHub Issueを作成する際は、`$create-issue` を使用する
 - 新機能や変更の実装前は、`$planning` を使用する
 
+## Skill provenance（スキルの出自分類）
+
+skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ `~/.agents/skills/` の外に置かれる）。新規 skill は `curated`（chezmoi 管理）で追加し、外部 skill は `external`（chezmoi external）で宣言的に取得する。**`unmanaged` を残さないこと**（削除するか `curated` / `external` へ取り込む）。Anthropic 公式 skill でも `.chezmoiexternal.toml` で宣言したものは `external`、宣言せず `.system/` に配布されるものは `system` とする（公式かどうかではなく管理方法で分類する）。
+
+| 分類 | 定義 | 配置 |
+|------|------|------|
+| `curated` | chezmoi で SSOT 管理する自作 skill。各ツール（Claude / Codex）へ symlink で配信 | source: `home/dot_agents/skills/<name>/` |
+| `external` | chezmoi external で取得する外部 skill（ECC 等）。source には含めない | `.chezmoiexternal.toml`（or `.tmpl`）で宣言、`~/.agents/skills/<name>/` に展開 |
+| `system` | Anthropic 配布の system skill。管理対象外（変更しない） | `~/.agents/skills/.system/` 配下 |
+| `evolved` | 継続学習 v2（CLV2）の `/evolve` で instinct から生成した skill。skill discovery とは別 location | `$CLV2_HOMUNCULUS_DIR/evolved/skills/` 配下 |
+| `unmanaged` | 上記いずれにも該当しない = **policy 違反** | — |
+
+分類整合性は `tests/skill_provenance.bats` で enforcement する（source の `curated` / `external` 宣言を deterministic に検証し、runtime に `unmanaged` が残っていれば警告する）。
+
 ## 運用ルール
 
 ### 基本
