@@ -1,0 +1,33 @@
+#!/bin/bash
+# mise config hash: {{ include "dot_config/mise/config.toml" | sha256sum }}
+set -euo pipefail
+
+# agent-browser's CLI is managed by mise (npm:agent-browser). It drives real browsers
+# over CDP and needs browser binaries (Chromium); `agent-browser install` downloads them.
+# The specialized skills (electron/slack/dogfood/...) are NOT vendored — the agent loads
+# them at runtime via `agent-browser skills get <name>` (version-matched).
+#
+# run_onchange (keyed on the mise config hash): re-runs when the agent-browser pin
+# changes, so a version bump re-installs matching browsers. `agent-browser install` is
+# idempotent. `mise exec` is used so the mise-managed version runs — not a stale
+# `agent-browser` that happens to come earlier on PATH (e.g. an old global install).
+
+if ! command -v mise &>/dev/null; then
+  echo "WARNING: mise is not installed; skipping agent-browser browser setup."
+  exit 0
+fi
+
+echo "==> Installing agent-browser browser binaries (via mise)..."
+{{ if eq .chezmoi.os "linux" -}}
+# --with-deps also installs the system libraries the browser needs (Linux only).
+if ! mise exec -- agent-browser install --with-deps; then
+  echo "WARNING: 'mise exec -- agent-browser install --with-deps' failed; run it later."
+  exit 0
+fi
+{{ else -}}
+if ! mise exec -- agent-browser install; then
+  echo "WARNING: 'mise exec -- agent-browser install' failed; run it later."
+  exit 0
+fi
+{{ end -}}
+echo "==> agent-browser browser binaries installed."
