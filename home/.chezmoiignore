@@ -18,6 +18,13 @@
 .claude/teams
 .claude/todos
 
+# ECC runtime state (hooks, governance state.db, continuous-learning, gateguard)
+.claude/ecc
+.claude/ecc-homunculus
+.claude/.gateguard
+.claude/mcp-health-cache.json
+.claude/metrics
+
 # Claude Code runtime data (work account)
 .claude-r06/backups
 .claude-r06/chrome
@@ -37,6 +44,15 @@
 .claude-r06/tasks
 .claude-r06/teams
 .claude-r06/todos
+.claude-r06/ecc
+.claude-r06/ecc-homunculus
+.claude-r06/.gateguard
+.claude-r06/mcp-health-cache.json
+.claude-r06/metrics
+
+# Shared agents: skill lock files (managed by skill tooling, not chezmoi)
+.agents/.skill-lock.json
+.agents/skills-lock.json
 
 # Codex runtime data
 # config.toml is intentionally unmanaged (Codex writes trust_level etc. dynamically);
