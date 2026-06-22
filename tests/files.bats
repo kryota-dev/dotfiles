@@ -181,29 +181,43 @@ load helpers/setup
   local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
   local tmp; tmp=$(mktemp -d)
   node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_name:"Bash",tool_input:{command:"echo "+"A".repeat(200000)}}))' > "$tmp/in.json"
-  local in_bytes out_bytes
-  in_bytes=$(wc -c < "$tmp/in.json")
-  out_bytes=$(ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit < "$tmp/in.json" 2>/dev/null | wc -c)
+  ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit < "$tmp/in.json" > "$tmp/out.json" 2>/dev/null
+  local in_bytes; in_bytes=$(wc -c < "$tmp/in.json")
+  # Byte-exact pass-through: input exceeds the OS pipe buffer AND output is identical
+  # (cmp catches reordering/corruption that an equal byte count would miss).
+  run cmp "$tmp/in.json" "$tmp/out.json"
+  local cmp_status=$status
   rm -rf "$tmp"
   [ "$in_bytes" -gt 65536 ]
-  [ "$in_bytes" -eq "$out_bytes" ]
+  [ "$cmp_status" -eq 0 ]
 }
 
-# Functional smoke: with the ECC runtime present, the fork appends a sanitized line
-# to the per-account bash-commands.log resolved via getClaudeDir() (ECC_AGENT_DATA_HOME),
-# proving account isolation (task #11) — not the hardcoded ~/.claude of the ECC original.
+# Functional smoke: with the ECC runtime present, the fork appends a sanitized, 0600
+# line to the per-account bash-commands.log resolved via getClaudeDir()
+# (ECC_AGENT_DATA_HOME), proving account isolation (task #11) — not the hardcoded
+# ~/.claude of the ECC original — and that extraRedact() strips a secret ECC's own
+# sanitizer misses. Assertions are split so a failure pinpoints which guarantee broke.
 # Skips in minimal CI (no ECC external deployed).
-@test "ecc post-bash-command-log fork appends to per-account bash-commands.log" {
+@test "ecc post-bash-command-log fork appends a redacted 0600 line to the per-account log" {
   local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
   local ecc="${HOME}/.agents/skills/ecc/scripts/hooks/post-bash-command-log.js"
   [ -f "$ecc" ] || skip "ECC external runtime not deployed"
   local tmp; tmp=$(mktemp -d)
-  printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}' \
+  local log="$tmp/bash-commands.log"
+  # AWS_SECRET_ACCESS_KEY=... is a secret shape ECC's sanitizeCommand does not catch;
+  # extraRedact() must strip it before the line is written.
+  printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"AWS_SECRET_ACCESS_KEY=abcdEFGH1234 aws s3 ls"}}' \
     | CLAUDE_PLUGIN_ROOT="${HOME}/.agents/skills/ecc" ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit >/dev/null 2>&1
-  local ok=0
-  [ -f "$tmp/bash-commands.log" ] && grep -q 'git push origin main' "$tmp/bash-commands.log" && ok=1
+  local file_exists=0 has_cmd=0 secret_leaked=0 perms=""
+  [ -f "$log" ] && file_exists=1
+  grep -q 'aws s3 ls' "$log" 2>/dev/null && has_cmd=1
+  grep -q 'abcdEFGH1234' "$log" 2>/dev/null && secret_leaked=1
+  perms=$(stat -f '%Lp' "$log" 2>/dev/null || stat -c '%a' "$log" 2>/dev/null)
   rm -rf "$tmp"
-  [ "$ok" -eq 1 ]
+  [ "$file_exists" -eq 1 ]   # account-aware log created under ECC_AGENT_DATA_HOME
+  [ "$has_cmd" -eq 1 ]       # command recorded
+  [ "$secret_leaked" -eq 0 ] # extraRedact stripped the secret env value
+  [ "$perms" = "600" ]       # owner-only permissions
 }
 
 @test "1password-backed secret template exists" {

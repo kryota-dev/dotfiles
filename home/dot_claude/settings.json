@@ -16,7 +16,7 @@
     "ECC_HOOK_PROFILE": "strict",
     "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete",
     "ECC_QUALITY_GATE_FIX": "true",
-    "GATEGUARD_BASH_EXTRA_DESTRUCTIVE": "\\b(?:chezmoi\\s+(?:destroy|forget|purge)\\b|terraform\\s+(?:destroy|state\\s+rm|workspace\\s+delete|force-unlock)\\b|terraform\\s+apply\\s+(?:[^&|;]*\\s)?-{1,2}auto-approve\\b|kubectl\\s+delete\\b|helm\\s+(?:uninstall|delete)\\b|docker\\s+(?:system\\s+prune|volume\\s+(?:rm|prune)|image\\s+prune|container\\s+prune|network\\s+prune)\\b|docker\\s+(?:rm|rmi)\\s+(?:[^&|;]*\\s)?-[a-zA-Z]*f\\b|brew\\s+(?:uninstall|autoremove|untap)\\b|mas\\s+uninstall\\b|mise\\s+(?:uninstall|implode|prune)\\b|aqua\\s+(?:rm|prune)\\b|gh\\s+(?:repo\\s+delete|release\\s+delete|secret\\s+(?:delete|remove)|cache\\s+delete|run\\s+delete)\\b|aws\\s+s3\\s+r[mb]\\b|aws\\s+(?:ec2\\s+terminate-instances|iam\\s+delete-|dynamodb\\s+delete-table|rds\\s+delete-)|gcloud\\s+(?:\\S+\\s+){1,3}delete\\b|supabase\\s+db\\s+reset\\b|supabase\\s+projects\\s+delete\\b|pnpm\\s+(?:purge|store\\s+prune)\\b|npm\\s+(?:unpublish|publish)\\b|yarn\\s+(?:unpublish|publish)\\b|defaults\\s+delete\\b|git\\s+filter-(?:repo|branch)\\b)"
+    "GATEGUARD_BASH_EXTRA_DESTRUCTIVE": "\\b(?:chezmoi\\s+(?:destroy|forget|purge)\\b|terraform\\s+(?:destroy|state\\s+rm|workspace\\s+delete|force-unlock)\\b|terraform\\s+apply\\s+(?:[^&|;]*\\s)?-{1,2}auto-approve\\b|kubectl\\s+delete\\b|helm\\s+(?:uninstall|delete)\\b|docker\\s+(?:system\\s+prune|volume\\s+(?:rm|prune)|image\\s+prune|container\\s+prune|network\\s+prune)\\b|docker\\s+(?:rm|rmi)\\b(?=[^&|;]*\\s(?:--force\\b|-[a-zA-Z]*f\\b))|brew\\s+(?:uninstall|autoremove|untap)\\b|mas\\s+uninstall\\b|mise\\s+(?:uninstall|implode|prune)\\b|aqua\\s+(?:rm|prune)\\b|gh\\s+(?:repo\\s+delete|release\\s+delete|secret\\s+(?:delete|remove)|cache\\s+delete|run\\s+delete)\\b|aws\\s+s3\\s+r[mb]\\b|aws\\s+(?:ec2\\s+terminate-instances|iam\\s+delete-|dynamodb\\s+delete-table|rds\\s+delete-)|aws\\s+\\S+\\s+delete-|gcloud\\s+(?:\\S+\\s+){1,5}delete\\b|supabase\\s+db\\s+reset\\b|supabase\\s+projects\\s+delete\\b|pnpm\\s+(?:purge|store\\s+prune)\\b|npm\\s+(?:unpublish|publish)\\b|yarn\\s+(?:unpublish|publish)\\b|defaults\\s+delete\\b|git\\s+filter-(?:repo|branch)\\b)"
   },
   "permissions": {
     "allow": [
@@ -201,7 +201,7 @@
             "timeout": 15
           }
         ],
-        "description": "Bash safety dispatcher (Theme H, strict profile). Runs block-no-verify, auto-tmux-dev, tmux-reminder, git-push-reminder, commit-quality, and the destructive-command gateguard in sequence; each sub-hook self-gates on ECC_HOOK_PROFILE/ECC_DISABLED_HOOKS. The gateguard honours GATEGUARD_BASH_EXTRA_DESTRUCTIVE (task #12).",
+        "description": "Bash safety dispatcher (Theme H, strict profile). Runs block-no-verify, auto-tmux-dev, tmux-reminder, git-push-reminder, commit-quality, and pre:bash:gateguard-fact-force (which gates both the first non-read-only Bash per session and destructive commands) in sequence; each sub-hook self-gates on ECC_HOOK_PROFILE/ECC_DISABLED_HOOKS. The gateguard's destructive set honours GATEGUARD_BASH_EXTRA_DESTRUCTIVE (task #12).",
         "id": "pre:bash:dispatcher"
       },
       {
@@ -295,7 +295,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:accumulate scripts/hooks/post-edit-accumulator.js standard,strict"
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:accumulate scripts/hooks/post-edit-accumulator.js standard,strict",
+            "timeout": 10
           }
         ],
         "description": "Accumulate edited JS/TS file paths for the Stop-time batched format/typecheck (D2, feeds stop:format-typecheck)",
@@ -307,11 +308,10 @@
           {
             "type": "command",
             "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:quality-gate scripts/hooks/quality-gate.js standard,strict",
-            "async": true,
             "timeout": 30
           }
         ],
-        "description": "Per-edit quality gate: auto-format .json/.md/.go/.py via biome/prettier/gofmt/ruff (D3, ECC_QUALITY_GATE_FIX=true; advisory, non-blocking). JS/TS in Biome projects are handled by stop:format-typecheck instead.",
+        "description": "Per-edit quality gate: auto-format .json/.md/.go/.py via biome/prettier/gofmt/ruff (D3, ECC_QUALITY_GATE_FIX=true). Runs synchronously: FIX rewrites the file, so an async format would race a following read/edit of the same file. JS/TS in Biome projects are handled by stop:format-typecheck instead.",
         "id": "post:quality-gate"
       },
       {
@@ -331,7 +331,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:console-warn scripts/hooks/post-edit-console-warn.js standard,strict"
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:edit:console-warn scripts/hooks/post-edit-console-warn.js standard,strict",
+            "timeout": 10
           }
         ],
         "description": "Warn (with line numbers) when an edited JS/TS file still contains console.log statements (D4)",
@@ -398,10 +399,11 @@
           {
             "type": "command",
             "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:format-typecheck scripts/hooks/stop-format-typecheck.js standard,strict",
+            "async": true,
             "timeout": 300
           }
         ],
-        "description": "At Stop, batch-format (biome/prettier) and typecheck (tsc --noEmit) the JS/TS files edited this session (D1, fed by post:edit:accumulate). No-op when no JS/TS was edited or tooling is unavailable.",
+        "description": "At Stop, batch-format (biome/prettier) and typecheck (tsc --noEmit) the JS/TS files edited this session (D1, fed by post:edit:accumulate). Runs async (like the other Stop hooks) so tsc never blocks the response; no-op when no JS/TS was edited or tooling is unavailable.",
         "id": "stop:format-typecheck"
       },
       {
@@ -409,10 +411,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:check-console-log scripts/hooks/check-console-log.js standard,strict"
+            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:check-console-log scripts/hooks/check-console-log.js standard,strict",
+            "timeout": 15
           }
         ],
-        "description": "At Stop, aggregate console.log warnings across git-modified JS/TS files (excluding tests/scripts) (D5, pairs with post:edit:console-warn)",
+        "description": "At Stop, aggregate console.log warnings across git-modified JS/TS files (excluding tests/scripts) (D5, pairs with post:edit:console-warn). Sync (fast grep) so warnings surface.",
         "id": "stop:check-console-log"
       }
     ]

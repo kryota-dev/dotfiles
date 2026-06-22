@@ -14,7 +14,9 @@
  *
  * Reuse over reimplementation: the command sanitiser (secret redaction) and the path
  * resolver are require()d from the pinned external rather than copied, so they stay in
- * sync with upstream. Only the audit-log path join is overridden. The plugin-root
+ * sync with upstream. On top of ECC's sanitiser the fork layers extraRedact() (extra
+ * secret shapes ECC misses) and writes the log owner-only (0600); the audit-log path
+ * is resolved via getClaudeDir() instead of the hardcoded ~/.claude. The plugin-root
  * fallback mirrors the PR4 governance-capture fork (probing for scripts/lib/utils.js,
  * the module that exports getClaudeDir).
  *
@@ -60,9 +62,13 @@ function resolvePluginRoot() {
     }
   };
 
-  const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (envRoot && envRoot.trim() && hasRuntime(envRoot.trim())) {
-    return path.resolve(envRoot.trim());
+  // plugin-hook-bootstrap.js reads CLAUDE_PLUGIN_ROOT, falling back to ECC_PLUGIN_ROOT;
+  // honour both so a host that exports only ECC_PLUGIN_ROOT still resolves.
+  for (const name of ['CLAUDE_PLUGIN_ROOT', 'ECC_PLUGIN_ROOT']) {
+    const envRoot = process.env[name];
+    if (envRoot && envRoot.trim() && hasRuntime(envRoot.trim())) {
+      return path.resolve(envRoot.trim());
+    }
   }
 
   const home = os.homedir();
@@ -98,6 +104,26 @@ function resolvePluginRoot() {
   return null;
 }
 
+// Defence-in-depth redaction layered ON TOP of ECC's sanitizeCommand (which is still
+// applied first, so upstream improvements keep flowing through). ECC covers
+// --token / Authorization / AKIA|ASIA / password / gh*_ tokens but misses several
+// secret shapes common in shell commands; redacting them before the line is written
+// keeps secrets out of bash-commands.log alongside the 0600 file mode below. \r is
+// collapsed too (ECC collapses \n only) so a CRLF command leaves no stray carriage
+// return in the log.
+function extraRedact(text) {
+  return String(text)
+    .replace(/\r/g, ' ')
+    // Uppercase env-style assignments: AWS_SECRET_ACCESS_KEY=, ANTHROPIC_API_KEY=,
+    // NPM_TOKEN=, *_PASSWORD= ... (env-var convention is uppercase, so no /i to avoid
+    // over-redacting ordinary words).
+    .replace(/\b([A-Z][A-Z0-9_]*(?:SECRET|KEY|TOKEN|PASSWORD|PASSWD)[A-Z0-9_]*)=\S+/g, '$1=<REDACTED>')
+    // Credentials embedded in a URL: https://user:pass@host -> https://user:<REDACTED>@host
+    .replace(/(https?:\/\/[^/\s:@]+:)[^/\s@]+@/g, '$1<REDACTED>@')
+    // OpenAI / Anthropic style keys: sk-..., sk-ant-...
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}/g, '<REDACTED>');
+}
+
 /**
  * Append a sanitised audit line for the Bash command in `rawInput` to the per-account
  * bash-commands.log. Best-effort: any failure degrades to a silent pass-through.
@@ -117,10 +143,18 @@ function run(rawInput, options = {}) {
         const { getClaudeDir } = require(path.join(pluginRoot, 'scripts', 'lib', 'utils'));
         const input = String(rawInput || '').trim() ? JSON.parse(String(rawInput)) : {};
         const command = (input.tool_input && input.tool_input.command) || '?';
-        const line = `[${new Date().toISOString()}] ${sanitizeCommand(command)}`;
+        const line = `[${new Date().toISOString()}] ${extraRedact(sanitizeCommand(command))}`;
         const filePath = path.join(getClaudeDir(), AUDIT_FILE);
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
-        fs.appendFileSync(filePath, `${line}\n`, 'utf8');
+        // Owner-only: the audit log holds (redacted) command history and must not be
+        // world/group readable. `mode` only applies on create, so chmod after append
+        // also tightens a pre-existing 0644 file (mirrors governance-capture.js).
+        fs.appendFileSync(filePath, `${line}\n`, { encoding: 'utf8', mode: 0o600 });
+        try {
+          fs.chmodSync(filePath, 0o600);
+        } catch {
+          // Best-effort — chmod may be unsupported on some filesystems.
+        }
       }
       // pluginRoot === null: external runtime absent → skip logging (no sanitiser).
     } catch {
