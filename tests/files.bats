@@ -127,6 +127,46 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
 }
 
+@test "ecc governance-capture fork exists and passes node syntax check" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
+  [ -f "$fork" ]
+  node --check "$fork"
+}
+
+# Regression guard: a bare process.exit() after stdout.write() truncates output
+# larger than the OS pipe buffer (~64 KB), which would corrupt PostToolUse
+# pass-through of large tool_response payloads. The fork must pass input through
+# byte-for-byte regardless of size. No ECC runtime needed (a benign tool yields
+# zero events, so the hook only passes stdin through).
+@test "ecc governance-capture fork passes large input through without truncation" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
+  local tmp; tmp=$(mktemp -d)
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_name:"Read",tool_input:{file_path:"/x"},tool_response:"A".repeat(200000)}))' > "$tmp/in.json"
+  local in_bytes out_bytes
+  in_bytes=$(wc -c < "$tmp/in.json")
+  out_bytes=$(ECC_GOVERNANCE_CAPTURE=1 ECC_AGENT_DATA_HOME="$tmp" node "$fork" < "$tmp/in.json" 2>/dev/null | wc -c)
+  rm -rf "$tmp"
+  [ "$in_bytes" -gt 65536 ]
+  [ "$in_bytes" -eq "$out_bytes" ]
+}
+
+# Functional smoke: with the ECC runtime present and node:sqlite available, a
+# governance-relevant tool call must persist a row to the per-account state.db.
+# Skips in minimal CI (no ECC external / older Node without node:sqlite).
+@test "ecc governance-capture fork persists an event to state.db" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
+  local ecc="${HOME}/.agents/skills/ecc/scripts/hooks/governance-capture.js"
+  [ -f "$ecc" ] || skip "ECC external runtime not deployed"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  local tmp; tmp=$(mktemp -d)
+  printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main --force"},"session_id":"bats-gov"}' \
+    | CLAUDE_PLUGIN_ROOT="${HOME}/.agents/skills/ecc" ECC_GOVERNANCE_CAPTURE=1 ECC_AGENT_DATA_HOME="$tmp" node "$fork" >/dev/null 2>&1
+  local count
+  count=$(node -e 'const{DatabaseSync}=require("node:sqlite");const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});process.stdout.write(String(db.prepare("SELECT count(*) c, session_id s FROM governance_events").get().c));db.close()' "$tmp/ecc/state.db" 2>/dev/null)
+  rm -rf "$tmp"
+  [ "$count" -ge 1 ]
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }
