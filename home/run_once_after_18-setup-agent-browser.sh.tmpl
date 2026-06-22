@@ -1,0 +1,32 @@
+#!/bin/bash
+set -euo pipefail
+
+# agent-browser's CLI is managed by mise (npm:agent-browser). The CLI drives real
+# browsers over CDP, so it needs browser binaries (Chromium); `agent-browser install`
+# downloads them. The specialized skills (electron/slack/dogfood/...) are NOT vendored —
+# the agent loads them at runtime via `agent-browser skills get <name>` (version-matched),
+# so the only setup here is the browser binaries.
+#
+# run_once: the binaries are installed once per machine. After a major agent-browser
+# bump, re-run `agent-browser install` manually if automation reports a missing browser.
+
+if ! command -v agent-browser &>/dev/null; then
+  echo "WARNING: agent-browser is not installed (managed by mise: npm:agent-browser)."
+  echo "Skipping browser-binary setup; run 'mise install' then 'agent-browser install'."
+  exit 0
+fi
+
+echo "==> Installing agent-browser browser binaries..."
+{{ if eq .chezmoi.os "linux" -}}
+# --with-deps also installs the system libraries the browser needs (Linux only).
+if ! agent-browser install --with-deps; then
+  echo "WARNING: 'agent-browser install --with-deps' failed; install browsers later with 'agent-browser install'."
+  exit 0
+fi
+{{ else -}}
+if ! agent-browser install; then
+  echo "WARNING: 'agent-browser install' failed; install browsers later with 'agent-browser install'."
+  exit 0
+fi
+{{ end -}}
+echo "==> agent-browser browser binaries installed."

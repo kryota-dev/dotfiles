@@ -17,11 +17,18 @@ load helpers/setup
 
 # --- Deterministic source assertions ------------------------------------------
 
-@test "skill provenance: newly curated skills (electron, slack, dogfood) are in source" {
+@test "skill provenance: agent-browser vendors only its discovery stub; specialized skills are CLI-served" {
+  # Only the discovery stub is vendored (curated). It points the agent at
+  # `agent-browser skills get <name>` for the version-matched specialized content.
+  [ -f "${HOME_DIR}/dot_agents/skills/agent-browser/SKILL.md" ] || {
+    echo "agent-browser discovery stub missing from source"
+    false
+  }
+  # The specialized skills are loaded at runtime, not vendored (would go stale).
   local s
   for s in electron slack dogfood; do
-    [ -f "${HOME_DIR}/dot_agents/skills/${s}/SKILL.md" ] || {
-      echo "missing curated skill: dot_agents/skills/${s}/SKILL.md"
+    [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
+      echo "agent-browser skill '$s' should be CLI-served, not vendored in source"
       false
     }
   done

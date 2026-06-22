@@ -10,3 +10,11 @@
 .claude/agents/sdd-worker.md
 .claude/agents/sdd-work-reviewer.md
 .claude/agents/sdd-design-reviewer.md
+
+# agent-browser specialized skills. The CLI serves these at runtime via
+# `agent-browser skills get <name>` (version-matched, never stale), so vendoring the
+# static SKILL.md is redundant. Only the discovery stub (dot_agents/skills/agent-browser)
+# stays managed; these previously-deployed copies are removed.
+.agents/skills/electron
+.agents/skills/slack
+.agents/skills/dogfood
