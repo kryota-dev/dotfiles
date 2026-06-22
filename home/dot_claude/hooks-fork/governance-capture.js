@@ -117,6 +117,17 @@ function stateDbPath() {
   return path.join(base, 'ecc', 'state.db');
 }
 
+// Best-effort owner-only (0600) on the audit DB and its WAL sidecars.
+function hardenDbPerms(dbPath) {
+  for (const suffix of ['', '-wal', '-shm']) {
+    try {
+      fs.chmodSync(dbPath + suffix, 0o600);
+    } catch {
+      // Sidecar may not exist / chmod unsupported — best-effort only.
+    }
+  }
+}
+
 /**
  * Persist governance events to the per-account state.db. Best-effort: any failure
  * degrades to stderr-only (the events were already emitted by the caller).
@@ -130,19 +141,22 @@ function persistEvents(events, pluginRoot) {
   try {
     ({ DatabaseSync } = require('node:sqlite'));
   } catch {
-    return; // node:sqlite unavailable (older Node) — emit-only.
+    // Emit the drop marker so every persistence-failure path is observable,
+    // not just DB-open/write errors. (node:sqlite needs Node >= 22.5.)
+    process.stderr.write('[governance][persist-failed] node:sqlite unavailable\n');
+    return;
   }
 
   let MIGRATIONS;
   try {
     ({ MIGRATIONS } = require(path.join(pluginRoot, 'scripts', 'lib', 'state-store', 'migrations.js')));
-  } catch {
+  } catch (err) {
+    process.stderr.write(`[governance][persist-failed] migration load failed: ${err.message}\n`);
     return;
   }
 
   const dbPath = stateDbPath();
   const dbDir = path.dirname(dbPath);
-  const dirExisted = fs.existsSync(dbDir);
   try {
     // 0700: the audit DB holds sensitive-path / command metadata; keep its
     // directory owner-only. recursive mode only applies to created components.
@@ -150,15 +164,15 @@ function persistEvents(events, pluginRoot) {
   } catch {
     // Directory creation failed — the open below will surface the error.
   }
-  if (!dirExisted) {
-    try {
-      fs.chmodSync(dbDir, 0o700);
-    } catch {
-      // Best-effort hardening only.
-    }
+  // Enforce owner-only on the audit dir every run (idempotent), so an existing
+  // dir created with a looser umask is also tightened. An audit store has no
+  // legitimate reason to be group/world-accessible.
+  try {
+    fs.chmodSync(dbDir, 0o700);
+  } catch {
+    // Best-effort hardening only.
   }
 
-  const dbExisted = fs.existsSync(dbPath);
   let db;
   try {
     // FK off: see file header — appended rows may reference unmanaged sessions.
@@ -168,17 +182,10 @@ function persistEvents(events, pluginRoot) {
     return;
   }
 
-  if (!dbExisted) {
-    // Restrict a freshly created audit DB to the owner (0600). Existing files
-    // are left untouched so we never widen or fight a user's chosen mode.
-    for (const suffix of ['', '-wal', '-shm']) {
-      try {
-        fs.chmodSync(dbPath + suffix, 0o600);
-      } catch {
-        // Sidecar may not exist yet / chmod unsupported — best-effort only.
-      }
-    }
-  }
+  // Restrict the audit DB to the owner (0600), every run and idempotently. The
+  // -wal/-shm sidecars only exist once WAL is active, so they are re-hardened
+  // again after the writes below.
+  hardenDbPerms(dbPath);
 
   try {
     // Match ECC's own connection (state-store/index.js uses WAL) and let
@@ -241,6 +248,9 @@ function persistEvents(events, pluginRoot) {
         '@created_at': event.createdAt || new Date().toISOString(),
       });
     }
+
+    // Re-harden now that WAL writes have materialised the -wal/-shm sidecars.
+    hardenDbPerms(dbPath);
   } catch (err) {
     // Machine-readable marker so external monitoring can detect dropped audit
     // events even though the hook fails open and never blocks the tool.
