@@ -167,6 +167,45 @@ load helpers/setup
   [ "$count" -ge 1 ]
 }
 
+@test "ecc post-bash-command-log fork exists and passes node syntax check" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
+  [ -f "$fork" ]
+  node --check "$fork"
+}
+
+# Regression guard: a bare process.exit() after stdout.write() truncates output
+# larger than the OS pipe buffer (~64 KB). The fork must pass the PostToolUse Bash
+# payload through byte-for-byte regardless of size. No ECC runtime needed (logging
+# is best-effort; the pass-through is unconditional).
+@test "ecc post-bash-command-log fork passes large input through without truncation" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
+  local tmp; tmp=$(mktemp -d)
+  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_name:"Bash",tool_input:{command:"echo "+"A".repeat(200000)}}))' > "$tmp/in.json"
+  local in_bytes out_bytes
+  in_bytes=$(wc -c < "$tmp/in.json")
+  out_bytes=$(ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit < "$tmp/in.json" 2>/dev/null | wc -c)
+  rm -rf "$tmp"
+  [ "$in_bytes" -gt 65536 ]
+  [ "$in_bytes" -eq "$out_bytes" ]
+}
+
+# Functional smoke: with the ECC runtime present, the fork appends a sanitized line
+# to the per-account bash-commands.log resolved via getClaudeDir() (ECC_AGENT_DATA_HOME),
+# proving account isolation (task #11) — not the hardcoded ~/.claude of the ECC original.
+# Skips in minimal CI (no ECC external deployed).
+@test "ecc post-bash-command-log fork appends to per-account bash-commands.log" {
+  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
+  local ecc="${HOME}/.agents/skills/ecc/scripts/hooks/post-bash-command-log.js"
+  [ -f "$ecc" ] || skip "ECC external runtime not deployed"
+  local tmp; tmp=$(mktemp -d)
+  printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main"}}' \
+    | CLAUDE_PLUGIN_ROOT="${HOME}/.agents/skills/ecc" ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit >/dev/null 2>&1
+  local ok=0
+  [ -f "$tmp/bash-commands.log" ] && grep -q 'git push origin main' "$tmp/bash-commands.log" && ok=1
+  rm -rf "$tmp"
+  [ "$ok" -eq 1 ]
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }
