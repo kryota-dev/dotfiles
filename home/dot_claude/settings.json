@@ -193,10 +193,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict"
+            "command": "CLAUDE_HOOK_EVENT_NAME=PreToolUse $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict",
+            "timeout": 10
           }
         ],
-        "description": "Probe MCP server health before MCP tool execution (matcher narrowed to mcp__.* per task #13 so non-MCP tools never pay the hook cost)",
+        "description": "Probe MCP server health before MCP tool execution (matcher narrowed to mcp__.* per task #13 so non-MCP tools never pay the hook cost). CLAUDE_HOOK_EVENT_NAME is set explicitly because Claude Code does not export it and mcp-health-check.js selects its handler from that env var.",
         "id": "pre:mcp-health-check"
       },
       {
@@ -255,10 +256,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict"
+            "command": "CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict",
+            "timeout": 10
           }
         ],
-        "description": "Track failed MCP tool calls, mark unhealthy servers, and attempt reconnect",
+        "description": "Track failed MCP tool calls, mark unhealthy servers, and attempt reconnect. CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure is set explicitly because Claude Code does not export it and mcp-health-check.js would otherwise default to the PreToolUse handler.",
         "id": "post:mcp-health-check"
       }
     ],

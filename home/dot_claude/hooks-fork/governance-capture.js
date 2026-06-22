@@ -18,9 +18,16 @@
  * dependencies and writes a standard SQLite3 file that ECC's sql.js readers can
  * still open. The schema is applied by replaying ECC's own migration SQL
  * (require()d from scripts/lib/state-store/migrations.js, which is pure JS with no
- * sql.js/ajv dependency), so the resulting database is byte-compatible with what
+ * sql.js/ajv dependency), so the resulting database is schema-compatible with what
  * ECC would have produced — including the schema_migrations bookkeeping — and ECC's
- * later migrations skip cleanly.
+ * later migrations skip cleanly. We replay the MIGRATIONS array ourselves rather
+ * than calling ECC's applyMigrations() because the latter uses better-sqlite3's
+ * db.transaction(), which node:sqlite's DatabaseSync does not expose; if ECC ever
+ * changes its migration-apply semantics, this replay loop must be updated by hand.
+ *
+ * WAL + busy_timeout match ECC's own connection (state-store/index.js sets WAL) and
+ * let concurrent hook processes (parallel tool calls each fire pre+post) serialise
+ * writes instead of dropping audit rows on SQLITE_BUSY.
  *
  * Foreign keys are intentionally left disabled on this connection: this hook only
  * appends governance rows, whose session_id may reference a session this hook does
@@ -134,29 +141,71 @@ function persistEvents(events, pluginRoot) {
   }
 
   const dbPath = stateDbPath();
+  const dbDir = path.dirname(dbPath);
+  const dirExisted = fs.existsSync(dbDir);
   try {
-    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    // 0700: the audit DB holds sensitive-path / command metadata; keep its
+    // directory owner-only. recursive mode only applies to created components.
+    fs.mkdirSync(dbDir, { recursive: true, mode: 0o700 });
   } catch {
     // Directory creation failed — the open below will surface the error.
   }
+  if (!dirExisted) {
+    try {
+      fs.chmodSync(dbDir, 0o700);
+    } catch {
+      // Best-effort hardening only.
+    }
+  }
 
+  const dbExisted = fs.existsSync(dbPath);
   let db;
   try {
     // FK off: see file header — appended rows may reference unmanaged sessions.
     db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: false });
   } catch (err) {
-    process.stderr.write(`[governance] open failed: ${err.message}\n`);
+    process.stderr.write(`[governance][persist-failed] open failed: ${err.message}\n`);
     return;
   }
 
+  if (!dbExisted) {
+    // Restrict a freshly created audit DB to the owner (0600). Existing files
+    // are left untouched so we never widen or fight a user's chosen mode.
+    for (const suffix of ['', '-wal', '-shm']) {
+      try {
+        fs.chmodSync(dbPath + suffix, 0o600);
+      } catch {
+        // Sidecar may not exist yet / chmod unsupported — best-effort only.
+      }
+    }
+  }
+
   try {
+    // Match ECC's own connection (state-store/index.js uses WAL) and let
+    // concurrent hook processes wait on the write lock instead of dropping
+    // audit rows on SQLITE_BUSY. busy_timeout stays under the hook's 10s budget.
+    try {
+      db.exec('PRAGMA journal_mode = WAL');
+    } catch {
+      // WAL unsupported in this context — fall back to the default journal.
+    }
+    try {
+      db.exec('PRAGMA busy_timeout = 5000');
+    } catch {
+      // Ignore — a missing busy_timeout only weakens concurrent-write resilience.
+    }
+
     db.exec(
       'CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)'
     );
     const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map(row => row.version));
-    const recordMigration = db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)');
+    // INSERT OR IGNORE: a concurrent fork on a fresh DB may also be recording
+    // the same migration version — let the loser skip rather than error.
+    const recordMigration = db.prepare('INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)');
 
-    db.exec('BEGIN');
+    // BEGIN IMMEDIATE acquires the write lock up front so two concurrent forks
+    // serialise the whole migrate+insert unit instead of racing the lock mid-write.
+    db.exec('BEGIN IMMEDIATE');
     try {
       for (const migration of Array.isArray(MIGRATIONS) ? MIGRATIONS : []) {
         if (applied.has(migration.version)) continue;
@@ -173,12 +222,13 @@ function persistEvents(events, pluginRoot) {
       throw err;
     }
 
+    // DO NOTHING keeps the table append-only: governance events are an audit
+    // trail, and ids are unique, so a (near-impossible) id collision must never
+    // silently overwrite an existing row.
     const insert = db.prepare(
       'INSERT INTO governance_events (id, session_id, event_type, payload, resolved_at, resolution, created_at) ' +
         'VALUES (@id, @session_id, @event_type, @payload, @resolved_at, @resolution, @created_at) ' +
-        'ON CONFLICT(id) DO UPDATE SET session_id=excluded.session_id, event_type=excluded.event_type, ' +
-        'payload=excluded.payload, resolved_at=excluded.resolved_at, resolution=excluded.resolution, ' +
-        'created_at=excluded.created_at'
+        'ON CONFLICT(id) DO NOTHING'
     );
     for (const event of events) {
       insert.run({
@@ -192,7 +242,9 @@ function persistEvents(events, pluginRoot) {
       });
     }
   } catch (err) {
-    process.stderr.write(`[governance] persist failed: ${err.message}\n`);
+    // Machine-readable marker so external monitoring can detect dropped audit
+    // events even though the hook fails open and never blocks the tool.
+    process.stderr.write(`[governance][persist-failed] ${err.message}\n`);
   } finally {
     try {
       db.close();
@@ -226,8 +278,6 @@ function run(rawInput, options = {}) {
     }
   }
 
-  const sessionId = process.env.ECC_SESSION_ID || null;
-
   let input = null;
   try {
     input = JSON.parse(rawInput);
@@ -235,9 +285,25 @@ function run(rawInput, options = {}) {
     input = null;
   }
 
+  // session_id arrives in the stdin payload (a common hook input field); the
+  // cld/cld-r06 aliases do NOT export ECC_SESSION_ID, so reading it from the
+  // payload is what actually correlates events to a session.
+  const sessionId = (input && input.session_id) || process.env.ECC_SESSION_ID || null;
+
   const eventName = (input && input.hook_event_name) || process.env.CLAUDE_HOOK_EVENT_NAME || '';
   const hookPhase = String(eventName).startsWith('Pre') ? 'pre' : 'post';
 
+  // ECC's analyzer inspects `tool_output` for output-side secrets, but Claude
+  // Code delivers tool output under `tool_response` (PostToolUse/PostToolUseFailure).
+  // Normalise so the post-side detection actually runs.
+  if (input && input.tool_output == null && input.tool_response != null) {
+    input.tool_output =
+      typeof input.tool_response === 'string' ? input.tool_response : JSON.stringify(input.tool_response);
+  }
+
+  // Note: when stdin exceeded MAX_STDIN the payload is truncated, JSON.parse
+  // above fails, and only the hook_input_truncated event below is recorded —
+  // detection is intentionally skipped rather than run on a corrupt payload.
   const events = [];
 
   if (options.truncated) {
@@ -270,10 +336,22 @@ function run(rawInput, options = {}) {
   try {
     persistEvents(events, pluginRoot);
   } catch (err) {
-    process.stderr.write(`[governance] persist error: ${err.message}\n`);
+    process.stderr.write(`[governance][persist-failed] ${err.message}\n`);
   }
 
   return rawInput;
+}
+
+// Write stdout and exit only once the buffer is fully flushed. A bare
+// process.exit() after a write truncates output larger than the OS pipe buffer
+// (~64 KB) — fatal for PostToolUse pass-through of large tool_response payloads.
+function writeAndExit(output) {
+  process.exitCode = 0;
+  try {
+    process.stdout.write(output, () => process.exit(0));
+  } catch {
+    process.exit(0);
+  }
 }
 
 // ── stdin entry point ────────────────────────────────────────────────────────
@@ -293,8 +371,7 @@ if (require.main === module) {
     }
   });
   process.stdin.on('error', () => {
-    process.stdout.write(raw);
-    process.exit(0);
+    writeAndExit(raw);
   });
   process.stdin.on('end', () => {
     let output = raw;
@@ -306,8 +383,7 @@ if (require.main === module) {
     } catch {
       output = raw;
     }
-    process.stdout.write(output);
-    process.exit(0);
+    writeAndExit(output);
   });
 }
 
