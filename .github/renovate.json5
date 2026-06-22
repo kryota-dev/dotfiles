@@ -60,16 +60,19 @@
       extractVersionTemplate: '^v(?<version>.+)$',
     },
     {
-      // ECC is pinned to a semver release tag in [ecc].version; track upstream releases.
+      // ECC ships executable hook code, so it is pinned to an immutable commit digest (not a
+      // moveable tag). github-tags tracks release tags and updates both the version and the
+      // commit digest in [ecc]; the packageRule below keeps ECC out of automerge.
       customType: 'regex',
       managerFilePatterns: [
         '/home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
-        '\\[ecc\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"',
+        '\\[ecc\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>[^"]+)"[\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
       ],
       depNameTemplate: 'affaan-m/ECC',
-      datasourceTemplate: 'github-releases',
+      packageNameTemplate: 'affaan-m/ECC',
+      datasourceTemplate: 'github-tags',
       extractVersionTemplate: '^v(?<version>.+)$',
     },
   ],
@@ -78,4 +81,11 @@
       '/home/dot_config/mise/config\\.toml/',
     ],
   },
+  packageRules: [
+    {
+      // ECC ships third-party executable hook code: never auto-merge, always review.
+      matchDepNames: ['affaan-m/ECC'],
+      automerge: false,
+    },
+  ],
 }

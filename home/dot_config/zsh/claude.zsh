@@ -14,15 +14,12 @@ _claude_with_home() {
 alias cld='_claude_with_home "$HOME/.claude"'
 alias cld-r06='_claude_with_home "$HOME/.claude-r06"'
 
-# Dedicated session for intentional config edits: disables the ECC config-protection and
-# gateguard-fact-force gates so Claude can edit settings.json / biome.json / eslint.config.* etc.
-alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force claude'
-
-# ECC state.db CLI (account-aware via ECC_AGENT_DATA_HOME). ECC scripts are chezmoi-managed
-# under ~/.agents/skills/ecc; these need the ECC runtime deps that a later PR installs.
-alias ecc-status='node "$HOME/.agents/skills/ecc/scripts/status.js" --db "${ECC_AGENT_DATA_HOME:-$HOME/.claude}/ecc/state.db"'
-alias ecc-sessions='node "$HOME/.agents/skills/ecc/scripts/sessions-cli.js" --db "${ECC_AGENT_DATA_HOME:-$HOME/.claude}/ecc/state.db"'
-alias ecc-work-items='node "$HOME/.agents/skills/ecc/scripts/work-items.js" --db "${ECC_AGENT_DATA_HOME:-$HOME/.claude}/ecc/state.db"'
+# Dedicated session for intentional config edits on the DEFAULT account (~/.claude): routes
+# through _claude_with_home (so ECC state stays isolated to ~/.claude) and disables the ECC
+# config-protection / gateguard-fact-force gates so Claude can edit settings.json / biome.json /
+# eslint.config.* etc. For the r06 account, prefix the same var to cld-r06:
+#   ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
+alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude"'
 
 alias ccdcmds='ccdcommands'
 
