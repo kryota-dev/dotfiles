@@ -12,13 +12,15 @@ description = "Global allowlist for the cross-harness pre-commit scan"
 # 1Password references are pointers, not secrets: chezmoi templates render
 # them at apply time via onepasswordRead, and `op://` URIs resolve through
 # the 1Password CLI. Neither embeds the secret value in the source tree.
+# regexTarget = "line" matches the whole staged line (vault names may contain
+# spaces), not just the extracted secret value.
+regexTarget = "line"
 regexes = [
-  '''op://[^"'\s]+''',
+  '''op://\S.*''',
   '''onepasswordRead''',
 ]
 
-# Planning/notes under .kryota-dev hold synthetic example tokens used in
-# design docs (e.g. illustrative regex test cases), not live credentials.
-paths = [
-  '''(^|/)\.kryota-dev/''',
-]
+# NOTE: no path-based allowlist. This config is loaded globally via
+# core.hooksPath, so a `paths` entry would blind the scanner to that path in
+# EVERY repo. Planning notes under .kryota-dev are already excluded from git
+# tracking via ~/.gitignore_global, so they never reach the staging area.

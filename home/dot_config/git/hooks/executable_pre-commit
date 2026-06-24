@@ -3,9 +3,13 @@
 # every commit — Claude, Codex, or human — is scanned for staged secrets with
 # gitleaks. This is a git-layer (harness-agnostic) guardrail.
 #
+# core.hooksPath replaces the repo's .git/hooks dir for ALL hook types, so this
+# hook also chains the repo's own .git/hooks/pre-commit when present (a repo
+# that sets its own core.hooksPath, e.g. husky, never reaches this hook).
+# Other raw .git/hooks types (commit-msg, …) are not chained here; repos that
+# rely on those should use a hook manager that sets core.hooksPath.
+#
 # Caveats:
-#   - A repo that sets its own core.hooksPath (e.g. husky's .husky) overrides
-#     this global hook; CI gitleaks is the backstop there.
 #   - `git commit --no-verify` bypasses it by design (per-harness policy).
 #   - If gitleaks is not installed the scan is skipped (fail-open) so commits
 #     are never bricked on a machine before `mise install` runs.
@@ -17,22 +21,38 @@ if command -v gitleaks >/dev/null 2>&1; then
 elif command -v mise >/dev/null 2>&1 && mise which gitleaks >/dev/null 2>&1; then
   gitleaks_cmd=(mise exec -- gitleaks)
 else
-  echo "[pre-commit] gitleaks not found; skipping secret scan (CI gitleaks is the backstop)." >&2
-  exit 0
+  echo "[pre-commit] gitleaks not found; skipping secret scan (CI/server-side scan is the backstop)." >&2
+  gitleaks_cmd=()
 fi
 
-config="${HOME}/.config/git/gitleaks.toml"
-scan_args=(git --staged --redact --no-banner)
-if [ -f "$config" ]; then
-  scan_args+=(--config "$config")
-fi
+if [ "${#gitleaks_cmd[@]}" -gt 0 ]; then
+  # Prefer a repo-local gitleaks config (so per-repo rules/allowlists win);
+  # fall back to the global config only when the repo defines none. Passing
+  # --config unconditionally would shadow the repo's own .gitleaks.toml.
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  scan_args=(git --staged --redact --no-banner)
+  if [ -n "$toplevel" ] && [ -f "${toplevel}/.gitleaks.toml" ]; then
+    : # gitleaks auto-discovers the repo-local config; do not override it.
+  elif [ -f "${HOME}/.config/git/gitleaks.toml" ]; then
+    scan_args+=(--config "${HOME}/.config/git/gitleaks.toml")
+  fi
 
-if ! "${gitleaks_cmd[@]}" "${scan_args[@]}"; then
-  cat >&2 <<'MSG'
+  if ! "${gitleaks_cmd[@]}" "${scan_args[@]}"; then
+    cat >&2 <<'MSG'
 [pre-commit] gitleaks detected a potential secret in the staged changes.
-The commit was aborted. Review the finding above. If it is a false positive,
-add an allowlist entry to ~/.config/git/gitleaks.toml. To override (NOT
-recommended), re-run with: git commit --no-verify
+The commit was aborted. Secret values are redacted above; to inspect the full
+match for a false-positive review, run locally:
+  gitleaks git --staged --config ~/.config/git/gitleaks.toml
+If it is a false positive, add an allowlist entry to ~/.config/git/gitleaks.toml.
+To override (NOT recommended): git commit --no-verify
 MSG
-  exit 1
+    exit 1
+  fi
+fi
+
+# Chain the repo's own pre-commit hook, which core.hooksPath would otherwise
+# replace. --git-path resolves the literal .git/hooks dir (not core.hooksPath).
+local_hook="$(git rev-parse --git-path hooks/pre-commit 2>/dev/null || true)"
+if [ -n "$local_hook" ] && [ -x "$local_hook" ]; then
+  exec "$local_hook" "$@"
 fi

@@ -318,8 +318,11 @@ FAKE
   grep -q 'Skill provenance' "$agents"
   ! grep -q 'Mandatory skill usage' "$agents"
   ! grep -q 'memory への記録ポリシー' "$agents"
-  # #10: the dev-server delegation rule is deleted.
-  ! grep -q '開発サーバーの起動はユーザーに委任' "$agents"
+  # The agnostic core must NOT reference Claude-only hooks or the @-import
+  # mechanism — Codex reads this file and has neither.
+  ! grep -q 'git-push-reminder' "$agents"
+  ! grep -q 'auto-tmux-dev' "$agents"
+  ! grep -q '@~/AGENTS.md' "$agents"
 }
 
 @test "house coding-standards SSOT exists" {
@@ -334,6 +337,9 @@ FAKE
   grep -q '@~/AGENTS.md' "$claude"
   grep -q 'Mandatory skill usage' "$claude"
   grep -q 'memory への記録ポリシー' "$claude"
+  # The Claude-only relaxations of the conservative core rules live here.
+  grep -q 'git-push-reminder' "$claude"
+  grep -q 'auto-tmux-dev' "$claude"
   # The personal-account symlink was replaced by this real file.
   [ ! -f "${HOME_DIR}/dot_claude/symlink_CLAUDE.md.tmpl" ]
 }
@@ -342,17 +348,31 @@ FAKE
   grep -q '/.claude/CLAUDE.md' "${HOME_DIR}/dot_claude-r06/symlink_CLAUDE.md.tmpl"
 }
 
-@test "codex AGENTS.md symlinks still point at the agnostic core" {
-  grep -q '/AGENTS.md' "${HOME_DIR}/dot_codex/symlink_AGENTS.md.tmpl"
-  grep -q '/AGENTS.md' "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl"
+@test "codex AGENTS.md symlinks still point at the agnostic core (not the .tmpl source)" {
+  # Target must be the deployed ~/AGENTS.md, never the source AGENTS.md.tmpl.
+  grep -qE '/AGENTS\.md$' "${HOME_DIR}/dot_codex/symlink_AGENTS.md.tmpl"
+  grep -qE '/AGENTS\.md$' "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl"
 }
 
-@test "global gitleaks pre-commit hook is wired" {
+@test "global gitleaks pre-commit hook is wired and well-behaved" {
   grep -q 'hooksPath = ~/.config/git/hooks' "${HOME_DIR}/dot_gitconfig.tmpl"
   local hook="${HOME_DIR}/dot_config/git/hooks/executable_pre-commit"
   [ -f "$hook" ]
   bash -n "$hook"
   grep -q 'gitleaks' "$hook"
   grep -q 'git --staged' "$hook"
+  # Prefers a repo-local gitleaks config over the global one.
+  grep -q '.gitleaks.toml' "$hook"
+  # Chains the repo's own pre-commit so core.hooksPath does not silently drop it.
+  grep -q 'git-path hooks/pre-commit' "$hook"
   [ -f "${HOME_DIR}/dot_config/git/gitleaks.toml" ]
+  # The global config must not carry a path allowlist (it would blind every repo).
+  ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/gitleaks.toml"
+}
+
+# Rendered-target checks (codex review): verify the template actually produces
+# the intended files, not just that the source greps right.
+@test "AGENTS.md renders with the coding-standards inlined" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  chezmoi cat "${HOME}/AGENTS.md" --source "${REPO_ROOT}/home" 2>/dev/null | grep -q 'Coding standards (house)'
 }

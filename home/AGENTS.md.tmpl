@@ -1,6 +1,6 @@
 <!-- このファイルが読み込まれたら「~/AGENTS.mdを読み込みました」とユーザーに必ず伝えてください -->
 
-このファイルは harness 非依存（Claude / Codex 共通）の運用ルールです。Claude 固有のルールは `~/.claude/CLAUDE.md`（本ファイルを `@~/AGENTS.md` で取り込む）に置きます。
+このファイルは harness 非依存（Claude / Codex 共通）の運用ルールです。各ツール固有のルールは、そのツール固有の設定ファイルで本ファイルを取り込んだ上に追記されます。
 
 ## Skill provenance（スキルの出自分類）
 
@@ -28,8 +28,7 @@ skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ
 - **常に日本語で対応すること**
 - **専門用語を積極的に使用すること**
   - 一般的な表現に言い換えず、正確な技術用語・業界用語をそのまま用いる
-- **git の commit 操作を行う際は、事故防止のため、ユーザーに確認を取ってから行うこと**
-  - push は git-push-reminder hook が stderr で注意喚起するため、明示確認は不要
+- **git の commit / push 操作を行う際は、事故防止のため、ユーザーに確認を取ってから行うこと**
 - **ファイルのリネーム時は `git mv` コマンドを使用し、Git 履歴を保持すること**
   - 削除 → 新規作成ではなく、必ず `git mv old_name new_name` でリネームする
 - **ユーザーによる操作や承認が必要な場合は、通知音付きのプッシュ通知を配信して作業を即中断すること**
@@ -46,5 +45,9 @@ skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ
   - `gh-asset download <asset_id> .claude/gh-assets`
   - 参考: https://github.com/YuitoSato/gh-asset
 - **ユーザーから「Copilotにアサインして」と指示された際は、`copilot-swe-agent`をアサインすること**
+
+### 開発サーバー
+
+- **ターミナルセッションのトラブルを避けるため、開発サーバーの起動はユーザーに委任すること**（自動化された hook がガードレールを提供する harness では、そのツール固有の設定で緩和してよい）
 
 {{ includeTemplate "coding-standards.md" . }}
