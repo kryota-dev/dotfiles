@@ -88,6 +88,16 @@ load helpers/setup
   [ "$count" -gt 0 ]
 }
 
+@test "language specialist reviewer agents exist with model sonnet" {
+  local lang agent
+  for lang in typescript react python database; do
+    agent="${HOME_DIR}/dot_claude/agents/${lang}-reviewer.md"
+    [ -f "$agent" ]
+    grep -q "^name: ${lang}-reviewer$" "$agent"
+    grep -q "^model: sonnet$" "$agent"
+  done
+}
+
 @test "shared agent skills exist" {
   [ -d "${HOME_DIR}/dot_agents/skills" ]
   local count
