@@ -27,6 +27,34 @@ FILENAME="${TIMESTAMP}_${TASK_NAME}.md"
 echo "ファイル名: ${FILENAME}"
 ```
 
+## Plan-PRD pipeline（任意 / opt-in, task #22）
+
+以下の flag は **任意**。**未指定時は本ドキュメントの通常動作（`.claude/plans/YYYYMMDDHHMMSS_taskName.md` への計画出力）を完全に維持する**。flag を渡したときだけ PRD 入力 / pipeline 形式の Plan 出力を行う。
+
+| flag | 既定 | 意味 |
+|------|------|------|
+| `--input-prd <path>` | （なし） | `/grill-me --output-prd` が出力した PRD file を入力 context として読み込み、その Acceptance Criteria を計画の起点にする |
+| `--output-plan <path>` | （なし） | pipeline 形式で Plan file を出力（既定の配置: `.claude/plans/<slug>.plan.md`、git tracked）。**この flag を渡したときのみ** slug ベース命名になる（未指定時は従来の timestamp 命名） |
+| `--mode=interactive\|auto` | `interactive` | `interactive`=現状動作 / `auto`=council（4 視点）審議で自動詳細化し、**最終 Plan draft を user が 1 回承認** |
+
+- **auto でも security / data migration / contract change 等は強制的に user エスカレート**する。
+- Plan file 出力は memory 記録に相当するため、`~/AGENTS.md` の memory ポリシー（**承認前に保存しない**）に従い、**file 出力前に必ず user 承認**を得る。
+- `--input-prd` の file が存在しない場合は error にして user に `/grill-me --output-prd` での生成を案内する。
+
+### Plan frontmatter（pipeline 形式時）
+
+```yaml
+---
+slug: <slug>
+prd: .claude/prds/<slug>.prd.md
+created_at: <ISO8601>
+planning_session: <session-id>
+status: draft | approved | implemented
+---
+```
+
+sections: **Approach** / **Step-by-step** / **Risk** / **Estimated effort**。下流の `/sdd --prd <path> --plan <path>` がこれらを入力にする。
+
 ## 実行計画の構造
 
 ### 必須セクション
