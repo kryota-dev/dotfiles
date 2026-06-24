@@ -15,7 +15,7 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 | flag | 既定 | 意味 |
 |------|------|------|
-| `--output-prd <path>` | （なし） | 合意内容を PRD file として書き出す（既定の配置: `.claude/prds/<slug>.prd.md`、git tracked） |
+| `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し **slug = basename（拡張子・`.prd` を除く）**。省略時は対話で確定した feature 名を **kebab-case 化した slug** で `.claude/prds/<slug>.prd.md`（git tracked）に出力 |
 | `--mode=interactive\|auto` | `interactive` | `interactive`=各判断を user 対話（現状動作）/ `auto`=council（4 視点）+ santa-method（PRD draft を 2 reviewer で adversarial verify）で自動審議し、**最終 PRD draft を user が 1 回承認** |
 
 - **auto でも security / data migration / contract change 等は強制的に user エスカレート**する。
@@ -33,6 +33,6 @@ status: draft | finalized | implemented
 ---
 ```
 
-sections: **Background** / **User Story** / **Acceptance Criteria**（`AC-NNN`） / **Out of Scope** / **Open Questions**。
+sections: **Background** / **User Story** / **Acceptance Criteria**（`AC-NNN`、ゼロ埋め 3 桁: `AC-001`） / **Out of Scope** / **Open Questions**。`created_at` は `date -Iseconds`（ローカル TZ）で生成する。
 
-slug 衝突時は `-v2` suffix で生成（user override 可）。下流の `/planning --input-prd <path>` がこの file を入力にする。
+**衝突処理（上書き禁止）**: 出力先 file が既存なら `-v2`、それも在れば `-v3`…と空きが見つかるまで `-vN` を増やす（既存 file は決して上書きしない。user が override path を明示した場合のみ従う）。下流の `/planning --input-prd <path>` がこの file を入力にする。

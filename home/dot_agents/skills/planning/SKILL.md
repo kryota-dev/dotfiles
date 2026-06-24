@@ -34,7 +34,7 @@ echo "ファイル名: ${FILENAME}"
 | flag | 既定 | 意味 |
 |------|------|------|
 | `--input-prd <path>` | （なし） | `/grill-me --output-prd` が出力した PRD file を入力 context として読み込み、その Acceptance Criteria を計画の起点にする |
-| `--output-plan <path>` | （なし） | pipeline 形式で Plan file を出力（既定の配置: `.claude/plans/<slug>.plan.md`、git tracked）。**この flag を渡したときのみ** slug ベース命名になる（未指定時は従来の timestamp 命名） |
+| `--output-plan [<path>]` | （なし） | pipeline 形式で Plan file を出力。**この flag を渡したときのみ** slug 命名になる（未指定時は従来の timestamp 命名）。slug は `--input-prd` 指定時は **PRD frontmatter の `slug` を継承**、未指定時は task 名を kebab-case 化。`<path>` 省略時の既定配置は `.claude/plans/<slug>.plan.md`（git tracked。`*.plan.md` は global gitignore の negation で追跡される） |
 | `--mode=interactive\|auto` | `interactive` | `interactive`=現状動作 / `auto`=council（4 視点）審議で自動詳細化し、**最終 Plan draft を user が 1 回承認** |
 
 - **auto でも security / data migration / contract change 等は強制的に user エスカレート**する。
@@ -46,14 +46,16 @@ echo "ファイル名: ${FILENAME}"
 ```yaml
 ---
 slug: <slug>
-prd: .claude/prds/<slug>.prd.md
-created_at: <ISO8601>
+prd: <--input-prd で渡した実パス。custom path/override もそのまま反映。--input-prd 未指定時は省略>
+created_at: <date -Iseconds（ローカル TZ）>
 planning_session: <session-id>
 status: draft | approved | implemented
 ---
 ```
 
-sections: **Approach** / **Step-by-step** / **Risk** / **Estimated effort**。下流の `/sdd --prd <path> --plan <path>` がこれらを入力にする。
+sections: **Approach** / **Step-by-step** / **Risk** / **Estimated effort** / **AC coverage**（PRD を入力にした場合、PRD の各 `AC-NNN` を Plan の step/task に対応付ける traceability。例: `AC-001 → Step 2, 3`）。下流の `/sdd --prd <path> --plan <path>` がこれらを入力にする。
+
+**衝突処理（上書き禁止）**: 出力先 file が既存なら `-v2`/`-v3`…と空きまで `-vN` を増やす（既存 file を上書きしない。user override path のみ従う）。`--input-prd` の file 不存在は error（PRD を捏造しない）。
 
 ## 実行計画の構造
 
