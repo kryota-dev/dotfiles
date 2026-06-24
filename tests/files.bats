@@ -106,14 +106,26 @@ load helpers/setup
   head -n1 "$skill" | grep -q '^---$'
   grep -q '^name: pr-workflow$' "$skill"
   grep -q '^argument-hint:' "$skill"
-  # The four size tiers and the three gates must be documented.
+  grep -q '^user-invocable: true$' "$skill"
+  # The four size tiers, the operation variants, and the three gates.
   local t
   for t in trivial small standard large; do grep -q "$t" "$skill"; done
-  grep -q 'GATE 1' "$skill"
-  grep -q 'GATE 2' "$skill"
-  grep -q 'GATE 3' "$skill"
-  # Merge stays the user's action (no auto-merge), per the global policy.
-  grep -q '自動マージ' "$skill"
+  grep -q 'add-feature' "$skill"
+  grep -q 'GATE 1' "$skill"; grep -q 'GATE 2' "$skill"; grep -q 'GATE 3' "$skill"
+  # Merge stays the user's action; never auto-merge.
+  grep -q '自動マージしない' "$skill"
+  ! grep -q '自動マージする' "$skill"
+  # Must not reference the removed sdd-worker agent (Phase 4-1, task #25).
+  ! grep -q 'sdd-worker' "$skill"
+  # Referenced curated skills that this orchestrator delegates to must exist.
+  local s
+  for s in sdd multi-review review-resolve-loop monitor-ci grill-me commit create-pr planning; do
+    [ -f "${HOME_DIR}/dot_agents/skills/${s}/SKILL.md" ] || { echo "delegated skill missing: $s"; return 1; }
+  done
+  # tdd-workflow / santa-method are described as inline protocols, not skills;
+  # they must NOT be referenced as if they were invokable curated skills.
+  [ ! -d "${HOME_DIR}/dot_agents/skills/tdd-workflow" ]
+  [ ! -d "${HOME_DIR}/dot_agents/skills/santa-method" ]
 }
 
 @test "codex-r06 work profile sources exist" {
