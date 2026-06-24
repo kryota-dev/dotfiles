@@ -236,6 +236,60 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
 
+@test "mcp setup registers both servers as user scope for every account config dir" {
+  local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
+  [ -f "$script" ]
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/bin"
+  # Fake mise that emulates `mise exec -- <cmd...>` by logging the wrapped command together
+  # with the CLAUDE_CONFIG_DIR it ran under. Lets us assert the script's real behaviour
+  # (per-account loop + --scope user) instead of just matching strings in the source.
+  cat >"$tmp/bin/mise" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$1" = "exec" ] && [ "$2" = "--" ]; then
+  shift 2
+  printf '%s ::: %s\n' "${CLAUDE_CONFIG_DIR:-NONE}" "$*" >>"$MISE_FAKE_LOG"
+fi
+exit 0
+FAKE
+  chmod +x "$tmp/bin/mise"
+
+  run env HOME="$tmp/home" PATH="$tmp/bin:$PATH" MISE_FAKE_LOG="$tmp/log" \
+    bash "$script"
+  [ "$status" -eq 0 ]
+
+  # Both servers are add-json'd with user scope for both account config dirs. The trailing
+  # " :::" anchors ".claude" so it does not also match ".claude-r06".
+  local d
+  for d in '\.claude' '\.claude-r06'; do
+    grep -qE "/home/${d} ::: claude mcp add-json context7 .* --scope user" "$tmp/log"
+    grep -qE "/home/${d} ::: claude mcp add-json deepwiki .* --scope user" "$tmp/log"
+  done
+}
+
+@test "mcp setup script declares valid JSON server configs" {
+  local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
+  local json count=0
+  # Each server config is a single-quoted JSON literal; ensure every one parses.
+  while IFS= read -r json; do
+    [ -n "$json" ] || continue
+    echo "$json" | jq -e . >/dev/null
+    count=$((count + 1))
+  done < <(grep -oE "'\{[^']*\}'" "$script" | tr -d "'")
+  [ "$count" -ge 2 ]
+}
+
+@test "project .mcp.json keeps only project-scoped servers" {
+  # context7/deepwiki were moved to user scope (run_onchange_after_13); the repo's own
+  # .mcp.json must keep the project-specific spec-workflow but no longer declare them.
+  local mcp="${REPO_ROOT}/.mcp.json"
+  [ -f "$mcp" ]
+  grep -q 'spec-workflow' "$mcp"
+  ! grep -q 'context7' "$mcp"
+  ! grep -q 'deepwiki' "$mcp"
+}
+
 @test "bootstrap script exists" {
   [ -f "${REPO_ROOT}/install/install.sh" ]
 }
