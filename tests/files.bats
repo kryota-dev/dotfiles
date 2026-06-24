@@ -100,6 +100,22 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
 
+@test "pr-workflow orchestrator skill exists with tier paths and gates" {
+  local skill="${HOME_DIR}/dot_agents/skills/pr-workflow/SKILL.md"
+  [ -f "$skill" ]
+  head -n1 "$skill" | grep -q '^---$'
+  grep -q '^name: pr-workflow$' "$skill"
+  grep -q '^argument-hint:' "$skill"
+  # The four size tiers and the three gates must be documented.
+  local t
+  for t in trivial small standard large; do grep -q "$t" "$skill"; done
+  grep -q 'GATE 1' "$skill"
+  grep -q 'GATE 2' "$skill"
+  grep -q 'GATE 3' "$skill"
+  # Merge stays the user's action (no auto-merge), per the global policy.
+  grep -q '自動マージ' "$skill"
+}
+
 @test "codex-r06 work profile sources exist" {
   [ -f "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl" ]
   [ -f "${HOME_DIR}/dot_codex-r06/symlink_skills.tmpl" ]
