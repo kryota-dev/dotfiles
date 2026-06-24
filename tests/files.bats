@@ -137,6 +137,34 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
 
+@test "pr-workflow orchestrator skill exists with tier paths and gates" {
+  local skill="${HOME_DIR}/dot_agents/skills/pr-workflow/SKILL.md"
+  [ -f "$skill" ]
+  head -n1 "$skill" | grep -q '^---$'
+  grep -q '^name: pr-workflow$' "$skill"
+  grep -q '^argument-hint:' "$skill"
+  grep -q '^user-invocable: true$' "$skill"
+  # The four size tiers, the operation variants, and the three gates.
+  local t
+  for t in trivial small standard large; do grep -q "$t" "$skill"; done
+  grep -q 'add-feature' "$skill"
+  grep -q 'GATE 1' "$skill"; grep -q 'GATE 2' "$skill"; grep -q 'GATE 3' "$skill"
+  # Merge stays the user's action; never auto-merge.
+  grep -q '自動マージしない' "$skill"
+  ! grep -q '自動マージする' "$skill"
+  # Must not reference the removed sdd-worker agent (Phase 4-1, task #25).
+  ! grep -q 'sdd-worker' "$skill"
+  # Referenced curated skills that this orchestrator delegates to must exist.
+  local s
+  for s in sdd multi-review review-resolve-loop monitor-ci grill-me commit create-pr planning; do
+    [ -f "${HOME_DIR}/dot_agents/skills/${s}/SKILL.md" ] || { echo "delegated skill missing: $s"; return 1; }
+  done
+  # tdd-workflow / santa-method are described as inline protocols, not skills;
+  # they must NOT be referenced as if they were invokable curated skills.
+  [ ! -d "${HOME_DIR}/dot_agents/skills/tdd-workflow" ]
+  [ ! -d "${HOME_DIR}/dot_agents/skills/santa-method" ]
+}
+
 @test "Plan-PRD pipeline flags are wired into grill-me / planning / sdd (opt-in)" {
   local skills="${HOME_DIR}/dot_agents/skills"
   # grill-me emits the PRD; planning consumes it and emits the Plan; sdd
