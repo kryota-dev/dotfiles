@@ -324,6 +324,124 @@ FAKE
   [ -f "${HOME_DIR}/Library/Application Support/Code/User/keybindings.json" ]
 }
 
+# --- Cross-harness gateguard: Codex PreToolUse Bash gate (task #26) ---
+
+@test "codex cross-harness gateguard script exists and passes node syntax check" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
+  [ -f "$gate" ]
+  node --check "$gate"
+}
+
+@test "codex hooks.json registers the gateguard as a PreToolUse Bash hook for both accounts" {
+  local shared="${HOME_DIR}/.chezmoitemplates/codex-hooks.json"
+  [ -f "$shared" ]
+  # Shared template is valid JSON once the homeDir placeholder is filled.
+  HOME_RENDER="/home/test" \
+    node -e 'const fs=require("fs");let s=fs.readFileSync(process.argv[1],"utf8").replace(/\{\{[^}]*\}\}/g,process.env.HOME_RENDER+"/.config/gateguard/codex-bash-gate.js");const j=JSON.parse(s);const m=j.hooks.PreToolUse[0];if(m.matcher!=="^Bash$")throw new Error("matcher");if(m.hooks[0].type!=="command")throw new Error("type");if(!/codex-bash-gate\.js/.test(m.hooks[0].command))throw new Error("command")' "$shared"
+  # Both accounts include the shared template (config.toml itself is unmanaged).
+  [ -f "${HOME_DIR}/dot_codex/hooks.json.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex-r06/hooks.json.tmpl" ]
+  grep -q 'includeTemplate "codex-hooks.json"' "${HOME_DIR}/dot_codex/hooks.json.tmpl"
+  grep -q 'includeTemplate "codex-hooks.json"' "${HOME_DIR}/dot_codex-r06/hooks.json.tmpl"
+}
+
+# Drive the gate with an ISOLATED HOME (empty BATS_TEST_TMPDIR, no .claude)
+# so an empty GATEGUARD_BASH_EXTRA_DESTRUCTIVE does not silently fall back to
+# the developer's real ~/.claude/settings.json. Echoes "deny" or "allow".
+_gate_decision() {
+  local gate="$1" cmd="$2" json
+  json=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.argv[1]}}))' "$cmd")
+  if printf '%s' "$json" | HOME="$BATS_TEST_TMPDIR" GATEGUARD_BASH_EXTRA_DESTRUCTIVE= node "$gate" 2>/dev/null \
+      | grep -q '"permissionDecision":"deny"'; then
+    echo deny
+  else
+    echo allow
+  fi
+}
+
+@test "codex gateguard denies a built-in destructive command (rm -rf)" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
+  [ "$(_gate_decision "$gate" 'rm -rf build')" = deny ]
+}
+
+@test "codex gateguard allows benign commands without false positives" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js" c
+  # Each must pass through. A destructive phrase inside quotes, a safe
+  # --force-with-lease, and env-assignment prefixes must not trip the gate.
+  for c in \
+    'ls -la && git status' \
+    'git commit -m "drop table notes from the agenda"' \
+    'git push --force-with-lease origin main' \
+    'git checkout -b feature/x' \
+    'env FOO=bar npm run build' \
+    'dd --help'; do
+    [ "$(_gate_decision "$gate" "$c")" = allow ] || { echo "false positive: $c"; return 1; }
+  done
+}
+
+# Regression guard for the evasion vectors surfaced by multi-review (cc-code /
+# cc-security / codex): wrappers, subshell/brace/process-substitution groups,
+# quoted command substitution, sh -c / psql -c bodies, dd arg order, and the
+# ECC git-parity gaps. Each MUST be blocked.
+@test "codex gateguard resists destructive-command evasion vectors" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js" c
+  for c in \
+    'dd if=/dev/zero of=/dev/sda' \
+    'dd of=/dev/disk1 if=/dev/zero' \
+    'env rm -rf /tmp/x' \
+    'command rm -rf /tmp/x' \
+    'sudo rm -rf /tmp/x' \
+    '/bin/rm -rf /tmp/x' \
+    '(rm -rf /tmp/x)' \
+    '{ rm -rf /tmp/x; }' \
+    'cat <(rm -rf /tmp/x)' \
+    'echo "$(rm -rf /tmp/x)"' \
+    'sh -c "rm -rf /tmp/x"' \
+    'bash -c "rm -rf /tmp/x"' \
+    'psql -c "drop table users"' \
+    'git push --force --force-with-lease origin main' \
+    'git push origin +main' \
+    'git --git-dir .git reset --hard' \
+    'git checkout -- .' \
+    'git commit --amend' \
+    'git rm -r src/'; do
+    [ "$(_gate_decision "$gate" "$c")" = deny ] || { echo "bypass: $c"; return 1; }
+  done
+}
+
+@test "codex gateguard consumes the task #12 EXTRA regex from the environment" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
+  local out
+  # chezmoi destroy is NOT a built-in; only the operator EXTRA set covers it.
+  out=$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"chezmoi destroy"}}' \
+    | GATEGUARD_BASH_EXTRA_DESTRUCTIVE='chezmoi\s+destroy\b' node "$gate" 2>/dev/null)
+  echo "$out" | grep -q '"permissionDecision":"deny"'
+}
+
+# Proves the single-source-of-truth path: with no env override, the gate reads
+# GATEGUARD_BASH_EXTRA_DESTRUCTIVE out of ~/.claude/settings.json (task #12 SSOT).
+@test "codex gateguard reads the EXTRA regex from settings.json when no env override" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
+  local tmp; tmp=$(mktemp -d)
+  mkdir -p "$tmp/.claude"
+  printf '%s' '{"env":{"GATEGUARD_BASH_EXTRA_DESTRUCTIVE":"chezmoi\\s+destroy\\b"}}' > "$tmp/.claude/settings.json"
+  local out
+  out=$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"chezmoi destroy"}}' \
+    | HOME="$tmp" GATEGUARD_BASH_EXTRA_DESTRUCTIVE= node "$gate" 2>/dev/null)
+  rm -rf "$tmp"
+  echo "$out" | grep -q '"permissionDecision":"deny"'
+}
+
+# Guard against quoted-string false positives: a destructive phrase inside a
+# commit message must not trip the gate.
+@test "codex gateguard does not false-positive on a destructive phrase inside quotes" {
+  local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
+  local out
+  out=$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit -m \"drop table notes from the agenda\""}}' \
+    | GATEGUARD_BASH_EXTRA_DESTRUCTIVE= node "$gate" 2>/dev/null)
+  [ -z "$out" ]
+}
+
 @test "chezmoi source files exist: VS Code mcp.json" {
   [ -f "${HOME_DIR}/Library/Application Support/Code/User/mcp.json" ]
 }
