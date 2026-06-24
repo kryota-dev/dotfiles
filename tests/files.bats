@@ -95,12 +95,19 @@ load helpers/setup
   [ "$count" -gt 0 ]
 }
 
-@test "retrospective-codify skill exists with valid frontmatter" {
+@test "retrospective-codify skill exists with valid frontmatter and structure" {
   local skill="${HOME_DIR}/dot_agents/skills/retrospective-codify/SKILL.md"
   [ -f "$skill" ]
+  # Frontmatter delimiter on line 1, name matches the directory.
+  head -n1 "$skill" | grep -q '^---$'
   grep -q '^name: retrospective-codify$' "$skill"
   grep -q '^description:' "$skill"
   grep -q '^argument-hint:' "$skill"
+  # Args were split into --range/--target (the old --scope was overloaded).
+  grep -q -- '--range=' "$skill"
+  grep -q -- '--target=' "$skill"
+  # Core sections are present.
+  grep -q '## 実行フロー' "$skill"
 }
 
 @test "claude and codex skills are symlinked" {
