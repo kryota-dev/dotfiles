@@ -6,6 +6,9 @@
 _claude_with_home() {
   local home_dir="$1"
   shift
+  # Default to plain `claude` when no command is given, so a direct call still launches
+  # Claude Code (the aliases always pass an explicit command).
+  (($#)) || set -- claude
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
     CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
