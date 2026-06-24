@@ -6,6 +6,10 @@
 	excludesfile = ~/.gitignore_global
 	editor = nvim
 	ignorecase = false
+	# Global hooks dir (task #31): runs the gitleaks secret-scan pre-commit on
+	# every commit across harnesses. A repo with its own core.hooksPath (e.g.
+	# husky) overrides this locally; CI gitleaks is the backstop there.
+	hooksPath = ~/.config/git/hooks
 [commit]
 	gpgsign = true
 [gpg]
