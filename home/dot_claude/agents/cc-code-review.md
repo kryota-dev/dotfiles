@@ -19,7 +19,7 @@ model: inherit
 | ファイル | `cat <path>` または対象ファイルを Read |
 | 現在の変更 | `git diff` |
 
-呼び出し元が明示的に取得コマンドを指定した場合はそれに従ってください。差分が大きすぎる場合はファイル単位（`gh pr diff <番号> -- <path>`）に絞ってもかまいません。
+呼び出し元が明示的に取得コマンドを指定した場合はそれに従ってください。差分が大きすぎる場合は `gh pr diff <番号> --name-only` で変更ファイルを把握し、関連ファイルの hunk を `gh pr diff <番号>` 全文から読んでください（`gh pr diff` は include pathspec 非対応のため `gh pr diff <番号> -- <path>` は使えません。除外したいときのみ `--exclude '<glob>'`）。
 
 ## 動作原則
 

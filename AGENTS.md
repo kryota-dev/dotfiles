@@ -17,6 +17,8 @@ All written artifacts in this repository must be in English:
 
 Exceptions — the following must be written in Japanese:
 - Agent skill files (`SKILL.md`) and their script comments
+- Agent definition files (`home/dot_claude/agents/*.md`) — their system prompts steer Japanese-speaking review output
+- The global agent instructions deployed from this repo (`home/AGENTS.md.tmpl`, `home/dot_claude/CLAUDE.md`, `home/.chezmoitemplates/coding-standards.md`)
 
 Note: Conversational responses to the user remain in Japanese as specified in the global `~/AGENTS.md`.
 

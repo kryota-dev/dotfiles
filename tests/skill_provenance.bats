@@ -83,7 +83,7 @@ load helpers/setup
 }
 
 @test "skill provenance: AGENTS.md documents all five categories" {
-  local agents="${HOME_DIR}/AGENTS.md"
+  local agents="${HOME_DIR}/AGENTS.md.tmpl"
   grep -q 'Skill provenance' "$agents"
   local c
   for c in curated external system evolved unmanaged; do

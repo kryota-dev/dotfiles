@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"{{ .chezmoi.homeDir }}/.config/gateguard/codex-bash-gate.js\"",
+            "statusMessage": "Checking Bash command against cross-harness gateguard",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
