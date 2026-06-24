@@ -9,3 +9,10 @@
 #       Always use `cdx` / `cdx-r06` to pick an account with the SSOT config.
 alias cdx='codex --profile shared'
 alias cdx-r06='CODEX_HOME=$HOME/.codex-r06 codex --profile shared'
+
+# happy (slopus/happy) variants: run Codex through the happy wrapper for phone control.
+# `happy codex` forwards `--profile shared` to codex and respects CODEX_HOME, so each
+# account keeps its SSOT config and isolation; happy's own state (~/.happy) is shared
+# across accounts (one pairing controls every account).
+alias hcdx='happy codex --profile shared'
+alias hcdx-r06='CODEX_HOME=$HOME/.codex-r06 happy codex --profile shared'
