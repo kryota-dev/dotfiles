@@ -95,6 +95,14 @@ load helpers/setup
   [ "$count" -gt 0 ]
 }
 
+@test "retrospective-codify skill exists with valid frontmatter" {
+  local skill="${HOME_DIR}/dot_agents/skills/retrospective-codify/SKILL.md"
+  [ -f "$skill" ]
+  grep -q '^name: retrospective-codify$' "$skill"
+  grep -q '^description:' "$skill"
+  grep -q '^argument-hint:' "$skill"
+}
+
 @test "claude and codex skills are symlinked" {
   [ -f "${HOME_DIR}/dot_claude/symlink_skills.tmpl" ]
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
