@@ -1,0 +1,47 @@
+#!/bin/bash
+set -euo pipefail
+
+# Declaratively register user-scope MCP servers for every Claude Code account.
+#
+# `claude mcp add-json --scope user` writes to "$CLAUDE_CONFIG_DIR/.claude.json", which the
+# CLI rewrites on every session (volatile). chezmoi must not own that file directly, so this
+# script drives the CLI instead. run_onchange re-runs whenever the server definitions below
+# change (the rendered script body is the change key).
+#
+# Only globally-useful servers belong here: context7 (library docs) and deepwiki (repo Q&A)
+# are wanted in every project. Project-specific servers (spec-workflow, serena) stay in each
+# repo's own .mcp.json. claude.ai connectors and the Chrome extension are configured manually.
+
+if ! command -v claude &>/dev/null; then
+  echo "WARNING: claude CLI not found; skipping user-scope MCP setup."
+  exit 0
+fi
+
+# Each account is isolated by CLAUDE_CONFIG_DIR (see dot_config/zsh/claude.zsh: cld -> ~/.claude,
+# cld-r06 -> ~/.claude-r06). user-scope servers live in "<config dir>/.claude.json", so register
+# them once per account.
+config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
+
+# Server name -> canonical JSON. Both are stdio (npx-launched); deepwiki bridges to its remote
+# HTTP endpoint via mcp-remote. Keep in sync with the project's .mcp.json removal of these two.
+mcp_names=("context7" "deepwiki")
+mcp_configs=(
+  '{"type":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}'
+  '{"type":"stdio","command":"npx","args":["mcp-remote","https://mcp.deepwiki.com/mcp"]}'
+)
+
+for config_dir in "${config_dirs[@]}"; do
+  echo "==> Registering user-scope MCP servers in ${config_dir}..."
+  for i in "${!mcp_names[@]}"; do
+    name="${mcp_names[$i]}"
+    cfg="${mcp_configs[$i]}"
+    # Idempotent: drop any stale definition, then add the canonical one. remove exits non-zero
+    # when the server is absent, which is expected on a first run.
+    CLAUDE_CONFIG_DIR="$config_dir" claude mcp remove "$name" --scope user >/dev/null 2>&1 || true
+    if ! CLAUDE_CONFIG_DIR="$config_dir" claude mcp add-json "$name" "$cfg" --scope user >/dev/null 2>&1; then
+      echo "WARNING: failed to register MCP server '${name}' in ${config_dir}; add it later with 'claude mcp add-json'."
+    fi
+  done
+done
+
+echo "==> User-scope MCP servers registered."

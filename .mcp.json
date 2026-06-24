@@ -1,15 +1,5 @@
 {
   "mcpServers": {
-    "context7": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"],
-      "env": {}
-    },
-    "deepwiki": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://mcp.deepwiki.com/mcp"]
-    },
     "spec-workflow": {
       "command": "npx",
       "args": ["-y", "@pimzino/spec-workflow-mcp@latest", "."]

@@ -236,6 +236,25 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
 
+@test "mcp setup script registers context7 and deepwiki as user-scope" {
+  local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
+  [ -f "$script" ]
+  # Both globally-useful servers are declared and added with user scope.
+  grep -q 'context7' "$script"
+  grep -q 'deepwiki' "$script"
+  grep -q -- '--scope user' "$script"
+}
+
+@test "project .mcp.json keeps only project-scoped servers" {
+  # context7/deepwiki were moved to user scope (run_onchange_after_13); the repo's own
+  # .mcp.json must keep the project-specific spec-workflow but no longer declare them.
+  local mcp="${REPO_ROOT}/.mcp.json"
+  [ -f "$mcp" ]
+  grep -q 'spec-workflow' "$mcp"
+  ! grep -q 'context7' "$mcp"
+  ! grep -q 'deepwiki' "$mcp"
+}
+
 @test "bootstrap script exists" {
   [ -f "${REPO_ROOT}/install/install.sh" ]
 }
