@@ -137,6 +137,49 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/symlink_skills.tmpl" ]
 }
 
+@test "Plan-PRD pipeline flags are wired into grill-me / planning / sdd (opt-in)" {
+  local skills="${HOME_DIR}/dot_agents/skills"
+  # grill-me emits the PRD; planning consumes it and emits the Plan; sdd
+  # optionally consumes either or both (--prd / --plan are independent opt-ins).
+  grep -q -- '--output-prd' "${skills}/grill-me/SKILL.md"
+  grep -q -- '--input-prd' "${skills}/planning/SKILL.md"
+  grep -q -- '--output-plan' "${skills}/planning/SKILL.md"
+  grep -q -- '--prd' "${skills}/sdd/SKILL.md"
+  grep -q -- '--plan' "${skills}/sdd/SKILL.md"
+  grep -q -- '--mode' "${skills}/grill-me/SKILL.md"
+  grep -q -- '--mode' "${skills}/planning/SKILL.md"
+  # Each must declare the flags are opt-in (default behaviour preserved).
+  grep -q '任意 / opt-in' "${skills}/grill-me/SKILL.md"
+  grep -q '任意 / opt-in' "${skills}/planning/SKILL.md"
+  grep -q '任意 / opt-in' "${skills}/sdd/SKILL.md"
+  # Pipeline contract: PRD/Plan frontmatter + no-overwrite collision handling.
+  grep -q 'grill_session:' "${skills}/grill-me/SKILL.md"
+  grep -q 'planning_session:' "${skills}/planning/SKILL.md"
+  grep -q '上書きしない\|上書き禁止' "${skills}/grill-me/SKILL.md"
+  grep -q '上書きしない\|上書き禁止' "${skills}/planning/SKILL.md"
+}
+
+# The pipeline Plan (<slug>.plan.md) must be git-trackable while ad-hoc
+# timestamp plans stay ignored — the handoff artifact would break otherwise.
+@test "Plan-PRD pipeline plans are un-ignored in the global gitignore" {
+  local gi="${HOME_DIR}/dot_gitignore_global"
+  local tmp; tmp=$(mktemp -d)
+  cd "$tmp"
+  git init -q
+  git config core.excludesfile "$gi"
+  mkdir -p .claude/plans
+  touch .claude/plans/20260101_adhoc.md .claude/plans/feat.plan.md
+  # ad-hoc timestamp plan stays ignored, pipeline .plan.md is tracked.
+  # Capture with && || so a non-zero check-ignore does not abort the test.
+  local adhoc_ignored plan_ignored
+  git check-ignore -q .claude/plans/20260101_adhoc.md && adhoc_ignored=yes || adhoc_ignored=no
+  git check-ignore -q .claude/plans/feat.plan.md && plan_ignored=yes || plan_ignored=no
+  cd "$REPO_ROOT"
+  rm -rf "$tmp"
+  [ "$adhoc_ignored" = yes ]
+  [ "$plan_ignored" = no ]
+}
+
 @test "codex-r06 work profile sources exist" {
   [ -f "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl" ]
   [ -f "${HOME_DIR}/dot_codex-r06/symlink_skills.tmpl" ]

@@ -196,7 +196,10 @@ dist
 .claude/reviews/**/*.md
 .claude/pull-requests/**/*.md
 .claude/issues/**/*.md
-.claude/plans/
+# Ignore ad-hoc plans (timestamp-named) but track the Plan-PRD pipeline
+# artifacts (<slug>.plan.md, task #22) as cross-session handoff files.
+.claude/plans/*
+!.claude/plans/*.plan.md
 
 # Dogfood
 dogfood-output/
