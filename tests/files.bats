@@ -88,6 +88,28 @@ load helpers/setup
   [ "$count" -gt 0 ]
 }
 
+@test "language specialist reviewer agents exist with expected frontmatter" {
+  local lang agent
+  for lang in typescript react python database; do
+    agent="${HOME_DIR}/dot_claude/agents/${lang}-reviewer.md"
+    [ -f "$agent" ]
+    grep -q "^name: ${lang}-reviewer$" "$agent"
+    grep -q "^model: sonnet$" "$agent"
+    grep -q "^tools: Read, Glob, Grep, Bash$" "$agent"
+  done
+}
+
+@test "reviewer agents steer to a valid gh pr diff filter idiom" {
+  # gh pr diff has no include pathspec (only --exclude / --name-only), so every
+  # reviewer agent must reference --name-only rather than the unsupported
+  # `gh pr diff <n> -- <path>` form. Positive guard (the docs mention the bad form
+  # only as a counter-example, so a negative grep would false-positive on it).
+  local agent
+  for agent in "${HOME_DIR}/dot_claude/agents"/{cc-code-review,typescript-reviewer,react-reviewer,python-reviewer,database-reviewer}.md; do
+    grep -q -- "--name-only" "$agent"
+  done
+}
+
 @test "shared agent skills exist" {
   [ -d "${HOME_DIR}/dot_agents/skills" ]
   local count
