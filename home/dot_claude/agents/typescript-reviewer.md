@@ -19,7 +19,7 @@ model: sonnet
 | ファイル | `cat <path>` または対象ファイルを Read |
 | 現在の変更 | `git diff` |
 
-TypeScript ファイル（`.ts` / `.tsx` / `.mts` / `.cts`）に絞る場合は `gh pr diff <番号> -- '*.ts' '*.tsx'` を使ってもかまいません。
+差分が大きい場合は、まず `gh pr diff <番号> --name-only` で変更ファイルを確認し、TypeScript ファイル（`.ts` / `.tsx` / `.mts` / `.cts`）の hunk を `gh pr diff <番号>` 全文から読んでください。`gh pr diff` は include pathspec 非対応のため `gh pr diff <番号> -- <path>` は使えません（除外したいときのみ `--exclude '<glob>'`）。
 
 ## 動作原則
 
