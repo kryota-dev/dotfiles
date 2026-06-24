@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Global secret-scan pre-commit hook (task #31), wired via core.hooksPath so
+# every commit — Claude, Codex, or human — is scanned for staged secrets with
+# gitleaks. This is a git-layer (harness-agnostic) guardrail.
+#
+# Caveats:
+#   - A repo that sets its own core.hooksPath (e.g. husky's .husky) overrides
+#     this global hook; CI gitleaks is the backstop there.
+#   - `git commit --no-verify` bypasses it by design (per-harness policy).
+#   - If gitleaks is not installed the scan is skipped (fail-open) so commits
+#     are never bricked on a machine before `mise install` runs.
+set -euo pipefail
+
+# Resolve gitleaks: prefer a PATH binary (mise shims), else `mise exec`.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks_cmd=(gitleaks)
+elif command -v mise >/dev/null 2>&1 && mise which gitleaks >/dev/null 2>&1; then
+  gitleaks_cmd=(mise exec -- gitleaks)
+else
+  echo "[pre-commit] gitleaks not found; skipping secret scan (CI gitleaks is the backstop)." >&2
+  exit 0
+fi
+
+config="${HOME}/.config/git/gitleaks.toml"
+scan_args=(git --staged --redact --no-banner)
+if [ -f "$config" ]; then
+  scan_args+=(--config "$config")
+fi
+
+if ! "${gitleaks_cmd[@]}" "${scan_args[@]}"; then
+  cat >&2 <<'MSG'
+[pre-commit] gitleaks detected a potential secret in the staged changes.
+The commit was aborted. Review the finding above. If it is a false positive,
+add an allowlist entry to ~/.config/git/gitleaks.toml. To override (NOT
+recommended), re-run with: git commit --no-verify
+MSG
+  exit 1
+fi

@@ -305,3 +305,54 @@ FAKE
 @test "chezmoi source files exist: VS Code mcp.json" {
   [ -f "${HOME_DIR}/Library/Application Support/Code/User/mcp.json" ]
 }
+
+# --- PR9: secret-scan + AGENTS.md split + house coding-standards ---
+
+@test "AGENTS.md is templated and inlines the house coding-standards" {
+  local agents="${HOME_DIR}/AGENTS.md.tmpl"
+  [ -f "$agents" ]
+  # Old plain path must be gone (renamed via git mv).
+  [ ! -f "${HOME_DIR}/AGENTS.md" ]
+  grep -q 'includeTemplate "coding-standards.md"' "$agents"
+  # Agnostic core keeps provenance; Claude-only sections must have moved out.
+  grep -q 'Skill provenance' "$agents"
+  ! grep -q 'Mandatory skill usage' "$agents"
+  ! grep -q 'memory への記録ポリシー' "$agents"
+  # #10: the dev-server delegation rule is deleted.
+  ! grep -q '開発サーバーの起動はユーザーに委任' "$agents"
+}
+
+@test "house coding-standards SSOT exists" {
+  local cs="${HOME_DIR}/.chezmoitemplates/coding-standards.md"
+  [ -f "$cs" ]
+  grep -q 'Coding standards (house)' "$cs"
+}
+
+@test "Claude layer CLAUDE.md imports the agnostic core and holds Claude-only rules" {
+  local claude="${HOME_DIR}/dot_claude/CLAUDE.md"
+  [ -f "$claude" ]
+  grep -q '@~/AGENTS.md' "$claude"
+  grep -q 'Mandatory skill usage' "$claude"
+  grep -q 'memory への記録ポリシー' "$claude"
+  # The personal-account symlink was replaced by this real file.
+  [ ! -f "${HOME_DIR}/dot_claude/symlink_CLAUDE.md.tmpl" ]
+}
+
+@test "claude-r06 CLAUDE.md symlink points at the shared Claude layer" {
+  grep -q '/.claude/CLAUDE.md' "${HOME_DIR}/dot_claude-r06/symlink_CLAUDE.md.tmpl"
+}
+
+@test "codex AGENTS.md symlinks still point at the agnostic core" {
+  grep -q '/AGENTS.md' "${HOME_DIR}/dot_codex/symlink_AGENTS.md.tmpl"
+  grep -q '/AGENTS.md' "${HOME_DIR}/dot_codex-r06/symlink_AGENTS.md.tmpl"
+}
+
+@test "global gitleaks pre-commit hook is wired" {
+  grep -q 'hooksPath = ~/.config/git/hooks' "${HOME_DIR}/dot_gitconfig.tmpl"
+  local hook="${HOME_DIR}/dot_config/git/hooks/executable_pre-commit"
+  [ -f "$hook" ]
+  bash -n "$hook"
+  grep -q 'gitleaks' "$hook"
+  grep -q 'git --staged' "$hook"
+  [ -f "${HOME_DIR}/dot_config/git/gitleaks.toml" ]
+}

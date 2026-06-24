@@ -1,0 +1,24 @@
+# gitleaks config for the global pre-commit secret scan (task #31).
+# Referenced by ~/.config/git/hooks/pre-commit via --config. Extends the
+# bundled default ruleset and allowlists known non-secrets so the global
+# hook does not block legitimate commits.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for the cross-harness pre-commit scan"
+
+# 1Password references are pointers, not secrets: chezmoi templates render
+# them at apply time via onepasswordRead, and `op://` URIs resolve through
+# the 1Password CLI. Neither embeds the secret value in the source tree.
+regexes = [
+  '''op://[^"'\s]+''',
+  '''onepasswordRead''',
+]
+
+# Planning/notes under .kryota-dev hold synthetic example tokens used in
+# design docs (e.g. illustrative regex test cases), not live credentials.
+paths = [
+  '''(^|/)\.kryota-dev/''',
+]
