@@ -124,14 +124,32 @@
 
 # Everything Claude Code (ECC) hook runtime — https://github.com/affaan-m/ECC
 # Only scripts/hooks + scripts/lib are fetched here (the hook runtime that later PRs wire
-# into settings.json). Skills / agents / rules are managed separately. The tarball is large,
-# but chezmoi extracts only the included paths. Version pinned in .chezmoidata.toml [ecc].version.
+# into settings.json). Adopted skills are deployed by the list-driven block below; ECC
+# agents / rules are not adopted. The tarball is large, but chezmoi extracts only the
+# included paths. Version pinned in .chezmoidata.toml [ecc].version.
 [".agents/skills/ecc/scripts"]
     type = "archive"
     url = "https://github.com/affaan-m/ECC/archive/{{ .ecc.commit }}.tar.gz"
     stripComponents = 2
     include = ["*/scripts/hooks/**", "*/scripts/lib/**"]
     refreshPeriod = "168h"
+
+# ECC adopted skills (#46/#15) — the reconciled 127-skill set lives in .chezmoidata.toml
+# [ecc].skills. chezmoi ranges over it to emit one external entry per skill, all pulling
+# from the SAME ECC tarball as the hook runtime above (cached by URL SHA256 → one download)
+# and version-locked to [ecc].commit. Mirrors the anthropics/skills archive+include pattern;
+# stripComponents=3 drops the `ECC-<commit>/skills/<name>/` prefix so files land directly
+# under each ~/.agents/skills/<name>/. continuous-learning-v2 is in the list, so its full
+# engine (hooks/scripts/agents) is deployed here; PR-B only wires the observer + enables it.
+{{ range $skill := .ecc.skills -}}
+[".agents/skills/{{ $skill }}"]
+    type = "archive"
+    url = "https://github.com/affaan-m/ECC/archive/{{ $.ecc.commit }}.tar.gz"
+    stripComponents = 3
+    include = ["*/skills/{{ $skill }}/**"]
+    refreshPeriod = "168h"
+
+{{ end -}}
 
 # ECC `aside` slash command — the only command adopted from ECC (the other 83
 # were rejected). Fetched verbatim instead of vendored, so this public MIT repo
