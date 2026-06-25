@@ -46,6 +46,20 @@ chezmoi init --apply kryota-dev
 
 ライフサイクルスクリプトが前提条件のインストール、Homebrew パッケージ、フォント、macOS 設定を自動的に処理します。
 
+1Password の必須 vault item と `chezmoi apply` のゲートについては
+[1Password シークレットの初期設定](docs/getting-started/secrets-1password.ja.md) を参照してください。
+
+## ドキュメント
+
+詳細なドキュメントは [`docs/`](docs/README.ja.md) にあります（英語が正、日本語 `*.ja.md` はミラー）。
+[ドキュメント目次](docs/README.ja.md) から辿れます:
+
+- **はじめに:** [インストール](docs/getting-started/installation.ja.md) · [検証](docs/getting-started/verification.ja.md) · [1Password シークレット](docs/getting-started/secrets-1password.ja.md)
+- **アーキテクチャ:** [概要](docs/architecture/overview.ja.md) · [chezmoi エンジン](docs/architecture/chezmoi-engine.ja.md) · [externals & pinning](docs/architecture/externals-and-pinning.ja.md) · [ライフサイクルスクリプト](docs/architecture/lifecycle-scripts.ja.md) · [シェル環境](docs/architecture/shell-environment.ja.md) · [開発ツール](docs/architecture/dev-tooling.ja.md)
+- **AI エージェント:** [概要](docs/agents/overview.ja.md) · [アカウント分離](docs/agents/account-isolation.ja.md) · [Claude Code](docs/agents/claude-code.ja.md) · [Codex](docs/agents/codex.ja.md) · [skill provenance](docs/agents/skills-provenance.ja.md)
+- **コントリビュート:** [ローカル開発](docs/contributing/local-dev.ja.md) · [CI & テスト](docs/contributing/ci-and-tests.ja.md) · [worktree & 環境](docs/contributing/worktrees-and-env.ja.md)
+- **解説:** [設計判断](docs/explanation/design-rationale.ja.md) · [シークレットと分離](docs/explanation/secrets-and-isolation.ja.md)
+
 ## アーキテクチャ
 
 ### リポジトリ構成
@@ -78,48 +92,21 @@ dotfiles/
 └── LICENSE
 ```
 
-### Zsh アーキテクチャ
+### 詳細
 
-`.zshrc` は最小限のコアで、すべてのプラグインとモジュールの読み込みを sheldon に委譲し、zsh-defer で非同期初期化を行います：
+zsh の起動モデル、ライフサイクルの適用タイムライン、chezmoi エンジン、externals の pinning、
+開発ツールについては [アーキテクチャドキュメント](docs/architecture/overview.ja.md) を参照してください:
 
-```
-.zprofile                     Homebrew PATH、環境変数
-    ↓
-.zshrc (最小コア)              setopt、PATH、mise、direnv、starship
-    ↓
-sheldon source                zsh-defer がすべてを非同期に読み込み
-    ├── コミュニティプラグイン   autosuggestions、syntax-highlighting、completions
-    └── ローカルモジュール ──→  aliases、git、docker、claude、...
-```
-
-| モジュール | 説明 |
-|-----------|------|
-| `aliases.zsh` | 汎用エイリアス (ll, vi, pn 等) |
-| `git.zsh` | Git エイリアス & 関数 |
-| `docker.zsh` | Docker / Compose エイリアス |
-| `claude.zsh` | Claude Code ユーティリティ |
-| `functions.zsh` | 汎用ユーティリティ (yazi, mduch) |
-| `completions.zsh` | 補完設定 |
-| `wtp.zsh` | wtp 補完 & cd フック |
-
-### ライフサイクルスクリプト
-
-chezmoi はライフサイクルスクリプトによってセットアップを統制します — `run_once` スクリプトは初回適用時に実行され、`run_onchange` スクリプトは追跡対象の内容が変更されたときに再実行されます：
-
-| フェーズ | スクリプト | トリガー | 説明 |
-|---------|-----------|---------|------|
-| 1 | `00-install-prerequisites` | once (before) | Xcode CLI ツール、Homebrew |
-| 2 | `10-brew-bundle` | on change | Brewfile によるパッケージインストール |
-| 2.5 | `11-validate-1password` | once (after) | 1Password CLI の検証 |
-| 3 | `12-setup-mise` | on change | mise 管理ツールのインストール |
-| 4 | `20-macos-defaults` | on change | Finder、Dock、キーボード等 |
-| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 6 | `40-setup-sheldon` | once (after) | プラグインバージョンのロック |
-| 7 | `90-other-apps` | once (after) | 対話式アプリダウンロード |
+- [シェル環境](docs/architecture/shell-environment.ja.md) — `.zprofile` → `.zshrc` → sheldon/zsh-defer、モジュール
+- [ライフサイクルスクリプト](docs/architecture/lifecycle-scripts.ja.md) — 番号順の `run_once_*` / `run_onchange_*` 適用タイムライン
+- [chezmoi エンジン](docs/architecture/chezmoi-engine.ja.md) · [externals & pinning](docs/architecture/externals-and-pinning.ja.md) · [開発ツール](docs/architecture/dev-tooling.ja.md)
 
 ## Claude Code
 
 AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) と [Codex](https://openai.com/index/introducing-codex/) の設定、カスタムスキル、エージェントを chezmoi 経由で dotfiles として宣言的に管理します。スキルは `home/dot_agents/skills/` に一元管理し、`~/.claude/skills` と `~/.codex/skills` にシンボリックリンクで配布します。
+
+[`docs/agents/`](docs/agents/overview.ja.md) で dual-harness × dual-account モデル、
+[アカウント分離](docs/agents/account-isolation.ja.md)、[skill provenance 分類](docs/agents/skills-provenance.ja.md) を解説しています。
 
 ## 開発
 
@@ -138,6 +125,9 @@ AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/d
 **CI パイプライン:**
 - **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
 - **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → ファイル検証 → zsh 起動検証 (macos)
+
+bats スイートのマップ、検証マトリクス、`make` コントラクト全体は
+[CI & テスト](docs/contributing/ci-and-tests.ja.md) と [ローカル開発](docs/contributing/local-dev.ja.md) を参照してください。
 
 ## ライセンス
 
