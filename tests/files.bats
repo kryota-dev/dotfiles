@@ -363,6 +363,83 @@ load helpers/setup
   node --check "$fork"
 }
 
+@test "ecc-state-reader aggregates pending governance events from a sandbox state.db" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  [ -f "$reader" ]
+  node --check "$reader"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local tmp; tmp=$(mktemp -d)
+  mkdir -p "$tmp/ecc"
+  # Seed 2 pending + 1 resolved event; the reader must count only the 2 pending ones.
+  node -e '
+    const {DatabaseSync}=require("node:sqlite");
+    const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});
+    db.exec("CREATE TABLE governance_events(id TEXT PRIMARY KEY, session_id TEXT, event_type TEXT NOT NULL, payload TEXT NOT NULL, resolved_at TEXT, resolution TEXT, created_at TEXT NOT NULL)");
+    const ins=db.prepare("INSERT INTO governance_events(id,session_id,event_type,payload,resolved_at,created_at) VALUES(?,?,?,?,?,?)");
+    ins.run("1","s","approval_requested","{}",null,"2026-01-01T01:00:00Z");
+    ins.run("2","s","secret_detected","{}",null,"2026-01-01T02:00:00Z");
+    ins.run("3","s","approval_requested","{}","2026-01-01T03:00:00Z","2026-01-01T00:30:00Z");
+    db.close();
+  ' "$tmp/ecc/state.db"
+  local out
+  out=$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" status --json)
+  [ "$(echo "$out" | jq -r '.pendingGovernanceEvents')" = "2" ]
+  [ "$(echo "$out" | jq -r '[.governanceByType[].c] | add')" = "2" ]
+  # sessions / work-items tables are absent in this sandbox → graceful empty, never a crash.
+  [ "$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" sessions)" = "No sessions recorded." ]
+  [ "$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" work-items)" = "No work items." ]
+  rm -rf "$tmp"
+}
+
+@test "ecc-state-reader is graceful when state.db is absent and creates nothing" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  local tmp; tmp=$(mktemp -d)
+  run env "ECC_AGENT_DATA_HOME=$tmp" node "$reader" status
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No state.db"* ]]
+  # A read-only CLI must never materialize a database on a fresh account.
+  [ ! -e "$tmp/ecc/state.db" ]
+  rm -rf "$tmp"
+}
+
+@test "ecc-state-reader counts only non-closed work items (ECC status domain)" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local tmp; tmp=$(mktemp -d); mkdir -p "$tmp/ecc"
+  # Only "open" is non-closed; resolved/merged/done/cancelled are all closed in ECC's domain.
+  node -e '
+    const {DatabaseSync}=require("node:sqlite");
+    const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});
+    db.exec("CREATE TABLE work_items(id TEXT PRIMARY KEY, source TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, priority TEXT, url TEXT, owner TEXT, repo_root TEXT, session_id TEXT, metadata TEXT, created_at TEXT, updated_at TEXT NOT NULL)");
+    const ins=db.prepare("INSERT INTO work_items(id,source,title,status,updated_at) VALUES(?,?,?,?,?)");
+    for (const [id,st] of [["w1","open"],["w2","resolved"],["w3","merged"],["w4","done"],["w5","cancelled"]]) ins.run(id,"gh",id,st,"2026-01-01");
+    db.close();
+  ' "$tmp/ecc/state.db"
+  local out; out=$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" status --json)
+  [ "$(echo "$out" | jq -r '.openWorkItems')" = "1" ]
+  rm -rf "$tmp"
+}
+
+@test "ecc-state-reader rejects an unknown subcommand with exit 2 even on a fresh account" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  local tmp; tmp=$(mktemp -d)
+  # No state.db: validation must still fire before the graceful "no db" path.
+  run env "ECC_AGENT_DATA_HOME=$tmp" node "$reader" bogus-subcommand
+  [ "$status" -eq 2 ]
+  rm -rf "$tmp"
+}
+
+@test "claude.zsh defines the ecc-* reader functions" {
+  grep -q 'ecc-status()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
+  grep -q 'ecc-sessions()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
+  grep -q 'ecc-work-items()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
+  grep -q 'ecc-state-reader.js' "${HOME_DIR}/dot_config/zsh/claude.zsh"
+}
+
 # Regression guard: a bare process.exit() after stdout.write() truncates output
 # larger than the OS pipe buffer (~64 KB). The fork must pass the PostToolUse Bash
 # payload through byte-for-byte regardless of size. No ECC runtime needed (logging
