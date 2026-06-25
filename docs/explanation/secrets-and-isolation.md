@@ -22,8 +22,9 @@ Secret values live exclusively in the 1Password `kryota.dev` vault. They never a
 ~/.config/zsh/claude-secrets.zsh    (mode 0600, private_ prefix)
 ~/.config/zsh/dmux-secrets.zsh      (mode 0600, private_ prefix)
 ~/.aws/config                        (mode 0600, private_ prefix)
-~/.ssh/config                        (mode 0600, private_ prefix)
 ```
+
+`~/.ssh/config` is also a `private_` 0600 file (deployed from `home/private_dot_ssh/config.tmpl`), but it is **not** rendered from 1Password — it uses OS-branching template logic only and contains no `op://` or `onepasswordRead` references.
 
 The source `.tmpl` files contain only `op://` references:
 
@@ -50,9 +51,7 @@ This lifecycle script runs once on macOS and aborts `chezmoi apply` with a non-z
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - OpenRouter API/credential`
 
-If `op` is not installed, not authenticated, or an item cannot be read, `chezmoi apply` fails fast — before any home-directory mutation occurs. The intent is that a partially-applied machine with missing secrets is worse than a clean abort. The script is macOS-only (`{{ if ne .chezmoi.os "darwin" }}` exits early) because CI runs on Ubuntu without a 1Password installation.
-
-`onepasswordRead` inside `.tmpl` files also fails apply if an item is missing. The lifecycle script's pre-flight check catches authentication failures before chezmoi reaches those template renders.
+If `op` is not installed, not authenticated, or an item cannot be read, `chezmoi apply` fails fast. Note that `run_once_after_11` is an AFTER-phase script — home has already been mutated by the time it runs. The actual fail-fast paths are: (1) `onepasswordRead` inside `.tmpl` files aborts apply during template render, before those files are written; and (2) `run_once_after_11` acts as a fail-fast gate before the heavier after-phase provisioning (mise, MCP, CLV2, etc.). The intent is that a partially-provisioned machine with missing secrets is worse than a clean abort at either of those points. The script is macOS-only (`{{ if ne .chezmoi.os "darwin" }}` exits early) because CI runs on Ubuntu without a 1Password installation.
 
 ### Runtime-graceful: sourcing with `[[ -r ... ]]` guards
 

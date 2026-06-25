@@ -22,8 +22,9 @@
 ~/.config/zsh/claude-secrets.zsh    (モード 0600, private_ プレフィックス)
 ~/.config/zsh/dmux-secrets.zsh      (モード 0600, private_ プレフィックス)
 ~/.aws/config                        (モード 0600, private_ プレフィックス)
-~/.ssh/config                        (モード 0600, private_ プレフィックス)
 ```
+
+`~/.ssh/config` も `private_` 0600 ファイル（`home/private_dot_ssh/config.tmpl` からデプロイ）ですが、1Password からレンダリングされるものでは**ありません**。OS 分岐テンプレートロジックのみを使用しており、`op://` や `onepasswordRead` の参照を一切含みません。
 
 ソースの `.tmpl` ファイルには `op://` 参照のみが含まれています:
 
@@ -50,9 +51,7 @@
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - OpenRouter API/credential`
 
-`op` がインストールされていない、認証されていない、またはアイテムが読み取れない場合、`chezmoi apply` はホームディレクトリへの変更が発生する前にフェイルファストします。シークレットが欠落した状態で途中まで適用されたマシンは、クリーンな中断よりも悪い結果をもたらすという考えに基づいています。スクリプトは macOS のみです（`{{ if ne .chezmoi.os "darwin" }}` で早期終了）。CI は 1Password インストールなしで Ubuntu 上で実行されるためです。
-
-`.tmpl` ファイル内の `onepasswordRead` もアイテムが欠落している場合に apply を失敗させます。ライフサイクルスクリプトのプリフライトチェックは、chezmoi がそれらのテンプレートレンダリングに到達する前に認証失敗を捕捉します。
+`op` がインストールされていない、認証されていない、またはアイテムが読み取れない場合、`chezmoi apply` はフェイルファストします。注意点として、`run_once_after_11` は AFTER フェーズのスクリプトであり、実行時点ではホームディレクトリはすでに変更されています。実際のフェイルファストパスは次の 2 つです: (1) `.tmpl` ファイル内の `onepasswordRead` がテンプレートレンダリング中に apply を中断する（当該ファイルが書き込まれる前）; (2) `run_once_after_11` が後続の重い after フェーズプロビジョニング（mise、MCP、CLV2 等）の前のフェイルファストゲートとして機能する。シークレットが欠落した状態で途中までプロビジョニングされたマシンは、これらいずれかの時点でのクリーンな中断よりも悪い結果をもたらすという考えに基づいています。スクリプトは macOS のみです（`{{ if ne .chezmoi.os "darwin" }}` で早期終了）。CI は 1Password インストールなしで Ubuntu 上で実行されるためです。
 
 ### Runtime-graceful: `[[ -r ... ]]` ガードによるソース
 

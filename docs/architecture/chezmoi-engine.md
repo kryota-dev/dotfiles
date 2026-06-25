@@ -17,10 +17,10 @@ The chezmoi source root is `home/` (set by `.chezmoiroot`). All paths below are 
 | `dot_` | Replaced by `.` | `dot_zshrc` → `~/.zshrc` |
 | `dot_config/` | Prefix expands recursively | `dot_config/zsh/foo.zsh` → `~/.config/zsh/foo.zsh` |
 | `private_` | Destination created at mode `0600` | `private_dot_aws/config` → `~/.aws/config` (0600) |
-| `executable_` | Destination created at mode `0755` | `executable_statusline.sh` → `~/.local/bin/statusline.sh` (0755) |
+| `executable_` | Destination created at mode `0755` | `dot_claude/executable_statusline.sh` → `~/.claude/statusline.sh` (0755) |
 | `symlink_` | Creates a symlink; file content is the link target | `symlink_skills.tmpl` → rendered path is the symlink target |
 | `.tmpl` suffix | File is rendered as a Go template; suffix stripped from destination name | `dot_gitconfig.tmpl` → `~/.gitconfig` |
-| `run_once_` prefix | Script executes exactly once (keyed by script content SHA256) | `run_once_after_40-setup-sheldon.sh.tmpl` |
+| `run_once_` prefix | Script executes exactly once (keyed by script content SHA256) | `run_once_after_11-validate-1password.sh.tmpl` |
 | `run_onchange_` prefix | Script re-executes whenever its content hash or a watched input hash changes | `run_onchange_before_10-brew-bundle.sh.tmpl` |
 
 Prefixes and suffixes combine. Example: `home/dot_config/chezmoi/private_chezmoi.toml` decodes to `~/.config/chezmoi/chezmoi.toml` at mode `0600`.
@@ -100,7 +100,7 @@ The trailing `.` passes the current data context (all template variables) to the
 
 | Fragment | Included by | Purpose |
 |----------|-------------|---------|
-| `coding-standards.md` | `AGENTS.md.tmpl`, `dot_claude/CLAUDE.md` | House coding standards (Japanese); authored once, embedded in both harness rule files |
+| `coding-standards.md` | `AGENTS.md.tmpl` | House coding standards (Japanese), authored once. Embedded into `~/AGENTS.md`; `~/.claude/CLAUDE.md` picks it up transitively via its `@~/AGENTS.md` import (a Claude Code file reference, not a chezmoi `includeTemplate`) |
 | `codex-hooks.json` | `dot_codex/hooks.json.tmpl`, `dot_codex-r06/hooks.json.tmpl` | Actual Codex `PreToolUse` hook body; references `{{ .chezmoi.homeDir }}` |
 | `codex-shared-config.toml` | `dot_codex/private_shared.config.toml.tmpl`, `dot_codex-r06/private_shared.config.toml.tmpl` | Shared Codex profile config; personality, model, reasoning effort, `multi_agent` flag |
 

@@ -65,7 +65,7 @@ Because the coding-standards template is `includeTemplate`-embedded in `AGENTS.m
 
 ## Single SSOT skill library
 
-All skills — curated, external, system, and evolved — are addressed through one canonical path: `~/.agents/skills/`.
+Curated, external, and system skills are addressed through one canonical path: `~/.agents/skills/`. Evolved skills are a CLV2-only location (`$CLV2_HOMUNCULUS_DIR/evolved/skills/`) and are not part of this shared discovery tree.
 
 The chezmoi source deploys curated skills directly to `~/.agents/skills/<name>/` via `home/dot_agents/skills/`. External skills (ECC, Anthropic system skills) are fetched by `home/.chezmoiexternal.toml` into the same directory tree.
 
@@ -83,7 +83,7 @@ Adding or updating a skill in `~/.agents/skills/` is immediately visible to all 
 
 ## Account isolation at runtime
 
-Although config is shared, runtime state is isolated per account via environment variables injected by the zsh alias wrappers. The wrappers — `_claude_with_home` for Claude Code and `CODEX_HOME=...` for Codex — set per-process env vars that direct each tool to its own state directories. No state variable is exported into the general shell environment.
+Although config is shared, runtime state is isolated per account via environment variables injected by the zsh alias wrappers. The wrappers — `_claude_with_home` for Claude Code and the `cdx`/`cdx-r06` aliases for Codex — set per-process env vars that direct each tool to its own state directories. (`cdx-r06` sets `CODEX_HOME=$HOME/.codex-r06`; `cdx` leaves `CODEX_HOME` unset so Codex defaults to `~/.codex`.) No state variable is exported into the general shell environment.
 
 Details of every env var and alias are in [account-isolation.md](account-isolation.md).
 

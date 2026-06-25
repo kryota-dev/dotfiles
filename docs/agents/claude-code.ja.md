@@ -180,7 +180,7 @@ flowchart TD
 - `defaults delete`
 - `git filter-repo/branch`
 
-この正規表現は Codex ゲートガードと SSOT を共有します（[codex.md](codex.md#ゲートガード) を参照）。
+この正規表現は Codex ゲートガードと SSOT を共有します（[codex.ja.md](codex.ja.md#ゲートガード) を参照）。
 
 ### PostToolUse
 

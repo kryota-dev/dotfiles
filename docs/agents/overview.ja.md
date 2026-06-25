@@ -65,7 +65,7 @@ graph LR
 
 ## 単一 SSOT スキルライブラリ
 
-キュレーテッド・外部・システム・エボルブドのすべてのスキルは、一つの標準パス `~/.agents/skills/` を通じてアクセスされます。
+curated・external・system スキルは、一つの標準パス `~/.agents/skills/` を通じてアクセスされます。Evolved スキルは CLV2 専用のロケーション（`$CLV2_HOMUNCULUS_DIR/evolved/skills/`）に別途管理されており、この共有 discovery ツリーには含まれません。
 
 chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドスキルを `~/.agents/skills/<name>/` に直接デプロイします。外部スキル（ECC、Anthropic システムスキル）は `home/.chezmoiexternal.toml` によって同じディレクトリツリーにフェッチされます。
 
@@ -83,7 +83,7 @@ chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドス
 
 ## ランタイムにおけるアカウント分離
 
-設定は共有されていますが、ランタイム状態は zsh エイリアスラッパーが注入する環境変数によってアカウントごとに分離されます。Claude Code 用の `_claude_with_home`、Codex 用の `CODEX_HOME=...` といったラッパーが、プロセス単位の環境変数をセットして各ツールをそれぞれの状態ディレクトリへ向けます。状態変数はシェルの一般的な環境にはエクスポートされません。
+設定は共有されていますが、ランタイム状態は zsh エイリアスラッパーが注入する環境変数によってアカウントごとに分離されます。Claude Code 用の `_claude_with_home`、Codex 用の `cdx`/`cdx-r06` エイリアスといったラッパーが、プロセス単位の環境変数をセットして各ツールをそれぞれの状態ディレクトリへ向けます。（`cdx-r06` は `CODEX_HOME=$HOME/.codex-r06` を設定し、`cdx` は `CODEX_HOME` を未設定のままにして Codex が `~/.codex` をデフォルト使用します。）状態変数はシェルの一般的な環境にはエクスポートされません。
 
 すべての環境変数とエイリアスの詳細は [account-isolation.ja.md](account-isolation.ja.md) を参照してください。
 

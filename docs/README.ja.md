@@ -24,7 +24,7 @@
 |-------------|------|
 | [アーキテクチャ概要](architecture/overview.ja.md) | ブートストラップ → chezmoi エンジン → ライフサイクル → zsh/ツール → AI エージェント層 → CI をまたぐサブシステムマップとデータフロー図 |
 | [chezmoi エンジン: データ・テンプレート・名前デコード](architecture/chezmoi-engine.ja.md) | 名前デコード表、テンプレート変数インベントリ、OS 分岐イディオム、`includeTemplate`、2 つの chezmoi 設定ファイル |
-| [Externals・SHA ピン・シングルアーカイブキャッシュ](architecture/externals-and-pinning.ja.md) | 約 145 個の external エントリが少数のキャッシュダウンロードに集約される仕組み、`range .ecc.skills` ファンアウト、更新ウィンドウと Renovate バンプ |
+| [Externals・SHA ピン・シングルアーカイブキャッシュ](architecture/externals-and-pinning.ja.md) | 147 個の external エントリが少数のキャッシュダウンロードに集約される仕組み、`range .ecc.skills` ファンアウト、更新ウィンドウと Renovate バンプ |
 | [ライフサイクルスクリプト: 順序とトリガーモデル](architecture/lifecycle-scripts.ja.md) | before/after 二フェーズモデル、完全な適用タイムライン（00→90）、`run_once` vs `run_onchange` のセマンティクス、埋め込みハッシュのトリック |
 | [zsh 起動・プロンプト・シェルモジュール](architecture/shell-environment.ja.md) | `.zprofile` → `.zshrc` → sheldon 遅延ローディング、新しい `.zsh` モジュールの追加方法 |
 | [開発ツールチェーン: mise・Brewfile・git](architecture/dev-tooling.ja.md) | mise バージョンピン、`Brewfile` + `.brewfile-linux-exclude`、git 1Password 署名、グローバル gitleaks フック |

@@ -24,7 +24,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 |-----|-------------|
 | [Architecture overview](architecture/overview.md) | Subsystem map and data-flow diagram spanning bootstrap → chezmoi engine → lifecycle → zsh/tooling → AI-agent layer → CI |
 | [chezmoi engine: data, templates & name decoding](architecture/chezmoi-engine.md) | Name-decoding table, template-variable inventory, OS branching idiom, `includeTemplate`, and the two chezmoi config files |
-| [Externals, SHA-pinning & the single-tarball cache](architecture/externals-and-pinning.md) | How ~145 external entries collapse to a few cached downloads; the `range .ecc.skills` fan-out; refresh windows and Renovate bumps |
+| [Externals, SHA-pinning & the single-tarball cache](architecture/externals-and-pinning.md) | How 147 external entries collapse to a few cached downloads; the `range .ecc.skills` fan-out; refresh windows and Renovate bumps |
 | [Lifecycle scripts: ordering & trigger model](architecture/lifecycle-scripts.md) | The two-phase before/after model, the full apply timeline (00→90), `run_once` vs `run_onchange` semantics, and the embedded-hash trick |
 | [zsh startup, prompt & shell modules](architecture/shell-environment.md) | `.zprofile` → `.zshrc` → sheldon deferred loading; how to add a new `.zsh` module |
 | [Developer toolchain: mise, Brewfile & git](architecture/dev-tooling.md) | mise version pins, `Brewfile` + `.brewfile-linux-exclude`, git 1Password signing, global gitleaks hook |

@@ -72,7 +72,7 @@ Behavioral tests for `dot_claude/executable_statusline.sh`. Pipes mock JSON thro
 
 Behavioral regression guard for the `_claude_with_home` helper and the per-account wrappers. Sources `claude.zsh` in a minimal `zsh -f` environment (no rc files) and drives the underlying functions directly. Key assertions:
 
-- `_claude_with_home` sets `CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`, and `ECC_MCP_HEALTH_STATE_PATH` rooted at the given home dir, then runs the given command.
+- `_claude_with_home` sets several env vars rooted at the given home dir and runs the given command. The test asserts three of them: `CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, and `GATEGUARD_STATE_DIR`. (`_claude_with_home` also sets `CLV2_HOMUNCULUS_DIR` and `ECC_MCP_HEALTH_STATE_PATH` at runtime, but the bats test does not assert those.)
 - MCP API keys (`EXA_API_KEY`, `FIRECRAWL_API_KEY`) are exported into the subprocess env but are not exported into the parent shell.
 
 ### `tests/skill_provenance.bats`
@@ -103,7 +103,7 @@ This workflow runs a real `chezmoi init --apply` on two platforms and asserts th
 
 ### Step: Exclude CI-incompatible files
 
-Before `chezmoi apply`, both jobs move a set of files to `/tmp/chezmoi-excluded/` so that apply never attempts to call `op` or download fonts in the CI environment. Each file is moved inside a `for f in …; do if [ -f "$f" ]; then mv …; fi; done` loop so that a missing entry does not abort the step.
+Before `chezmoi apply`, both jobs move a set of files to `/tmp/chezmoi-excluded/` so that apply never attempts to call `op` or run interactive/install steps in the CI environment. Each file is moved inside a `for f in …; do if [ -f "$f" ]; then mv …; fi; done` loop so that a missing entry does not abort the step.
 
 Files excluded by **both** jobs (6 files):
 
@@ -179,7 +179,7 @@ The Ubuntu `setup-validation` job runs:
 cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
 ```
 
-The file `home/.chezmoi.toml` does not exist in the source tree. Only `home/.chezmoidata.toml` exists, which chezmoi auto-loads without explicit configuration. The `cp` step will silently fail (the `if [ -f "$f" ]` guard in analogous steps is not present here). Apply succeeds because `.chezmoidata.toml` is auto-discovered. This inconsistency is tracked for a separate fix.
+The file `home/.chezmoi.toml` does not exist in the source tree. The `cp` runs unguarded (no `if [ -f ]` check) under GitHub Actions' default `set -e -o pipefail`, so the missing file causes `cp` to error and **abort the step** — apply does not proceed. `setup-validation.yml` has been failing on recent runs as a result. The `cp` is unnecessary because `.chezmoidata.toml` auto-loads without explicit configuration. This is tracked as a real bug for a separate fix.
 
 **2. `benchmark.yml` reimplements the startup loop inline.**
 

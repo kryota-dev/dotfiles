@@ -44,7 +44,7 @@ chezmoi がインストール済みの場合：
 chezmoi init --apply kryota-dev
 ```
 
-ライフサイクルスクリプトが前提条件のインストール、Homebrew パッケージ、フォント、macOS 設定を自動的に処理します。
+ライフサイクルスクリプトが前提条件のインストール、Homebrew パッケージ、macOS 設定を自動的に処理します（フォントは chezmoi external でデプロイされます）。
 
 1Password の必須 vault item と `chezmoi apply` のゲートについては
 [1Password シークレットの初期設定](docs/getting-started/secrets-1password.ja.md) を参照してください。
@@ -123,8 +123,9 @@ AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/d
 > 適用と差分確認は chezmoi を直接実行します: `chezmoi apply -v` / `chezmoi diff`。
 
 **CI パイプライン:**
-- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
-- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → ファイル検証 → zsh 起動検証 (macos)
+- **CI** (`ci.yml`): Lint + Test (`make lint` / `make test-bats`) + ghq 補完同期 — すべて ubuntu-latest
+- **Setup Validation** (`setup-validation.yml`): macOS と Ubuntu/Linuxbrew でのエンドツーエンド `chezmoi apply`
+- **Benchmark** (`benchmark.yml`): 週次 cron + 手動 dispatch (macOS)
 
 bats スイートのマップ、検証マトリクス、`make` コントラクト全体は
 [CI & テスト](docs/contributing/ci-and-tests.ja.md) と [ローカル開発](docs/contributing/local-dev.ja.md) を参照してください。

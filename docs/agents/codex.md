@@ -42,11 +42,11 @@ Each `CODEX_HOME` receives an identical file set. Both are rendered from the sam
 
 ## Two-account model
 
-The personal account uses the default `CODEX_HOME=~/.codex`; the work account uses `CODEX_HOME=~/.codex-r06`. The `cdx`/`cdx-r06` zsh aliases set `CODEX_HOME` before invoking Codex, selecting the active account:
+The personal account uses the default `CODEX_HOME=~/.codex` (Codex's built-in default); the work account uses `CODEX_HOME=~/.codex-r06`, set explicitly by the `cdx-r06` alias. The `cdx`/`cdx-r06` zsh aliases select the active account:
 
 ```
-cdx      → CODEX_HOME=~/.codex        (personal)
-cdx-r06  → CODEX_HOME=~/.codex-r06   (work / r06)
+cdx      → codex --profile shared "$@"            (personal — CODEX_HOME unset, Codex defaults to ~/.codex)
+cdx-r06  → CODEX_HOME=~/.codex-r06 codex --profile shared "$@"   (work / r06)
 ```
 
 Because both homes receive their own copy of `hooks.json` and `shared.config.toml` — rendered from shared templates — each account runs the identical hook and config logic while keeping auth tokens and conversation state isolated in separate directories.
@@ -128,12 +128,12 @@ There are two mechanisms that inject `--profile shared` automatically:
 
 ### cdx / cdx-r06 aliases
 
-The `cdx` and `cdx-r06` zsh aliases (defined in `home/dot_config/zsh/codex.zsh`) are the standard user-facing entry points. They inject `--profile shared` and set `CODEX_HOME` before passing all arguments to the real Codex binary:
+The `cdx` and `cdx-r06` zsh aliases (defined in `home/dot_config/zsh/codex.zsh`) are the standard user-facing entry points. Both inject `--profile shared`. Only `cdx-r06` also sets `CODEX_HOME`; `cdx` leaves `CODEX_HOME` unset so Codex uses its default `~/.codex`:
 
 ```zsh
-# Conceptual shape (see codex.zsh for the actual definition)
-cdx      → CODEX_HOME=~/.codex      codex --profile shared "$@"
-cdx-r06  → CODEX_HOME=~/.codex-r06  codex --profile shared "$@"
+# Actual shape (from codex.zsh)
+cdx      → codex --profile shared "$@"                            # CODEX_HOME unset → Codex defaults to ~/.codex
+cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ```
 
 Variants `hcdx` and `hcdx-r06` exist for phone-control contexts (via the happy wrapper).
@@ -223,11 +223,11 @@ Both `~/.codex/AGENTS.md` and `~/.codex-r06/AGENTS.md` point to the same `~/AGEN
 
 ### Skills
 
-`home/dot_codex/symlink_skills.tmpl` renders to a symlink target of `~/.agents/skills`. This is the shared skill tree — the same directory symlinked by `home/dot_claude/symlink_skills.tmpl`. Both harnesses consume one inventory of curated, external, system, and evolved skills.
+`home/dot_codex/symlink_skills.tmpl` renders to a symlink target of `~/.agents/skills`. This is the shared skill tree — the same directory symlinked by `home/dot_claude/symlink_skills.tmpl`. Both harnesses consume one inventory of curated, external, and system skills from this path. Evolved skills live separately under `$CLV2_HOMUNCULUS_DIR/evolved/skills/` (CLV2-only; not part of the shared discovery tree).
 
 ```mermaid
 graph LR
-    A[~/.agents/skills\nSSO skill tree] --> B[~/.claude/skills\nsymlink]
+    A["~/.agents/skills\n(curated + external + system)"] --> B[~/.claude/skills\nsymlink]
     A --> C[~/.codex/skills\nsymlink]
     A --> D[~/.codex-r06/skills\nsymlink]
 ```

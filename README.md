@@ -44,7 +44,7 @@ If chezmoi is already installed:
 chezmoi init --apply kryota-dev
 ```
 
-Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, and macOS defaults.
+Lifecycle scripts automatically handle prerequisites, Homebrew packages, and macOS defaults (fonts are deployed via a chezmoi external).
 
 ### 1Password Secret Setup
 
@@ -135,8 +135,9 @@ See [`docs/agents/`](docs/agents/overview.md) for the dual-harness × dual-accou
 > Applying and diffing are done with chezmoi directly: `chezmoi apply -v`, `chezmoi diff`.
 
 **CI pipelines:**
-- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
-- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → file verification → zsh startup (macos)
+- **CI** (`ci.yml`): Lint + Test (`make lint` / `make test-bats`) + ghq-completion sync — all on ubuntu-latest
+- **Setup Validation** (`setup-validation.yml`): end-to-end `chezmoi apply` on macOS and Ubuntu/Linuxbrew
+- **Benchmark** (`benchmark.yml`): weekly cron + manual dispatch (macOS)
 
 See [CI & tests](docs/contributing/ci-and-tests.md) and [local dev](docs/contributing/local-dev.md)
 for the bats suite map, the validation matrix, and the full `make` contract.

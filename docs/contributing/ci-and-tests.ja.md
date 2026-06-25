@@ -72,7 +72,7 @@ lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を Gi
 
 `_claude_with_home` ヘルパーとアカウントごとのラッパーのふるまいリグレッションガードです。最小限の `zsh -f` 環境（rc ファイルなし）で `claude.zsh` をソースし、基礎となる関数を直接駆動します。主な確認事項：
 
-- `_claude_with_home` が `CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`、`ECC_MCP_HEALTH_STATE_PATH` を指定したホームディレクトリ配下に設定し、指定したコマンドを実行する。
+- `_claude_with_home` が指定したホームディレクトリ配下に複数の環境変数を設定し、指定したコマンドを実行する。テストが確認するのは `CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`GATEGUARD_STATE_DIR` の 3 つです（`_claude_with_home` は実行時に `CLV2_HOMUNCULUS_DIR` と `ECC_MCP_HEALTH_STATE_PATH` も設定しますが、bats テストはそれらを確認しません）。
 - MCP API キー（`EXA_API_KEY`、`FIRECRAWL_API_KEY`）がサブプロセス環境にエクスポートされるが、親シェルにはエクスポートされない。
 
 ### `tests/skill_provenance.bats`
@@ -103,7 +103,7 @@ awk パーサーは `[ecc]` テーブルの `skills` 配列のみにスコープ
 
 ### ステップ：CI 非互換ファイルの除外
 
-`chezmoi apply` の前に、両ジョブは CI 環境では `op` の呼び出しやフォントのダウンロードを試みないよう、一連のファイルを `/tmp/chezmoi-excluded/` に移動します。各ファイルは `for f in …; do if [ -f "$f" ]; then mv …; fi; done` ループ内で移動されるため、エントリが見つからなくてもステップは中断されません。
+`chezmoi apply` の前に、両ジョブは CI 環境では `op` の呼び出しやインタラクティブ/インストールステップの実行を試みないよう、一連のファイルを `/tmp/chezmoi-excluded/` に移動します。各ファイルは `for f in …; do if [ -f "$f" ]; then mv …; fi; done` ループ内で移動されるため、エントリが見つからなくてもステップは中断されません。
 
 **両ジョブ**で除外されるファイル（6 ファイル）：
 
@@ -179,7 +179,7 @@ Ubuntu の `setup-validation` ジョブは以下を実行します：
 cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
 ```
 
-ソースツリーには `home/.chezmoi.toml` が存在しません。存在するのは `home/.chezmoidata.toml` のみで、chezmoi は明示的な設定なしに自動ロードします。この `cp` ステップは静かに失敗しますが、`.chezmoidata.toml` が自動検出されるため apply は成功します。この不整合は別途修正として追跡されています。
+ソースツリーには `home/.chezmoi.toml` が存在しません。この `cp` は `if [ -f ]` ガードなしで実行されており、GitHub Actions のデフォルト `set -e -o pipefail` 下ではファイルが存在しないため `cp` がエラーとなり**ステップが中断**されます — apply は進みません。この結果、`setup-validation.yml` は最近のランで失敗しています。`.chezmoidata.toml` は明示的な設定なしに自動ロードされるため、この `cp` 自体が不要です。これは実際のバグとして別途修正が追跡されています。
 
 **2. `benchmark.yml` が起動ループをインラインで再実装している。**
 

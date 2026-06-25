@@ -42,11 +42,11 @@
 
 ## 2 アカウントモデル
 
-個人アカウントはデフォルトの `CODEX_HOME=~/.codex` を使用し、ワークアカウントは `CODEX_HOME=~/.codex-r06` を使用します。`cdx`/`cdx-r06` zsh エイリアスは Codex を呼び出す前に `CODEX_HOME` を設定してアクティブアカウントを選択します：
+個人アカウントは Codex のデフォルト `CODEX_HOME=~/.codex` をそのまま使用し、ワークアカウントは `cdx-r06` エイリアスが明示的に設定する `CODEX_HOME=~/.codex-r06` を使用します。`cdx`/`cdx-r06` zsh エイリアスはアクティブアカウントを選択します：
 
 ```
-cdx      → CODEX_HOME=~/.codex        (個人)
-cdx-r06  → CODEX_HOME=~/.codex-r06   (ワーク / r06)
+cdx      → codex --profile shared "$@"                              (個人 — CODEX_HOME 未設定、Codex は ~/.codex をデフォルト使用)
+cdx-r06  → CODEX_HOME=~/.codex-r06 codex --profile shared "$@"    (ワーク / r06)
 ```
 
 両方のホームは共有テンプレートからレンダリングされた `hooks.json` と `shared.config.toml` のコピーをそれぞれ受け取るため、各アカウントは同一のフックと設定ロジックを実行しながら、認証トークンと会話状態を別々のディレクトリに分離します。
@@ -128,12 +128,12 @@ multi_agent = true
 
 ### cdx / cdx-r06 エイリアス
 
-`cdx` と `cdx-r06` zsh エイリアス（`home/dot_config/zsh/codex.zsh` で定義）は標準のユーザー向けエントリポイントです。`--profile shared` を注入し、すべての引数を実際の Codex バイナリに渡す前に `CODEX_HOME` を設定します：
+`cdx` と `cdx-r06` zsh エイリアス（`home/dot_config/zsh/codex.zsh` で定義）は標準のユーザー向けエントリポイントです。どちらも `--profile shared` を注入しますが、`CODEX_HOME` を設定するのは `cdx-r06` のみです。`cdx` は `CODEX_HOME` を未設定のままにし、Codex はデフォルトの `~/.codex` を使用します：
 
 ```zsh
-# 概念的な形（実際の定義は codex.zsh を参照）
-cdx      → CODEX_HOME=~/.codex      codex --profile shared "$@"
-cdx-r06  → CODEX_HOME=~/.codex-r06  codex --profile shared "$@"
+# 実際の形（codex.zsh より）
+cdx      → codex --profile shared "$@"                              # CODEX_HOME 未設定 → Codex は ~/.codex をデフォルト使用
+cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ```
 
 `hcdx` と `hcdx-r06` は phone-control コンテキスト用のバリアントです（happy ラッパー経由）。
@@ -223,11 +223,11 @@ Codex ゲートはベストエフォートの補完的レイヤーです。Codex
 
 ### スキル
 
-`home/dot_codex/symlink_skills.tmpl` は `~/.agents/skills` へのシンボリックリンクにレンダリングされます。これは共有スキルツリーで、`home/dot_claude/symlink_skills.tmpl` がシンボリックリンクするのと同じディレクトリです。両ハーネスは curated、external、system、evolved スキルの 1 つのインベントリを共有します。
+`home/dot_codex/symlink_skills.tmpl` は `~/.agents/skills` へのシンボリックリンクにレンダリングされます。これは共有スキルツリーで、`home/dot_claude/symlink_skills.tmpl` がシンボリックリンクするのと同じディレクトリです。両ハーネスはこのパスから curated、external、system スキルの 1 つのインベントリを共有します。Evolved スキルは `$CLV2_HOMUNCULUS_DIR/evolved/skills/` 配下に別途管理されており（CLV2 専用）、共有 discovery ツリーには含まれません。
 
 ```mermaid
 graph LR
-    A[~/.agents/skills\nSSO スキルツリー] --> B[~/.claude/skills\nシンボリックリンク]
+    A["~/.agents/skills\n（curated + external + system）"] --> B[~/.claude/skills\nシンボリックリンク]
     A --> C[~/.codex/skills\nシンボリックリンク]
     A --> D[~/.codex-r06/skills\nシンボリックリンク]
 ```
