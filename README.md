@@ -44,7 +44,7 @@ If chezmoi is already installed:
 chezmoi init --apply kryota-dev
 ```
 
-Lifecycle scripts automatically handle prerequisites, Homebrew packages, fonts, and macOS defaults.
+Lifecycle scripts automatically handle prerequisites, Homebrew packages, and macOS defaults (fonts are deployed via a chezmoi external).
 
 ### 1Password Secret Setup
 
@@ -56,6 +56,20 @@ Sensitive files (AWS config) are stored as [1Password Secure Notes](https://deve
    | Item Title | Content |
    |-----------|---------|
    | `Dotfiles - AWS Config` | `~/.aws/config` content |
+
+See [1Password secrets onboarding](docs/getting-started/secrets-1password.md) for the full
+list of required vault items and how `chezmoi apply` gates on them.
+
+## Documentation
+
+Full documentation lives in [`docs/`](docs/README.md) — English canonical with Japanese
+(`*.ja.md`) mirrors. Start at the [docs index](docs/README.md):
+
+- **Getting started:** [installation](docs/getting-started/installation.md) · [verification](docs/getting-started/verification.md) · [1Password secrets](docs/getting-started/secrets-1password.md)
+- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md)
+- **AI agents:** [overview](docs/agents/overview.md) · [account isolation](docs/agents/account-isolation.md) · [Claude Code](docs/agents/claude-code.md) · [Codex](docs/agents/codex.md) · [skill provenance](docs/agents/skills-provenance.md)
+- **Contributing:** [local dev](docs/contributing/local-dev.md) · [CI & tests](docs/contributing/ci-and-tests.md) · [worktrees & env](docs/contributing/worktrees-and-env.md)
+- **Explanation:** [design rationale](docs/explanation/design-rationale.md) · [secrets & isolation](docs/explanation/secrets-and-isolation.md)
 
 ## Architecture
 
@@ -89,48 +103,22 @@ dotfiles/
 └── LICENSE
 ```
 
-### Zsh Architecture
+### Deep dives
 
-`.zshrc` is a minimal core that delegates all plugin and module loading to sheldon with zsh-defer for async initialization:
+For the zsh startup model, the full lifecycle apply timeline, the chezmoi engine,
+externals pinning, and dev tooling, see the [architecture docs](docs/architecture/overview.md):
 
-```
-.zprofile                     Homebrew PATH, env vars
-    ↓
-.zshrc (minimal core)         setopt, PATH, mise, direnv, starship
-    ↓
-sheldon source                zsh-defer loads everything async
-    ├── community plugins     autosuggestions, syntax-highlighting, completions
-    └── local modules ──→     aliases, git, docker, claude, ...
-```
-
-| Module | Description |
-|--------|-------------|
-| `aliases.zsh` | General aliases (ll, vi, pn, etc.) |
-| `git.zsh` | Git aliases & functions |
-| `docker.zsh` | Docker / Compose aliases |
-| `claude.zsh` | Claude Code utilities |
-| `functions.zsh` | General utilities (yazi, mduch) |
-| `completions.zsh` | Completion settings |
-| `wtp.zsh` | wtp completions & cd hooks |
-
-### Lifecycle Scripts
-
-chezmoi orchestrates setup through lifecycle scripts — `run_once` scripts execute on first apply, while `run_onchange` scripts re-run when their tracked content changes:
-
-| Phase | Script | Trigger | Description |
-|-------|--------|---------|-------------|
-| 1 | `00-install-prerequisites` | once (before) | Xcode CLI tools, Homebrew |
-| 2 | `10-brew-bundle` | on change | Install packages via Brewfile |
-| 2.5 | `11-validate-1password` | once (after) | Validate 1Password CLI |
-| 3 | `12-setup-mise` | on change | Install mise-managed tools |
-| 4 | `20-macos-defaults` | on change | Finder, Dock, keyboard, etc. |
-| 5 | `30-setup-fonts` | once (after) | Moralerspace Neon |
-| 6 | `40-setup-sheldon` | once (after) | Lock plugin versions |
-| 7 | `90-other-apps` | once (after) | Interactive app downloads |
+- [Shell environment](docs/architecture/shell-environment.md) — `.zprofile` → `.zshrc` → sheldon/zsh-defer, modules
+- [Lifecycle scripts](docs/architecture/lifecycle-scripts.md) — the numbered `run_once_*` / `run_onchange_*` apply timeline
+- [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [dev tooling](docs/architecture/dev-tooling.md)
 
 ## Claude Code
 
 AI-native development environment — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://openai.com/index/introducing-codex/) settings, custom skills, and agents are managed declaratively as dotfiles via chezmoi. Skills are centralized in `home/dot_agents/skills/` and symlinked to both `~/.claude/skills` and `~/.codex/skills`.
+
+See [`docs/agents/`](docs/agents/overview.md) for the dual-harness × dual-account model,
+[account isolation](docs/agents/account-isolation.md), and the
+[skill provenance taxonomy](docs/agents/skills-provenance.md).
 
 ## Development
 
@@ -147,8 +135,12 @@ AI-native development environment — [Claude Code](https://docs.anthropic.com/e
 > Applying and diffing are done with chezmoi directly: `chezmoi apply -v`, `chezmoi diff`.
 
 **CI pipelines:**
-- **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
-- **Setup Validation** (`setup-validation.yml`): chezmoi apply → mise install → file verification → zsh startup (macos)
+- **CI** (`ci.yml`): Lint + Test (`make lint` / `make test-bats`) + ghq-completion sync — all on ubuntu-latest
+- **Setup Validation** (`setup-validation.yml`): end-to-end `chezmoi apply` on macOS and Ubuntu/Linuxbrew
+- **Benchmark** (`benchmark.yml`): weekly cron + manual dispatch (macOS)
+
+See [CI & tests](docs/contributing/ci-and-tests.md) and [local dev](docs/contributing/local-dev.md)
+for the bats suite map, the validation matrix, and the full `make` contract.
 
 ## License
 
