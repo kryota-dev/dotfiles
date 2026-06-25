@@ -133,6 +133,16 @@
     include = ["*/scripts/hooks/**", "*/scripts/lib/**"]
     refreshPeriod = "168h"
 
+# ECC `aside` slash command — the only command adopted from ECC (the other 83
+# were rejected). Fetched verbatim instead of vendored, so this public MIT repo
+# references rather than redistributes ECC's file (no third-party notice needed,
+# same rationale as the hook runtime above). Pinned to the same [ecc].commit, so
+# it stays version-locked with the runtime.
+[".claude/commands/aside.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/affaan-m/ECC/{{ .ecc.commit }}/commands/aside.md"
+    refreshPeriod = "168h"
+
 # Moralerspace font (macOS only)
 # Version is defined in .chezmoidata.toml [versions.moralerspace_font]
 {{ if eq .chezmoi.os "darwin" -}}
