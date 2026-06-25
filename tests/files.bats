@@ -225,6 +225,20 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_settings.json.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_agents.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_statusline.sh.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl" ]
+}
+
+@test "aside curated command exists with MIT attribution and r06 delivery" {
+  local cmd="${HOME_DIR}/dot_claude/commands/aside.md"
+  [ -f "$cmd" ]
+  # Valid command frontmatter.
+  head -n1 "$cmd" | grep -q '^---$'
+  grep -q '^description:' "$cmd"
+  # ECC-adopted command keeps MIT attribution (provenance: curated).
+  grep -q 'MIT License' "$cmd"
+  grep -q 'affaan-m/ECC' "$cmd"
+  # r06 work profile shares the commands dir via symlink to the default profile.
+  grep -q '/.claude/commands$' "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl"
 }
 
 @test "claude statusline script exists" {
