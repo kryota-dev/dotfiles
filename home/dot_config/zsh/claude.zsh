@@ -3,17 +3,29 @@
 # cld-r06 never share sessions, governance state.db, instincts, or hook caches.
 # The command to run is passed after the home dir ("claude ..." or "happy claude ..."),
 # so the happy wrapper inherits the exact same per-account environment.
+
+# MCP API keys (exa, firecrawl) rendered from 1Password into a 0600 file. Sourced (not
+# exported) so the keys stay out of the general shell environment; _claude_with_home re-exports
+# them scoped to the claude subprocess. Absent until `chezmoi apply` provisions it, in which
+# case the MCP servers just launch without a key.
+[[ -r "${HOME}/.config/zsh/claude-secrets.zsh" ]] && source "${HOME}/.config/zsh/claude-secrets.zsh"
+
 _claude_with_home() {
   local home_dir="$1"
   shift
   # Default to plain `claude` when no command is given, so a direct call still launches
   # Claude Code (the aliases always pass an explicit command).
   (($#)) || set -- claude
+  # EXA_API_KEY/FIRECRAWL_API_KEY are exported here (scoped to "$@") so Claude Code can expand
+  # the "${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}" placeholders in its MCP env at spawn. The :-
+  # default keeps this safe when the secrets file is absent.
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
     CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
+    EXA_API_KEY="${EXA_API_KEY:-}" \
+    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
     "$@"
 }
 alias cld='_claude_with_home "$HOME/.claude" claude'
