@@ -98,7 +98,7 @@ docker exec <コンテナ名> psql -U postgres -d <DB名> -c \
 ### Step 7: マイグレーション再実行
 
 ```bash
-pnpm -F @acsim/api db:migrate
+pnpm -F <api-package> db:migrate
 ```
 
 ### Step 8: 結果の確認
