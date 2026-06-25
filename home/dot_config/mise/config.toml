@@ -44,6 +44,11 @@ zoxide = "0.9.9"
 # end-to-end encryption (`happy claude` / `happy codex`). CLI only; the mobile/web apps
 # are installed separately and paired at runtime.
 "npm:happy" = "1.1.10"
+# dmux (standardagents/dmux): a tmux-based pane manager for orchestrating parallel AI
+# agent sessions; backs the dmux-workflows skill. Security-reviewed before adoption: MIT,
+# no install/postinstall/prepare lifecycle scripts (build steps run only at publish time),
+# mainstream deps (ink/react/chalk/chokidar). Requires tmux, already provisioned above.
+"npm:dmux" = "5.9.0"
 
 [settings]
 # Pin precompiled CPython to a flavor that ships lib/; latest mise otherwise

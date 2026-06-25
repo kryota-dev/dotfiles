@@ -503,6 +503,12 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
 
+@test "mise config declares dmux as a pinned npm-backed CLI" {
+  local config="${HOME_DIR}/dot_config/mise/config.toml"
+  # dmux backs the dmux-workflows skill; provisioned via the npm backend at a fixed version.
+  grep -Eq '^"npm:dmux"[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$config"
+}
+
 @test "mcp setup registers both servers as user scope for every account config dir" {
   local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
   [ -f "$script" ]
