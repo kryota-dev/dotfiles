@@ -16,8 +16,9 @@ ghq_user = "kryota-dev"
   # version and commit together; ECC is never auto-merged (see packageRules in renovate.json5).
   version = "2.0.0"
   commit = "8ad4151095e453301ce0e50374103bcd8f50ded2"
-  # Adopted ECC skills (Phase 3 analysis: 133 selected of 271). Reconciled against the
-  # pinned commit's 261-skill tree (F-0): 127 exist, 6 vanished upstream and are dropped
+  # Adopted ECC skills (Phase 3 analysis: 133 selected of 271 skills at analysis time).
+  # Reconciled against the pinned commit's current 261-skill tree (F-0): 127 exist, 6
+  # vanished upstream between analysis and the pinned commit and are dropped
   # (agent-self-evaluation, brand-discovery, competitive-platform-analysis,
   # competitive-report-structure, config-gc, ml-adoption-playbook — no rename rescue;
   # functional substitutes remain in the list). .chezmoiexternal.toml ranges over this
