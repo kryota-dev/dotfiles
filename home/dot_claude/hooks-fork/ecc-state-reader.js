@@ -80,8 +80,10 @@ function buildStatus(db) {
   const activeSessions = tableExists(db, 'sessions')
     ? db.prepare("SELECT count(*) c FROM sessions WHERE ended_at IS NULL AND state IN ('active','running','idle')").get().c
     : 0;
+  // Mirror ECC's CLOSED_WORK_ITEM_STATUSES (queries.js) exactly so the count matches ECC's
+  // own dashboard — resolved/merged are closed there, not open.
   const openWorkItems = tableExists(db, 'work_items')
-    ? db.prepare("SELECT count(*) c FROM work_items WHERE status NOT IN ('closed','done','cancelled')").get().c
+    ? db.prepare("SELECT count(*) c FROM work_items WHERE status NOT IN ('done','closed','resolved','merged','cancelled')").get().c
     : 0;
   return {
     pendingGovernanceEvents: pending,
@@ -133,8 +135,16 @@ function renderWorkItems(rows) {
     .join('\n');
 }
 
+const SUBCOMMANDS = new Set(['status', 'sessions', 'work-items', 'work_items']);
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  // Validate the subcommand BEFORE touching the db, so an unknown subcommand always reports
+  // exit 2 — even on a fresh account where openDb() would otherwise short-circuit to a note.
+  if (!SUBCOMMANDS.has(args.sub)) {
+    process.stderr.write(`Unknown subcommand: ${args.sub} (use status|sessions|work-items)\n`);
+    return 2;
+  }
   const dbPath = args.db || stateDbPath();
 
   const opened = openDb(dbPath);
@@ -161,9 +171,6 @@ function main() {
         payload = { workItems: listWorkItems(db) };
         text = renderWorkItems(payload.workItems);
         break;
-      default:
-        process.stderr.write(`Unknown subcommand: ${args.sub} (use status|sessions|work-items)\n`);
-        return 2;
     }
     process.stdout.write((args.json ? JSON.stringify(payload) : text) + '\n');
     return 0;
@@ -172,4 +179,6 @@ function main() {
   }
 }
 
-process.exit(main());
+// Set exitCode rather than process.exit() so a large buffered stdout write drains fully
+// before the process ends (process.exit() can truncate it).
+process.exitCode = main();

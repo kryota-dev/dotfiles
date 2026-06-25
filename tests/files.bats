@@ -404,6 +404,35 @@ load helpers/setup
   rm -rf "$tmp"
 }
 
+@test "ecc-state-reader counts only non-closed work items (ECC status domain)" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local tmp; tmp=$(mktemp -d); mkdir -p "$tmp/ecc"
+  # Only "open" is non-closed; resolved/merged/done/cancelled are all closed in ECC's domain.
+  node -e '
+    const {DatabaseSync}=require("node:sqlite");
+    const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});
+    db.exec("CREATE TABLE work_items(id TEXT PRIMARY KEY, source TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, priority TEXT, url TEXT, owner TEXT, repo_root TEXT, session_id TEXT, metadata TEXT, created_at TEXT, updated_at TEXT NOT NULL)");
+    const ins=db.prepare("INSERT INTO work_items(id,source,title,status,updated_at) VALUES(?,?,?,?,?)");
+    for (const [id,st] of [["w1","open"],["w2","resolved"],["w3","merged"],["w4","done"],["w5","cancelled"]]) ins.run(id,"gh",id,st,"2026-01-01");
+    db.close();
+  ' "$tmp/ecc/state.db"
+  local out; out=$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" status --json)
+  [ "$(echo "$out" | jq -r '.openWorkItems')" = "1" ]
+  rm -rf "$tmp"
+}
+
+@test "ecc-state-reader rejects an unknown subcommand with exit 2 even on a fresh account" {
+  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
+  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
+  local tmp; tmp=$(mktemp -d)
+  # No state.db: validation must still fire before the graceful "no db" path.
+  run env "ECC_AGENT_DATA_HOME=$tmp" node "$reader" bogus-subcommand
+  [ "$status" -eq 2 ]
+  rm -rf "$tmp"
+}
+
 @test "claude.zsh defines the ecc-* reader functions" {
   grep -q 'ecc-status()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
   grep -q 'ecc-sessions()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
