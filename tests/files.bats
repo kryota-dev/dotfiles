@@ -234,11 +234,14 @@ load helpers/setup
   # Valid command frontmatter.
   head -n1 "$cmd" | grep -q '^---$'
   grep -q '^description:' "$cmd"
-  # ECC-adopted command keeps MIT attribution (provenance: curated).
+  # ECC-adopted command keeps the full MIT attribution (provenance: curated).
   grep -q 'MIT License' "$cmd"
   grep -q 'affaan-m/ECC' "$cmd"
-  # r06 work profile shares the commands dir via symlink to the default profile.
-  grep -q '/.claude/commands$' "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl"
+  grep -q 'Copyright (c) 2026 Affaan Mustafa' "$cmd"
+  # r06 work profile shares the commands dir via a symlink that points at the
+  # DEFAULT profile (exact match: a self-referential ~/.claude-r06/commands
+  # target would loop, and a loose grep would not catch it).
+  [ "$(cat "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl")" = '{{ .chezmoi.homeDir }}/.claude/commands' ]
 }
 
 @test "claude statusline script exists" {
