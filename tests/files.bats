@@ -225,6 +225,26 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_settings.json.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_agents.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_statusline.sh.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl" ]
+}
+
+@test "aside command is fetched from ECC via chezmoi external and delivered to r06" {
+  local ext="${HOME_DIR}/.chezmoiexternal.toml"
+  # The aside command is referenced (not vendored): a chezmoi external file entry
+  # targeting ~/.claude/commands/aside.md, fetched verbatim from ECC. Verbatim
+  # external fetch means this public repo references rather than redistributes
+  # the file, so it is NOT committed under home/dot_claude/commands/.
+  [ ! -e "${HOME_DIR}/dot_claude/commands/aside.md" ]
+  grep -q '\[".claude/commands/aside.md"\]' "$ext"
+  grep -q 'raw.githubusercontent.com/affaan-m/ECC' "$ext"
+  grep -q 'commands/aside.md' "$ext"
+  # Pinned to the shared ECC commit (version-locked with the hook runtime), not a
+  # mutable branch/tag.
+  grep -q '{{ .ecc.commit }}/commands/aside.md' "$ext"
+  # r06 work profile shares the commands dir via a symlink that points at the
+  # DEFAULT profile (exact match: a self-referential ~/.claude-r06/commands
+  # target would loop, and a loose grep would not catch it).
+  [ "$(cat "${HOME_DIR}/dot_claude-r06/symlink_commands.tmpl")" = '{{ .chezmoi.homeDir }}/.claude/commands' ]
 }
 
 @test "claude statusline script exists" {
