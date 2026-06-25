@@ -2,6 +2,24 @@
 
 load helpers/setup
 
+# Names declared external via the templated range over .chezmoidata.toml [ecc].skills.
+# That range emits one [".agents/skills/<name>"] entry per list element, so a literal grep
+# of .chezmoiexternal.toml (which only sees the `{{ $skill }}` template var) can't see the
+# expanded names — resolve the list directly. Kept dependency-free on purpose: CI's bats
+# job installs only bats/shellcheck/zsh, no chezmoi to render the template.
+_ecc_skill_list() {
+  awk '/^  skills = \[/{f=1;next} f&&/^  \]/{f=0} f' "${HOME_DIR}/.chezmoidata.toml" \
+    | grep -oE '"[^"]+"' | tr -d '"'
+}
+
+# True if <name> is declared external: either a literal [".agents/skills/<name>..."] table
+# header in .chezmoiexternal.toml, or an element of the [ecc].skills range source above.
+_skill_is_external() {
+  local name="$1"
+  grep -Eq "^\[\"\.agents/skills/${name}(/|\")" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null && return 0
+  _ecc_skill_list | grep -qFx "$name"
+}
+
 # Skill provenance enforcement (see ~/AGENTS.md "Skill provenance").
 #
 # Five categories:
@@ -75,8 +93,8 @@ load helpers/setup
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
-    if grep -Eq "^\[\"\.agents/skills/${name}(/|\")" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null; then
-      echo "skill '$name' is declared both curated (source) and external (.chezmoiexternal.toml)"
+    if _skill_is_external "$name"; then
+      echo "skill '$name' is declared both curated (source) and external (.chezmoiexternal.toml / [ecc].skills)"
       false
     fi
   done
@@ -116,6 +134,32 @@ load helpers/setup
   done
 }
 
+@test "skill provenance: adopted ECC skills are range-declared external (no literal drift)" {
+  # PR-A deploys the reconciled ECC skill set via a {{ range .ecc.skills }} block in
+  # .chezmoiexternal.toml. Assert the mechanism is wired so the runtime classifier — which
+  # resolves the [ecc].skills list, not the template text — stays correct.
+  local n
+  n="$(_ecc_skill_list | grep -c .)"
+  [ "$n" -ge 100 ] || {
+    echo "expected >=100 [ecc].skills entries, got $n"
+    false
+  }
+  # The range entry must exist in .chezmoiexternal.toml, keyed on the template var.
+  grep -qF '[".agents/skills/{{ $skill }}"]' "${HOME_DIR}/.chezmoiexternal.toml" || {
+    echo "ECC skills range entry missing from .chezmoiexternal.toml"
+    false
+  }
+  # No adopted ECC skill may also be curated in source (would double-manage the path:
+  # chezmoi would try to both symlink the curated dir and external-fetch the same name).
+  local s
+  while IFS= read -r s; do
+    [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
+      echo "ECC skill '$s' collides with a curated skill of the same name"
+      false
+    }
+  done < <(_ecc_skill_list)
+}
+
 # --- Informational runtime check ----------------------------------------------
 
 @test "skill provenance: runtime ~/.agents/skills has no unmanaged skill (informational)" {
@@ -128,10 +172,10 @@ load helpers/setup
     name="$(basename "$dir")"
     # curated: present in the chezmoi source tree
     [ -d "${HOME_DIR}/dot_agents/skills/${name}" ] && continue
-    # external: declared as a [".agents/skills/<name>"] or [".agents/skills/<name>/..."]
-    # table header. Anchor to the path segment so a prefix name (e.g. "slack") is not
-    # matched against a longer external entry ("slack-gif-creator").
-    grep -Eq "^\[\"\.agents/skills/${name}(/|\")" "${HOME_DIR}/.chezmoiexternal.toml" 2>/dev/null && continue
+    # external: a literal [".agents/skills/<name>"] / [".agents/skills/<name>/..."] table
+    # header in .chezmoiexternal.toml, OR a [ecc].skills element fanned out by the range
+    # (whose literal text is only `{{ $skill }}`). _skill_is_external covers both.
+    _skill_is_external "$name" && continue
     # system (.system) is a dotfile and not matched by */ ; anything else is unmanaged
     unmanaged+=("$name")
   done
