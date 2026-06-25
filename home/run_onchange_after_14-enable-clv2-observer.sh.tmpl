@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Enable the continuous-learning-v2 (CLV2) Haiku observer per account (Phase 7 PR-B, #7/#34).
+#
+# The CLV2 engine is deployed read-only via chezmoi external (PR-A) and its own config.json
+# ships observer.enabled=false. observe.sh resolves the EFFECTIVE config from
+# $CLV2_HOMUNCULUS_DIR/config.json FIRST, falling back to the skill's own config. That
+# homunculus dir is per-account runtime state — NOT chezmoi-managed — so writing the enable
+# flag there both (a) turns the observer on and (b) survives the external's 168h refresh,
+# which would otherwise clobber an edit to the skill's own config.json.
+#
+# The cld / cld-r06 wrappers point CLV2_HOMUNCULUS_DIR at "<account>/ecc-homunculus", so we
+# enable it under each account config dir that exists. Idempotent.
+set -euo pipefail
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "[clv2-observer] jq not found; skipping observer enable (re-run after mise/brew provisions jq)." >&2
+  exit 0
+fi
+
+# Defaults mirror the upstream skill config (continuous-learning-v2/config.json).
+enable_config='{"version":"2.1","observer":{"enabled":true,"run_interval_minutes":5,"min_observations_to_analyze":20}}'
+
+for account in "${HOME}/.claude" "${HOME}/.claude-r06"; do
+  [ -d "$account" ] || continue
+  dir="${account}/ecc-homunculus"
+  mkdir -p "$dir"
+  cfg="${dir}/config.json"
+  if [ -f "$cfg" ]; then
+    # Preserve any existing fields; only force observer.enabled=true.
+    tmp="$(mktemp)"
+    if jq '.observer.enabled = true' "$cfg" >"$tmp" 2>/dev/null; then
+      mv "$tmp" "$cfg"
+    else
+      rm -f "$tmp"
+      printf '%s\n' "$enable_config" >"$cfg"
+    fi
+  else
+    printf '%s\n' "$enable_config" >"$cfg"
+  fi
+  echo "[clv2-observer] observer enabled in ${cfg}" >&2
+done
