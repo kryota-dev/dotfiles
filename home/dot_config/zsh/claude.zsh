@@ -33,6 +33,16 @@ alias hcld-r06='_claude_with_home "$HOME/.claude-r06" happy claude'
 #   ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
 alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude" claude'
 
+# ecc-* CLIs (PR-C, #4/#5): inspect the per-account ECC governance state.db that the
+# governance-capture fork writes. Account is selected by ECC_AGENT_DATA_HOME; the reader
+# defaults to ~/.claude when it is unset, so a plain shell shows the default account. To
+# inspect the r06 account, prefix it: `ECC_AGENT_DATA_HOME=$HOME/.claude-r06 ecc-status`.
+# Functions (not aliases) so flags like --json pass through. The reader lives under the
+# default account dir and is shared by both accounts (same as the governance-capture fork).
+ecc-status()     { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" status "$@"; }
+ecc-sessions()   { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" sessions "$@"; }
+ecc-work-items() { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" work-items "$@"; }
+
 alias ccdcmds='ccdcommands'
 
 function ccdpaths() {
