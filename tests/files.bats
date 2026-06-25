@@ -910,6 +910,119 @@ _gate_decision() {
   chezmoi cat "${HOME}/AGENTS.md" --source "${REPO_ROOT}/home" 2>/dev/null | grep -q 'Coding standards (house)'
 }
 
+# ---------------------------------------------------------------------------
+# PR-F: CLV2 instinct→skill flow wiring (SessionStart producer + statusline +
+# retrospective-codify input mode).
+# ---------------------------------------------------------------------------
+
+@test "clv2-session-notify hook exists, is valid bash, and degrades gracefully" {
+  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
+  [ -f "$hook" ]
+  bash -n "$hook"
+  # Reads the pinned engine and parses its cluster-count line.
+  grep -q 'instinct-cli.py' "$hook"
+  grep -q 'Potential skill clusters found' "$hook"
+  # Caches the count for the statusline and throttles notifications for 7 days.
+  grep -q '.review-ready-clusters' "$hook"
+  grep -q '604800' "$hook"
+  grep -q 'osascript' "$hook"
+  # No-op guards: needs a python interpreter and macOS notifier before acting.
+  grep -q 'command -v python3' "$hook"
+}
+
+# Behavioral: drive the hook with fake python/osascript so it never touches the
+# real engine or fires a real notification, then assert it caches the parsed
+# count and that the 7-day throttle suppresses a second notification.
+@test "clv2-session-notify caches the cluster count and throttles notifications" {
+  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
+  local td hh hb
+  td=$(mktemp -d)
+  hh=$(mktemp -d)
+  hb=$(mktemp -d)
+  # Fake engine file: only needs to be readable; the fake python ignores it.
+  mkdir -p "${hh}/.agents/skills/continuous-learning-v2/scripts"
+  printf 'x\n' >"${hh}/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py"
+  # Fake python3: emit canned evolve output with N=3.
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "Potential skill clusters found: 3"' >"${hb}/python3"
+  chmod +x "${hb}/python3"
+  # Fake osascript: record each notification call.
+  printf '%s\n' '#!/usr/bin/env bash' "echo call >>\"${td}/.osa-calls\"" >"${hb}/osascript"
+  chmod +x "${hb}/osascript"
+
+  # First run: cache == 3, exactly one notification (no throttle stamp yet).
+  # CLV2_PYTHON_CMD is pinned to the fake so an inherited value cannot bypass it.
+  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
+  [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
+  [ -f "${td}/.last-instinct-notify" ]
+  [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
+
+  # Second run immediately after: still caches, but throttle suppresses notify #2.
+  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
+  [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
+  [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
+
+  rm -rf "$td" "$hh" "$hb"
+}
+
+# Regression: a corrupt throttle stamp that looks octal ("09") must not abort the
+# arithmetic (10# base-10 coercion). The hook must still exit 0 and refresh the cache.
+@test "clv2-session-notify tolerates a corrupt octal-looking throttle stamp" {
+  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
+  local td hh hb
+  td=$(mktemp -d)
+  hh=$(mktemp -d)
+  hb=$(mktemp -d)
+  mkdir -p "${hh}/.agents/skills/continuous-learning-v2/scripts"
+  printf 'x\n' >"${hh}/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "Potential skill clusters found: 2"' >"${hb}/python3"
+  chmod +x "${hb}/python3"
+  printf '%s\n' '#!/usr/bin/env bash' ':' >"${hb}/osascript"
+  chmod +x "${hb}/osascript"
+  printf '09\n' >"${td}/.last-instinct-notify"
+  run env HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${td}/.review-ready-clusters")" = "2" ]
+  rm -rf "$td" "$hh" "$hb"
+}
+
+# Graceful no-op when the CLV2 engine is not deployed: no cache, clean exit.
+@test "clv2-session-notify is a no-op when the engine is absent" {
+  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
+  local td hh
+  td=$(mktemp -d)
+  hh=$(mktemp -d)
+  run env HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" bash "$hook"
+  [ "$status" -eq 0 ]
+  [ ! -f "${td}/.review-ready-clusters" ]
+  rm -rf "$td" "$hh"
+}
+
+@test "settings.json wires the clv2 SessionStart notify hook (async)" {
+  command -v jq >/dev/null 2>&1 || skip "jq not installed"
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  run jq -e '.hooks.SessionStart[]
+    | select(.id=="session:start:clv2-notify")
+    | .hooks[0]
+    | select(.command=="$HOME/.claude/clv2-session-notify.sh" and .async==true)' "$s"
+  [ "$status" -eq 0 ]
+}
+
+@test "statusline renders the instinct-cluster segment from the cache" {
+  local sl="${HOME_DIR}/dot_claude/executable_statusline.sh"
+  grep -q 'I_INSTINCT=' "$sl"
+  grep -q 'clv2_cluster_count' "$sl"
+  grep -q '.review-ready-clusters' "$sl"
+  grep -qF '${I_INSTINCT} ${icc}' "$sl"
+}
+
+@test "retrospective-codify documents the instinct-cluster input mode" {
+  local sk="${HOME_DIR}/dot_agents/skills/retrospective-codify/SKILL.md"
+  grep -q 'instinct-cluster 入力モード' "$sk"
+  grep -q -- '--input=instinct-clusters' "$sk"
+  grep -q 'instinct-cli.py' "$sk"
+  grep -q 'clv2-session-notify' "$sk"
+}
+
 @test "dmux OpenRouter secret is a private 1Password template, never committed in clear" {
   local tmpl="${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl"
   [ -f "$tmpl" ]
