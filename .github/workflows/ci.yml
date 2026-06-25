@@ -43,26 +43,13 @@ jobs:
           curl -sS -L "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
           chmod +x /usr/local/bin/shfmt
 
-      - name: Run shellcheck on scripts
-        run: |
-          find home \( -name '*.sh' -o -name '*.sh.tmpl' \) ! -name 'symlink_*' | while read -r f; do
-            sed '/{{/d' "$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 -
-          done
-
-      - name: Run shfmt check
-        run: |
-          find home \( -name '*.sh' -o -name '*.sh.tmpl' \) ! -name 'symlink_*' | while read -r f; do
-            sed '/{{/d' "$f" | shfmt -d -i 2 -ci
-          done
-
       - name: Install zsh
         run: sudo apt-get install -y zsh
 
-      - name: Check zsh syntax
-        run: |
-          for f in home/dot_config/zsh/*.zsh; do
-            zsh -n "$f" || exit 1
-          done
+      # Single source of truth: the same `make lint` developers run locally
+      # (shellcheck + shfmt + zsh syntax for .zsh, .zsh.tmpl, and _ghq).
+      - name: Run lint
+        run: make lint
 
   test:
     name: Test
@@ -82,7 +69,7 @@ jobs:
           sudo apt-get install -y bats shellcheck zsh
 
       - name: Run Bats tests
-        run: bats tests/*.bats
+        run: make test-bats
 
   sync-ghq-completion:
     name: Sync ghq completion
