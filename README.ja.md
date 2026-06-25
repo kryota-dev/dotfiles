@@ -125,13 +125,15 @@ AI ネイティブ開発環境 — [Claude Code](https://docs.anthropic.com/en/d
 
 | コマンド | 説明 |
 |---------|------|
-| `make apply` | dotfiles を適用 |
-| `make diff` | 保留中の変更をプレビュー |
-| `make watch` | ファイル変更時に自動適用 |
-| `make test` | lint + Bats テストを実行 |
+| `make help` | 利用可能なターゲットを一覧表示（デフォルトターゲット） |
 | `make lint` | shellcheck + shfmt + zsh 構文チェック |
+| `make fmt` | shfmt でシェルスクリプトを整形 |
+| `make test` | lint + Bats テストを実行 |
 | `make benchmark` | zsh 起動時間を計測 |
 | `make dump-brewfile` | 現在の Homebrew パッケージをエクスポート |
+| `make sync-ghq-completion` | vendoring した `_ghq` 補完を更新 |
+
+> 適用と差分確認は chezmoi を直接実行します: `chezmoi apply -v` / `chezmoi diff`。
 
 **CI パイプライン:**
 - **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main のみ)
