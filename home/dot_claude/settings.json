@@ -226,6 +226,19 @@
         ],
         "description": "Warn when creating non-standard scratch documentation files (TODO.md/NOTES.md/etc.) outside structured directories",
         "id": "pre:write:doc-file-warning"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.agents/skills/continuous-learning-v2/hooks/observe.sh pre",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "CLV2 observer (PreToolUse): capture tool_start to observations.jsonl and lazy-start the Haiku observer. observe.sh is invoked directly (not via the ECC observe-runner.js) because the ECC plugin root has no skills/ tree, so the runner cannot locate it; observe.sh resolves its own SKILL_ROOT from $0. async so it never adds per-tool latency.",
+        "id": "pre:observe:continuous-learning"
       }
     ],
     "PostToolUse": [
@@ -252,6 +265,19 @@
         ],
         "description": "Inject agent warnings on context exhaustion, high cost, scope creep, or tool loops",
         "id": "post:ecc-context-monitor"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.agents/skills/continuous-learning-v2/hooks/observe.sh post",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "CLV2 observer (PostToolUse): capture tool_complete to observations.jsonl and signal the observer. Direct observe.sh invocation, async — see pre:observe:continuous-learning.",
+        "id": "post:observe:continuous-learning"
       },
       {
         "matcher": "Bash|Write|Edit|MultiEdit",

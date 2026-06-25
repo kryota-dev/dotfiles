@@ -255,6 +255,68 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
 }
 
+@test "settings.json wires the CLV2 observer as direct observe.sh hooks (pre + post)" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # Structural assertion (not a substring grep): exactly one pre + one post observe entry,
+  # each matcher "*", a command-type hook, async, timeout 10, invoking observe.sh directly
+  # with the right phase — and NOT observe-runner.js (which can't resolve observe.sh under
+  # this layout and would silently no-op).
+  jq -e '
+    [.hooks.PreToolUse[] | select(.id=="pre:observe:continuous-learning")] as $m
+    | ($m|length)==1
+      and $m[0].matcher=="*"
+      and $m[0].hooks[0].type=="command"
+      and $m[0].hooks[0].async==true
+      and $m[0].hooks[0].timeout==10
+      and ($m[0].hooks[0].command|endswith("/continuous-learning-v2/hooks/observe.sh pre"))
+      and ($m[0].hooks[0].command|contains("observe-runner")|not)
+  ' "$s" >/dev/null
+  jq -e '
+    [.hooks.PostToolUse[] | select(.id=="post:observe:continuous-learning")] as $m
+    | ($m|length)==1
+      and $m[0].matcher=="*"
+      and $m[0].hooks[0].type=="command"
+      and $m[0].hooks[0].async==true
+      and $m[0].hooks[0].timeout==10
+      and ($m[0].hooks[0].command|endswith("/continuous-learning-v2/hooks/observe.sh post"))
+      and ($m[0].hooks[0].command|contains("observe-runner")|not)
+  ' "$s" >/dev/null
+}
+
+@test "clv2 observer enable script is present and idempotently forces observer.enabled" {
+  local script="${HOME_DIR}/run_onchange_after_14-enable-clv2-observer.sh.tmpl"
+  [ -f "$script" ]
+  bash -n "$script"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local tmp; tmp=$(mktemp -d)
+  # Pin XDG_DATA_HOME inside the sandbox so the bare-`claude` fallback branch can never
+  # touch the developer's real ~/.local/share/ecc-homunculus.
+  local run=(env "HOME=$tmp" "XDG_DATA_HOME=$tmp/.local/share" bash "$script")
+  # Seed a pre-existing config (disabled + unrelated keys) to exercise the jq-merge branch:
+  # it must force enabled=true while preserving every other field, and stay stable on re-run.
+  mkdir -p "$tmp/.claude/ecc-homunculus"
+  printf '%s' '{"version":"2.1","observer":{"enabled":false,"run_interval_minutes":7},"custom":42}' \
+    > "$tmp/.claude/ecc-homunculus/config.json"
+  "${run[@]}" >/dev/null 2>&1
+  "${run[@]}" >/dev/null 2>&1
+  local cfg="$tmp/.claude/ecc-homunculus/config.json"
+  [ "$(jq -r '.observer.enabled' "$cfg")" = "true" ]
+  [ "$(jq -r '.observer.run_interval_minutes' "$cfg")" = "7" ]
+  [ "$(jq -r '.custom' "$cfg")" = "42" ]
+  # Fresh-write branch: an account dir with no prior config gets a fully-formed enabled config.
+  mkdir -p "$tmp/.claude-r06"
+  "${run[@]}" >/dev/null 2>&1
+  [ "$(jq -r '.observer.enabled' "$tmp/.claude-r06/ecc-homunculus/config.json")" = "true" ]
+  # Bare-`claude` fallback: not created speculatively, but enabled once it exists.
+  [ ! -e "$tmp/.local/share/ecc-homunculus/config.json" ]
+  mkdir -p "$tmp/.local/share/ecc-homunculus"
+  "${run[@]}" >/dev/null 2>&1
+  [ "$(jq -r '.observer.enabled' "$tmp/.local/share/ecc-homunculus/config.json")" = "true" ]
+  rm -rf "$tmp"
+}
+
 @test "ecc governance-capture fork exists and passes node syntax check" {
   local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
   [ -f "$fork" ]
