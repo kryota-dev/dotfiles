@@ -32,8 +32,8 @@ skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ
 web 上の情報が必要なときは、目的に応じて以下を使い分ける（利用可能な場合）:
 
 - **一般的な web 検索**: Firecrawl の検索（full-page 抽出・domain / source-type フィルタ）を既定とする。検索後に feedback を呼ぶと credit が還元される。
-- **意味・概念ベースの探索**: Exa の neural search。キーワードが曖昧でも、意味の近い実装・記事・論文を見つけられる。
+- **意味・概念ベースの探索**: Exa の semantic（neural）search。キーワードが曖昧でも、意味の近い実装・記事・論文を見つけられる。
 - **特定 URL / サイトの全文取得・crawl・構造化抽出**: Firecrawl の scrape / crawl / extract（単一 URL の取得だけなら Exa の fetch でもよい）。
-- **フォールバック**: 上記 MCP が無い環境では harness 標準の WebSearch を使う。
+- **フォールバック**: 上記 MCP が無い環境では harness 標準の web 検索（Claude Code では WebSearch）を使う。
 
 {{ includeTemplate "coding-standards.md" . }}

@@ -129,18 +129,9 @@ gh api repos/$OWNER/$REPO/issues/$PR_NUMBER/comments --paginate | \
 
 PR にレビューコメントを作成する際、pending（保留）状態で追加し、後からまとめて submit できる。
 
-### 署名ルール
+### 署名・クレジットの禁止
 
-Claude がレビューコメントを作成する際は、コメント末尾に必ず署名を付与する。署名はMarkdownの斜体で記述する。
-
-```
-コメント本文
-
----
-*Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>*
-```
-
-> **注意**: 署名のモデル名は実際に使用しているモデル名に合わせること。
+レビューコメントに AI ツールのクレジット・署名（`Co-Authored-By` / `Generated with ...` 等）を付与しない（`~/AGENTS.md` の global ルール準拠）。
 
 ### 1. 既存の Pending Review を確認する
 
@@ -165,7 +156,7 @@ cat <<'PAYLOAD' | gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews --method 
       "path": "src/example.ts",
       "line": 10,
       "side": "RIGHT",
-      "body": "[imo] コメント本文\n\n---\n*Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>*"
+      "body": "[imo] コメント本文"
     }
   ]
 }
@@ -231,7 +222,7 @@ cat <<'GQL' | gh api graphql --input -
       "path": "src/example.ts",
       "line": 10,
       "side": "RIGHT",
-      "body": "[imo] コメント本文\n\n---\n*Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>*"
+      "body": "[imo] コメント本文"
     }
   }
 }
@@ -252,7 +243,7 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/comments --paginate | \
 # コメントの更新
 cat <<'BODY' | gh api repos/{owner}/{repo}/pulls/comments/{comment_id} --method PATCH --input -
 {
-  "body": "更新後のコメント本文\n\n---\n*Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>*"
+  "body": "更新後のコメント本文"
 }
 BODY
 ```
@@ -274,7 +265,7 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews/{review_id}/comments \
 2. 必要に応じてコメントを追加（3.2 を繰り返す）
 3. submit はユーザーに委ねる（または submit API を呼ぶ）
 4. submit 後にコメントを修正する場合は PATCH で個別更新
-※ すべてのコメントに署名を付与すること
+※ コメントに AI クレジット・署名（Co-Authored-By 等）は付与しない
 ```
 
 ## Review Conversation の Resolve
@@ -351,4 +342,4 @@ mutation {
 5. **REST API の `event: "PENDING"` は無効**: pending review を作成するには `event` フィールドを省略する
 6. **既存 pending review へのコメント追加は GraphQL のみ**: REST API では対応できないため、`addPullRequestReviewThread` mutation を使用する
 7. **レビューコメント個別操作のエンドポイント**: `/pulls/comments/{comment_id}` を使用する。`/pulls/{pull_number}/comments/{comment_id}` は 404 エラーになる
-8. **署名の付与**: Claude がコメントを作成・更新する際は、末尾に区切り線（`---`）と斜体の署名 `*Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>*` を付与する
+8. **署名・クレジットの禁止**: コメントに AI ツールのクレジット・署名（`Co-Authored-By` / `Generated with ...` 等）を付与しない（global ルール準拠）
