@@ -157,7 +157,15 @@ clv2_cluster_count() {
   local dir="${CLV2_HOMUNCULUS_DIR:-}"
   case "$dir" in
     /*) ;;
-    *) dir="${XDG_DATA_HOME:-$HOME/.local/share}/ecc-homunculus" ;;
+    *)
+      # Match the producer's precedence exactly (clv2-session-notify.sh /
+      # scripts/lib/homunculus-dir.sh): a non-absolute XDG_DATA_HOME is ignored,
+      # not used verbatim, so both halves always resolve to the same cache file.
+      case "${XDG_DATA_HOME:-}" in
+        /*) dir="${XDG_DATA_HOME}/ecc-homunculus" ;;
+        *) dir="${HOME}/.local/share/ecc-homunculus" ;;
+      esac
+      ;;
   esac
   local f="$dir/.review-ready-clusters"
   [ -r "$f" ] || return 0

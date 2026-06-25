@@ -950,16 +950,38 @@ _gate_decision() {
   chmod +x "${hb}/osascript"
 
   # First run: cache == 3, exactly one notification (no throttle stamp yet).
-  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" PATH="${hb}:$PATH" bash "$hook"
+  # CLV2_PYTHON_CMD is pinned to the fake so an inherited value cannot bypass it.
+  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
   [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
   [ -f "${td}/.last-instinct-notify" ]
   [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
 
   # Second run immediately after: still caches, but throttle suppresses notify #2.
-  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" PATH="${hb}:$PATH" bash "$hook"
+  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
   [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
   [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
 
+  rm -rf "$td" "$hh" "$hb"
+}
+
+# Regression: a corrupt throttle stamp that looks octal ("09") must not abort the
+# arithmetic (10# base-10 coercion). The hook must still exit 0 and refresh the cache.
+@test "clv2-session-notify tolerates a corrupt octal-looking throttle stamp" {
+  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
+  local td hh hb
+  td=$(mktemp -d)
+  hh=$(mktemp -d)
+  hb=$(mktemp -d)
+  mkdir -p "${hh}/.agents/skills/continuous-learning-v2/scripts"
+  printf 'x\n' >"${hh}/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "Potential skill clusters found: 2"' >"${hb}/python3"
+  chmod +x "${hb}/python3"
+  printf '%s\n' '#!/usr/bin/env bash' ':' >"${hb}/osascript"
+  chmod +x "${hb}/osascript"
+  printf '09\n' >"${td}/.last-instinct-notify"
+  run env HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${td}/.review-ready-clusters")" = "2" ]
   rm -rf "$td" "$hh" "$hb"
 }
 

@@ -67,20 +67,21 @@ elif command -v python >/dev/null 2>&1; then
 fi
 [ -n "$py" ] || exit 0
 
-# `evolve` prints "Potential skill clusters found: N" and exits 1 when there are <3
-# instincts (nothing to surface). Capture output regardless and parse the count; default
-# to 0 on any failure so the cache always holds a clean integer.
+# `evolve` prints "Potential skill clusters found: N" on success and exits 1 when there are
+# <3 instincts (nothing to surface). A non-zero exit resets evolve_out to "" (so the <3
+# case yields no count line); on success we parse the count. The sed capture is digits-only
+# and `|| count=0` guarantees the cache always holds a clean integer.
 evolve_out=$("$py" "$cli" evolve 2>/dev/null) || evolve_out=""
 count=$(printf '%s\n' "$evolve_out" |
   sed -n 's/.*Potential skill clusters found: \([0-9][0-9]*\).*/\1/p' | head -n1)
 [ -n "$count" ] || count=0
 
 # Cache the count for the statusline (atomic write so a concurrent reader never sees a
-# half-written file).
-mkdir -p "$home_dir"
+# half-written file). A write failure degrades to a no-op rather than aborting the hook.
+mkdir -p "$home_dir" || exit 0
 cache="$home_dir/.review-ready-clusters"
 tmp="$cache.tmp.$$"
-printf '%s\n' "$count" >"$tmp" && mv -f "$tmp" "$cache"
+{ printf '%s\n' "$count" >"$tmp" && mv -f "$tmp" "$cache"; } || exit 0
 
 # Notify only when there is something to review and we are on macOS.
 [ "$count" -ge 1 ] || exit 0
@@ -93,7 +94,9 @@ now=$(date +%s)
 last=0
 if [ -r "$stamp" ]; then
   last=$(tr -dc '0-9' <"$stamp" 2>/dev/null || true)
-  [ -n "$last" ] || last=0
+  # Force base-10: a corrupt stamp like "08"/"09" would otherwise be read as octal
+  # and the arithmetic below would fail (and abort the hook under set -e).
+  last=$((10#${last:-0}))
 fi
 [ "$((now - last))" -ge "$NOTIFY_THROTTLE_SECONDS" ] || exit 0
 
