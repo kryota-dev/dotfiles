@@ -505,8 +505,11 @@ load helpers/setup
 
 @test "mise config declares dmux as a pinned npm-backed CLI" {
   local config="${HOME_DIR}/dot_config/mise/config.toml"
-  # dmux backs the dmux-workflows skill; provisioned via the npm backend at a fixed version.
-  grep -Eq '^"npm:dmux"[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$config"
+  # dmux backs the dmux-workflows skill; provisioned via the npm backend. The trailing
+  # quote pins a fixed SemVer core (X.Y.Z) — ranges and pre-releases are intentionally
+  # rejected so mise resolves a single immutable version. The leading [[:space:]]* keeps
+  # the guard robust if the key is ever indented under [tools].
+  grep -Eq '^[[:space:]]*"npm:dmux"[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$config"
 }
 
 @test "mcp setup registers both servers as user scope for every account config dir" {

@@ -40,15 +40,16 @@ zoxide = "0.9.9"
 # (electron/slack/dogfood/...) via `agent-browser skills get`, so they are loaded at
 # runtime instead of being vendored; only the discovery stub is chezmoi-managed.
 "npm:agent-browser" = "0.29.1"
+# dmux (standardagents/dmux): a tmux-based pane manager for orchestrating parallel AI
+# agent sessions; backs the dmux-workflows skill. Security-reviewed before adoption: MIT,
+# and the published package declares no preinstall/install/postinstall/prepare lifecycle
+# scripts (its build/release steps run only at publish time, never on `npm install`),
+# mainstream deps (ink/react/chalk/chokidar). Requires tmux, already provisioned above.
+"npm:dmux" = "5.9.0"
 # happy (slopus/happy): a wrapper that runs Claude Code / Codex with phone control and
 # end-to-end encryption (`happy claude` / `happy codex`). CLI only; the mobile/web apps
 # are installed separately and paired at runtime.
 "npm:happy" = "1.1.10"
-# dmux (standardagents/dmux): a tmux-based pane manager for orchestrating parallel AI
-# agent sessions; backs the dmux-workflows skill. Security-reviewed before adoption: MIT,
-# no install/postinstall/prepare lifecycle scripts (build steps run only at publish time),
-# mainstream deps (ink/react/chalk/chokidar). Requires tmux, already provisioned above.
-"npm:dmux" = "5.9.0"
 
 [settings]
 # Pin precompiled CPython to a flavor that ships lib/; latest mise otherwise
