@@ -129,6 +129,19 @@
         ],
         "description": "Load previous context and detect package manager on new session",
         "id": "session:start"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/clv2-session-notify.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "CLV2 instinct→skill flow: cache the review-ready instinct-cluster count for the statusline 🧬N segment and emit a 7-day-throttled desktop notification when clusters await review",
+        "id": "session:start:clv2-notify"
       }
     ],
     "PreCompact": [
