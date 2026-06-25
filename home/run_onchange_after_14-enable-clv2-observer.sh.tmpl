@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Enable the continuous-learning-v2 (CLV2) Haiku observer per account (Phase 7 PR-B, #7/#34).
+#
+# The CLV2 engine is deployed read-only via chezmoi external (PR-A) and its own config.json
+# ships observer.enabled=false. observe.sh resolves the EFFECTIVE config from
+# $CLV2_HOMUNCULUS_DIR/config.json FIRST, falling back to the skill's own config. That
+# homunculus dir is per-account runtime state — NOT chezmoi-managed — so writing the enable
+# flag there both (a) turns the observer on and (b) survives the external's 168h refresh,
+# which would clobber an edit to the skill's own config.json.
+#
+# Privacy note: with the observer on, observe.sh records tool input/output to a local
+# observations.jsonl (secret redaction + truncation are upstream observe.sh's responsibility).
+# This is local at-rest data under each homunculus dir; nothing leaves the machine.
+#
+# Homunculus dirs (all that apply): the cld / cld-r06 wrappers point CLV2_HOMUNCULUS_DIR at
+# "<account>/ecc-homunculus"; bare `claude` (no wrapper, env unset) falls back to
+# $XDG_DATA_HOME/ecc-homunculus or ~/.local/share/ecc-homunculus. Idempotent.
+set -euo pipefail
+
+# jq merge-enables without clobbering other fields. Prefer a PATH jq (brew installs it in
+# run_onchange_before_10), else the mise-managed jq (mirrors after_13's `mise exec` pattern,
+# since a fresh apply may run before the ~/.local/bin shims exist). Fail loudly rather than
+# exit 0: a silent skip would mark this run_onchange "done" and never retry once jq lands.
+if command -v jq >/dev/null 2>&1; then
+  jq_cmd=(jq)
+elif command -v mise >/dev/null 2>&1; then
+  jq_cmd=(mise exec -- jq)
+else
+  echo "[clv2-observer] neither jq nor mise found; cannot enable observer." >&2
+  exit 1
+fi
+
+# Defaults mirror the upstream skill config (continuous-learning-v2/config.json).
+enable_config='{"version":"2.1","observer":{"enabled":true,"run_interval_minutes":5,"min_observations_to_analyze":20}}'
+
+_enable_in() {
+  local dir="$1"
+  mkdir -p "$dir"
+  local cfg="${dir}/config.json"
+  if [ -f "$cfg" ]; then
+    # Preserve any existing fields; only force observer.enabled=true. mktemp in the target
+    # dir so the mv is an atomic same-filesystem rename.
+    local tmp
+    tmp="$(mktemp "${dir}/config.json.XXXXXX")"
+    if "${jq_cmd[@]}" '.observer.enabled = true' "$cfg" >"$tmp" 2>/dev/null; then
+      mv "$tmp" "$cfg"
+    else
+      rm -f "$tmp"
+      printf '%s\n' "$enable_config" >"$cfg"
+    fi
+  else
+    printf '%s\n' "$enable_config" >"$cfg"
+  fi
+  echo "[clv2-observer] observer enabled in ${cfg}" >&2
+}
+
+# Wrapper accounts: enable under each account config dir that exists.
+for account in "${HOME}/.claude" "${HOME}/.claude-r06"; do
+  if [ -d "$account" ]; then
+    _enable_in "${account}/ecc-homunculus"
+  fi
+done
+
+# Bare `claude` fallback (CLV2_HOMUNCULUS_DIR unset): only enable if the dir already exists,
+# so we don't create speculative state for a path that may never be used.
+# Use `if` (not `&&`) so a missing fallback dir does not leave the script's exit status at 1.
+fallback="${XDG_DATA_HOME:-${HOME}/.local/share}/ecc-homunculus"
+if [ -d "$fallback" ]; then
+  _enable_in "$fallback"
+fi
