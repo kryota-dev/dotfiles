@@ -65,6 +65,7 @@ jobs:
           for f in \
             home/private_dot_aws/config.tmpl \
             home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
+            home/dot_config/zsh/private_dmux-secrets.zsh.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
@@ -245,6 +246,7 @@ jobs:
           for f in \
             home/private_dot_aws/config.tmpl \
             home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
+            home/dot_config/zsh/private_dmux-secrets.zsh.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl; do
