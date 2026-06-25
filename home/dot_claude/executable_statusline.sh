@@ -56,20 +56,20 @@ REVERSE=$'\033[7m'
 SEP="${DIM} | ${RST}"
 
 # Nerd Font glyphs (raw UTF-8 bytes; see header note)
-I_HOST=$'\xef\x84\x88'       # nf-fa-desktop        U+F108
-I_DIR=$'\xef\x81\xbb'        # nf-fa-folder         U+F07B
-I_BRANCH=$'\xee\x9c\xa5'     # nf-dev-git_branch    U+E725
-I_WT=$'\xf3\xb0\x99\x85'     # nf-md-file_tree      U+F0645
-I_MODEL=$'\xf3\xb0\x9a\xa9'  # nf-md-robot       U+F06A9
-I_EFFORT=$'\xef\x83\xa4'     # nf-fa-tachometer     U+F0E4
+I_HOST=$'\xef\x84\x88'         # nf-fa-desktop        U+F108
+I_DIR=$'\xef\x81\xbb'          # nf-fa-folder         U+F07B
+I_BRANCH=$'\xee\x9c\xa5'       # nf-dev-git_branch    U+E725
+I_WT=$'\xf3\xb0\x99\x85'       # nf-md-file_tree      U+F0645
+I_MODEL=$'\xf3\xb0\x9a\xa9'    # nf-md-robot       U+F06A9
+I_EFFORT=$'\xef\x83\xa4'       # nf-fa-tachometer     U+F0E4
 I_INSTINCT=$'\xf3\xb0\x9a\x83' # nf-md-dna          U+F0683
-I_5H=$'\xef\x80\x97'         # nf-fa-clock_o        U+F017
-I_7D=$'\xef\x81\xb3'         # nf-fa-calendar       U+F073
-I_COST=$'\xef\x83\x96'       # nf-fa-money          U+F0D6
-I_NET=$'\xef\x80\x92'        # nf-fa-signal         U+F012
-I_BATT=$'\xf3\xb0\x81\xb9'   # nf-md-battery        U+F0079
-I_CHARGE=$'\xf3\xb0\x82\x84' # nf-md-battery_charging U+F0084
-I_PLUG=$'\xf3\xb0\x9a\xa5'   # nf-md-power_plug     U+F06A5
+I_5H=$'\xef\x80\x97'           # nf-fa-clock_o        U+F017
+I_7D=$'\xef\x81\xb3'           # nf-fa-calendar       U+F073
+I_COST=$'\xef\x83\x96'         # nf-fa-money          U+F0D6
+I_NET=$'\xef\x80\x92'          # nf-fa-signal         U+F012
+I_BATT=$'\xf3\xb0\x81\xb9'     # nf-md-battery        U+F0079
+I_CHARGE=$'\xf3\xb0\x82\x84'   # nf-md-battery_charging U+F0084
+I_PLUG=$'\xf3\xb0\x9a\xa5'     # nf-md-power_plug     U+F06A5
 
 # Per-user cache directory (mode 700). Kept under $HOME instead of a
 # world-readable, predictable /tmp path to avoid symlink/TOCTOU attacks and
