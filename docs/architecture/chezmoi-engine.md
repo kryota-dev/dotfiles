@@ -41,9 +41,9 @@ This file is auto-loaded by chezmoi (any file named `.chezmoidata.*` in the sour
 | `.name` | string | Commit author name (`kryota-dev`) |
 | `.signingkey` | string | Path to SSH public key used for git commit signing (`~/.ssh/ssh-key.pub`) |
 | `.ghq_user` | string | Default `ghq` user namespace (`kryota-dev`) |
-| `.versions.moralerspace_font` | string | Moralerspace font release version (e.g. `2.0.0`); used in the external archive URL |
+| `.versions.moralerspace_font` | string | Moralerspace font release version; used in the external archive URL (Renovate-bumped) |
 | `.skills.anthropic_commit` | string | SHA of the `anthropics/skills` commit to fetch; Renovate bumps this |
-| `.ecc.version` | string | ECC release version string (e.g. `2.0.0`) |
+| `.ecc.version` | string | ECC release version — the **Renovate** tracking anchor for the `github-tags` customManager. Not referenced by any chezmoi template (chezmoi consumes `.ecc.commit`); bumped together with `.ecc.commit` on each ECC release |
 | `.ecc.commit` | string | Immutable commit SHA of the pinned ECC release; used in all ECC external URLs |
 | `.ecc.skills` | string array | The <!-- FACT:ecc-skill-count -->127<!-- /FACT -->-entry list of adopted ECC skill names; ranged over in `.chezmoiexternal.toml` to generate one external entry per skill |
 

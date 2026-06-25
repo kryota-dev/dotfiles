@@ -41,9 +41,9 @@ chezmoi ソースルートは `home/` です（`.chezmoiroot` で設定）。以
 | `.name` | string | コミット作者名（`kryota-dev`） |
 | `.signingkey` | string | git コミット署名に使用する SSH 公開鍵のパス（`~/.ssh/ssh-key.pub`） |
 | `.ghq_user` | string | デフォルトの `ghq` ユーザー名前空間（`kryota-dev`） |
-| `.versions.moralerspace_font` | string | Moralerspace フォントのリリースバージョン（例: `2.0.0`）。external アーカイブ URL で使用 |
+| `.versions.moralerspace_font` | string | Moralerspace フォントのリリースバージョン。external アーカイブ URL で使用（Renovate がバンプ） |
 | `.skills.anthropic_commit` | string | 取得する `anthropics/skills` コミットの SHA。Renovate がバンプする |
-| `.ecc.version` | string | ECC リリースバージョン文字列（例: `2.0.0`） |
+| `.ecc.version` | string | ECC リリースバージョン。`github-tags` customManager の **Renovate** 追跡 anchor。chezmoi テンプレートからは未参照（chezmoi が使うのは `.ecc.commit`）。ECC リリースごとに `.ecc.commit` と共にバンプされる |
 | `.ecc.commit` | string | ピン固定された ECC リリースのイミュータブルなコミット SHA。すべての ECC external URL で使用 |
 | `.ecc.skills` | string 配列 | 採用済み ECC スキル名の <!-- FACT:ecc-skill-count -->127<!-- /FACT --> エントリリスト。`.chezmoiexternal.toml` でレンジされ、スキルごとに 1 つの external エントリを生成 |
 
