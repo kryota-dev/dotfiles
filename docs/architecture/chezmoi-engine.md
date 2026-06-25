@@ -45,7 +45,7 @@ This file is auto-loaded by chezmoi (any file named `.chezmoidata.*` in the sour
 | `.skills.anthropic_commit` | string | SHA of the `anthropics/skills` commit to fetch; Renovate bumps this |
 | `.ecc.version` | string | ECC release version string (e.g. `2.0.0`) |
 | `.ecc.commit` | string | Immutable commit SHA of the pinned ECC release; used in all ECC external URLs |
-| `.ecc.skills` | string array | The 127-entry list of adopted ECC skill names; ranged over in `.chezmoiexternal.toml` to generate one external entry per skill |
+| `.ecc.skills` | string array | The <!-- FACT:ecc-skill-count -->127<!-- /FACT -->-entry list of adopted ECC skill names; ranged over in `.chezmoiexternal.toml` to generate one external entry per skill |
 
 Reference top-level keys bare: `{{ .name }}`, `{{ .email }}`. Reference nested tables with dots: `{{ .ecc.commit }}`, `{{ .versions.moralerspace_font }}`.
 

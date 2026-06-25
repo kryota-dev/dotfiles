@@ -110,7 +110,7 @@
 
 | ソース | 件数 | バージョンピン |
 |---|---|---|
-| ECC（`affaan-m/ECC`） | 127 スキル | `.chezmoidata.toml` の `[ecc].commit` |
+| ECC（`affaan-m/ECC`） | <!-- FACT:ecc-skill-count -->127<!-- /FACT --> スキル | `.chezmoidata.toml` の `[ecc].commit` |
 | Anthropic システムスキル | 17 スキル | `.chezmoidata.toml` の `[skills].anthropic_commit` |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
@@ -161,7 +161,7 @@ chezmoi ソースからファイルを削除しても既にデプロイされた
 
 ### テストが chezmoi なしで ECC スキル名を解決する方法
 
-`.chezmoidata.toml` の `[ecc].skills` 配列が 127 の ECC スキル名の真実の源です。`.chezmoiexternal.toml` の range ブロックにはリテラルのテンプレート変数 `{{ $skill }}` のみが含まれ、external ファイルの単純な `grep` では展開された名前が見えません。
+`.chezmoidata.toml` の `[ecc].skills` 配列が採用済み ECC スキル名の真実の源です（正規カウントは上記の外部スキルインベントリテーブルを参照）。`.chezmoiexternal.toml` の range ブロックにはリテラルのテンプレート変数 `{{ $skill }}` のみが含まれ、external ファイルの単純な `grep` では展開された名前が見えません。
 
 テストは `.chezmoidata.toml` から直接リストを抽出するために chezmoi を使わない `awk` スコープを使用します。
 

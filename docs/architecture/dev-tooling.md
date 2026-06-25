@@ -14,26 +14,13 @@ This document covers the non-AI developer tooling layer: mise as the version SSO
 
 ### `[tools]` block
 
-Runtime languages are pinned to exact versions:
+The `[tools]` block in `home/dot_config/mise/config.toml` is the SSOT for every pinned runtime and CLI version. Renovate bumps each pin automatically, and any change re-triggers `run_onchange_after_12-setup-mise` on the next `chezmoi apply`. **Consult that file for the authoritative, current version list.**
 
-| Tool | Pinned version (at time of writing) |
-|------|--------------------------------------|
-| node | 24.18.0 |
-| python | 3.14.6 |
-| ruby | 4.0.5 |
-| go | 1.26.4 |
-| deno | 2.8.3 |
-| rust | 1.96.0 |
+The block contains three categories of entries (examples; see `config.toml` for the authoritative, current list):
 
-Registry-resolvable CLI tools are pinned alongside them: `act`, `actionlint`, `aws-cli`, `bats`, `bun`, `chezmoi`, `claude`, `cloudflared`, `direnv`, `fd`, `fzf`, `gcloud`, `gh`, `ghq`, `gitleaks`, `jq`, `mas`, `pinact`, `ripgrep`, `shellcheck`, `shfmt`, `starship`, `terraform`, `tmux`, `uv`, `yazi`, `zoxide`.
-
-npm-backed CLIs without a mise registry entry use the `"npm:<pkg>"` key form:
-
-```toml
-"npm:agent-browser" = "0.29.1"
-"npm:dmux" = "5.9.0"
-"npm:happy" = "1.1.10"
-```
+- **Runtime languages** pinned to exact versions (e.g. `node`, `python`, `ruby`, `go`, `deno`, `rust`).
+- **Registry-resolvable CLI tools** using a bare key (e.g. `gh`, `gitleaks`, `shellcheck`, `starship`, `tmux`).
+- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`, `"npm:dmux"`, `"npm:happy"`).
 
 ### `[settings]` block
 

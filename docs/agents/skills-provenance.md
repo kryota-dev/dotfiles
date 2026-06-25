@@ -110,7 +110,7 @@ Miscellaneous functional skills spanning databases, frontend testing, and media 
 
 | Source | Count | Version pin |
 |---|---|---|
-| ECC (`affaan-m/ECC`) | 127 skills | `[ecc].commit` in `.chezmoidata.toml` |
+| ECC (`affaan-m/ECC`) | <!-- FACT:ecc-skill-count -->127<!-- /FACT --> skills | `[ecc].commit` in `.chezmoidata.toml` |
 | Anthropic system skills | 17 skills | `[skills].anthropic_commit` in `.chezmoidata.toml` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
@@ -161,7 +161,7 @@ Removing a file from the chezmoi source does not delete an already-deployed copy
 
 ### How the test resolves ECC skill names without chezmoi
 
-The `[ecc].skills` array in `.chezmoidata.toml` is the source of truth for the 127 ECC skill names. The range block in `.chezmoiexternal.toml` only contains the literal template variable `{{ $skill }}` — a plain `grep` of the external file cannot see the expanded names.
+The `[ecc].skills` array in `.chezmoidata.toml` is the source of truth for the adopted ECC skill names (authoritative count: see the External skill inventory table above). The range block in `.chezmoiexternal.toml` only contains the literal template variable `{{ $skill }}` — a plain `grep` of the external file cannot see the expanded names.
 
 The test uses a chezmoi-free `awk` scope to extract the list directly from `.chezmoidata.toml`:
 

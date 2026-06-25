@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-`home/.chezmoiexternal.toml` declares every external resource chezmoi fetches at apply time: Anthropic skill archives, the ECC hook runtime, 127 ECC skills (generated from a single list), the `aside` slash command, and the Moralerspace font. This document explains the caching model, the `range`-driven fan-out, SHA pinning, refresh windows, and the `chezmoiignore`/`chezmoiremove` lifecycle for retiring deployed files.
+`home/.chezmoiexternal.toml` declares every external resource chezmoi fetches at apply time: Anthropic skill archives, the ECC hook runtime, <!-- FACT:ecc-skill-count -->127<!-- /FACT --> ECC skills (generated from a single list), the `aside` slash command, and the Moralerspace font. This document explains the caching model, the `range`-driven fan-out, SHA pinning, refresh windows, and the `chezmoiignore`/`chezmoiremove` lifecycle for retiring deployed files.
 
 ---
 
@@ -14,11 +14,11 @@
 |----------|-------------|------------|-------|
 | Anthropic skills | `anthropics/skills` | `archive` | 17 |
 | ECC hook runtime (`scripts/hooks` + `scripts/lib`) | `affaan-m/ECC` | `archive` | 1 |
-| ECC adopted skills | `affaan-m/ECC` | `archive` (range-generated) | 127 |
+| ECC adopted skills | `affaan-m/ECC` | `archive` (range-generated) | = length of `[ecc].skills` (asserted by `tests/docs_facts.bats`) |
 | `aside` slash command | `affaan-m/ECC` | `file` | 1 |
 | Moralerspace font (macOS only) | `yuru7/moralerspace` | `archive` | 1 |
 
-Total declared entries: 147. Total actual HTTP downloads at a cold apply: 4 (one per unique tarball URL — see caching below).
+Total declared entries: the static entries (17 + 1 + 1 + 1 = 20) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. Total actual HTTP downloads at a cold apply: 4 (one per unique tarball URL — see caching below).
 
 ---
 
@@ -29,7 +29,7 @@ chezmoi caches external archives keyed by the SHA256 of the URL string. Any two 
 This repo exploits that property deliberately:
 
 - All 17 Anthropic skill entries share `https://github.com/anthropics/skills/archive/{{ .skills.anthropic_commit }}.tar.gz`. One download, 17 extractions from the cache.
-- The 1 ECC hook-runtime entry and all 127 ECC skill entries share `https://github.com/affaan-m/ECC/archive/{{ .ecc.commit }}.tar.gz`. One download, 128 extractions.
+- The 1 ECC hook-runtime entry and all ECC skill entries share `https://github.com/affaan-m/ECC/archive/{{ .ecc.commit }}.tar.gz`. One download, 1 + len([ecc].skills) extractions.
 
 Adding more entries from the same repo is therefore essentially free in network terms — only the `include` glob and `stripComponents` value differ per entry.
 
@@ -72,7 +72,7 @@ The single `file` entry (`aside.md`) fetches a raw URL with no extraction:
 
 ## The `range .ecc.skills` fan-out
 
-Writing 127 near-identical TOML blocks by hand would be error-prone. Instead, `.chezmoiexternal.toml` is itself a Go template. The entire ECC skills section is a single `range` loop:
+Writing a near-identical TOML block for each ECC skill by hand would be error-prone. Instead, `.chezmoiexternal.toml` is itself a Go template. The entire ECC skills section is a single `range` loop:
 
 ```
 {{ range $skill := .ecc.skills -}}
@@ -88,7 +88,7 @@ Writing 127 near-identical TOML blocks by hand would be error-prone. Instead, `.
 
 Key points:
 
-- `.ecc.skills` is the 127-entry array in `home/.chezmoidata.toml` `[ecc]` table.
+- `.ecc.skills` is the array in `home/.chezmoidata.toml` `[ecc]` table; its length is the authoritative ECC skill count.
 - Inside the `range` block, `.` is rebound to the current element (the skill name string). To reach other top-level data — specifically the commit SHA — you must use **`$`** (the root context): `{{ $.ecc.commit }}`, not `{{ .ecc.commit }}`.
 - **To add or remove an ECC skill**, edit only the `[ecc].skills` array in `home/.chezmoidata.toml`. The range block generates the external entry automatically. Never hand-write per-skill entries in `.chezmoiexternal.toml`.
 
@@ -123,11 +123,11 @@ Every external URL interpolates an **immutable commit SHA**, never a branch name
 url = "https://github.com/affaan-m/ECC/archive/{{ .ecc.commit }}.tar.gz"
 ```
 
-The SHA is defined in `home/.chezmoidata.toml`:
+The SHA is defined in `home/.chezmoidata.toml` under `[ecc].commit`; Renovate bumps it on every new ECC release (see the Renovate bump model section). The current value is intentionally not repeated here — it is the SSOT in `.chezmoidata.toml` and changes frequently. Example shape:
 
 ```toml
 [ecc]
-  commit = "8ad4151095e453301ce0e50374103bcd8f50ded2"
+  commit = "<commit-sha>"   # current value: home/.chezmoidata.toml [ecc].commit
 ```
 
 A moved tag cannot change the fetched bytes. The `refreshPeriod` controls how long chezmoi serves its local cache before re-downloading:

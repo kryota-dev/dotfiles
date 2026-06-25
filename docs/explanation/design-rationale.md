@@ -10,9 +10,9 @@ This document explains the load-bearing design decisions behind the repo — the
 
 ## Single-tarball caching over N individual downloads
 
-**Decision:** All 127 adopted ECC skills, plus the ECC hook runtime, are declared as separate entries in `.chezmoiexternal.toml` — but every one of those entries points at the same tarball URL (the ECC archive pinned at `[ecc].commit`). Similarly, the 17 Anthropic system skills each point at the same `anthropics/skills` archive URL.
+**Decision:** All <!-- FACT:ecc-skill-count -->127<!-- /FACT --> adopted ECC skills, plus the ECC hook runtime, are declared as separate entries in `.chezmoiexternal.toml` — but every one of those entries points at the same tarball URL (the ECC archive pinned at `[ecc].commit`). Similarly, the 17 Anthropic system skills each point at the same `anthropics/skills` archive URL.
 
-**Why:** chezmoi caches external archives keyed by URL SHA-256. When multiple entries share an identical URL, chezmoi downloads the tarball once and satisfies every entry from the cache. The alternative — fetching each skill from its own URL — would require 127+ individual network round-trips on every `chezmoi apply`, adding minutes of latency and making installs brittle on slow or metered connections.
+**Why:** chezmoi caches external archives keyed by URL SHA-256. When multiple entries share an identical URL, chezmoi downloads the tarball once and satisfies every entry from the cache. The alternative — fetching each skill from its own URL — would require one network round-trip per skill (hundreds in total) on every `chezmoi apply`, adding minutes of latency and making installs brittle on slow or metered connections.
 
 The per-entry `include` glob and `stripComponents` value then act as a filter: they extract only the relevant subdirectory from the single cached archive without requiring a separate download. The cost of a larger tarball is paid once; the benefit of isolated per-skill paths is preserved.
 

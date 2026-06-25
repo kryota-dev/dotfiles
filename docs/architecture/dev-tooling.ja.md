@@ -14,26 +14,13 @@
 
 ### `[tools]` ブロック
 
-ランタイム言語は正確なバージョンにピンされています:
+`home/dot_config/mise/config.toml` の `[tools]` ブロックが、全ピン済みランタイムと CLI バージョンの SSOT です。Renovate が各ピンを自動バンプし、変更があると次回の `chezmoi apply` で `run_onchange_after_12-setup-mise` が再トリガーされます。**権威ある最新のバージョン一覧はそのファイルを参照してください。**
 
-| ツール | ピン済みバージョン（執筆時） |
-|--------|--------------------------|
-| node | 24.18.0 |
-| python | 3.14.6 |
-| ruby | 4.0.5 |
-| go | 1.26.4 |
-| deno | 2.8.3 |
-| rust | 1.96.0 |
+ブロックには以下の3カテゴリのエントリがあります（例示のみ; 権威ある最新一覧は `config.toml` を参照）:
 
-レジストリで解決可能な CLI ツールも一緒にピンされています: `act`、`actionlint`、`aws-cli`、`bats`、`bun`、`chezmoi`、`claude`、`cloudflared`、`direnv`、`fd`、`fzf`、`gcloud`、`gh`、`ghq`、`gitleaks`、`jq`、`mas`、`pinact`、`ripgrep`、`shellcheck`、`shfmt`、`starship`、`terraform`、`tmux`、`uv`、`yazi`、`zoxide`。
-
-mise レジストリにエントリがない npm バックの CLI は `"npm:<pkg>"` キー形式を使用します:
-
-```toml
-"npm:agent-browser" = "0.29.1"
-"npm:dmux" = "5.9.0"
-"npm:happy" = "1.1.10"
-```
+- **ランタイム言語** — 正確なバージョンにピン（例: `node`、`python`、`ruby`、`go`、`deno`、`rust`）
+- **レジストリ解決可能な CLI ツール** — ベアキーを使用（例: `gh`、`gitleaks`、`shellcheck`、`starship`、`tmux`）
+- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`、`"npm:dmux"`、`"npm:happy"`）
 
 ### `[settings]` ブロック
 
