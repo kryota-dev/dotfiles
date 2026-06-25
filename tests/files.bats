@@ -512,7 +512,7 @@ load helpers/setup
   grep -Eq '^[[:space:]]*"npm:dmux"[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$config"
 }
 
-@test "mcp setup registers both servers as user scope for every account config dir" {
+@test "mcp setup registers all servers as user scope for every account config dir" {
   local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
   [ -f "$script" ]
   local tmp
@@ -535,13 +535,19 @@ FAKE
     bash "$script"
   [ "$status" -eq 0 ]
 
-  # Both servers are add-json'd with user scope for both account config dirs. The trailing
+  # Every server is add-json'd with user scope for both account config dirs. The trailing
   # " :::" anchors ".claude" so it does not also match ".claude-r06".
-  local d
+  local d name
   for d in '\.claude' '\.claude-r06'; do
-    grep -qE "/home/${d} ::: claude mcp add-json context7 .* --scope user" "$tmp/log"
-    grep -qE "/home/${d} ::: claude mcp add-json deepwiki .* --scope user" "$tmp/log"
+    for name in context7 deepwiki exa firecrawl; do
+      grep -qE "/home/${d} ::: claude mcp add-json ${name} .* --scope user" "$tmp/log"
+    done
   done
+
+  # exa/firecrawl carry the literal env placeholder (expanded by Claude Code at spawn, never
+  # baked here). The single quotes must survive into the logged add-json invocation.
+  grep -qF '"EXA_API_KEY":"${EXA_API_KEY}"' "$tmp/log"
+  grep -qF '"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"' "$tmp/log"
 }
 
 @test "mcp setup script declares valid JSON server configs" {
@@ -553,7 +559,35 @@ FAKE
     echo "$json" | jq -e . >/dev/null
     count=$((count + 1))
   done < <(grep -oE "'\{[^']*\}'" "$script" | tr -d "'")
-  [ "$count" -ge 2 ]
+  [ "$count" -ge 4 ]
+}
+
+@test "claude MCP secrets are a private 1Password template, never committed in clear" {
+  # The keys are rendered from 1Password into a 0600 file; the source must be a private_
+  # template that reads via onepasswordRead and must not contain a literal key.
+  local tmpl="${HOME_DIR}/dot_config/zsh/private_claude-secrets.zsh.tmpl"
+  [ -f "$tmpl" ]
+  grep -q 'onepasswordRead' "$tmpl"
+  grep -qE 'EXA_API_KEY=.*onepasswordRead' "$tmpl"
+  grep -qE 'FIRECRAWL_API_KEY=.*onepasswordRead' "$tmpl"
+  # Not exported in the secrets file (scoping is done by _claude_with_home).
+  ! grep -qE '^export ' "$tmpl"
+}
+
+@test "claude.zsh sources the MCP secrets and scopes the keys to the claude subprocess" {
+  local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  # Sourced only when present, so a machine without the 1Password items still works.
+  grep -qF 'claude-secrets.zsh' "$zsh"
+  grep -qE '\[\[ -r .* \]\] && source' "$zsh"
+  # _claude_with_home re-exports both keys (with :- defaults) into the launched command's env.
+  grep -qE 'EXA_API_KEY="\$\{EXA_API_KEY:-\}"' "$zsh"
+  grep -qE 'FIRECRAWL_API_KEY="\$\{FIRECRAWL_API_KEY:-\}"' "$zsh"
+}
+
+@test "1Password validation requires the exa and firecrawl API keys" {
+  local script="${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+  grep -qF 'op://kryota.dev/Dotfiles - Exa API/credential' "$script"
+  grep -qF 'op://kryota.dev/Dotfiles - Firecrawl API/credential' "$script"
 }
 
 @test "project .mcp.json keeps only project-scoped servers" {

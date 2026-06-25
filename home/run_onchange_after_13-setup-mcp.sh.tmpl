@@ -13,9 +13,17 @@ set -euo pipefail
 # ~/.local/bin/claude launcher symlink is created (run_once_after_16), so `command -v claude`
 # is not yet reliable on a fresh apply. mise + the mise-installed claude are both present by 13.
 #
-# Only globally-useful servers belong here: context7 (library docs) and deepwiki (repo Q&A)
-# are wanted in every project. Project-specific servers (e.g. spec-workflow) stay in each
-# repo's own .mcp.json. claude.ai connectors and the Chrome extension are configured manually.
+# Only globally-useful servers belong here: context7 (library docs), deepwiki (repo Q&A),
+# exa (neural web/code search) and firecrawl (web scraping/crawling) are wanted in every
+# project. Project-specific servers (e.g. spec-workflow) stay in each repo's own .mcp.json.
+# claude.ai connectors and the Chrome extension are configured manually.
+#
+# exa/firecrawl need API keys. We do NOT bake them into .claude.json: the JSON below stores
+# the literal "${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}" placeholders, which Claude Code expands
+# from the launching process's environment when it spawns the server (verified: add-json keeps
+# the literal, expansion happens at spawn). The keys themselves are rendered from 1Password into
+# a 0600 ~/.config/zsh/claude-secrets.zsh and injected per-account by _claude_with_home, so this
+# rendered script body stays secret-free and the keys never sit at rest in .claude.json.
 
 if ! command -v mise &>/dev/null; then
   echo "WARNING: mise is not installed; skipping user-scope MCP setup."
@@ -27,13 +35,20 @@ fi
 # them once per account.
 config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
 
-# Server name -> canonical JSON. Both are stdio (npx-launched, -y so the first run never blocks
-# on an install prompt); deepwiki bridges to its remote HTTP endpoint via mcp-remote. Keep in
-# sync with the project's .mcp.json removal of these two.
-mcp_names=("context7" "deepwiki")
+# Server name -> canonical JSON. All stdio (npx-launched, -y so the first run never blocks on an
+# install prompt); deepwiki bridges to its remote HTTP endpoint via mcp-remote. exa/firecrawl
+# carry an env placeholder ("${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}") expanded by Claude Code at
+# spawn time from the per-account env set by _claude_with_home. Single-quoted here so the shell
+# stores the literal placeholder rather than expanding it now. Keep in sync with the project's
+# .mcp.json removal of context7/deepwiki.
+mcp_names=("context7" "deepwiki" "exa" "firecrawl")
+# shellcheck disable=SC2016  # the ${EXA_API_KEY}/${FIRECRAWL_API_KEY} placeholders are stored
+# literally on purpose: Claude Code expands them at server spawn, not this script.
 mcp_configs=(
   '{"type":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}'
   '{"type":"stdio","command":"npx","args":["-y","mcp-remote","https://mcp.deepwiki.com/mcp"]}'
+  '{"type":"stdio","command":"npx","args":["-y","exa-mcp-server"],"env":{"EXA_API_KEY":"${EXA_API_KEY}"}}'
+  '{"type":"stdio","command":"npx","args":["-y","firecrawl-mcp"],"env":{"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"}}'
 )
 
 failed=0
