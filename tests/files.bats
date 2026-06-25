@@ -545,9 +545,14 @@ FAKE
   done
 
   # exa/firecrawl carry the literal env placeholder (expanded by Claude Code at spawn, never
-  # baked here). The single quotes must survive into the logged add-json invocation.
+  # baked here): the ${EXA_API_KEY} / ${FIRECRAWL_API_KEY} text must survive verbatim into the
+  # logged add-json invocation.
   grep -qF '"EXA_API_KEY":"${EXA_API_KEY}"' "$tmp/log"
   grep -qF '"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"' "$tmp/log"
+
+  # The key-bearing servers are version-pinned to shrink the npx supply-chain surface.
+  grep -qE 'exa-mcp-server@[0-9]+\.[0-9]+\.[0-9]+' "$tmp/log"
+  grep -qE 'firecrawl-mcp@[0-9]+\.[0-9]+\.[0-9]+' "$tmp/log"
 }
 
 @test "mcp setup script declares valid JSON server configs" {
@@ -582,6 +587,35 @@ FAKE
   # _claude_with_home re-exports both keys (with :- defaults) into the launched command's env.
   grep -qE 'EXA_API_KEY="\$\{EXA_API_KEY:-\}"' "$zsh"
   grep -qE 'FIRECRAWL_API_KEY="\$\{FIRECRAWL_API_KEY:-\}"' "$zsh"
+}
+
+@test "claude.zsh injects MCP keys into the subprocess but not the parent shell" {
+  command -v zsh >/dev/null || skip "zsh not available"
+  local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/.config/zsh"
+  # Stand in for the 1Password-rendered secrets file (non-exported assignments, single-quoted).
+  cat >"$tmp/.config/zsh/claude-secrets.zsh" <<'SECRETS'
+EXA_API_KEY='exa-test-key'
+FIRECRAWL_API_KEY='fc-test-key'
+SECRETS
+
+  # -f: no rc files. Source claude.zsh, then check (a) the keys do NOT leak into the parent
+  # shell's exported env, and (b) they DO reach a subprocess launched via _claude_with_home.
+  run zsh -fc "
+    export HOME='$tmp'
+    source '$zsh'
+    printf 'PARENT_EXA=[%s]\n' \"\$(printenv EXA_API_KEY)\"
+    printf 'SUB_EXA=[%s]\n' \"\$(_claude_with_home '$tmp' printenv EXA_API_KEY)\"
+    printf 'SUB_FC=[%s]\n' \"\$(_claude_with_home '$tmp' printenv FIRECRAWL_API_KEY)\"
+  "
+  [ "$status" -eq 0 ]
+  # Non-exported in the parent: printenv finds nothing.
+  echo "$output" | grep -qF 'PARENT_EXA=[]'
+  # Exported (scoped) into the subprocess: the values come through.
+  echo "$output" | grep -qF 'SUB_EXA=[exa-test-key]'
+  echo "$output" | grep -qF 'SUB_FC=[fc-test-key]'
 }
 
 @test "1Password validation requires the exa and firecrawl API keys" {

@@ -41,14 +41,19 @@ config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
 # spawn time from the per-account env set by _claude_with_home. Single-quoted here so the shell
 # stores the literal placeholder rather than expanding it now. Keep in sync with the project's
 # .mcp.json removal of context7/deepwiki.
+#
+# exa/firecrawl are version-pinned: they receive an API key in their env, so we shrink the
+# supply-chain surface by spawning a known version rather than whatever "latest" npx resolves.
+# Bumping the pin re-keys this run_onchange (intentional updates only). context7/deepwiki carry
+# no secret, so they stay on latest to track upstream tool changes.
 mcp_names=("context7" "deepwiki" "exa" "firecrawl")
 # shellcheck disable=SC2016  # the ${EXA_API_KEY}/${FIRECRAWL_API_KEY} placeholders are stored
 # literally on purpose: Claude Code expands them at server spawn, not this script.
 mcp_configs=(
   '{"type":"stdio","command":"npx","args":["-y","@upstash/context7-mcp"]}'
   '{"type":"stdio","command":"npx","args":["-y","mcp-remote","https://mcp.deepwiki.com/mcp"]}'
-  '{"type":"stdio","command":"npx","args":["-y","exa-mcp-server"],"env":{"EXA_API_KEY":"${EXA_API_KEY}"}}'
-  '{"type":"stdio","command":"npx","args":["-y","firecrawl-mcp"],"env":{"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"}}'
+  '{"type":"stdio","command":"npx","args":["-y","exa-mcp-server@3.2.1"],"env":{"EXA_API_KEY":"${EXA_API_KEY}"}}'
+  '{"type":"stdio","command":"npx","args":["-y","firecrawl-mcp@3.22.0"],"env":{"FIRECRAWL_API_KEY":"${FIRECRAWL_API_KEY}"}}'
 )
 
 failed=0
