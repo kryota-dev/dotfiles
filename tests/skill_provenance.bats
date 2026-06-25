@@ -2,22 +2,8 @@
 
 load helpers/setup
 
-# Names declared external via the templated range over .chezmoidata.toml [ecc].skills.
-# That range emits one [".agents/skills/<name>"] entry per list element, so a literal grep
-# of .chezmoiexternal.toml (which only sees the `{{ $skill }}` template var) can't see the
-# expanded names — resolve the list directly. Kept dependency-free on purpose: CI's bats
-# job installs only bats/shellcheck/zsh, no chezmoi to render the template.
-_ecc_skill_list() {
-  # Scope strictly to the [ecc] table's `skills = [ ... ]` array so an unrelated section
-  # gaining a `skills` key (or a formatter changing the indent) can't perturb the result.
-  awk '
-    /^\[ecc\]$/        { in_ecc = 1; next }
-    /^\[/              { in_ecc = 0; in_list = 0 }
-    in_ecc && /^[[:space:]]*skills[[:space:]]*=[[:space:]]*\[/ { in_list = 1; next }
-    in_ecc && in_list && /^[[:space:]]*\]/ { in_list = 0; next }
-    in_ecc && in_list  { print }
-  ' "${HOME_DIR}/.chezmoidata.toml" | grep -oE '"[^"]+"' | tr -d '"'
-}
+# _ecc_skill_list (resolves the [ecc].skills array) lives in helpers/setup.bash so this
+# suite and docs_facts.bats share one definition and can't diverge on how they count.
 
 # True if <name> is declared external: either a literal [".agents/skills/<name>..."] table
 # header in .chezmoiexternal.toml, or an element of the [ecc].skills range source above.
