@@ -32,11 +32,14 @@ Note: Conversational responses to the user remain in Japanese as specified in th
 ## Commands
 
 ```bash
-# Apply dotfiles
-make apply          # chezmoi apply -v
+# List available targets (also the default `make` target)
+make help
 
-# Show diff
-make diff           # chezmoi diff
+# Apply dotfiles (run chezmoi directly; no Make wrapper)
+chezmoi apply -v
+
+# Show diff (run chezmoi directly; no Make wrapper)
+chezmoi diff
 
 # Lint (shellcheck + shfmt + zsh syntax check)
 make lint
@@ -50,7 +53,7 @@ make test-bats      # bats tests/*.bats
 # Run a single test file
 bats tests/files.bats
 
-# Auto-fix with shfmt
+# Format shell scripts (shfmt -w on .sh; .tmpl shown as diff only)
 make fmt
 
 # Benchmark zsh startup
@@ -59,8 +62,8 @@ make benchmark
 # Update Brewfile
 make dump-brewfile
 
-# Re-lock sheldon plugins
-make sheldon-lock
+# Sync vendored _ghq completion from the mise-pinned ghq version
+make sync-ghq-completion
 ```
 
 ## Architecture

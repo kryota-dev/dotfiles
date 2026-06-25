@@ -136,13 +136,15 @@ AI-native development environment — [Claude Code](https://docs.anthropic.com/e
 
 | Command | Description |
 |---------|-------------|
-| `make apply` | Apply dotfiles |
-| `make diff` | Preview pending changes |
-| `make watch` | Auto-apply on file changes |
-| `make test` | Run lint + Bats tests |
+| `make help` | List available targets (default target) |
 | `make lint` | shellcheck + shfmt + zsh syntax |
+| `make fmt` | Format shell scripts with shfmt |
+| `make test` | Run lint + Bats tests |
 | `make benchmark` | Measure zsh startup time |
 | `make dump-brewfile` | Export current Homebrew packages |
+| `make sync-ghq-completion` | Refresh vendored `_ghq` completion |
+
+> Applying and diffing are done with chezmoi directly: `chezmoi apply -v`, `chezmoi diff`.
 
 **CI pipelines:**
 - **CI** (`ci.yml`): Lint (ubuntu) → Test (macos) → Benchmark (macos, main only)
