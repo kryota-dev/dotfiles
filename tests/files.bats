@@ -55,7 +55,7 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(git docker claude codex functions completions wtp ghq)
+  local modules=(git docker claude codex dmux functions completions wtp ghq)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
@@ -1021,4 +1021,58 @@ _gate_decision() {
   grep -q -- '--input=instinct-clusters' "$sk"
   grep -q 'instinct-cli.py' "$sk"
   grep -q 'clv2-session-notify' "$sk"
+}
+
+@test "dmux OpenRouter secret is a private 1Password template, never committed in clear" {
+  local tmpl="${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl"
+  [ -f "$tmpl" ]
+  grep -qE 'OPENROUTER_API_KEY=.*onepasswordRead' "$tmpl"
+  # Single-quoted (squote, not quote) so a key with $ or a backtick cannot expand when sourced.
+  grep -qE 'OPENROUTER_API_KEY=.*\| squote' "$tmpl"
+  ! grep -qE 'OPENROUTER_API_KEY=.*\| quote' "$tmpl"
+  # Not exported in the secrets file (scoping is done by the dmux wrapper).
+  ! grep -qE '^export ' "$tmpl"
+}
+
+@test "dmux.zsh sources the OpenRouter secret and scopes it to the dmux subprocess" {
+  local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
+  [ -f "$zsh" ]
+  grep -qF 'dmux-secrets.zsh' "$zsh"
+  grep -qE '\[\[ -r .* \]\] && source' "$zsh"
+  grep -qE 'OPENROUTER_API_KEY="\$\{OPENROUTER_API_KEY:-\}"' "$zsh"
+  # Must reach the real binary, not recurse into the function.
+  grep -qF 'command dmux' "$zsh"
+}
+
+@test "dmux.zsh injects OPENROUTER_API_KEY into the dmux subprocess but not the parent shell" {
+  command -v zsh >/dev/null || skip "zsh not available"
+  local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/.config/zsh" "$tmp/bin"
+  # Stand in for the 1Password-rendered secrets file (non-exported, single-quoted).
+  cat >"$tmp/.config/zsh/dmux-secrets.zsh" <<'SECRETS'
+OPENROUTER_API_KEY='or-test-key'
+SECRETS
+  # Stub dmux binary that reports what it received.
+  cat >"$tmp/bin/dmux" <<'STUB'
+#!/usr/bin/env bash
+printf 'SUB_OR=[%s]\n' "$(printenv OPENROUTER_API_KEY)"
+STUB
+  chmod +x "$tmp/bin/dmux"
+  run zsh -fc "
+    export HOME='$tmp'
+    export PATH=\"$tmp/bin:\$PATH\"
+    source '$zsh'
+    printf 'PARENT_OR=[%s]\n' \"\$(printenv OPENROUTER_API_KEY)\"
+    dmux
+  "
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'PARENT_OR=[]'
+  echo "$output" | grep -qF 'SUB_OR=[or-test-key]'
+}
+
+@test "1Password validation requires the OpenRouter API key" {
+  local script="${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+  grep -qF 'op://kryota.dev/Dotfiles - OpenRouter API/credential' "$script"
 }
