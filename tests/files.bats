@@ -55,7 +55,7 @@ load helpers/setup
 }
 
 @test "zsh modules exist" {
-  local modules=(git docker claude codex functions completions wtp ghq)
+  local modules=(git docker claude codex dmux functions completions wtp ghq)
   for mod in "${modules[@]}"; do
     [ -f "${HOME_DIR}/dot_config/zsh/${mod}.zsh" ]
   done
@@ -914,6 +914,9 @@ _gate_decision() {
   local tmpl="${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl"
   [ -f "$tmpl" ]
   grep -qE 'OPENROUTER_API_KEY=.*onepasswordRead' "$tmpl"
+  # Single-quoted (squote, not quote) so a key with $ or a backtick cannot expand when sourced.
+  grep -qE 'OPENROUTER_API_KEY=.*\| squote' "$tmpl"
+  ! grep -qE 'OPENROUTER_API_KEY=.*\| quote' "$tmpl"
   # Not exported in the secrets file (scoping is done by the dmux wrapper).
   ! grep -qE '^export ' "$tmpl"
 }

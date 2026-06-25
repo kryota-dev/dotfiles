@@ -148,7 +148,7 @@ jobs:
 
       - name: Verify zsh modules deployed
         run: |
-          for mod in aliases git docker claude functions completions wtp ghq; do
+          for mod in aliases git docker claude dmux functions completions wtp ghq; do
             f=~/.config/zsh/${mod}.zsh
             if [ -f "$f" ]; then
               echo "OK: $f"
@@ -316,7 +316,7 @@ jobs:
 
       - name: Verify zsh modules deployed
         run: |
-          for mod in aliases git docker claude functions completions wtp ghq; do
+          for mod in aliases git docker claude dmux functions completions wtp ghq; do
             f=~/.config/zsh/${mod}.zsh
             if [ -f "$f" ]; then
               echo "OK: $f"
