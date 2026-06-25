@@ -1077,13 +1077,19 @@ STUB
   [ -f "$shim" ]
   # executable_ prefix → chezmoi deploys 0755 as `codex` (no extension), which dmux invokes.
   head -1 "$shim" | grep -qE '^#!/bin/sh'
-  grep -qF 'exec codex --profile shared "$@"' "$shim"
+  # Execs the resolved real codex (never the bare name) with the SSOT profile re-injected.
+  grep -qF 'exec "$real" --profile shared "$@"' "$shim"
 }
 
-@test "dmux codex shim passes shellcheck as POSIX sh" {
-  command -v shellcheck >/dev/null || skip "shellcheck not available"
-  shellcheck --shell=sh --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 \
-    "${HOME_DIR}/dot_config/dmux/bin/executable_codex"
+@test "dmux codex shim passes shellcheck and shfmt as POSIX sh" {
+  local shim="${HOME_DIR}/dot_config/dmux/bin/executable_codex"
+  # make lint only globs *.sh/*.sh.tmpl, so the extension-less shim needs explicit coverage.
+  if command -v shellcheck >/dev/null; then
+    shellcheck --shell=sh --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 "$shim"
+  fi
+  if command -v shfmt >/dev/null; then
+    shfmt -d -i 2 -ci "$shim"
+  fi
 }
 
 @test "dmux codex shim injects --profile shared and drops its own dir to avoid recursion" {
@@ -1099,46 +1105,95 @@ STUB
 printf 'REAL_CODEX_ARGS=[%s]\n' "$*"
 STUB
   chmod +x "$tmp/real/codex"
-  # shim dir first, real dir second: the shim must drop its own dir, then resolve the real codex.
+  # shim dir first, real dir second: the shim must skip its own dir, then resolve the real codex.
   run env PATH="$tmp/shim:$tmp/real:/usr/bin:/bin" "$tmp/shim/codex" exec --foo
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF 'REAL_CODEX_ARGS=[--profile shared exec --foo]'
 }
 
-@test "dmux (default account) prepends the codex shim dir to PATH" {
+@test "dmux codex shim resolves correctly via PATH lookup (dmux's real sh -c launch path)" {
+  # dmux runs `sh -c "codex …"`, so codex is found by PATH lookup and $0 becomes the resolved
+  # full path. This exercises that path (vs the direct-invocation test above) to guard the
+  # verbatim self-skip premise against regressions.
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_codex"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim" "$tmp/real"
+  cp "$shimsrc" "$tmp/shim/codex"
+  chmod +x "$tmp/shim/codex"
+  cat >"$tmp/real/codex" <<'STUB'
+#!/usr/bin/env bash
+printf 'REAL_CODEX_ARGS=[%s]\n' "$*"
+STUB
+  chmod +x "$tmp/real/codex"
+  run env PATH="$tmp/shim:$tmp/real:/usr/bin:/bin" sh -c 'codex exec --foo'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'REAL_CODEX_ARGS=[--profile shared exec --foo]'
+}
+
+@test "dmux codex shim exits non-zero (no fork bomb) when no real codex is on PATH" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_codex"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim"
+  cp "$shimsrc" "$tmp/shim/codex"
+  chmod +x "$tmp/shim/codex"
+  # Only the shim is reachable as `codex`: it must fail cleanly, never recurse into itself.
+  run env PATH="$tmp/shim:/usr/bin:/bin" "$tmp/shim/codex" exec
+  [ "$status" -eq 127 ]
+  echo "$output" | grep -qF 'no real codex found on PATH'
+}
+
+@test "dmux (default account) prepends the codex shim dir to PATH and passes the MCP keys" {
   local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
   grep -qF '_DMUX_SHIM_DIR="${HOME}/.config/dmux/bin"' "$zsh"
   # The default dmux wrapper must put the shim dir on PATH so its bare codex loads the SSOT.
   grep -qE 'PATH="\$\{_DMUX_SHIM_DIR\}:\$\{PATH\}"' "$zsh"
+  # MCP keys re-passed for parity with cld (claude expands the placeholders at spawn).
+  grep -qF 'EXA_API_KEY="${EXA_API_KEY:-}"' "$zsh"
+  grep -qF 'FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"' "$zsh"
+  # claude's MCP keys are sourced here too so the wrapper does not depend on plugin load order.
+  grep -qF 'claude-secrets.zsh' "$zsh"
 }
 
 @test "dmux-r06 binds the r06 account env, a dedicated tmux socket and the codex shim" {
   local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
   grep -qE '^dmux-r06\(\) \{' "$zsh"
-  # Dedicated fresh tmux server so the env reaches every pane.
+  # Dedicated tmux server (own session namespace) so dmux-r06 never attaches to a default-account
+  # session of the same project; socket dir created 0700 to match tmux's default privacy.
   grep -qF 'TMUX_TMPDIR="$tmpdir"' "$zsh"
-  # Full per-account env set (mirrors _claude_with_home + CODEX_HOME).
+  grep -qF 'mkdir -m 700 -p "$tmpdir"' "$zsh"
+  # Full per-account env set (mirrors _claude_with_home + CODEX_HOME + the MCP keys).
   grep -qF 'CLAUDE_CONFIG_DIR="${HOME}/.claude-r06"' "$zsh"
   grep -qF 'ECC_AGENT_DATA_HOME="${HOME}/.claude-r06"' "$zsh"
   grep -qF 'CLV2_HOMUNCULUS_DIR="${HOME}/.claude-r06/ecc-homunculus"' "$zsh"
   grep -qF 'ECC_MCP_HEALTH_STATE_PATH="${HOME}/.claude-r06/mcp-health-cache.json"' "$zsh"
   grep -qF 'GATEGUARD_STATE_DIR="${HOME}/.claude-r06/.gateguard"' "$zsh"
   grep -qF 'CODEX_HOME="${HOME}/.codex-r06"' "$zsh"
+  grep -qF 'EXA_API_KEY="${EXA_API_KEY:-}"' "$zsh"
+  grep -qF 'FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"' "$zsh"
   grep -qF 'command dmux "$@"' "$zsh"
 }
 
-@test "dmux-r06 injects the r06 account env into the dmux subprocess but not the parent shell" {
+@test "dmux-r06 injects the r06 account env and MCP keys into the subprocess but not the parent" {
   command -v zsh >/dev/null || skip "zsh not available"
   local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
   local tmp
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/.config/zsh" "$tmp/bin"
+  # Stand in for the 1Password-rendered claude secrets (non-exported, sourced by dmux.zsh).
+  cat >"$tmp/.config/zsh/claude-secrets.zsh" <<'SECRETS'
+EXA_API_KEY='exa-test-key'
+FIRECRAWL_API_KEY='fc-test-key'
+SECRETS
   # Stub dmux binary that reports the per-account env it received.
   cat >"$tmp/bin/dmux" <<'STUB'
 #!/usr/bin/env bash
 printf 'SUB_CC=[%s]\n' "$(printenv CLAUDE_CONFIG_DIR)"
 printf 'SUB_CODEX=[%s]\n' "$(printenv CODEX_HOME)"
 printf 'SUB_TMPDIR=[%s]\n' "$(printenv TMUX_TMPDIR)"
+printf 'SUB_EXA=[%s]\n' "$(printenv EXA_API_KEY)"
+printf 'SUB_FIRE=[%s]\n' "$(printenv FIRECRAWL_API_KEY)"
 case ":$PATH:" in
 *":$HOME/.config/dmux/bin:"*) printf 'SUB_SHIM=[yes]\n' ;;
 *) printf 'SUB_SHIM=[no]\n' ;;
@@ -1149,20 +1204,26 @@ STUB
     export HOME='$tmp'
     export PATH=\"$tmp/bin:\$PATH\"
     # Start from a clean baseline: the outer test environment may already export these.
-    unset CLAUDE_CONFIG_DIR CODEX_HOME TMUX_TMPDIR
+    unset CLAUDE_CONFIG_DIR CODEX_HOME TMUX_TMPDIR EXA_API_KEY FIRECRAWL_API_KEY
     source '$zsh'
     dmux-r06
     printf 'PARENT_CC=[%s]\n' \"\$(printenv CLAUDE_CONFIG_DIR)\"
     printf 'PARENT_CODEX=[%s]\n' \"\$(printenv CODEX_HOME)\"
+    printf 'PARENT_EXA=[%s]\n' \"\$(printenv EXA_API_KEY)\"
   "
   [ "$status" -eq 0 ]
   echo "$output" | grep -qF "SUB_CC=[$tmp/.claude-r06]"
   echo "$output" | grep -qF "SUB_CODEX=[$tmp/.codex-r06]"
   echo "$output" | grep -qF "SUB_TMPDIR=[$tmp/.dmux-r06]"
+  echo "$output" | grep -qF 'SUB_EXA=[exa-test-key]'
+  echo "$output" | grep -qF 'SUB_FIRE=[fc-test-key]'
   echo "$output" | grep -qF 'SUB_SHIM=[yes]'
   # Parent shell must stay clean (env was scoped to the dmux subprocess only).
   echo "$output" | grep -qF 'PARENT_CC=[]'
   echo "$output" | grep -qF 'PARENT_CODEX=[]'
+  # EXA was sourced (non-exported) into the parent, but must NOT be exported to child env leak-style;
+  # printenv in the parent reflects the sourced shell var only if exported — it is not, so empty.
+  echo "$output" | grep -qF 'PARENT_EXA=[]'
 }
 
 @test "1Password validation requires the OpenRouter API key" {

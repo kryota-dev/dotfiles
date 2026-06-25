@@ -4,25 +4,35 @@
 # chezmoi-managed SSOT static config ($CODEX_HOME/shared.config.toml). The dmux / dmux-r06
 # zsh wrappers prepend this shim's directory to PATH; dmux's PATH sanitiser only strips
 # node_modules/.bin entries (dist/utils/pathEnvironment.js), so the shim survives and
-# intercepts `codex` in every pane, re-injecting `--profile shared` before exec-ing the
-# real codex. (claude needs no shim: its account is selected purely by CLAUDE_CONFIG_DIR.)
+# intercepts `codex` in every pane, re-injecting `--profile shared`. (claude needs no shim:
+# its account is selected purely by CLAUDE_CONFIG_DIR.)
 #
-# To avoid recursing into itself, it drops its own directory from PATH first. When resolved
-# via PATH, $0 is "<matched PATH entry>/codex", so the directory part equals a PATH entry
-# verbatim — no canonicalisation needed. Falls back to the install dir if invoked by bare name.
+# Recursion is structurally impossible: rather than stripping itself from PATH and letting a
+# bare `exec codex` re-search (which loops if the self-match ever fails), it walks PATH itself,
+# skips its own directory, and execs the FIRST other `codex` by absolute path. Trailing slashes
+# on both sides are normalised so the self-skip is exact even for `…/bin/` style entries. When
+# resolved via PATH, $0 is "<matched PATH entry>/codex"; the bare-name fallback covers a direct
+# invocation by name.
 case "$0" in
   */*) self_dir="${0%/*}" ;;
   *) self_dir="${HOME}/.config/dmux/bin" ;;
 esac
+self_dir="${self_dir%/}"
 
-newpath=""
+real=""
 IFS=:
 for dir in $PATH; do
-  [ "$dir" = "$self_dir" ] && continue
-  newpath="${newpath:+$newpath:}$dir"
+  d="${dir%/}"
+  [ "$d" = "$self_dir" ] && continue
+  if [ -x "$d/codex" ]; then
+    real="$d/codex"
+    break
+  fi
 done
 unset IFS
 
-PATH="$newpath"
-export PATH
-exec codex --profile shared "$@"
+[ -n "$real" ] || {
+  printf '%s\n' "dmux codex shim: no real codex found on PATH" >&2
+  exit 127
+}
+exec "$real" --profile shared "$@"
