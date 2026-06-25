@@ -51,8 +51,15 @@ MSG
 fi
 
 # Chain the repo's own pre-commit hook, which core.hooksPath would otherwise
-# replace. --git-path resolves the literal .git/hooks dir (not core.hooksPath).
-local_hook="$(git rev-parse --git-path hooks/pre-commit 2>/dev/null || true)"
-if [ -n "$local_hook" ] && [ -x "$local_hook" ]; then
-  exec "$local_hook" "$@"
+# replace. IMPORTANT: `git rev-parse --git-path hooks/pre-commit` RESPECTS
+# core.hooksPath (git 2.x), so it resolves back to THIS global hook and would
+# infinite-loop via exec. Resolve the literal .git/hooks dir from --git-dir
+# instead (which ignores core.hooksPath), and skip if it points back at this
+# script (self-reference guard via -ef, defending against symlinks too).
+git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
+if [ -n "$git_dir" ]; then
+  local_hook="${git_dir}/hooks/pre-commit"
+  if [ -x "$local_hook" ] && ! [ "$local_hook" -ef "${BASH_SOURCE[0]}" ]; then
+    exec "$local_hook" "$@"
+  fi
 fi

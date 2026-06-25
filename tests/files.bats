@@ -589,11 +589,39 @@ _gate_decision() {
   grep -q 'git --staged' "$hook"
   # Prefers a repo-local gitleaks config over the global one.
   grep -q '.gitleaks.toml' "$hook"
-  # Chains the repo's own pre-commit so core.hooksPath does not silently drop it.
-  grep -q 'git-path hooks/pre-commit' "$hook"
+  # Chains the repo's own pre-commit so core.hooksPath does not silently drop it,
+  # WITHOUT self-recursion: `git rev-parse --git-path hooks/pre-commit` respects
+  # core.hooksPath and would resolve back to THIS global hook (infinite loop), so
+  # the hook must resolve the literal .git dir via --git-dir and guard against
+  # self-reference with -ef.
+  ! grep -q 'git-path hooks/pre-commit' "$hook"
+  grep -q 'rev-parse --git-dir' "$hook"
+  grep -q -- '-ef' "$hook"
   [ -f "${HOME_DIR}/dot_config/git/gitleaks.toml" ]
   # The global config must not carry a path allowlist (it would blind every repo).
   ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/gitleaks.toml"
+}
+
+# Regression (this PR): the chain step must not infinite-loop when core.hooksPath
+# points at the global hook's own dir. Drives a real commit through a temp repo
+# whose core.hooksPath is the hook dir; the buggy idiom would exec itself forever.
+@test "global pre-commit hook does not self-recurse under core.hooksPath" {
+  command -v timeout >/dev/null 2>&1 || skip "timeout not available"
+  local hooksdir repo
+  hooksdir=$(mktemp -d)
+  cp "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit" "${hooksdir}/pre-commit"
+  chmod +x "${hooksdir}/pre-commit"
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  git -C "$repo" config core.hooksPath "$hooksdir"
+  git -C "$repo" config commit.gpgsign false
+  git -C "$repo" config user.email t@example.com
+  git -C "$repo" config user.name t
+  printf 'x\n' >"${repo}/f"
+  git -C "$repo" add f
+  # timeout returns 124 if the hook loops; a clean commit returns 0.
+  run timeout 15 git -C "$repo" commit -q -m regression
+  [ "$status" -eq 0 ]
 }
 
 # Rendered-target checks (codex review): verify the template actually produces
