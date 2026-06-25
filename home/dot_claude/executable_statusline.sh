@@ -62,6 +62,7 @@ I_BRANCH=$'\xee\x9c\xa5'     # nf-dev-git_branch    U+E725
 I_WT=$'\xf3\xb0\x99\x85'     # nf-md-file_tree      U+F0645
 I_MODEL=$'\xf3\xb0\x9a\xa9'  # nf-md-robot       U+F06A9
 I_EFFORT=$'\xef\x83\xa4'     # nf-fa-tachometer     U+F0E4
+I_INSTINCT=$'\xf3\xb0\x9a\x83' # nf-md-dna          U+F0683
 I_5H=$'\xef\x80\x97'         # nf-fa-clock_o        U+F017
 I_7D=$'\xef\x81\xb3'         # nf-fa-calendar       U+F073
 I_COST=$'\xef\x83\x96'       # nf-fa-money          U+F0D6
@@ -145,6 +146,22 @@ daily_cost() {
       jq -r '.totals.totalCost // empty' >"$cache.tmp" && mv "$cache.tmp" "$cache") &
   fi
   cat "$cache" 2>/dev/null
+}
+
+# Review-ready instinct-cluster count (🧬N). The async SessionStart hook
+# (clv2-session-notify.sh) computes it via the CLV2 engine and caches a single integer to
+# "<homunculus>/.review-ready-clusters", so this renderer stays a cheap file read with no
+# python. Mirrors the homunculus-dir precedence and sanitizes to digits (defends against a
+# malformed cache). Empty output => caller hides the segment.
+clv2_cluster_count() {
+  local dir="${CLV2_HOMUNCULUS_DIR:-}"
+  case "$dir" in
+    /*) ;;
+    *) dir="${XDG_DATA_HOME:-$HOME/.local/share}/ecc-homunculus" ;;
+  esac
+  local f="$dir/.review-ready-clusters"
+  [ -r "$f" ] || return 0
+  tr -dc '0-9' <"$f" 2>/dev/null
 }
 
 # USD->JPY rate from frankfurter.dev (ECB rates, daily cache, background refresh).
@@ -321,6 +338,9 @@ printf '%s\n' "$line1"
 # ---------------------------------------------------------------------------
 line2="${I_MODEL} ${model}"
 [ -n "$effort" ] && line2+="${SEP}${I_EFFORT} ${effort}"
+
+icc=$(clv2_cluster_count)
+[ -n "$icc" ] && [ "$icc" -gt 0 ] 2>/dev/null && line2+="${SEP}${I_INSTINCT} ${icc}"
 
 if [ -n "$ctx" ]; then
   used=$((100 - ${ctx%%.*}))
