@@ -589,11 +589,82 @@ _gate_decision() {
   grep -q 'git --staged' "$hook"
   # Prefers a repo-local gitleaks config over the global one.
   grep -q '.gitleaks.toml' "$hook"
-  # Chains the repo's own pre-commit so core.hooksPath does not silently drop it.
-  grep -q 'git-path hooks/pre-commit' "$hook"
+  # Chains the repo's own pre-commit so core.hooksPath does not silently drop it,
+  # WITHOUT self-recursion: `git rev-parse --git-path hooks/pre-commit` respects
+  # core.hooksPath and would resolve back to THIS global hook (infinite loop), so
+  # the hook must resolve the default hooks dir via --git-common-dir (ignores
+  # core.hooksPath and also works in linked worktrees) and guard self-reference
+  # with -ef against ${BASH_SOURCE[0]}.
+  ! grep -q 'git-path hooks/pre-commit' "$hook"
+  grep -q 'git-common-dir' "$hook"
+  grep -q 'BASH_SOURCE' "$hook"
+  grep -q -- '-ef' "$hook"
   [ -f "${HOME_DIR}/dot_config/git/gitleaks.toml" ]
   # The global config must not carry a path allowlist (it would blind every repo).
   ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/gitleaks.toml"
+}
+
+# Regression (this PR): the chain step must not infinite-loop when core.hooksPath
+# points at the global hook's own dir. Drives a real commit through a temp repo
+# whose core.hooksPath is the hook dir; the buggy idiom would exec itself forever.
+@test "global pre-commit hook does not self-recurse under core.hooksPath" {
+  local to
+  if command -v timeout >/dev/null 2>&1; then to=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then to=gtimeout
+  else skip "timeout not available"; fi
+  local hooksdir repo
+  hooksdir=$(mktemp -d)
+  cp "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit" "${hooksdir}/pre-commit"
+  chmod +x "${hooksdir}/pre-commit"
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  git -C "$repo" config core.hooksPath "$hooksdir"
+  git -C "$repo" config commit.gpgsign false
+  git -C "$repo" config user.email t@example.com
+  git -C "$repo" config user.name t
+  printf 'x\n' >"${repo}/f"
+  git -C "$repo" add f
+  # timeout returns 124 if the hook loops; a clean commit returns 0.
+  run "$to" 15 git -C "$repo" commit -q -m regression
+  rm -rf "$hooksdir" "$repo"
+  [ "$status" -eq 0 ]
+}
+
+# Regression (this PR): in a linked worktree the chain must still reach the
+# common-dir repo-local hook. The earlier --git-dir idiom resolved the
+# per-worktree gitdir (which has no hooks/) and silently dropped the chain;
+# --git-common-dir points at the shared .git so the repo-local hook still runs.
+@test "global pre-commit chains the common-dir hook from a linked worktree" {
+  local to
+  if command -v timeout >/dev/null 2>&1; then to=timeout
+  elif command -v gtimeout >/dev/null 2>&1; then to=gtimeout
+  else skip "timeout not available"; fi
+  local hooksdir repo wt
+  hooksdir=$(mktemp -d)
+  cp "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit" "${hooksdir}/pre-commit"
+  chmod +x "${hooksdir}/pre-commit"
+  repo=$(mktemp -d)
+  git -C "$repo" init -q
+  git -C "$repo" config core.hooksPath "$hooksdir"
+  git -C "$repo" config commit.gpgsign false
+  git -C "$repo" config user.email t@example.com
+  git -C "$repo" config user.name t
+  git -C "$repo" commit --allow-empty -qm init
+  wt=$(mktemp -d)
+  git -C "$repo" worktree add -q "$wt" -b wt
+  # Repo-local hook that drops a marker into the shared .git dir when it runs.
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+    'printf ran >"$(git rev-parse --path-format=absolute --git-common-dir)/local-hook-ran"' \
+    >"${repo}/.git/hooks/pre-commit"
+  chmod +x "${repo}/.git/hooks/pre-commit"
+  printf 'x\n' >"${wt}/f"
+  git -C "$wt" add f
+  run "$to" 15 git -C "$wt" commit -q -m wt
+  local marker=no
+  [ -f "${repo}/.git/local-hook-ran" ] && marker=yes
+  rm -rf "$hooksdir" "$repo" "$wt"
+  [ "$status" -eq 0 ]
+  [ "$marker" = yes ]
 }
 
 # Rendered-target checks (codex review): verify the template actually produces
