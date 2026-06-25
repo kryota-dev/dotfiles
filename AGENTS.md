@@ -66,47 +66,26 @@ make dump-brewfile
 make sync-ghq-completion
 ```
 
-## Architecture
+## Documentation
 
-### chezmoi source structure (`home/`)
+Deep reference, how-to, and design rationale live in [`docs/`](docs/README.md) — English
+canonical with Japanese (`*.ja.md`) mirrors. `docs/` is the single home for the chezmoi
+engine, the lifecycle apply timeline, the lint/CI internals, and the AI-agent layer; this
+file stays short and points there.
 
-Follows chezmoi naming conventions (`dot_` → `.`, `.tmpl` → template, `run_once_`/`run_onchange_` → scripts, `symlink_` → symlinks, `private_` → permission-restricted).
+- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md)
+- **AI agents:** [overview](docs/agents/overview.md) · [account isolation](docs/agents/account-isolation.md) · [Claude Code](docs/agents/claude-code.md) · [Codex](docs/agents/codex.md) · [skill provenance](docs/agents/skills-provenance.md)
+- **Contributing:** [local dev & the make contract](docs/contributing/local-dev.md) · [CI & tests](docs/contributing/ci-and-tests.md) · [worktrees & env](docs/contributing/worktrees-and-env.md)
+- **Explanation:** [design rationale](docs/explanation/design-rationale.md) · [secrets & isolation](docs/explanation/secrets-and-isolation.md)
 
-- **Lifecycle scripts** (executed in numbered order):
-  - `run_once_before_00-install-prerequisites.sh.tmpl` — Xcode CLI tools, Homebrew
-  - `run_onchange_before_10-brew-bundle.sh.tmpl` — runs brew bundle when `dot_Brewfile` hash changes
-  - `run_once_after_11-validate-1password.sh.tmpl` — validates 1Password CLI and required secret items
-  - `run_onchange_after_12-setup-mise.sh.tmpl` — installs mise-managed tools when config changes
-  - `run_onchange_after_20-macos-defaults.sh.tmpl` — macOS system preferences
-  - `run_once_after_30-setup-fonts.sh.tmpl` — font installation
-  - `run_once_after_40-setup-sheldon.sh.tmpl` — sheldon lock
-  - `run_once_after_90-other-apps.sh.tmpl` — other app configurations
+The chezmoi naming conventions, lint pipeline internals (shellcheck/shfmt flags, the
+`{{`-line stripping trick), the numbered lifecycle timeline, and the test/CI architecture
+are documented there, not duplicated here. Note: the chezmoi **behavior** config is
+`home/dot_config/chezmoi/private_chezmoi.toml` (deploys to `~/.config/chezmoi/chezmoi.toml`,
+0600); template **data** is `home/.chezmoidata.toml`.
 
-- **zsh config**: `dot_zshrc.tmpl` → activates mise, direnv, starship synchronously, then loads `dot_config/zsh/*.zsh` via sheldon with deferred loading
-- **Template variables**: `home/.chezmoidata.toml` defines `email`, `signingkey`, `name`, and `ghq_user` (auto-loaded from the source tree, no per-machine config required). Chezmoi behavior config (e.g., `[diff]`) lives in `home/dot_config/chezmoi/chezmoi.toml` and is auto-deployed.
-- **1Password secrets**: `private_dot_aws/config.tmpl` — rendered from 1Password Secure Notes via `onepasswordRead`
-- **AI agent config**: `dot_claude/`, `dot_codex/`, `dot_agents/skills/` — shared skills are centralized in `dot_agents/skills/` and distributed to each tool via symlinks
+## Git config
 
-### Lint conventions
-
-- shellcheck: `--shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329`
-- shfmt: `-i 2 -ci` (2-space indent, case indent)
-- chezmoi template lines (containing `{{`) are stripped with `sed` before linting
-- zsh files (`*.zsh`) are syntax-checked with `zsh -n`
-
-### Tests
-
-Uses Bats (Bash Automated Testing System) in the `tests/` directory.
-- `files.bats` — verifies chezmoi source files exist
-- `shellcheck.bats` — verifies shellcheck passes
-- `zsh_syntax.bats` — verifies zsh syntax
-
-### CI
-
-GitHub Actions:
-- `.github/workflows/ci.yml`: lint → test → benchmark (main only)
-- `.github/workflows/setup-validation.yml`: chezmoi apply → mise install → file verification → zsh startup (macOS)
-
-### Git config
-
-Commit signing via 1Password SSH signatures is enabled (`dot_gitconfig.tmpl`). If a 1Password error occurs during `git commit`, notify the user with the `notify` command.
+Commit signing via 1Password SSH signatures is enabled (`home/dot_gitconfig.tmpl`). If a
+1Password error occurs during `git commit`, notify the user with the `notify` command. See
+[dev tooling](docs/architecture/dev-tooling.md) for signing and the gitleaks pre-commit hook.
