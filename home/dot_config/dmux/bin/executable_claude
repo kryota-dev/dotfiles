@@ -1,0 +1,50 @@
+#!/bin/sh
+# Opt-in dmux → happy-claude shim. dmux launches the bare `claude` binary (paneBootstrapRunner
+# types `claude …` into the pane shell), and the dmux / dmux-r06 zsh wrappers prepend this
+# shim's directory to PATH (alongside the codex shim), so this file intercepts `claude` in every
+# pane. By default it is a TRANSPARENT passthrough — it execs the first OTHER `claude` on PATH,
+# exactly matching dmux's own PATH resolution, so default dmux behaviour is unchanged.
+#
+# When DMUX_HAPPY is set (run `DMUX_HAPPY=1 dmux`), it instead launches `happy claude` so the
+# pane is phone-controllable. happy spawns the REAL Claude Code TUI locally (unlike `happy
+# codex`, which is headless/remote-only — see docs/agents/codex.md), so the pane stays
+# interactive and dmux's prompt dispatch / pane-state capture keep working.
+#
+# Recursion is structurally impossible: before exec'ing happy we `unset DMUX_HAPPY`, so the
+# nested `claude` that happy spawns re-enters this shim with DMUX_HAPPY cleared and takes the
+# transparent-passthrough branch — never `happy claude` again. (The pane's own shell keeps
+# DMUX_HAPPY; only the happy subprocess tree has it cleared.) The codex shim deliberately
+# ignores DMUX_HAPPY: `happy codex` has no local TUI, so wrapping codex panes would break dmux.
+#
+# Account selection needs no flag here: claude picks its account purely from CLAUDE_CONFIG_DIR
+# (set by dmux-r06's session env), which happy inherits.
+case "$0" in
+  */*) self_dir="${0%/*}" ;;
+  *) self_dir="${HOME}/.config/dmux/bin" ;;
+esac
+self_dir="${self_dir%/}"
+
+if [ -n "${DMUX_HAPPY}" ]; then
+  unset DMUX_HAPPY
+  exec happy claude "$@"
+fi
+
+# Default: transparent passthrough to the first `claude` on PATH that is not this shim.
+real=""
+IFS=:
+for dir in $PATH; do
+  d="${dir%/}"
+  [ "$d" = "$self_dir" ] && continue
+  if [ -x "$d/claude" ]; then
+    real="$d/claude"
+    break
+  fi
+done
+unset IFS
+
+[ -n "$real" ] || {
+  printf '%s\n' "dmux claude shim: no real claude found on PATH" >&2
+  exit 127
+}
+
+exec "$real" "$@"

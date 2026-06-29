@@ -153,6 +153,20 @@ dmux は素の `codex` 呼び出しで Codex ペインをスポーンし、`--pr
 
 このシムなしでは、dmux ペインは SSOT `shared.config.toml` なしでサイレントに実行されます。
 
+#### オプトインの happy-claude シム（`DMUX_HAPPY`）
+
+同じシムディレクトリには `executable_claude` も同梱されます。これは Claude ペインを happy
+ラッパー経由（スマホ操作）で起動するための**オプトイン**コンパニオンです。デフォルトでは
+透過パススルー（`PATH` 上の最初の実 `claude` を exec）なので、dmux の既定挙動は変わりません。
+`DMUX_HAPPY=1 dmux` で `happy claude` に切り替わります。exec 前に `DMUX_HAPPY` を `unset` する
+ため、happy が spawn する入れ子の `claude` はパススルー側に入り、再帰は構造的に不可能です
+（codex シムと同じ原理）。
+
+Codex はこの方式で**ラップしません**。`happy codex` は `codex app-server` 経由で Codex を
+headless 起動し、ローカル端末は入力欄のない read-only ビューアになる（上の
+`cdx / cdx-r06 aliases` 節を参照）ため、対話的な dmux ペインを駆動できません。スマホ操作の
+Codex は `hcdx` を単体起動し、dmux 内では `cdx` / `cdx-r06` を使ってください。
+
 ### 素の codex は SSOT 設定をスキップする
 
 エイリアスや dmux シムなしの直接 `codex` 呼び出しは `shared.config.toml` を**ロードしません**。`--profile shared` フラグが適用する唯一のメカニズムです。これは意図的なもの（Codex ではプロファイルはオプトイン）ですが、`codex` を直接呼び出すスクリプト、CI、またはエディタ統合では気づきにくい落とし穴です。

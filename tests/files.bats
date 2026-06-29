@@ -1144,6 +1144,82 @@ STUB
   echo "$output" | grep -qF 'no real codex found on PATH'
 }
 
+@test "dmux claude shim deploys as ~/.config/dmux/bin/claude and is opt-in via DMUX_HAPPY" {
+  local shim="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  [ -f "$shim" ]
+  # executable_ prefix → chezmoi deploys 0755 as `claude` (no extension), which dmux invokes.
+  head -1 "$shim" | grep -qE '^#!/bin/sh'
+  # Opt-in branch launches happy claude; default branch is a transparent passthrough.
+  grep -qF 'exec happy claude "$@"' "$shim"
+  grep -qF 'exec "$real" "$@"' "$shim"
+  # Recursion break: DMUX_HAPPY is cleared before exec so the nested claude passes through.
+  grep -qF 'unset DMUX_HAPPY' "$shim"
+}
+
+@test "dmux claude shim passes shellcheck and shfmt as POSIX sh" {
+  local shim="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  # make lint only globs *.sh/*.sh.tmpl, so the extension-less shim needs explicit coverage.
+  if command -v shellcheck >/dev/null; then
+    shellcheck --shell=sh --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 "$shim"
+  fi
+  if command -v shfmt >/dev/null; then
+    shfmt -d -i 2 -ci "$shim"
+  fi
+}
+
+@test "dmux claude shim is a transparent passthrough when DMUX_HAPPY is unset" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim" "$tmp/real"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # Real claude stub (in a separate dir) reports the args it was handed — verbatim, no flags.
+  cat >"$tmp/real/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'REAL_CLAUDE_ARGS=[%s]\n' "$*"
+STUB
+  chmod +x "$tmp/real/claude"
+  # shim dir first, real dir second: the shim must skip its own dir, then resolve the real claude.
+  run env -u DMUX_HAPPY PATH="$tmp/shim:$tmp/real:/usr/bin:/bin" sh -c 'claude --resume foo'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'REAL_CLAUDE_ARGS=[--resume foo]'
+}
+
+@test "dmux claude shim wraps in happy and clears DMUX_HAPPY to break recursion when opted in" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim" "$tmp/bin"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # happy stub reports its args and whether DMUX_HAPPY survived into its environment.
+  cat >"$tmp/bin/happy" <<'STUB'
+#!/usr/bin/env bash
+printf 'HAPPY_ARGS=[%s]\n' "$*"
+printf 'HAPPY_DMUX_HAPPY=[%s]\n' "${DMUX_HAPPY-<unset>}"
+STUB
+  chmod +x "$tmp/bin/happy"
+  run env DMUX_HAPPY=1 PATH="$tmp/shim:$tmp/bin:/usr/bin:/bin" sh -c 'claude --permission-mode plan'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'HAPPY_ARGS=[claude --permission-mode plan]'
+  # The nested claude that happy would spawn must NOT see DMUX_HAPPY (else it would re-wrap).
+  echo "$output" | grep -qF 'HAPPY_DMUX_HAPPY=[<unset>]'
+}
+
+@test "dmux claude shim exits non-zero (no fork bomb) when no real claude is on PATH" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # Only the shim is reachable as `claude`: it must fail cleanly, never recurse into itself.
+  run env -u DMUX_HAPPY PATH="$tmp/shim:/usr/bin:/bin" "$tmp/shim/claude" --resume
+  [ "$status" -eq 127 ]
+  echo "$output" | grep -qF 'no real claude found on PATH'
+}
+
 @test "dmux (default account) prepends the codex shim dir to PATH and passes the MCP keys" {
   local zsh="${HOME_DIR}/dot_config/zsh/dmux.zsh"
   grep -qF '_DMUX_SHIM_DIR="${HOME}/.config/dmux/bin"' "$zsh"
