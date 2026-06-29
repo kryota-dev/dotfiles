@@ -27,6 +27,11 @@ REPO_NAME=$(echo "${REPO_FULLNAME}" | cut -d'/' -f2)
 TODAY_JST=$(TZ=Asia/Tokyo date +%Y-%m-%d)
 YESTERDAY_JST=$(TZ=Asia/Tokyo date -v-1d +%Y-%m-%d)
 
+# 当月（Discussion 特定に使う）。TODAY_JST と TZ を揃えること。
+# `date +%Y-%m`（TZ なし）はマシン TZ が JST より後ろ（UTC 等）かつ月境界の JST 早朝に
+# 前月へずれ、当月 Discussion を取り違える／見つけられないため必ず TZ=Asia/Tokyo を付ける。
+YEAR_MONTH=$(TZ=Asia/Tokyo date +%Y-%m)
+
 # JST 今日の範囲を UTC で表現
 #   JST 今日 00:00 = UTC 前日 15:00
 #   JST 今日 24:00 = UTC 当日 15:00
@@ -42,6 +47,7 @@ SEARCH_END="${TODAY_JST}"
 # REPO_OWNER / REPO_NAME — GraphQL クエリの repository(owner:, name:) で使用
 # START_UTC / END_UTC — `/repos/.../{commits,reviews,comments,events}` の created_at/submitted_at フィルタに使う
 # SEARCH_START / SEARCH_END — `gh search prs/issues --updated/--created` のレンジに使う
+# YEAR_MONTH — Step 2 の当月 Discussion 検索に使う（YYYY-MM）
 ```
 
 ### 2. 今月のDaily Planning Discussionを特定
@@ -54,9 +60,9 @@ SEARCH_END="${TODAY_JST}"
 
 **注意: macOS では `USERNAME` がシステム環境変数として予約されているため、変数名は `GH_USER` を使うこと。**
 
-```bash
-YEAR_MONTH=$(date +%Y-%m)
+`YEAR_MONTH` は Step 1 で `TZ=Asia/Tokyo` 付きで算出済みのものを使う（ここで `date +%Y-%m` を再定義しない）。
 
+```bash
 gh api graphql -f query="
 {
   search(query: \"repo:${REPO_FULLNAME} ${GH_USER} ${YEAR_MONTH} in:title\", type: DISCUSSION, first: 5) {
@@ -208,16 +214,27 @@ gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SE
   - PR マージ・Issue close も明示的に「やったこと」へ統合
 - 2026-05 の見直し:
   - 3a「やったこと（PR）」の判定をコミット/マージのみから6指標（コミット/マージ/クローズ/レビュー submit/レビューコメント/PR コメント）に拡張。レビューや返信のみで進めたPR、merge を伴わない close が漏れる問題を解消
+- 2026-06 の見直し:
+  - Step 4・Step 7 の GraphQL をシングルクォート直書きから**変数バインディング（`-f`/`-F`）**へ統一（シェル変数が展開されず API 失敗する問題を解消）
+  - Step 7 の投稿本文を**ミューテーション直書きから `BODY` 変数バインディング**へ変更（複数行・絵文字・記号でクエリが壊れる問題を解消）
+  - `YEAR_MONTH` を Step 1 へ集約し `TZ=Asia/Tokyo` を付与（月境界の取り違え解消）
+  - Step 7 投稿直前に**日跨ぎ検証**（`TODAY_JST` と現在 JST 日付の不一致確認）を追加
 
 ### 4. 前日の投稿を取得
 
 Discussionの既存コメントから直前の投稿を取得し、「やったこと」と「レビュー」を「前日の振り返り」に使用する。
 
+**重要: GraphQL は変数バインディング（`-f`/`-F`）で渡す。** シングルクォート内に `${REPO_OWNER}` 等のシェル変数を直書きすると展開されず、文字列リテラル `${REPO_OWNER}` が GraphQL に送られて `Could not resolve to a Repository` で失敗する。`-f` は文字列、`-F` は数値（`number: Int!`）に使う。`DISCUSSION_NUMBER` は Step 2 で特定した番号を入れる。
+
 ```bash
-gh api graphql -f query='
-{
-  repository(owner: "${REPO_OWNER}", name: "${REPO_NAME}") {
-    discussion(number: DISCUSSION_NUMBER) {
+gh api graphql \
+  -f owner="${REPO_OWNER}" \
+  -f name="${REPO_NAME}" \
+  -F number="${DISCUSSION_NUMBER}" \
+  -f query='
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) {
       comments(last: 1) {
         nodes {
           body
@@ -297,29 +314,54 @@ AskUserQuestionを使って以下を質問する。
 
 ### 7. ユーザーの承認後、Discussionに投稿
 
+**投稿直前に日跨ぎを検証する（D2）。** 長時間・再開セッションでは Step 1 で確定した `TODAY_JST`
+と現在の JST 日付がずれることがある（本文の日付と実際の投稿日が食い違う）。ずれていたら投稿前に
+ユーザーへ「どの日付の Daily Planning として投稿するか」を確認する。
+
 ```bash
-# Discussion Node IDを取得
-DISCUSSION_ID=$(gh api graphql -f query='
-{
-  repository(owner: "${REPO_OWNER}", name: "${REPO_NAME}") {
-    discussion(number: DISCUSSION_NUMBER) {
-      id
-    }
+# 日跨ぎ検証
+NOW_JST=$(TZ=Asia/Tokyo date +%Y-%m-%d)
+if [ "${NOW_JST}" != "${TODAY_JST}" ]; then
+  echo "警告: セッション開始時の TODAY_JST=${TODAY_JST} と現在日 NOW_JST=${NOW_JST} が不一致。投稿日付の意図をユーザーに確認すること。"
+fi
+```
+
+**重要（D3・D4）:**
+- GraphQL は**変数バインディング（`-f`/`-F`）で渡す**。シングルクォート内のシェル変数（`${REPO_OWNER}` 等）は展開されないため、クエリ文字列へ直書きしない。
+- **投稿本文は必ず `BODY` 変数に格納して `-f body="${BODY}"` で渡す**。ミューテーション文字列へ本文を直接埋め込まない（複数行・絵文字 🤿📣⏰・`##`・改行・引用符でクエリが壊れる）。
+
+```bash
+# Discussion Node ID を取得（DISCUSSION_NUMBER は Step 2 で特定した番号）
+DISCUSSION_ID=$(gh api graphql \
+  -f owner="${REPO_OWNER}" \
+  -f name="${REPO_NAME}" \
+  -F number="${DISCUSSION_NUMBER}" \
+  -f query='
+query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    discussion(number: $number) { id }
   }
 }' --jq '.data.repository.discussion.id')
 
-# コメントを投稿
-gh api graphql -f query='
-mutation {
-  addDiscussionComment(input: {
-    discussionId: "'"${DISCUSSION_ID}"'",
-    body: "投稿内容"
-  }) {
-    comment {
-      url
-    }
+# 本文を heredoc で組み立てる（クォートなし EOF で変数展開を避け、Step 6 の下書きをそのまま流し込む）
+BODY=$(cat <<'EOF'
+## 2026/06/25
+
+✅ やったこと
+- ...（Step 6 で承認された下書きをそのまま貼る）
+EOF
+)
+
+# コメントを投稿（body は変数バインディング）
+gh api graphql \
+  -f discussionId="${DISCUSSION_ID}" \
+  -f body="${BODY}" \
+  -f query='
+mutation($discussionId: ID!, $body: String!) {
+  addDiscussionComment(input: { discussionId: $discussionId, body: $body }) {
+    comment { url }
   }
-}'
+}' --jq '.data.addDiscussionComment.comment.url'
 ```
 
 投稿後、コメントのURLをユーザーに表示する。
