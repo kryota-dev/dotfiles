@@ -5,7 +5,7 @@
 # pane. By default it is a TRANSPARENT passthrough — it execs the first OTHER `claude` on PATH,
 # exactly matching dmux's own PATH resolution, so default dmux behaviour is unchanged.
 #
-# When DMUX_HAPPY is set (run `DMUX_HAPPY=1 dmux`), it instead launches `happy claude` so the
+# When DMUX_HAPPY=1 (run `DMUX_HAPPY=1 dmux`), it instead launches `happy claude` so the
 # pane is phone-controllable. happy spawns the REAL Claude Code TUI locally (unlike `happy
 # codex`, which is headless/remote-only — see docs/agents/codex.md), so the pane stays
 # interactive and dmux's prompt dispatch / pane-state capture keep working.
@@ -24,9 +24,16 @@ case "$0" in
 esac
 self_dir="${self_dir%/}"
 
-if [ -n "${DMUX_HAPPY}" ]; then
+if [ "${DMUX_HAPPY:-}" = "1" ]; then
   unset DMUX_HAPPY
-  exec happy claude "$@"
+  # Resolve happy to an absolute path (symmetry with the passthrough branch) and fail with a
+  # clear diagnostic if it is missing, rather than relying on the shell's bare-name exec error.
+  happy_bin="$(command -v happy 2>/dev/null)"
+  [ -n "$happy_bin" ] || {
+    printf '%s\n' "dmux claude shim: DMUX_HAPPY=1 but no happy found on PATH" >&2
+    exit 127
+  }
+  exec "$happy_bin" claude "$@"
 fi
 
 # Default: transparent passthrough to the first `claude` on PATH that is not this shim.

@@ -1149,8 +1149,10 @@ STUB
   [ -f "$shim" ]
   # executable_ prefix → chezmoi deploys 0755 as `claude` (no extension), which dmux invokes.
   head -1 "$shim" | grep -qE '^#!/bin/sh'
-  # Opt-in branch launches happy claude; default branch is a transparent passthrough.
-  grep -qF 'exec happy claude "$@"' "$shim"
+  # Opt-in is strict (=1), not just "non-empty", so DMUX_HAPPY=0 does not enable happy.
+  grep -qF '[ "${DMUX_HAPPY:-}" = "1" ]' "$shim"
+  # Opt-in branch launches happy (resolved to an absolute path); default branch passes through.
+  grep -qF 'exec "$happy_bin" claude "$@"' "$shim"
   grep -qF 'exec "$real" "$@"' "$shim"
   # Recursion break: DMUX_HAPPY is cleared before exec so the nested claude passes through.
   grep -qF 'unset DMUX_HAPPY' "$shim"
@@ -1205,6 +1207,44 @@ STUB
   echo "$output" | grep -qF 'HAPPY_ARGS=[claude --permission-mode plan]'
   # The nested claude that happy would spawn must NOT see DMUX_HAPPY (else it would re-wrap).
   echo "$output" | grep -qF 'HAPPY_DMUX_HAPPY=[<unset>]'
+}
+
+@test "dmux claude shim treats DMUX_HAPPY=0 as off (strict =1 opt-in, not just non-empty)" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim" "$tmp/real" "$tmp/bin"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # A happy stub that would shout if (wrongly) invoked, plus a real claude for the passthrough.
+  cat >"$tmp/bin/happy" <<'STUB'
+#!/usr/bin/env bash
+printf 'HAPPY_WAS_CALLED=[%s]\n' "$*"
+STUB
+  chmod +x "$tmp/bin/happy"
+  cat >"$tmp/real/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'REAL_CLAUDE_ARGS=[%s]\n' "$*"
+STUB
+  chmod +x "$tmp/real/claude"
+  # DMUX_HAPPY=0 must NOT enable happy: a non-empty-but-not-1 value falls through to passthrough.
+  run env DMUX_HAPPY=0 PATH="$tmp/shim:$tmp/bin:$tmp/real:/usr/bin:/bin" sh -c 'claude --resume foo'
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qF 'REAL_CLAUDE_ARGS=[--resume foo]'
+  ! echo "$output" | grep -qF 'HAPPY_WAS_CALLED'
+}
+
+@test "dmux claude shim fails with a clear diagnostic when DMUX_HAPPY=1 but happy is absent" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # Opt-in requested but no happy on PATH: must exit non-zero with an explicit message, not recurse.
+  run env DMUX_HAPPY=1 PATH="$tmp/shim:/usr/bin:/bin" sh -c 'claude --permission-mode plan'
+  [ "$status" -eq 127 ]
+  echo "$output" | grep -qF 'DMUX_HAPPY=1 but no happy found on PATH'
 }
 
 @test "dmux claude shim exits non-zero (no fork bomb) when no real claude is on PATH" {
