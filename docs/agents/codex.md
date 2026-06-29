@@ -137,6 +137,11 @@ cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ```
 
 Variants `hcdx` and `hcdx-r06` exist for phone-control contexts (via the happy wrapper).
+Note that `happy codex` runs Codex **headless** via `codex app-server`: the local terminal
+is a read-only viewer ("Codex Agent Messages / Waiting for messages…") with no interactive
+prompt, so the session is driven from the Happy mobile/web app. For a local interactive
+Codex terminal, use `cdx` / `cdx-r06` instead. (This is asymmetric with `happy claude`,
+which spawns a full local TUI.)
 
 ### dmux PATH shim
 
