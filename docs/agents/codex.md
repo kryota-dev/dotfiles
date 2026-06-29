@@ -154,6 +154,20 @@ dmux spawns Codex panes with a bare `codex` invocation and cannot pass `--profil
 
 Without this shim, dmux panes would silently run without the SSOT `shared.config.toml`.
 
+#### Opt-in happy-claude shim (`DMUX_HAPPY`)
+
+The same shim directory also ships `executable_claude`, an **opt-in** companion for running
+Claude panes through the happy wrapper (phone control). By default it is a transparent
+passthrough — it execs the first real `claude` on `PATH`, so default dmux behavior is
+unchanged. Running `DMUX_HAPPY=1 dmux` flips it to `happy claude`; it `unset`s `DMUX_HAPPY`
+before exec so the nested `claude` happy spawns passes through (recursion is structurally
+impossible, same as the codex shim).
+
+Codex is deliberately **not** wrapped this way: `happy codex` runs Codex headless via
+`codex app-server` and the local terminal is a read-only viewer with no input (see the
+`cdx / cdx-r06 aliases` section above), so it cannot drive an interactive dmux pane. Use
+`hcdx` standalone for phone-controlled Codex, and keep `cdx` / `cdx-r06` inside dmux.
+
 ### Bare codex skips the SSOT config
 
 A direct `codex` invocation — without the aliases or the dmux shim in `PATH` — does **not** load `shared.config.toml`. The `--profile shared` flag is the only mechanism that applies it. This is intentional (profiles are opt-in in Codex), but easy to trip over in scripts, CI, or editor integrations that invoke `codex` directly.

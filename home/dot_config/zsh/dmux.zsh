@@ -21,8 +21,11 @@
 # `sh -c "codex …"`), so it cannot pass `--profile shared`, the chezmoi-managed SSOT static
 # config ($CODEX_HOME/shared.config.toml). Prepending this dir to PATH makes dmux pick up the
 # shim, which re-injects `--profile shared` for every codex pane (both accounts). dmux's PATH
-# sanitiser only strips node_modules/.bin, so the shim dir survives into the panes. claude
-# needs no shim: its account is selected purely by CLAUDE_CONFIG_DIR.
+# sanitiser only strips node_modules/.bin, so the shim dir survives into the panes. The same
+# dir also holds an opt-in `claude` shim: by default it is a transparent passthrough (claude's
+# account is selected purely by CLAUDE_CONFIG_DIR), but `DMUX_HAPPY=1 dmux` makes it launch
+# `happy claude` for phone control. Codex is deliberately not wrapped: `happy codex` is
+# headless/remote-only (no local TUI), so it cannot drive a dmux pane (see docs/agents/codex.md).
 _DMUX_SHIM_DIR="${HOME}/.config/dmux/bin"
 
 dmux() {
