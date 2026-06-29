@@ -137,6 +137,10 @@ cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ```
 
 `hcdx` と `hcdx-r06` は phone-control コンテキスト用のバリアントです（happy ラッパー経由）。
+ただし `happy codex` は `codex app-server` 経由で Codex を **headless** 起動し、ローカル端末は
+read-only ビューア（"Codex Agent Messages / Waiting for messages…"）で対話プロンプトを持ちません。
+セッション操作は Happy モバイル/Web アプリ側から行います。ローカルで対話的に Codex を使う場合は
+`cdx` / `cdx-r06` を使用してください（フル TUI をローカル起動する `happy claude` とは非対称です）。
 
 ### dmux PATH シム
 
