@@ -7,7 +7,7 @@ ghq_user = "kryota-dev"
   moralerspace_font = "2.0.0"
 
 [skills]
-  anthropic_commit = "57546260929473d4e0d1c1bb75297be2fdfa1949"
+  anthropic_commit = "9d2f1ae187231d8199c64b5b762e1bdf2244733d"
 
 [ecc]
   # Everything Claude Code — https://github.com/affaan-m/ECC
