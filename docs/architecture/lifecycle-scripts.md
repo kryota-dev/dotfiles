@@ -24,7 +24,7 @@ flowchart TD
     A([chezmoi apply starts]) --> B
 
     subgraph BEFORE ["BEFORE phase (files not yet written)"]
-        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew)\n(Linux: apt build-deps + Linuxbrew)"]
+        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew + Rosetta 2)\n(Linux: apt build-deps + Linuxbrew)"]
         B --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: filters .brewfile-linux-exclude)"]
     end
 
@@ -107,7 +107,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 
 ### 00 — install-prerequisites (`run_once`, before)
 
-Installs Xcode CLI tools (macOS, polling until `xcode-select -p` succeeds) and Homebrew (arch-aware shellenv: `/opt/homebrew` on arm64, `/usr/local` on intel). On Linux installs `build-essential curl file git` via `apt-get` then Linuxbrew. Runs once per rendered content so a re-run of `chezmoi apply` never repeats the Homebrew install.
+Installs Xcode CLI tools (macOS, polling until `xcode-select -p` succeeds) and Homebrew (arch-aware shellenv: `/opt/homebrew` on arm64, `/usr/local` on intel). On Apple Silicon it also installs Rosetta 2 (idempotent `arch -x86_64` guard) so Intel-only casks like `sony-ps-remote-play` install cleanly during `brew bundle`. On Linux installs `build-essential curl file git` via `apt-get` then Linuxbrew. Runs once per rendered content so a re-run of `chezmoi apply` never repeats the Homebrew install.
 
 ### 10 — brew-bundle (`run_onchange`, before)
 

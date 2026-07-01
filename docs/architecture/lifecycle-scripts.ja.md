@@ -24,7 +24,7 @@ flowchart TD
     A([chezmoi apply 開始]) --> B
 
     subgraph BEFORE ["BEFORE フェーズ (ファイル未書き込み)"]
-        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew)\n(Linux: apt build-deps + Linuxbrew)"]
+        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew + Rosetta 2)\n(Linux: apt build-deps + Linuxbrew)"]
         B --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: .brewfile-linux-exclude でフィルタ)"]
     end
 
@@ -107,7 +107,7 @@ flowchart TD
 
 ### 00 — install-prerequisites (`run_once`、before)
 
-Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリング）と Homebrew（arch 対応 shellenv: arm64 → `/opt/homebrew`、intel → `/usr/local`）をインストールします。Linux では `apt-get` で `build-essential curl file git` をインストールした後 Linuxbrew をインストールします。レンダリング済みコンテンツが同じなら1回のみ実行されるため、`chezmoi apply` を再実行しても Homebrew インストールは繰り返されません。
+Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリング）と Homebrew（arch 対応 shellenv: arm64 → `/opt/homebrew`、intel → `/usr/local`）をインストールします。Apple Silicon では Rosetta 2 も（冪等な `arch -x86_64` ガード付きで）インストールし、`sony-ps-remote-play` のような Intel 専用 cask が `brew bundle` 中に正しくインストールされるようにします。Linux では `apt-get` で `build-essential curl file git` をインストールした後 Linuxbrew をインストールします。レンダリング済みコンテンツが同じなら1回のみ実行されるため、`chezmoi apply` を再実行しても Homebrew インストールは繰り返されません。
 
 ### 10 — brew-bundle (`run_onchange`、before)
 
