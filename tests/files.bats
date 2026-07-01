@@ -81,14 +81,21 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_once_after_90-other-apps.sh.tmpl" ]
 }
 
-@test "prerequisites installs Rosetta 2 on arm64 darwin" {
+@test "prerequisites installs Rosetta 2 behind an arm64 guard" {
   local tmpl="${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
-  # arm64 でのみ実行されるようガードされていること
-  grep -q '{{ if eq .chezmoi.arch "arm64" -}}' "$tmpl"
-  # Rosetta 2 を非対話で導入すること
-  grep -q 'softwareupdate --install-rosetta --agree-to-license' "$tmpl"
-  # 冪等性: 既に Rosetta が使えるなら再実行しないガードがあること
-  grep -q 'arch -x86_64' "$tmpl"
+  # Installs Rosetta 2 non-interactively (Intel-only casks need it).
+  grep -Fq 'softwareupdate --install-rosetta --agree-to-license' "$tmpl"
+  # Idempotent: skips when x86_64 binaries already run (Rosetta present).
+  grep -Fq 'arch -x86_64' "$tmpl"
+  # The install must sit inside an arm64 template guard, not just anywhere: the
+  # Homebrew shellenv block also opens an arm64 guard, so a bare grep for the
+  # guard string would pass even if the Rosetta block lost its own guard.
+  awk '
+    /\{\{ if eq \.chezmoi\.arch "arm64" -\}\}/ { guard = 1; next }
+    /\{\{ (else|end)/ { guard = 0 }
+    /softwareupdate --install-rosetta/ && guard { inside = 1 }
+    END { exit !inside }
+  ' "$tmpl"
 }
 
 @test "claude agents exist" {

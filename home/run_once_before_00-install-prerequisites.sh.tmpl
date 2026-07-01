@@ -24,8 +24,9 @@ if ! command -v brew &>/dev/null; then
   {{ end -}}
 fi
 
-# Rosetta 2 (Apple Silicon only; required by Intel-only casks e.g. sony-ps-remote-play)
 {{ if eq .chezmoi.arch "arm64" -}}
+# Rosetta 2 (Apple Silicon only; required by Intel-only casks e.g. sony-ps-remote-play).
+# Idempotent: `arch -x86_64` succeeds only once Rosetta can run x86_64 binaries.
 if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
   echo "Installing Rosetta 2..."
   sudo softwareupdate --install-rosetta --agree-to-license
