@@ -255,6 +255,19 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
 }
 
+@test "settings.json suppresses AI attribution (Claude Code + happy) so no signatures leak" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # `attribution.commit`/`.pr` empty → Claude Code's own "Generated with…" + Co-Authored-By
+  # trailer is suppressed. `includeCoAuthoredBy: false` is ALSO required: happy-cli reads only
+  # this key from $CLAUDE_CONFIG_DIR/settings.json (not attribution, not project settings.local)
+  # and defaults to true when absent — dropping it re-enables happy's "via [Happy]" commit
+  # signature injection. Both keys must stay present; this guards against that regression.
+  jq -e '.includeCoAuthoredBy == false' "$s" >/dev/null
+  jq -e '.attribution.commit == "" and .attribution.pr == ""' "$s" >/dev/null
+}
+
 @test "settings.json wires the CLV2 observer as direct observe.sh hooks (pre + post)" {
   local s="${HOME_DIR}/dot_claude/settings.json"
   [ -f "$s" ]
