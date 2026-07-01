@@ -147,21 +147,30 @@ which spawns a full local TUI.)
 
 dmux spawns Codex panes with a bare `codex` invocation and cannot pass `--profile shared` itself. To handle this, `home/dot_config/dmux/bin/executable_codex` (a POSIX sh script, mode 0755) is installed as a PATH shim:
 
-1. The zsh dmux wrappers prepend `~/.config/dmux/bin` to `PATH`.
-2. dmux's own PATH sanitizer strips only `node_modules/.bin`, so the shim directory survives into Codex panes.
+1. The zsh dmux wrappers prepend `~/.config/dmux/bin` to `PATH` for the dmux process.
+2. **dmux agent panes are fresh interactive zsh shells that re-source `~/.zshrc`**, where `mise activate` rebuilds `PATH` and drops the shim dir. So `~/.zshrc` re-prepends `~/.config/dmux/bin` **after** `mise activate`, gated to `[[ -n "$TMUX" ]]`. This is the keystone that keeps the shim dir ahead of the mise-managed real `codex`/`claude` inside panes; without it the pane resolves the real binary directly and the shim never runs.
 3. When bare `codex` is executed in a dmux pane, the shim intercepts it.
 4. The shim walks `PATH` skipping its own directory, finds the real `codex` binary, and re-invokes it with `--profile shared` injected — making recursion structurally impossible.
 
-Without this shim, dmux panes would silently run without the SSOT `shared.config.toml`.
+Without the shim **and** the `~/.zshrc` re-prepend, dmux panes would silently run the real `codex` without the SSOT `shared.config.toml`.
 
 #### Opt-in happy-claude shim (`DMUX_HAPPY`)
 
 The same shim directory also ships `executable_claude`, an **opt-in** companion for running
 Claude panes through the happy wrapper (phone control). By default it is a transparent
 passthrough — it execs the first real `claude` on `PATH`, so default dmux behavior is
-unchanged. Running `DMUX_HAPPY=1 dmux` flips it to `happy claude`; it `unset`s `DMUX_HAPPY`
-before exec so the nested `claude` happy spawns passes through (recursion is structurally
-impossible, same as the codex shim).
+unchanged. `DMUX_HAPPY=1 dmux` flips it to `happy claude`. Two things make the toggle reach
+panes:
+
+- **PATH:** the `~/.zshrc` re-prepend above (shared with the codex shim) keeps the shim dir
+  ahead of mise's real `claude` inside panes.
+- **Env:** tmux fixes a pane's environment at server start, so the `dmux` / `dmux-r06`
+  wrappers inject the toggle into the running server with `tmux set-environment -g DMUX_HAPPY 1`
+  (and `-u` to clear it). Otherwise a reused server never sees a later `DMUX_HAPPY=1 dmux`.
+
+The shim pins the real claude via `HAPPY_CLAUDE_PATH` (which happy honours first when locating
+claude) before `exec happy claude`, so happy spawns that absolute binary and never re-enters
+the shim — recursion is structurally impossible even with the shim dir on `PATH`.
 
 Codex is deliberately **not** wrapped this way: `happy codex` runs Codex headless via
 `codex app-server` and the local terminal is a read-only viewer with no input (see the

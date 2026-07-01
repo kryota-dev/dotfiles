@@ -28,5 +28,16 @@ if command -v direnv &>/dev/null; then eval "$(direnv hook zsh)"; fi
 if command -v starship &>/dev/null; then eval "$(starship init zsh)"; fi
 if command -v zoxide &>/dev/null; then eval "$(zoxide init zsh)"; fi
 
+# ========== dmux shim PATH (tmux only) ==========
+# Inside tmux (incl. dmux agent panes) keep the dmux shim dir ahead of the mise-managed real
+# binaries so the claude/codex shims in ~/.config/dmux/bin actually intercept. `mise activate`
+# above re-prepends the real binaries, dropping the dir the dmux wrappers put on the server env;
+# re-adding it here (after mise) is what makes the shims work inside panes — without it dmux runs
+# the real claude/codex directly (no happy wrapping, no `--profile shared`). Skipped outside tmux
+# so non-tmux shells keep the documented bare-binary behaviour.
+if [[ -n "$TMUX" && -d "$HOME/.config/dmux/bin" ]]; then
+  export PATH="$HOME/.config/dmux/bin:$PATH"
+fi
+
 # ========== sheldon (deferred plugins) ==========
 if command -v sheldon &>/dev/null; then eval "$(sheldon source)"; fi

@@ -29,6 +29,16 @@
 _DMUX_SHIM_DIR="${HOME}/.config/dmux/bin"
 
 dmux() {
+  # The DMUX_HAPPY toggle must live in the tmux server's global env to reach new agent panes:
+  # tmux fixes a pane's env at server start, so a reused server never picks up the outer
+  # `DMUX_HAPPY=1 dmux` assignment. Inject it (or remove it) into the running server here so the
+  # toggle works regardless of whether the server already exists. Fresh servers inherit it via
+  # the env below; the `2>/dev/null` swallows the "no server yet" error in that case.
+  if [ "${DMUX_HAPPY:-}" = "1" ]; then
+    tmux set-environment -g DMUX_HAPPY 1 2>/dev/null
+  else
+    tmux set-environment -g -u DMUX_HAPPY 2>/dev/null
+  fi
   # Scope the API keys to the dmux process only; the :- defaults keep this safe when a secrets
   # file is absent. The shim dir is prepended so dmux's bare `codex` loads the SSOT config.
   # `command` bypasses this function to reach the mise-shimmed binary.
@@ -55,6 +65,13 @@ dmux-r06() {
   local tmpdir="${HOME}/.dmux-r06"
   # 0700 keeps the tmux socket dir as private as tmux's default $TMPDIR-based socket.
   [[ -d "$tmpdir" ]] || mkdir -m 700 -p "$tmpdir" || return 1
+  # Mirror dmux(): the DMUX_HAPPY toggle must be in the r06 server's global env to reach new
+  # agent panes (server env is fixed at start), so inject/remove it on the dedicated socket.
+  if [ "${DMUX_HAPPY:-}" = "1" ]; then
+    TMUX_TMPDIR="$tmpdir" tmux set-environment -g DMUX_HAPPY 1 2>/dev/null
+  else
+    TMUX_TMPDIR="$tmpdir" tmux set-environment -g -u DMUX_HAPPY 2>/dev/null
+  fi
   TMUX_TMPDIR="$tmpdir" \
     PATH="${_DMUX_SHIM_DIR}:${PATH}" \
     CLAUDE_CONFIG_DIR="${HOME}/.claude-r06" \
