@@ -81,6 +81,16 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_once_after_90-other-apps.sh.tmpl" ]
 }
 
+@test "prerequisites installs Rosetta 2 on arm64 darwin" {
+  local tmpl="${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
+  # arm64 でのみ実行されるようガードされていること
+  grep -q '{{ if eq .chezmoi.arch "arm64" -}}' "$tmpl"
+  # Rosetta 2 を非対話で導入すること
+  grep -q 'softwareupdate --install-rosetta --agree-to-license' "$tmpl"
+  # 冪等性: 既に Rosetta が使えるなら再実行しないガードがあること
+  grep -q 'arch -x86_64' "$tmpl"
+}
+
 @test "claude agents exist" {
   [ -d "${HOME_DIR}/dot_claude/agents" ]
   local count

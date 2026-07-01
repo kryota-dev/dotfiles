@@ -24,6 +24,13 @@ if ! command -v brew &>/dev/null; then
   {{ end -}}
 fi
 
+# Rosetta 2 (Apple Silicon only; required by Intel-only casks e.g. sony-ps-remote-play)
+{{ if eq .chezmoi.arch "arm64" -}}
+if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+  echo "Installing Rosetta 2..."
+  sudo softwareupdate --install-rosetta --agree-to-license
+fi
+{{ end -}}
 echo "Prerequisites installed."
 {{ else if eq .chezmoi.os "linux" -}}
 #!/bin/bash
