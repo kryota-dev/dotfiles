@@ -50,3 +50,5 @@ model: sonnet
 ## 技術的主張の確実性
 
 React のバージョン依存機能（`use` hook / Actions / `useOptimistic` / Compiler など）やフレームワーク（Next.js 等）固有の挙動について断定する場合、確信が持てないなら必ず本文に **「（未確認）」** または **「（要検証）」** と明示してください。呼び出し元（multi-review の親 Claude 等）がこのマークを手がかりに一次情報で裏取りします。
+
+**重要（coverage 優先）**: この marking は finding を **落とすためではなく、確信度を付けて残すため** のものです。確信が持てないこと・重要度が低いことを理由に指摘を **省略せず**、severity と confidence を付けて report してください。重要度／確信度による絞り込みは downstream（呼び出し元 = multi-review の親 Claude／後段の adversarial verify）が担います。finding 段階のゴールは coverage です。

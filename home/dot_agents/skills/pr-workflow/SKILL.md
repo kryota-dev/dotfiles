@@ -50,12 +50,19 @@ user-invocable: true
 
 **tier=large は auto-strict**（`--strict` を自動付与）。
 
+### fail-safe 化（#224）
+
+tier 分類は staging（tier 別 path）の前提であり、**誤分類（例: `large` を `small` と判定）は safety model を反転させる single point of failure** になる。これを fail-safe にするため、次の 2 つを既定にする:
+
+- **round-up default（迷ったら上位 tier に切り上げる）**: 判定軸の複数解釈が可能で確信が持てない場合、**必ず上位 tier を採用**する。全境界（trivial↔small↔standard↔large）に適用する。over-tier による多少のコスト増（不要に重い path を通す）は許容し、**見逃し（危険な変更を軽い path に流す fail-unsafe）を最優先で防ぐ**。判定に迷った旨と切り上げ理由は簡潔に記録する。
+- **mid-flight escalation（実装中の格上げ）**: 軽 tier（trivial/small）の実装中に、**contract 変更 / migration / security surface**（認証・認可・入力処理・機密情報・外部通信）への変更が判明したら、その場で tier を格上げし、格上げ後 tier の path（review 強化・GATE の user 承認待ち等）に乗せ換える。Phase 0 の入口分類は一度きりだが、**危険な surface を検知した時点で再分類する**（入口の分類だけに safety を依存させない）。
+
 ## Phase 1-4: tier 別 path
 
 | tier | path |
 |------|------|
-| `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr` |
-| `small` | **general-purpose サブエージェント（`model: sonnet`）**に inline prompt で委任（named worker は使わない）。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。→ `/commit` → `/create-pr` |
+| `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr`。**実装中に contract / migration / security surface を検知したら Phase 0 の mid-flight escalation で格上げする**。 |
+| `small` | **general-purpose サブエージェント（`model: sonnet`）**に inline prompt で委任（named worker は使わない）。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。→ `/commit` → `/create-pr`。**実装中に contract / migration / security surface を検知したら Phase 0 の mid-flight escalation で格上げする**（委任先 prompt にもこの検知・報告義務を含める）。 |
 | `standard` | `/sdd`（完全自律実行）。**`/sdd` は内部で自前に commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
 | `large` | （任意で）先に `/grill-me` で設計を詰める → `/sdd`（完全自律実行）。**`/grill-me` は対話型のため、pr-workflow から自動 invoke せず user が事前に実行する**前提。 |
 
@@ -66,6 +73,8 @@ user-invocable: true
 - **PR が存在する状態で** `/multi-review`（cc-code-review + cc-security-review + codex 並列）を起動する。trivial/small は Phase 1-4 で `/create-pr` 済、standard/large は `/sdd` が PR 作成済。
 - **二重 review の扱い（決定: 併用＝役割分離）**: standard/large では `/sdd` 内蔵 review（=開発中の自己 review）と本 `/multi-review`（=最終 PR への独立 second opinion）を**役割分離で併用**する（置換・skip しない）。指摘は一次ソースで検証してから対応。
 - **（large の adversarial 強化）**: `/multi-review` 後に **adversarial verify protocol**（独立 reviewer 視点で MUST を反証し、過半が反証→棄却）を inline で 1 ラウンド追加する（外部 skill ではなく手順）。
+  - **recall sink 化の防止（#224）**: Opus 4.8 は保守的な指示に忠実で recall を下げうるため、verify 段階が **本物の finding を落とす recall sink** になる余地がある。したがって **判断が割れた／確信が持てない finding は「残す」側にバイアスする**（過半が明確に反証したものだけ棄却。反証が僅差・不確実なら残す）。棄却する場合は棄却理由を一次情報とともに記録する（finding 段階の coverage を verify 段階で無為に打ち消さない）。
+  - **測定（AC #224）**: この adversarial verify が recall sink になっていないかを軽量プロトコルで測定する。下記「recall 測定プロトコル」参照。
 
 ## Phase 6-7: PR resolution + CI
 
@@ -94,6 +103,16 @@ user-invocable: true
 | Phase 7 CI fail | pr-workflow が修復、3 回 fail → user |
 | Phase 7 merge conflict | 解消（general-purpose 委任可）、解決不能 → user |
 | GATE 3 で user reject | pr-workflow 停止（merge しない） |
+
+## recall 測定プロトコル（#224）
+
+reviewer の recall（本物の bug を取りこぼさず surface できているか）と、adversarial verify が recall sink 化していないかを、**軽量な手動／定期プロトコル**で測定する（runtime 自動化はしない）。coverage-first reword（reviewer 定義側）と verify 段階の残す側バイアス（Phase 5）の効果を、定量的にではなく **サンプルで確認**するのが目的。
+
+1. **サンプル抽出**: 直近の standard/large PR を数件サンプルする（既知 bug を含む PR や、後から regression が判明した PR を優先）。
+2. **finding→verify の追跡**: 各 PR で multi-review が surface した finding 数と、adversarial verify で **棄却された finding 数（drop 数）**・**棄却理由**を記録する。
+3. **drop の妥当性判定**: 棄却された finding を一次情報で見直し、「正しく棄却（誤指摘）」か「本物を落とした（recall sink）」かを分類する。**本物を落としていた場合は recall sink** と判断し、verify 段階の bias（Phase 5）や reviewer 定義の wording を更に調整する。
+4. **precision-leaning wording の影響確認**: 「（未確認）」marking 付き finding が downstream（親 Claude / verify）で適切に裏取り・採否判断されているかを確認する。marking が付いた finding が無検証で drop されていれば、それも recall 損失として扱う。
+5. **記録**: 結果（drop 率の傾向・recall sink の有無・許容可能かの判断）を PR や作業ログに簡潔に残す。損失が確認されたら wording/バイアスを是正し、許容範囲なら「confirmed acceptable」と記録する。
 
 ## 注意
 
