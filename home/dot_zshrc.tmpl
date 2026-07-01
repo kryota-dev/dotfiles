@@ -28,5 +28,23 @@ if command -v direnv &>/dev/null; then eval "$(direnv hook zsh)"; fi
 if command -v starship &>/dev/null; then eval "$(starship init zsh)"; fi
 if command -v zoxide &>/dev/null; then eval "$(zoxide init zsh)"; fi
 
+# ========== dmux shim PATH (dmux sessions only) ==========
+# In dmux agent panes, keep the dmux shim dir ahead of the mise-managed real binaries so the
+# claude/codex shims in ~/.config/dmux/bin actually intercept. `mise activate` above re-prepends
+# the real binaries, dropping the dir the dmux wrappers put on the server env; re-adding it here
+# (after mise) is what makes the shims work inside panes — without it dmux runs the real
+# claude/codex directly (no happy wrapping, no `--profile shared`).
+#
+# Scoped to dmux sessions (named `dmux-<project>`), NOT every tmux session: a plain tmux pane on
+# the same server must keep the documented bare-binary behaviour (no `--profile shared` on bare
+# codex, and no accidental happy wrapping of claude while DMUX_HAPPY lingers in the shared server
+# env). The session-name check distinguishes dmux panes even on a shared socket, which a global
+# env var cannot.
+if [[ -n "$TMUX" && -d "$HOME/.config/dmux/bin" ]]; then
+  case "$(tmux display-message -p '#{session_name}' 2>/dev/null)" in
+    dmux-*) export PATH="$HOME/.config/dmux/bin:$PATH" ;;
+  esac
+fi
+
 # ========== sheldon (deferred plugins) ==========
 if command -v sheldon &>/dev/null; then eval "$(sheldon source)"; fi
