@@ -53,7 +53,10 @@ if [ "${DMUX_HAPPY:-}" = "1" ]; then
     printf '%s\n' "dmux claude shim: DMUX_HAPPY=1 but no happy found on PATH" >&2
     exit 127
   }
-  # Pin the real claude so happy never re-resolves `claude` back into this shim.
+  # Pin the real claude so happy never re-resolves `claude` back into this shim. happy-cli
+  # honours HAPPY_CLAUDE_PATH first (scripts/claude_version_utils.cjs) and spawns this absolute
+  # path directly — an internal env, so if a future happy drops it, the `unset DMUX_HAPPY` above
+  # still breaks recursion via the passthrough branch.
   export HAPPY_CLAUDE_PATH="$real"
   exec "$happy_bin" claude "$@"
 fi

@@ -1287,12 +1287,16 @@ STUB
   grep -qF 'TMUX_TMPDIR="$tmpdir" tmux set-environment -g DMUX_HAPPY 1' "$zsh"
 }
 
-@test "zshrc re-prepends the dmux shim dir after mise activate, gated to tmux" {
+@test "zshrc re-prepends the dmux shim dir after mise activate, scoped to dmux sessions" {
   local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
   # Without this the claude/codex shims never intercept inside dmux panes (mise wins on PATH).
   grep -qF 'export PATH="$HOME/.config/dmux/bin:$PATH"' "$zshrc"
-  # Gated to tmux so non-tmux shells keep the documented bare-binary behaviour.
+  # Gated to tmux first…
   grep -qF '[[ -n "$TMUX" && -d "$HOME/.config/dmux/bin" ]]' "$zshrc"
+  # …and narrowed to dmux-* sessions so plain tmux panes keep the documented bare-binary
+  # behaviour (no --profile shared on bare codex, no accidental happy wrapping of claude).
+  grep -qF "tmux display-message -p '#{session_name}'" "$zshrc"
+  grep -qE 'dmux-\*\)' "$zshrc"
   # Ordering is load-bearing: the prepend must come AFTER `mise activate` (which re-prepends the
   # real binaries) or the shim dir would be buried behind mise's claude/codex again.
   local mise_line shim_line
@@ -1301,6 +1305,32 @@ STUB
   [ -n "$mise_line" ]
   [ -n "$shim_line" ]
   [ "$shim_line" -gt "$mise_line" ]
+}
+
+@test "dmux claude shim: even if happy re-spawns bare claude, DMUX_HAPPY is cleared (no re-wrap)" {
+  local shimsrc="${HOME_DIR}/dot_config/dmux/bin/executable_claude"
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/shim" "$tmp/bin" "$tmp/real"
+  cp "$shimsrc" "$tmp/shim/claude"
+  chmod +x "$tmp/shim/claude"
+  # happy stub that IGNORES HAPPY_CLAUDE_PATH and re-invokes bare `claude` (worst case): the
+  # nested claude hits the shim again but must fall through to the real binary, not re-wrap.
+  cat >"$tmp/bin/happy" <<'STUB'
+#!/usr/bin/env bash
+shift # drop the leading "claude" arg happy was given
+exec claude "$@"
+STUB
+  chmod +x "$tmp/bin/happy"
+  cat >"$tmp/real/claude" <<'STUB'
+#!/usr/bin/env bash
+printf 'REAL_CLAUDE_ARGS=[%s]\n' "$*"
+STUB
+  chmod +x "$tmp/real/claude"
+  run env DMUX_HAPPY=1 PATH="$tmp/shim:$tmp/bin:$tmp/real:/usr/bin:/bin" sh -c 'claude --resume foo'
+  [ "$status" -eq 0 ]
+  # The real claude must run exactly once with the original args — no happy recursion loop.
+  echo "$output" | grep -qF 'REAL_CLAUDE_ARGS=[--resume foo]'
 }
 
 @test "dmux (default account) prepends the codex shim dir to PATH and passes the MCP keys" {

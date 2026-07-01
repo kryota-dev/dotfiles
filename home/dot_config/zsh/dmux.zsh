@@ -20,21 +20,25 @@
 # Directory holding the `codex` PATH shim. dmux launches the bare `codex` binary (it spawns
 # `sh -c "codex …"`), so it cannot pass `--profile shared`, the chezmoi-managed SSOT static
 # config ($CODEX_HOME/shared.config.toml). Prepending this dir to PATH makes dmux pick up the
-# shim, which re-injects `--profile shared` for every codex pane (both accounts). dmux's PATH
-# sanitiser only strips node_modules/.bin, so the shim dir survives into the panes. The same
-# dir also holds an opt-in `claude` shim: by default it is a transparent passthrough (claude's
-# account is selected purely by CLAUDE_CONFIG_DIR), but `DMUX_HAPPY=1 dmux` makes it launch
-# `happy claude` for phone control. Codex is deliberately not wrapped: `happy codex` is
-# headless/remote-only (no local TUI), so it cannot drive a dmux pane (see docs/agents/codex.md).
+# shim, which re-injects `--profile shared` for every codex pane (both accounts). This prepend
+# only sets PATH for the dmux process; the agent PANES are fresh zsh that re-source ~/.zshrc,
+# where `mise activate` rebuilds PATH and drops this dir — so ~/.zshrc re-prepends it (scoped to
+# `dmux-*` sessions) to actually reach the panes. The same dir also holds an opt-in `claude`
+# shim: by default it is a transparent passthrough (claude's account is selected purely by
+# CLAUDE_CONFIG_DIR), but `DMUX_HAPPY=1 dmux` makes it launch `happy claude` for phone control.
+# Codex is deliberately not wrapped: `happy codex` is headless/remote-only (no local TUI), so it
+# cannot drive a dmux pane (see docs/agents/codex.md).
 _DMUX_SHIM_DIR="${HOME}/.config/dmux/bin"
 
 dmux() {
   # The DMUX_HAPPY toggle must live in the tmux server's global env to reach new agent panes:
   # tmux fixes a pane's env at server start, so a reused server never picks up the outer
-  # `DMUX_HAPPY=1 dmux` assignment. Inject it (or remove it) into the running server here so the
-  # toggle works regardless of whether the server already exists. Fresh servers inherit it via
-  # the env below; the `2>/dev/null` swallows the "no server yet" error in that case.
-  if [ "${DMUX_HAPPY:-}" = "1" ]; then
+  # `DMUX_HAPPY=1 dmux` assignment. Inject it here when set, and CLEAR it on a plain `dmux` (no
+  # DMUX_HAPPY) so the toggle is sticky only until the next plain launch. Fresh servers inherit
+  # it via the env below; the `2>/dev/null` only swallows the expected "no server yet" error.
+  # (The shim dir is scoped to `dmux-*` sessions in ~/.zshrc, so this global env is inert in
+  # plain tmux panes on the same socket even while set.)
+  if [[ "${DMUX_HAPPY:-}" == "1" ]]; then
     tmux set-environment -g DMUX_HAPPY 1 2>/dev/null
   else
     tmux set-environment -g -u DMUX_HAPPY 2>/dev/null
@@ -67,7 +71,7 @@ dmux-r06() {
   [[ -d "$tmpdir" ]] || mkdir -m 700 -p "$tmpdir" || return 1
   # Mirror dmux(): the DMUX_HAPPY toggle must be in the r06 server's global env to reach new
   # agent panes (server env is fixed at start), so inject/remove it on the dedicated socket.
-  if [ "${DMUX_HAPPY:-}" = "1" ]; then
+  if [[ "${DMUX_HAPPY:-}" == "1" ]]; then
     TMUX_TMPDIR="$tmpdir" tmux set-environment -g DMUX_HAPPY 1 2>/dev/null
   else
     TMUX_TMPDIR="$tmpdir" tmux set-environment -g -u DMUX_HAPPY 2>/dev/null

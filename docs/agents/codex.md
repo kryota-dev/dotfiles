@@ -148,7 +148,7 @@ which spawns a full local TUI.)
 dmux spawns Codex panes with a bare `codex` invocation and cannot pass `--profile shared` itself. To handle this, `home/dot_config/dmux/bin/executable_codex` (a POSIX sh script, mode 0755) is installed as a PATH shim:
 
 1. The zsh dmux wrappers prepend `~/.config/dmux/bin` to `PATH` for the dmux process.
-2. **dmux agent panes are fresh interactive zsh shells that re-source `~/.zshrc`**, where `mise activate` rebuilds `PATH` and drops the shim dir. So `~/.zshrc` re-prepends `~/.config/dmux/bin` **after** `mise activate`, gated to `[[ -n "$TMUX" ]]`. This is the keystone that keeps the shim dir ahead of the mise-managed real `codex`/`claude` inside panes; without it the pane resolves the real binary directly and the shim never runs.
+2. **dmux agent panes are fresh interactive zsh shells that re-source `~/.zshrc`**, where `mise activate` rebuilds `PATH` and drops the shim dir. So `~/.zshrc` re-prepends `~/.config/dmux/bin` **after** `mise activate`, scoped to `dmux-*` sessions (checked via `tmux display-message -p '#{session_name}'`), not every tmux session. This is the keystone that keeps the shim dir ahead of the mise-managed real `codex`/`claude` inside panes; without it the pane resolves the real binary directly and the shim never runs. Scoping to dmux sessions keeps bare `codex`/`claude` in unrelated tmux panes on the same server unaffected (no `--profile shared`, no accidental happy wrapping).
 3. When bare `codex` is executed in a dmux pane, the shim intercepts it.
 4. The shim walks `PATH` skipping its own directory, finds the real `codex` binary, and re-invokes it with `--profile shared` injected — making recursion structurally impossible.
 
