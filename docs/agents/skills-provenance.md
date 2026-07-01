@@ -84,7 +84,7 @@ Review pipelines that spawn subagents or coordinate multiple reviewers.
 
 Structured task decomposition, requirement analysis, and end-to-end delivery flows.
 
-`planning`, `sdd`, `spec`, `grill-me`, `prompt`, `pr-workflow`
+`planning`, `sdd`, `spec`, `grill-me`, `prompt-conform`, `pr-workflow`
 
 ### Session and context management (~7 skills)
 
