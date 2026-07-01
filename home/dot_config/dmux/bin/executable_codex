@@ -1,11 +1,12 @@
 #!/bin/sh
 # dmux launches the bare `codex` binary — paneBootstrapRunner spawns `sh -c "codex …"`
 # (dist/utils/paneBootstrapRunner.js), so it cannot pass `--profile shared`, the
-# chezmoi-managed SSOT static config ($CODEX_HOME/shared.config.toml). The dmux / dmux-r06
-# zsh wrappers prepend this shim's directory to PATH; dmux's PATH sanitiser only strips
-# node_modules/.bin entries (dist/utils/pathEnvironment.js), so the shim survives and
-# intercepts `codex` in every pane, re-injecting `--profile shared`. (claude needs no shim:
-# its account is selected purely by CLAUDE_CONFIG_DIR.)
+# chezmoi-managed SSOT static config ($CODEX_HOME/shared.config.toml). The dmux / dmux-r06 zsh
+# wrappers prepend this shim's directory to PATH for the dmux process, but agent PANES are fresh
+# zsh that re-source ~/.zshrc where `mise activate` rebuilds PATH and drops it — so ~/.zshrc
+# re-prepends the shim dir (scoped to `dmux-*` sessions) to reach the panes, where this shim
+# intercepts `codex` and re-injects `--profile shared`. (The same dir also holds an opt-in
+# `claude` shim — see executable_claude.)
 #
 # Recursion is structurally impossible: rather than stripping itself from PATH and letting a
 # bare `exec codex` re-search (which loops if the self-match ever fails), it walks PATH itself,

@@ -1,20 +1,23 @@
 #!/bin/sh
 # Opt-in dmux → happy-claude shim. dmux launches the bare `claude` binary (paneBootstrapRunner
-# types `claude …` into the pane shell), and the dmux / dmux-r06 zsh wrappers prepend this
-# shim's directory to PATH (alongside the codex shim), so this file intercepts `claude` in every
-# pane. By default it is a TRANSPARENT passthrough — it execs the first OTHER `claude` on PATH,
-# exactly matching dmux's own PATH resolution, so default dmux behaviour is unchanged.
+# runs `sh -c "claude …"`), resolved via the pane shell's PATH. The dmux shim dir is kept ahead
+# of the mise-managed real claude by a tmux-gated PATH prepend in ~/.zshrc (mise activate would
+# otherwise drop it), so this file intercepts `claude` in dmux panes. By default it is a
+# TRANSPARENT passthrough — it execs the first OTHER `claude` on PATH, so default dmux behaviour
+# is unchanged.
 #
-# When DMUX_HAPPY=1 (run `DMUX_HAPPY=1 dmux`), it instead launches `happy claude` so the
-# pane is phone-controllable. happy spawns the REAL Claude Code TUI locally (unlike `happy
-# codex`, which is headless/remote-only — see docs/agents/codex.md), so the pane stays
-# interactive and dmux's prompt dispatch / pane-state capture keep working.
+# When DMUX_HAPPY=1 (run `DMUX_HAPPY=1 dmux`, which also injects it into the tmux server env),
+# it launches `happy claude` so the pane is phone-controllable. happy spawns the REAL Claude
+# Code TUI locally (unlike `happy codex`, which is headless/remote-only — see
+# docs/agents/codex.md), so the pane stays interactive and dmux's prompt dispatch / pane-state
+# capture keep working.
 #
-# Recursion is structurally impossible: before exec'ing happy we `unset DMUX_HAPPY`, so the
-# nested `claude` that happy spawns re-enters this shim with DMUX_HAPPY cleared and takes the
-# transparent-passthrough branch — never `happy claude` again. (The pane's own shell keeps
-# DMUX_HAPPY; only the happy subprocess tree has it cleared.) The codex shim deliberately
-# ignores DMUX_HAPPY: `happy codex` has no local TUI, so wrapping codex panes would break dmux.
+# Recursion is structurally impossible: we resolve the real claude first and pin it via
+# HAPPY_CLAUDE_PATH (which happy honours first when locating claude), so happy spawns that
+# absolute binary directly and never re-enters this shim — even though the shim dir stays on
+# PATH. DMUX_HAPPY is also cleared before exec as belt-and-suspenders. The codex shim
+# deliberately has no DMUX_HAPPY branch: `happy codex` has no local TUI, so wrapping codex
+# panes would break dmux.
 #
 # Account selection needs no flag here: claude picks its account purely from CLAUDE_CONFIG_DIR
 # (set by dmux-r06's session env), which happy inherits.
@@ -24,19 +27,8 @@ case "$0" in
 esac
 self_dir="${self_dir%/}"
 
-if [ "${DMUX_HAPPY:-}" = "1" ]; then
-  unset DMUX_HAPPY
-  # Resolve happy to an absolute path (symmetry with the passthrough branch) and fail with a
-  # clear diagnostic if it is missing, rather than relying on the shell's bare-name exec error.
-  happy_bin="$(command -v happy 2>/dev/null)"
-  [ -n "$happy_bin" ] || {
-    printf '%s\n' "dmux claude shim: DMUX_HAPPY=1 but no happy found on PATH" >&2
-    exit 127
-  }
-  exec "$happy_bin" claude "$@"
-fi
-
-# Default: transparent passthrough to the first `claude` on PATH that is not this shim.
+# Resolve the first `claude` on PATH that is not this shim (the real binary). Needed by both
+# branches: the passthrough execs it, and the happy branch pins it via HAPPY_CLAUDE_PATH.
 real=""
 IFS=:
 for dir in $PATH; do
@@ -53,5 +45,20 @@ unset IFS
   printf '%s\n' "dmux claude shim: no real claude found on PATH" >&2
   exit 127
 }
+
+if [ "${DMUX_HAPPY:-}" = "1" ]; then
+  unset DMUX_HAPPY
+  happy_bin="$(command -v happy 2>/dev/null)"
+  [ -n "$happy_bin" ] || {
+    printf '%s\n' "dmux claude shim: DMUX_HAPPY=1 but no happy found on PATH" >&2
+    exit 127
+  }
+  # Pin the real claude so happy never re-resolves `claude` back into this shim. happy-cli
+  # honours HAPPY_CLAUDE_PATH first (scripts/claude_version_utils.cjs) and spawns this absolute
+  # path directly — an internal env, so if a future happy drops it, the `unset DMUX_HAPPY` above
+  # still breaks recursion via the passthrough branch.
+  export HAPPY_CLAUDE_PATH="$real"
+  exec "$happy_bin" claude "$@"
+fi
 
 exec "$real" "$@"
