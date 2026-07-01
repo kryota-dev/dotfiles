@@ -84,7 +84,7 @@
 
 構造化されたタスク分解、要件分析、エンドツーエンドのデリバリーフロー。
 
-`planning`、`sdd`、`spec`、`grill-me`、`prompt`、`pr-workflow`
+`planning`、`sdd`、`spec`、`grill-me`、`prompt-conform`、`pr-workflow`
 
 ### セッションとコンテキスト管理（約 7 スキル）
 
