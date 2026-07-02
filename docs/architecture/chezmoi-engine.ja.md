@@ -45,7 +45,7 @@ chezmoi ソースルートは `home/` です（`.chezmoiroot` で設定）。以
 | `.skills.anthropic_commit` | string | 取得する `anthropics/skills` コミットの SHA。Renovate がバンプする |
 | `.ecc.version` | string | ECC リリースバージョン。`github-tags` customManager の **Renovate** 追跡 anchor。chezmoi テンプレートからは未参照（chezmoi が使うのは `.ecc.commit`）。ECC リリースごとに `.ecc.commit` と共にバンプされる |
 | `.ecc.commit` | string | ピン固定された ECC リリースのイミュータブルなコミット SHA。すべての ECC external URL で使用 |
-| `.ecc.skills` | string 配列 | 採用済み ECC スキル名の <!-- FACT:ecc-skill-count -->127<!-- /FACT --> エントリリスト。`.chezmoiexternal.toml` でレンジされ、スキルごとに 1 つの external エントリを生成 |
+| `.ecc.skills` | string 配列 | 採用済み ECC スキル名の <!-- FACT:ecc-skill-count -->126<!-- /FACT --> エントリリスト。`.chezmoiexternal.toml` でレンジされ、スキルごとに 1 つの external エントリを生成 |
 
 トップレベルキーはベアで参照します: `{{ .name }}`、`{{ .email }}`。ネストしたテーブルはドット区切りで参照します: `{{ .ecc.commit }}`、`{{ .versions.moralerspace_font }}`。
 

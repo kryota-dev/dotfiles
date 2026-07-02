@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-This page is the reference for how personal and r06 (work) accounts are kept isolated across Claude Code, Codex CLI, and dmux.
+This page is the reference for how personal and r06 (work) accounts are kept isolated across Claude Code and Codex CLI.
 The core principle is: **config shared via symlinks, state isolated via environment variables**.
 
 ---
@@ -22,7 +22,6 @@ These variables are set inline on the agent subprocess — they are never export
 | `ECC_MCP_HEALTH_STATE_PATH` | `~/.claude/mcp-health-cache.json` | `~/.claude-r06/mcp-health-cache.json` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 | `CODEX_HOME` | (default — `~/.codex`) | `~/.codex-r06` |
-| `TMUX_TMPDIR` (dmux only) | (default — `$TMPDIR`) | `~/.dmux-r06` (0700) |
 
 The r06 Claude config directory (`~/.claude-r06`) contains only symlinks pointing back to `~/.claude` for every config artifact (settings, agents, commands, skills). What differs between accounts is entirely in the state that these env vars direct the tools to write.
 
@@ -43,8 +42,6 @@ These are the user-facing entry points. Each alias corresponds to one cell in th
 | `cdx-r06` | Codex CLI | Work (r06) | Runs `CODEX_HOME=$HOME/.codex-r06 codex --profile shared` |
 | `hcdx` | Codex CLI (happy-wrapped) | Personal | Runs `happy codex --profile shared` |
 | `hcdx-r06` | Codex CLI (happy-wrapped) | Work (r06) | Runs `CODEX_HOME=$HOME/.codex-r06 happy codex --profile shared` |
-| `dmux` | dmux | Personal | Runs dmux with codex PATH shim and API keys scoped to subprocess |
-| `dmux-r06` | dmux | Work (r06) | Runs dmux with dedicated `TMUX_TMPDIR=~/.dmux-r06` + full r06 env |
 
 `happy`'s own state (`~/.happy`, i.e. `HAPPY_HOME_DIR` default) is intentionally **shared** across accounts — one phone pairing controls all accounts. Only the inner claude/codex environment is per-account.
 
@@ -80,54 +77,6 @@ Source: `home/dot_config/zsh/claude.zsh`.
 
 ---
 
-## dmux: dedicated socket isolation
-
-dmux keys sessions by project name and **attaches** to an existing session rather than creating a new one. Without account isolation at the tmux server level, running `dmux-r06` in a directory where a default-account dmux session already exists would attach to the wrong account's session.
-
-The fix is a **dedicated tmux server socket directory** (`TMUX_TMPDIR=~/.dmux-r06`, created 0700). Each socket directory gives r06 its own tmux server, with its own session namespace, so there is no cross-account collision.
-
-From `home/dot_config/zsh/dmux.zsh`:
-
-```zsh
-dmux-r06() {
-  local tmpdir="${HOME}/.dmux-r06"
-  [[ -d "$tmpdir" ]] || mkdir -m 700 -p "$tmpdir" || return 1
-  TMUX_TMPDIR="$tmpdir" \
-    PATH="${_DMUX_SHIM_DIR}:${PATH}" \
-    CLAUDE_CONFIG_DIR="${HOME}/.claude-r06" \
-    ECC_AGENT_DATA_HOME="${HOME}/.claude-r06" \
-    CLV2_HOMUNCULUS_DIR="${HOME}/.claude-r06/ecc-homunculus" \
-    ECC_MCP_HEALTH_STATE_PATH="${HOME}/.claude-r06/mcp-health-cache.json" \
-    GATEGUARD_STATE_DIR="${HOME}/.claude-r06/.gateguard" \
-    CODEX_HOME="${HOME}/.codex-r06" \
-    OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}" \
-    EXA_API_KEY="${EXA_API_KEY:-}" \
-    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
-    command dmux "$@"
-}
-```
-
-The env set in `dmux-r06` mirrors `_claude_with_home` with the r06 home dir, plus `CODEX_HOME` (mirroring `cdx-r06`) and `TMUX_TMPDIR`.
-
-### Session reuse and secrets refresh
-
-tmux captures the environment from the client that creates a `new-session`. Panes created later via `split-window` inherit that captured session environment. This means:
-
-- The r06 paths (`~/.claude-r06`, `~/.codex-r06`) are static, so a reused session picks the correct account without issue.
-- Newly-provisioned secrets (e.g. a newly-rendered `claude-secrets.zsh` after `chezmoi apply`) **are not** automatically picked up by a running tmux session. To refresh: `tmux -L <socket-name> kill-server`, then re-run `dmux-r06`.
-
----
-
-## The codex PATH shim
-
-dmux spawns Codex as `sh -c "codex …"` and cannot pass flags like `--profile shared` itself. Without `--profile shared`, Codex does not load `$CODEX_HOME/shared.config.toml` (the chezmoi-managed SSOT static config).
-
-The `dmux` wrapper prepends `~/.config/dmux/bin` to `PATH`. That directory contains a `codex` shim script that re-injects `--profile shared` for every codex invocation inside dmux panes. dmux's PATH sanitizer only strips `node_modules/.bin`, so the shim directory survives into the panes.
-
-Both `dmux` (default account) and `dmux-r06` prepend `_DMUX_SHIM_DIR` to PATH for the same reason.
-
----
-
 ## Critical: always use the aliases
 
 Running the bare binary name bypasses the account machinery entirely:
@@ -136,7 +85,6 @@ Running the bare binary name bypasses the account machinery entirely:
 |---|---|
 | `claude` | No `CLAUDE_CONFIG_DIR` — falls back to `~/.claude`; `ECC_AGENT_DATA_HOME` unset |
 | `codex` | No `--profile shared` — `$CODEX_HOME/shared.config.toml` not loaded |
-| `dmux` (without shim) | Panes spawn bare `codex` without `--profile shared` |
 
 The bare `claude` invocation is not an error, but it silently uses the default account dirs and ignores the ECC/CLV2/gateguard state isolation that the aliases provide. For `codex`, the SSOT model, personality, and multi-agent feature configuration are all absent when invoked bare.
 

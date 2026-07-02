@@ -207,11 +207,6 @@ dogfood-output/
 # Playwright MCP
 .playwright-mcp/
 
-# dmux (tmux agent pane manager): per-repo runtime state + worktrees, and the
-# auto-generated hook scaffolding (AGENTS.md/CLAUDE.md/examples/) it writes into every project.
-.dmux/
-.dmux-hooks/
-
 # Personal files
 .kryota-dev
 *.local.*

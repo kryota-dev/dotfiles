@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-`home/.chezmoiexternal.toml` declares every external resource chezmoi fetches at apply time: Anthropic skill archives, the ECC hook runtime, <!-- FACT:ecc-skill-count -->127<!-- /FACT --> ECC skills (generated from a single list), the `aside` slash command, and the Moralerspace font. This document explains the caching model, the `range`-driven fan-out, SHA pinning, refresh windows, and the `chezmoiignore`/`chezmoiremove` lifecycle for retiring deployed files.
+`home/.chezmoiexternal.toml` declares every external resource chezmoi fetches at apply time: Anthropic skill archives, the ECC hook runtime, <!-- FACT:ecc-skill-count -->126<!-- /FACT --> ECC skills (generated from a single list), the `aside` slash command, and the Moralerspace font. This document explains the caching model, the `range`-driven fan-out, SHA pinning, refresh windows, and the `chezmoiignore`/`chezmoiremove` lifecycle for retiring deployed files.
 
 ---
 

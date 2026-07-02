@@ -15,7 +15,6 @@
 |---|---|---|
 | **Claude Code** | `~/.claude` — エイリアス `cld` | `~/.claude-r06` — エイリアス `cld-r06` |
 | **Codex CLI** | `~/.codex` — エイリアス `cdx` | `~/.codex-r06` — エイリアス `cdx-r06` |
-| **dmux** | `dmux`（デフォルト tmux サーバー） | `dmux-r06`（専用ソケット `~/.dmux-r06`） |
 
 各セルは完全に隔離されたランタイム環境を表します。セッション履歴、ガバナンスデータベース、継続学習のインスティンクト、bash コマンド監査ログ、MCP 状態がそれぞれ独立しています。一方、設定ファイルは共有されており、各ハーネス内の両アカウントはシンボリックリンク経由で同じデプロイ済み設定ファイルを参照します。
 
@@ -93,7 +92,7 @@ chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドス
 
 | トピック | ドキュメント |
 |---|---|
-| アカウントごとの環境変数テーブル、エイリアスマトリクス、dmux ソケット分離 | [account-isolation.ja.md](account-isolation.ja.md) |
+| アカウントごとの環境変数テーブル、エイリアスマトリクス | [account-isolation.ja.md](account-isolation.ja.md) |
 | Claude Code ハーネス：フック、ECC、CLV2、ステータスライン | [claude-code.ja.md](claude-code.ja.md) |
 | Codex CLI ハーネス：プロファイル設定、フック、アカウント設定 | [codex.ja.md](codex.ja.md) |
 | スキルタクソノミー、キュレーテッドインベントリ、外部フェッチ、プロベナンス強制 | [skills-provenance.ja.md](skills-provenance.ja.md) |

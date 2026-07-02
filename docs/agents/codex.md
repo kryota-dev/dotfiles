@@ -17,7 +17,6 @@ This document covers the OpenAI Codex CLI harness configuration deployed by this
 - [Template SSOT — preventing account drift](#template-ssot--preventing-account-drift)
 - [--profile shared mechanism](#--profile-shared-mechanism)
   - [cdx / cdx-r06 aliases](#cdx--cdx-r06-aliases)
-  - [dmux PATH shim](#dmux-path-shim)
   - [Bare codex skips the SSOT config](#bare-codex-skips-the-ssot-config)
 - [Gateguard](#gateguard)
 - [Shared rule and skill layers](#shared-rule-and-skill-layers)
@@ -143,43 +142,9 @@ prompt, so the session is driven from the Happy mobile/web app. For a local inte
 Codex terminal, use `cdx` / `cdx-r06` instead. (This is asymmetric with `happy claude`,
 which spawns a full local TUI.)
 
-### dmux PATH shim
-
-dmux spawns Codex panes with a bare `codex` invocation and cannot pass `--profile shared` itself. To handle this, `home/dot_config/dmux/bin/executable_codex` (a POSIX sh script, mode 0755) is installed as a PATH shim:
-
-1. The zsh dmux wrappers prepend `~/.config/dmux/bin` to `PATH` for the dmux process.
-2. **dmux agent panes are fresh interactive zsh shells that re-source `~/.zshrc`**, where `mise activate` rebuilds `PATH` and drops the shim dir. So `~/.zshrc` re-prepends `~/.config/dmux/bin` **after** `mise activate`, scoped to `dmux-*` sessions (checked via `tmux display-message -p '#{session_name}'`), not every tmux session. This is the keystone that keeps the shim dir ahead of the mise-managed real `codex`/`claude` inside panes; without it the pane resolves the real binary directly and the shim never runs. Scoping to dmux sessions keeps bare `codex`/`claude` in unrelated tmux panes on the same server unaffected (no `--profile shared`, no accidental happy wrapping).
-3. When bare `codex` is executed in a dmux pane, the shim intercepts it.
-4. The shim walks `PATH` skipping its own directory, finds the real `codex` binary, and re-invokes it with `--profile shared` injected — making recursion structurally impossible.
-
-Without the shim **and** the `~/.zshrc` re-prepend, dmux panes would silently run the real `codex` without the SSOT `shared.config.toml`.
-
-#### Opt-in happy-claude shim (`DMUX_HAPPY`)
-
-The same shim directory also ships `executable_claude`, an **opt-in** companion for running
-Claude panes through the happy wrapper (phone control). By default it is a transparent
-passthrough — it execs the first real `claude` on `PATH`, so default dmux behavior is
-unchanged. `DMUX_HAPPY=1 dmux` flips it to `happy claude`. Two things make the toggle reach
-panes:
-
-- **PATH:** the `~/.zshrc` re-prepend above (shared with the codex shim) keeps the shim dir
-  ahead of mise's real `claude` inside panes.
-- **Env:** tmux fixes a pane's environment at server start, so the `dmux` / `dmux-r06`
-  wrappers inject the toggle into the running server with `tmux set-environment -g DMUX_HAPPY 1`
-  (and `-u` to clear it). Otherwise a reused server never sees a later `DMUX_HAPPY=1 dmux`.
-
-The shim pins the real claude via `HAPPY_CLAUDE_PATH` (which happy honours first when locating
-claude) before `exec happy claude`, so happy spawns that absolute binary and never re-enters
-the shim — recursion is structurally impossible even with the shim dir on `PATH`.
-
-Codex is deliberately **not** wrapped this way: `happy codex` runs Codex headless via
-`codex app-server` and the local terminal is a read-only viewer with no input (see the
-`cdx / cdx-r06 aliases` section above), so it cannot drive an interactive dmux pane. Use
-`hcdx` standalone for phone-controlled Codex, and keep `cdx` / `cdx-r06` inside dmux.
-
 ### Bare codex skips the SSOT config
 
-A direct `codex` invocation — without the aliases or the dmux shim in `PATH` — does **not** load `shared.config.toml`. The `--profile shared` flag is the only mechanism that applies it. This is intentional (profiles are opt-in in Codex), but easy to trip over in scripts, CI, or editor integrations that invoke `codex` directly.
+A direct `codex` invocation — without the aliases — does **not** load `shared.config.toml`. The `--profile shared` flag is the only mechanism that applies it. This is intentional (profiles are opt-in in Codex), but easy to trip over in scripts, CI, or editor integrations that invoke `codex` directly.
 
 ---
 
@@ -270,4 +235,4 @@ For the provenance taxonomy (curated / external / system / evolved / unmanaged) 
 - [Account isolation](account-isolation.md) — how per-account env isolation works
 - [Skills provenance](skills-provenance.md) — skill taxonomy and external fetching
 - [Architecture overview](../architecture/overview.md) — repo-wide structure
-- [Dev tooling](../architecture/dev-tooling.md) — gateguard source and the dmux PATH shim
+- [Dev tooling](../architecture/dev-tooling.md) — gateguard source

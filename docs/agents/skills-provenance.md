@@ -110,7 +110,7 @@ Miscellaneous functional skills spanning databases, frontend testing, and media 
 
 | Source | Count | Version pin |
 |---|---|---|
-| ECC (`affaan-m/ECC`) | <!-- FACT:ecc-skill-count -->127<!-- /FACT --> skills | `[ecc].commit` in `.chezmoidata.toml` |
+| ECC (`affaan-m/ECC`) | <!-- FACT:ecc-skill-count -->126<!-- /FACT --> skills | `[ecc].commit` in `.chezmoidata.toml` |
 | Anthropic system skills | 17 skills | `[skills].anthropic_commit` in `.chezmoidata.toml` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
