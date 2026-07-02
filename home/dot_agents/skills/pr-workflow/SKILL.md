@@ -56,8 +56,10 @@ user-invocable: true
 |------|------|
 | `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr` |
 | `small` | **general-purpose サブエージェント（`model: sonnet`）**に inline prompt で委任（named worker は使わない）。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。→ `/commit` → `/create-pr` |
-| `standard` | `/sdd`（完全自律実行）。**`/sdd` は内部で自前に commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
-| `large` | （任意で）先に `/grill-me` で設計を詰める → `/sdd`（完全自律実行）。**`/grill-me` は対話型のため、pr-workflow から自動 invoke せず user が事前に実行する**前提。 |
+| `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を `AskUserQuestion` で 1 回確認。承認 1 回で自律性を最大限維持）→ `/sdd`（完全自律実行）。**`/sdd` は内部で自前に commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
+| `large` | **intent gate（enforced）**: `/sdd` の前に `/grill-me --mode=auto`（自律審議＋最終 PRD を user が 1 回承認）を pr-workflow から auto-invoke する（`--mode=auto` が「対話型だから auto-invoke しない」を解消。auto でも security/data-migration/contract は grill-me が強制 user エスカレート）→ `/sdd`（完全自律実行）。 |
+
+**intent gate（#222・構造化）**: `standard`/`large` は **human intent check なしに実装フェーズ（`/sdd` Phase 4）へ入れない**。large=`/grill-me --mode=auto` の PRD 承認、standard=軽量 intent gate がそれに当たる。**gate を skip する場合は必ず理由を記録**する（decision log / spec / PR の 1 行）。**PRD 生成は non-trivial（standard/large）の default handoff**とする（生成は default、file 永続化は grill-me の memory ポリシーに従い user 承認必須）。
 
 **Plan-PRD pipeline（task #22 / PR10b）連携**: PR10b マージ後は `/grill-me --output-prd` → `/planning --output-plan` → `/sdd --prd --plan` の file handoff を使える。**PR10b 未マージ時はこれらの flag は存在しない**ため、PRD/Plan は手動で渡す。
 
