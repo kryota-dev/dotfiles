@@ -39,7 +39,7 @@ Asserts that chezmoi source files exist in `home/`. Key categories:
 - Core dotfiles are present: `dot_zshrc.tmpl`, `dot_zprofile.tmpl`, `dot_gitconfig.tmpl`, `private_dot_ssh/config.tmpl`, `dot_vimrc`, `dot_tmux.conf`, `dot_inputrc`, `dot_Brewfile`
 - chezmoi data files: `.chezmoiexternal.toml`, `.chezmoidata.toml`
 - Config files: `starship.toml`, ghostty config, sheldon `plugins.toml`
-- zsh modules exist (`git`, `docker`, `claude`, `codex`, `dmux`, `functions`, `completions`, `wtp`, `ghq`); `aliases.zsh.tmpl` is present
+- zsh modules exist (`git`, `docker`, `claude`, `codex`, `functions`, `completions`, `wtp`, `ghq`); `aliases.zsh.tmpl` is present
 - Vendored `_ghq` completion starts with `#compdef ghq`
 - Lifecycle scripts exist at their expected paths
 - Claude and Codex agent definitions, reviewer agents, shared skills
@@ -105,11 +105,10 @@ This workflow runs a real `chezmoi init --apply` on two platforms and asserts th
 
 Before `chezmoi apply`, both jobs move a set of files to `/tmp/chezmoi-excluded/` so that apply never attempts to call `op` or run interactive/install steps in the CI environment. Each file is moved inside a `for f in …; do if [ -f "$f" ]; then mv …; fi; done` loop so that a missing entry does not abort the step.
 
-Files excluded by **both** jobs (6 files):
+Files excluded by **both** jobs (5 files):
 
 - `home/private_dot_aws/config.tmpl`
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl`
-- `home/dot_config/zsh/private_dmux-secrets.zsh.tmpl`
 - `home/run_once_before_00-install-prerequisites.sh.tmpl`
 - `home/run_onchange_before_10-brew-bundle.sh.tmpl`
 - `home/run_once_after_11-validate-1password.sh.tmpl`
@@ -130,7 +129,7 @@ Only `tap` and `brew` lines are extracted from `dot_Brewfile` for CI (`grep -E '
 After apply, both jobs assert:
 
 1. **Deployed files**: `~/.zshrc`, `~/.zprofile`, `~/.gitconfig`, `~/.ssh/config`, `~/.config/starship.toml`, `~/.config/sheldon/plugins.toml`, `~/.config/mise/config.toml` exist.
-2. **zsh modules deployed**: `~/.config/zsh/{aliases,git,docker,claude,dmux,functions,completions,wtp,ghq}.zsh` exist.
+2. **zsh modules deployed**: `~/.config/zsh/{aliases,git,docker,claude,functions,completions,wtp,ghq}.zsh` exist.
 3. **ghq config**: `ghq.root = ~/ghq`, `ghq.user = kryota-dev`, `~/.config/zsh/completions/_ghq` exists.
 4. **mise tools**: `node`, `python`, and `go` resolve under `~/.local/share/mise/installs`.
 5. **Clean zsh start**: `zsh -i -c exit` produces no output matching `command not found`, `parse error`, or `not found` on stderr.

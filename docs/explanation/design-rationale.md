@@ -10,7 +10,7 @@ This document explains the load-bearing design decisions behind the repo — the
 
 ## Single-tarball caching over N individual downloads
 
-**Decision:** All <!-- FACT:ecc-skill-count -->127<!-- /FACT --> adopted ECC skills, plus the ECC hook runtime, are declared as separate entries in `.chezmoiexternal.toml` — but every one of those entries points at the same tarball URL (the ECC archive pinned at `[ecc].commit`). Similarly, the 17 Anthropic system skills each point at the same `anthropics/skills` archive URL.
+**Decision:** All <!-- FACT:ecc-skill-count -->126<!-- /FACT --> adopted ECC skills, plus the ECC hook runtime, are declared as separate entries in `.chezmoiexternal.toml` — but every one of those entries points at the same tarball URL (the ECC archive pinned at `[ecc].commit`). Similarly, the 17 Anthropic system skills each point at the same `anthropics/skills` archive URL.
 
 **Why:** chezmoi caches external archives keyed by URL SHA-256. When multiple entries share an identical URL, chezmoi downloads the tarball once and satisfies every entry from the cache. The alternative — fetching each skill from its own URL — would require one network round-trip per skill (hundreds in total) on every `chezmoi apply`, adding minutes of latency and making installs brittle on slow or metered connections.
 
@@ -54,9 +54,9 @@ See [claude-code.md](../agents/claude-code.md) for the full hook graph and the t
 
 **Why:** The alternative — maintaining two parallel config directories — would require every settings change to be applied twice and would inevitably create drift between accounts. Since the only thing that legitimately differs between personal and work sessions is runtime state (session history, governance database, ECC state, CLV2 instincts, caches), the right split is: one SSOT for config, two isolated trees for state.
 
-The env var mechanism (`CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`) is the lightest possible seam: it requires no changes to Claude Code itself, no per-account copy of any config file, and no runtime config-merging logic. The same env pattern extends to dmux (`dmux-r06` sets a dedicated `TMUX_TMPDIR` so sessions on the two accounts never collide).
+The env var mechanism (`CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`) is the lightest possible seam: it requires no changes to Claude Code itself, no per-account copy of any config file, and no runtime config-merging logic.
 
-The one risk of this model is that three places define the per-account env set (`_claude_with_home` in `claude.zsh`, `dmux-r06` in `dmux.zsh`, and `cdx-r06` in `codex.zsh`). The `dmux.zsh` source comments explicitly call this out as a sync requirement. This is accepted duplication — the alternative (a shared env-building function called by all three) would add indirection for a set that changes rarely.
+The one risk of this model is that two places define the per-account env set (`_claude_with_home` in `claude.zsh` and `cdx-r06` in `codex.zsh`). This is accepted duplication — the alternative (a shared env-building function called by both) would add indirection for a set that changes rarely.
 
 See [account-isolation.md](../agents/account-isolation.md) for the reference table of all per-account env vars and the full alias matrix.
 
@@ -64,7 +64,7 @@ See [account-isolation.md](../agents/account-isolation.md) for the reference tab
 
 ## Secrets sourced-not-exported, then re-exported scoped to the subprocess
 
-**Decision:** 1Password-rendered key files (`~/.config/zsh/claude-secrets.zsh`, `dmux-secrets.zsh`) are sourced into the interactive shell without `export`. The launcher functions (`_claude_with_home`, `dmux`, `dmux-r06`) then re-export the keys inline, scoped to the specific subprocess invocation.
+**Decision:** The 1Password-rendered key file (`~/.config/zsh/claude-secrets.zsh`) is sourced into the interactive shell without `export`. The launcher function (`_claude_with_home`) then re-exports the keys inline, scoped to the specific subprocess invocation.
 
 **Why:** An `export` in a sourced file leaks the key into every child process of the interactive shell — every subshell, every external command, every background job — for the lifetime of the session. If a rogue process or accidental `env` log captures the process environment, the key is exposed.
 

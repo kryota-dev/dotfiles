@@ -20,7 +20,6 @@
             │  onepasswordRead / op read
             ▼
 ~/.config/zsh/claude-secrets.zsh    (モード 0600, private_ プレフィックス)
-~/.config/zsh/dmux-secrets.zsh      (モード 0600, private_ プレフィックス)
 ~/.aws/config                        (モード 0600, private_ プレフィックス)
 ```
 
@@ -29,7 +28,6 @@
 ソースの `.tmpl` ファイルには `op://` 参照のみが含まれています:
 
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential"` および `onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential"`
-- `home/dot_config/zsh/private_dmux-secrets.zsh.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - OpenRouter API/credential"`
 - `home/private_dot_aws/config.tmpl` — 1Password Secure Note からファイル全体をレンダリングする単一の `onepasswordRead "op://kryota.dev/Dotfiles - AWS Config/notesPlain"` 呼び出し
 
 `private_` chezmoi プレフィックスは、デスティネーションファイルに `0600` を適用するメカニズムです。追加の `chmod` は不要です。
@@ -49,13 +47,12 @@
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
-- `op://kryota.dev/Dotfiles - OpenRouter API/credential`
 
 `op` がインストールされていない、認証されていない、またはアイテムが読み取れない場合、`chezmoi apply` はフェイルファストします。注意点として、`run_once_after_11` は AFTER フェーズのスクリプトであり、実行時点ではホームディレクトリはすでに変更されています。実際のフェイルファストパスは次の 2 つです: (1) `.tmpl` ファイル内の `onepasswordRead` がテンプレートレンダリング中に apply を中断する（当該ファイルが書き込まれる前）; (2) `run_once_after_11` が後続の重い after フェーズプロビジョニング（mise、MCP、CLV2 等）の前のフェイルファストゲートとして機能する。シークレットが欠落した状態で途中までプロビジョニングされたマシンは、これらいずれかの時点でのクリーンな中断よりも悪い結果をもたらすという考えに基づいています。スクリプトは macOS のみです（`{{ if ne .chezmoi.os "darwin" }}` で早期終了）。CI は 1Password インストールなしで Ubuntu 上で実行されるためです。
 
 ### Runtime-graceful: `[[ -r ... ]]` ガードによるソース
 
-シェル起動時、`claude.zsh` と `dmux.zsh` はレンダリングされたシークレットファイルが存在し読み取り可能な場合にのみソースします:
+シェル起動時、`claude.zsh` はレンダリングされたシークレットファイルが存在し読み取り可能な場合にのみソースします:
 
 ```zsh
 [[ -r "${HOME}/.config/zsh/claude-secrets.zsh" ]] && source "${HOME}/.config/zsh/claude-secrets.zsh"
@@ -94,8 +91,6 @@ _claude_with_home() {
 
 `${VAR:-}` デフォルト（変数が未設定の場合は空文字列）は、シークレットファイルがソースされていない場合でも再 export が安全であることを保証します。MCP サーバーはランチャー関数がエラーになる代わりに空のキーを受け取ります。
 
-**dmux も同じパターンに従います。** `dmux.zsh` は `dmux-secrets.zsh` と `claude-secrets.zsh` の両方をソースします（後者は dmux が `_claude_with_home` なしで `claude` を起動するため）。`dmux` と `dmux-r06` ラッパー関数は、`command dmux` 呼び出しにスコープして 3 つのキー（`OPENROUTER_API_KEY`、`EXA_API_KEY`、`FIRECRAWL_API_KEY`）すべてを再 export します。
-
 ---
 
 ## CI が `chezmoi apply` 前にシークレットファイルを除外する方法
@@ -108,7 +103,6 @@ CI（`setup-validation.yml`）は 1Password にアクセスせずに macOS と U
     for f in \
       home/private_dot_aws/config.tmpl \
       home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
-      home/dot_config/zsh/private_dmux-secrets.zsh.tmpl \
       home/run_once_before_00-install-prerequisites.sh.tmpl \
       home/run_onchange_before_10-brew-bundle.sh.tmpl \
       home/run_once_after_11-validate-1password.sh.tmpl; do
@@ -149,7 +143,7 @@ _claude_with_home() {
 
 ECC 状態、CLV2 インスティンクト、gateguard 状態をアカウントごとに分離する同じ単一のサブプロセス境界が、API キーもそのサブプロセスに限定します。どちらの関心事も別個のメカニズムを必要としません。
 
-`dmux-r06` は Codex アカウント env（`CODEX_HOME`）と専用の tmux ソケット（`TMUX_TMPDIR`）を同じ env 変数セットに追加し、マルチプレクサ層までパターンを拡張します。アカウントごとの env セットを定義する 3 か所（`_claude_with_home`、`dmux-r06`、`cdx-r06`）は同期を保つ必要があります。これは `dmux.zsh` のコメントに記載されており、分離モデルの主なメンテナンス負担です。
+`cdx-r06` は Codex アカウント env（`CODEX_HOME`）を同じ env 変数セットに追加し、Codex CLI までパターンを拡張します。アカウントごとの env セットを定義する 2 か所（`_claude_with_home`、`cdx-r06`）は同期を保つ必要があります。これが分離モデルの主なメンテナンス負担です。
 
 r06 設定ディレクトリ（`~/.claude-r06`）は完全に `~/.claude` へのシンボリックリンクです——settings、statusline、agents、commands、skills——設定は単一 SSOT であり、状態ツリーは分岐します。シークレットは設定ディレクトリの意味でアカウントごとではありません。両方のアカウントが同じ API キー（同じ 1Password アイテム）を受け取ります。アカウント分離は、アカウントごとに異なるキーを使用することではなく、状態（セッション、ガバナンス、キャッシュ）に関するものです。
 

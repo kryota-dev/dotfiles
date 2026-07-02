@@ -29,7 +29,7 @@ done
 ## 2. zsh モジュールのデプロイ確認
 
 ```bash
-for mod in aliases git docker claude dmux functions completions wtp ghq; do
+for mod in aliases git docker claude functions completions wtp ghq; do
   f=~/.config/zsh/${mod}.zsh
   [ -f "$f" ] && echo "OK: $f" || echo "MISSING: $f"
 done

@@ -4,7 +4,7 @@
 
 ← [ドキュメント目次](../README.ja.md)
 
-`home/.chezmoiexternal.toml` は、chezmoi が apply 時に取得するすべての外部リソースを宣言します。Anthropic スキルアーカイブ、ECC フックランタイム、<!-- FACT:ecc-skill-count -->127<!-- /FACT --> 個の ECC スキル（単一リストから生成）、`aside` スラッシュコマンド、Moralerspace フォントです。このドキュメントでは、キャッシュモデル、`range` によるファンアウト、SHA ピン固定、リフレッシュ期間、デプロイ済みファイルを廃棄するための `chezmoiignore`/`chezmoiremove` ライフサイクルについて説明します。
+`home/.chezmoiexternal.toml` は、chezmoi が apply 時に取得するすべての外部リソースを宣言します。Anthropic スキルアーカイブ、ECC フックランタイム、<!-- FACT:ecc-skill-count -->126<!-- /FACT --> 個の ECC スキル（単一リストから生成）、`aside` スラッシュコマンド、Moralerspace フォントです。このドキュメントでは、キャッシュモデル、`range` によるファンアウト、SHA ピン固定、リフレッシュ期間、デプロイ済みファイルを廃棄するための `chezmoiignore`/`chezmoiremove` ライフサイクルについて説明します。
 
 ---
 

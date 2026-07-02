@@ -39,7 +39,7 @@ lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を Gi
 - コアのドットファイルが存在する：`dot_zshrc.tmpl`、`dot_zprofile.tmpl`、`dot_gitconfig.tmpl`、`private_dot_ssh/config.tmpl`、`dot_vimrc`、`dot_tmux.conf`、`dot_inputrc`、`dot_Brewfile`
 - chezmoi データファイル：`.chezmoiexternal.toml`、`.chezmoidata.toml`
 - 設定ファイル：`starship.toml`、ghostty の config、sheldon の `plugins.toml`
-- zsh モジュールが存在する（`git`、`docker`、`claude`、`codex`、`dmux`、`functions`、`completions`、`wtp`、`ghq`）；`aliases.zsh.tmpl` が存在する
+- zsh モジュールが存在する（`git`、`docker`、`claude`、`codex`、`functions`、`completions`、`wtp`、`ghq`）；`aliases.zsh.tmpl` が存在する
 - ベンダリングした `_ghq` 補完が `#compdef ghq` で始まる
 - ライフサイクルスクリプトが期待するパスに存在する
 - Claude と Codex のエージェント定義、レビュアーエージェント、共有スキル
@@ -105,11 +105,10 @@ awk パーサーは `[ecc]` テーブルの `skills` 配列のみにスコープ
 
 `chezmoi apply` の前に、両ジョブは CI 環境では `op` の呼び出しやインタラクティブ/インストールステップの実行を試みないよう、一連のファイルを `/tmp/chezmoi-excluded/` に移動します。各ファイルは `for f in …; do if [ -f "$f" ]; then mv …; fi; done` ループ内で移動されるため、エントリが見つからなくてもステップは中断されません。
 
-**両ジョブ**で除外されるファイル（6 ファイル）：
+**両ジョブ**で除外されるファイル（5 ファイル）：
 
 - `home/private_dot_aws/config.tmpl`
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl`
-- `home/dot_config/zsh/private_dmux-secrets.zsh.tmpl`
 - `home/run_once_before_00-install-prerequisites.sh.tmpl`
 - `home/run_onchange_before_10-brew-bundle.sh.tmpl`
 - `home/run_once_after_11-validate-1password.sh.tmpl`
@@ -130,7 +129,7 @@ CI では `dot_Brewfile` から `tap` と `brew` 行のみを抽出します（`
 apply 後、両ジョブは以下を確認します：
 
 1. **デプロイされたファイル**：`~/.zshrc`、`~/.zprofile`、`~/.gitconfig`、`~/.ssh/config`、`~/.config/starship.toml`、`~/.config/sheldon/plugins.toml`、`~/.config/mise/config.toml` が存在する。
-2. **zsh モジュールのデプロイ**：`~/.config/zsh/{aliases,git,docker,claude,dmux,functions,completions,wtp,ghq}.zsh` が存在する。
+2. **zsh モジュールのデプロイ**：`~/.config/zsh/{aliases,git,docker,claude,functions,completions,wtp,ghq}.zsh` が存在する。
 3. **ghq 設定**：`ghq.root = ~/ghq`、`ghq.user = kryota-dev`、`~/.config/zsh/completions/_ghq` が存在する。
 4. **mise ツール**：`node`、`python`、`go` が `~/.local/share/mise/installs` 以下で解決される。
 5. **クリーンな zsh 起動**：`zsh -i -c exit` の stderr に `command not found`、`parse error`、`not found` にマッチする出力がない。

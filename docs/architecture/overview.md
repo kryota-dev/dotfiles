@@ -20,7 +20,7 @@ flowchart TD
     SH["Shell & tooling\n.zshrc · sheldon · starship\nmise · Brewfile · git"]
     AI["AI-agent layer\n~/.agents/skills · ~/.claude · ~/.codex\nECC · CLV2 · gateguard"]
     CI["CI & quality gates\nGitHub Actions · make lint/test\nbats · setup-validation"]
-    SEC["Secrets & account isolation\n1Password → 0600 files\nper-account env vars · tmux sockets"]
+    SEC["Secrets & account isolation\n1Password → 0600 files\nper-account env vars"]
 
     BS -->|"installs chezmoi, then\nchezmoi init --apply"| CE
     CE -->|"renders templates\nfetches externals"| LS
@@ -29,7 +29,7 @@ flowchart TD
     LS -->|"brew bundle\nmise install\nsheldon lock"| SH
     LS -->|"wires MCP servers\nenables CLV2"| AI
     SEC -.->|"op:// rendered at apply"| CE
-    SEC -.->|"per-account env\nTMUX_TMPDIR isolation"| AI
+    SEC -.->|"per-account env vars"| AI
     CI -.->|"make lint / make test-bats\nsetup-validation.yml"| CE
     CI -.->|"skill_provenance.bats"| AI
 ```
@@ -46,7 +46,7 @@ flowchart TD
 | Shell environment | `.zshrc` load order; sheldon deferred loading; starship; per-account zsh aliases | [shell-environment.md](shell-environment.md) |
 | Developer tooling | mise version pins; `Brewfile` + `.brewfile-linux-exclude`; git 1Password signing; gitleaks | [dev-tooling.md](dev-tooling.md) |
 | AI-agent layer (overview) | Dual-harness × dual-account matrix; SSOT skill library; shared rule layer | [agents/overview.md](../agents/overview.md) |
-| Account isolation | Per-account env vars; `_claude_with_home`; Codex `CODEX_HOME`; dmux TMUX_TMPDIR | [agents/account-isolation.md](../agents/account-isolation.md) |
+| Account isolation | Per-account env vars; `_claude_with_home`; Codex `CODEX_HOME` | [agents/account-isolation.md](../agents/account-isolation.md) |
 | Claude Code harness | `settings.json`; ECC hooks; CLV2 observer; statusline; review subagents | [agents/claude-code.md](../agents/claude-code.md) |
 | Codex CLI harness | Dual `CODEX_HOME`; `shared.config.toml`; `hooks.json`; gateguard | [agents/codex.md](../agents/codex.md) |
 | Skill provenance | 5-category taxonomy; adding curated vs ECC skills; `skill_provenance.bats` | [agents/skills-provenance.md](../agents/skills-provenance.md) |
@@ -104,6 +104,6 @@ See [contributing/ci-and-tests.md](../contributing/ci-and-tests.md).
 
 ### Secrets & account isolation
 
-Secret values live exclusively in a 1Password vault. The `private_` chezmoi prefix renders them to 0600 files at apply time; source templates contain only `op://` references. Per-account isolation is enforced at runtime by environment variables (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`) and, for dmux, a dedicated `TMUX_TMPDIR` socket.
+Secret values live exclusively in a 1Password vault. The `private_` chezmoi prefix renders them to 0600 files at apply time; source templates contain only `op://` references. Per-account isolation is enforced at runtime by environment variables (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`).
 
 See [explanation/secrets-and-isolation.md](../explanation/secrets-and-isolation.md) and [agents/account-isolation.md](../agents/account-isolation.md).
