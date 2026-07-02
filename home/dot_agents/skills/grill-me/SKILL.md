@@ -20,6 +20,7 @@ If a question can be answered by exploring the codebase, explore the codebase in
 
 - **auto でも security / data migration / contract change 等は強制的に user エスカレート**する。
 - PRD 書き出しは memory 記録に相当するため、`~/AGENTS.md` の memory ポリシー（**承認前に保存しない**）に従い、**file 出力前に必ず user 承認**を得る。
+- **PRD 生成の default 化（#222）**: `pr-workflow` の non-trivial path（standard/large）から呼ばれるときは **PRD 生成を default handoff** とする（intent gate の成果物）。ただし **file 永続化は上記 memory ポリシーどおり user 承認必須**（生成は default、保存は承認）。grill-me を **単体起動**したときの `--output-prd` は従来どおり opt-in（未指定なら対話のみ・ファイル出力なし）を維持する。
 
 ### PRD frontmatter + sections
 
@@ -33,6 +34,8 @@ status: draft | finalized | implemented
 ---
 ```
 
-sections: **Background** / **User Story** / **Acceptance Criteria**（`AC-NNN`、ゼロ埋め 3 桁: `AC-001`） / **Out of Scope** / **Open Questions**。`created_at` は `date -Iseconds`（ローカル TZ）で生成する。
+sections: **Background** / **User Story** / **Acceptance Criteria**（`AC-NNN`、ゼロ埋め 3 桁: `AC-001`） / **Considered Alternatives / Rejection Rationale**（決定ログ: 検討した代替案とその却下理由。**必須**） / **Out of Scope** / **Open Questions**。`created_at` は `date -Iseconds`（ローカル TZ）で生成する。
+
+- **Considered Alternatives / Rejection Rationale（決定ログ, #222）は必須セクション**。intent を将来へ残すため、検討した設計代替案と「なぜ採らなかったか」を最低 1 件記録する（可能なら `AC` と対応づける）。intent 確認の成果を decision log として保全し、後から「なぜこの設計か」を辿れるようにする狙い。
 
 **衝突処理（上書き禁止）**: 出力先 file が既存なら `-v2`、それも在れば `-v3`…と空きが見つかるまで `-vN` を増やす（既存 file は決して上書きしない。user が override path を明示した場合のみ従う）。下流の `/planning --input-prd <path>` がこの file を入力にする。
