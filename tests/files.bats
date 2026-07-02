@@ -122,9 +122,21 @@ load helpers/setup
   # `gh pr diff <n> -- <path>` form. Positive guard (the docs mention the bad form
   # only as a counter-example, so a negative grep would false-positive on it).
   local agent
-  for agent in "${HOME_DIR}/dot_claude/agents"/{cc-code-review,typescript-reviewer,react-reviewer,python-reviewer,database-reviewer}.md; do
+  for agent in "${HOME_DIR}/dot_claude/agents"/{cc-code-review,typescript-reviewer,react-reviewer,python-reviewer,database-reviewer,architecture-reviewer}.md; do
     grep -q -- "--name-only" "$agent"
   done
+}
+
+@test "architecture-reviewer agent exists as a separate aggregate-view layer" {
+  # #223: whole-repo/architecture reviewer, distinct from the diff-triggered
+  # specialist roster. Pinned to sonnet (#28 model-tier) and scans the repo tree
+  # (not just the diff), so it must reference a repo-wide enumeration command.
+  local agent="${HOME_DIR}/dot_claude/agents/architecture-reviewer.md"
+  [ -f "$agent" ]
+  grep -q "^name: architecture-reviewer$" "$agent"
+  grep -q "^model: sonnet$" "$agent"
+  grep -q "^tools: Read, Glob, Grep, Bash$" "$agent"
+  grep -q "git ls-files" "$agent"
 }
 
 @test "shared agent skills exist" {
