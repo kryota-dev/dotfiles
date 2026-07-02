@@ -68,7 +68,6 @@ ghq_user = "kryota-dev"
     "deep-research",
     "deployment-patterns",
     "design-system",
-    "dmux-workflows",
     "docker-patterns",
     "documentation-lookup",
     "dynamic-workflow-mode",

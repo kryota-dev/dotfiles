@@ -44,7 +44,7 @@ Before running `chezmoi apply` on macOS:
 1. **1Password desktop app** installed and signed in.
 2. **CLI integration enabled**: 1Password → Settings → Developer → "Integrate with 1Password CLI".
 3. **1Password CLI (`op`)** installed: `brew install --cask 1password-cli`.
-4. All four vault items listed below exist in the `kryota.dev` vault.
+4. All three vault items listed below exist in the `kryota.dev` vault.
 
 ---
 
@@ -91,19 +91,6 @@ Used by the `exa` user-scope Claude Code MCP server. The rendered file sets `EXA
 
 Used by the `firecrawl` user-scope Claude Code MCP server. Sets `FIRECRAWL_API_KEY` in the same file.
 
-### 4. `Dotfiles - OpenRouter API`
-
-| Attribute | Value |
-|-----------|-------|
-| Vault | `kryota.dev` |
-| Item title | `Dotfiles - OpenRouter API` |
-| Field reference | `credential` |
-| op:// URI | `op://kryota.dev/Dotfiles - OpenRouter API/credential` |
-| Rendered to | `~/.config/zsh/dmux-secrets.zsh` (`private_dmux-secrets.zsh.tmpl`) |
-| File mode | `0600` |
-
-Used by dmux's AI features (smart branch slugs, AI commit messages, pane-state analysis, `aiMerge`). Sets `OPENROUTER_API_KEY`.
-
 ---
 
 ## What breaks when an item is missing or renamed
@@ -113,9 +100,8 @@ Used by dmux's AI features (smart branch slugs, AI commit messages, pane-state a
 | `Dotfiles - AWS Config` | `chezmoi apply` exits 1 at the validation gate | `~/.aws/config` not written; AWS CLI unusable |
 | `Dotfiles - Exa API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; exa MCP server starts but fails to authenticate |
 | `Dotfiles - Firecrawl API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; firecrawl MCP server starts but fails to authenticate |
-| `Dotfiles - OpenRouter API` | `chezmoi apply` exits 1 at the validation gate | `dmux-secrets.zsh` not rendered; dmux AI features unavailable |
 
-Because the gate checks all four items before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
+Because the gate checks all three items before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
 
 ---
 
@@ -130,27 +116,23 @@ The templates use chezmoi's `onepasswordRead` function:
 # private_claude-secrets.zsh.tmpl
 EXA_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential" | squote }}
 FIRECRAWL_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential" | squote }}
-
-# private_dmux-secrets.zsh.tmpl
-OPENROUTER_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - OpenRouter API/credential" | squote }}
 ```
 
 Key points:
 - Values are rendered at `chezmoi apply` time only — never stored in the repo.
 - The `private_` chezmoi prefix ensures all rendered files are written with mode `0600`.
 - API keys are wrapped in `squote` (single-quote), so a key containing `$` or backticks cannot trigger shell expansion when the file is sourced.
-- The rendered `.zsh` files use unset variables (no `export`) so the values do not leak into every child process of the interactive shell. The launcher functions in `claude.zsh` and `dmux.zsh` re-export them scoped to their subprocess.
+- The rendered `.zsh` files use unset variables (no `export`) so the values do not leak into every child process of the interactive shell. The launcher functions in `claude.zsh` re-export them scoped to their subprocess.
 
 ---
 
 ## CI exclusions
 
-`setup-validation.yml` excludes all 1Password-dependent files before running `chezmoi apply` in CI. The following 6 files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
+`setup-validation.yml` excludes all 1Password-dependent files before running `chezmoi apply` in CI. The following 5 files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
 
 ```
 home/private_dot_aws/config.tmpl
 home/dot_config/zsh/private_claude-secrets.zsh.tmpl
-home/dot_config/zsh/private_dmux-secrets.zsh.tmpl
 home/run_once_before_00-install-prerequisites.sh.tmpl
 home/run_onchange_before_10-brew-bundle.sh.tmpl
 home/run_once_after_11-validate-1password.sh.tmpl

@@ -10,7 +10,7 @@
 
 ## 複数の個別ダウンロードではなく単一 tarball キャッシュ
 
-**判断:** 採用した <!-- FACT:ecc-skill-count -->127<!-- /FACT --> の ECC スキルと ECC フックランタイムはすべて `.chezmoiexternal.toml` に個別エントリとして宣言されていますが、各エントリは同一の tarball URL（`[ecc].commit` でピンされた ECC アーカイブ）を指しています。同様に、17 の Anthropic システムスキルもすべて同じ `anthropics/skills` アーカイブ URL を参照しています。
+**判断:** 採用した <!-- FACT:ecc-skill-count -->126<!-- /FACT --> の ECC スキルと ECC フックランタイムはすべて `.chezmoiexternal.toml` に個別エントリとして宣言されていますが、各エントリは同一の tarball URL（`[ecc].commit` でピンされた ECC アーカイブ）を指しています。同様に、17 の Anthropic システムスキルもすべて同じ `anthropics/skills` アーカイブ URL を参照しています。
 
 **なぜ:** chezmoi は外部アーカイブを URL の SHA-256 をキーとしてキャッシュします。複数のエントリが同一 URL を共有する場合、chezmoi は tarball を一度だけダウンロードしてキャッシュからすべてのエントリを満たします。各スキルを個別 URL からフェッチする代替案では、`chezmoi apply` のたびにスキルごとに 1 回（合計で数百回）のネットワーク通信が必要となり、低速・従量制の回線ではインストールが遅くなり不安定になります。
 
@@ -54,9 +54,9 @@ Renovate の `customManager` 正規表現については [externals-and-pinning.
 
 **なぜ:** 2 つの並列設定ディレクトリを管理する代替案では、設定変更のたびに二重作業が必要となり、必然的にアカウント間でドリフトが生じます。個人セッションと作業セッションで正当に異なる唯一のものが実行時の状態（セッション履歴、ガバナンス DB、ECC 状態、CLV2 インスティンクト、キャッシュ）であるため、適切な分割は「設定は単一 SSOT、状態は 2 つの独立したツリー」です。
 
-環境変数メカニズム（`CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`）は最も軽量なシームです。Claude Code 自体への変更も、設定ファイルのアカウントごとのコピーも、ランタイムの設定マージロジックも不要です。同じ env パターンが dmux にも適用されます（`dmux-r06` は専用の `TMUX_TMPDIR` を設定し、2 つのアカウントのセッションが衝突しないようにします）。
+環境変数メカニズム（`CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`）は最も軽量なシームです。Claude Code 自体への変更も、設定ファイルのアカウントごとのコピーも、ランタイムの設定マージロジックも不要です。
 
-このモデルのリスクは、3 か所（`claude.zsh` の `_claude_with_home`、`dmux.zsh` の `dmux-r06`、`codex.zsh` の `cdx-r06`）でアカウントごとの env セットが定義されることです。`dmux.zsh` のコメントはこれを明示的に同期要件として記載しています。これは受け入れられた重複であり、変更が稀なセットに対する代替案（3 か所から呼ばれる共有 env 構築関数）は、不必要な間接性を追加するだけです。
+このモデルのリスクは、2 か所（`claude.zsh` の `_claude_with_home` と `codex.zsh` の `cdx-r06`）でアカウントごとの env セットが定義されることです。これは受け入れられた重複であり、変更が稀なセットに対する代替案（両方から呼ばれる共有 env 構築関数）は、不必要な間接性を追加するだけです。
 
 アカウントごとの全 env 変数とエイリアスマトリクスについては [account-isolation.ja.md](../agents/account-isolation.ja.md) を参照してください。
 
@@ -64,7 +64,7 @@ Renovate の `customManager` 正規表現については [externals-and-pinning.
 
 ## シークレットはソース（export なし）、サブプロセスにスコープして再 export
 
-**判断:** 1Password レンダリングのキーファイル（`~/.config/zsh/claude-secrets.zsh`、`dmux-secrets.zsh`）は `export` なしでインタラクティブシェルにソースされます。ランチャー関数（`_claude_with_home`、`dmux`、`dmux-r06`）が特定のサブプロセス呼び出しにスコープしてキーをインラインで再 export します。
+**判断:** 1Password レンダリングのキーファイル（`~/.config/zsh/claude-secrets.zsh`）は `export` なしでインタラクティブシェルにソースされます。ランチャー関数（`_claude_with_home`）が特定のサブプロセス呼び出しにスコープしてキーをインラインで再 export します。
 
 **なぜ:** ソースされたファイル内の `export` は、セッションの存続期間中、インタラクティブシェルのすべての子プロセス——すべてのサブシェル、すべての外部コマンド、すべてのバックグラウンドジョブ——にキーを漏洩させます。不正プロセスや誤った `env` ログがプロセス環境をキャプチャすれば、キーが露出します。
 

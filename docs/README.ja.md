@@ -34,7 +34,7 @@
 | ドキュメント | 説明 |
 |-------------|------|
 | [AI エージェント層の概要](agents/overview.ja.md) | デュアルハーネス（Claude Code + Codex）× デュアルアカウント（default + r06）マトリクス、共有ルールと SSOT スキル層 |
-| [アカウント分離: エイリアス・env・tmux ソケット](agents/account-isolation.ja.md) | アカウント別 env 変数表、完全なエイリアスマトリクス、`_claude_with_home`、dmux ソケットの注意点 |
+| [アカウント分離: エイリアス・env・tmux ソケット](agents/account-isolation.ja.md) | アカウント別 env 変数表、完全なエイリアスマトリクス、`_claude_with_home` |
 | [Claude Code ハーネス設定](agents/claude-code.ja.md) | `settings.json`、ECC フックフォーク、CLV2 オブザーバーの配線、3 行ステータスライン、日本語レビューサブエージェント |
 | [Codex CLI ハーネス設定](agents/codex.ja.md) | デュアル `CODEX_HOME` アカウント、`hooks.json`、`shared.config.toml` SSOT、gateguard |
 | [スキルライブラリと出自分類](agents/skills-provenance.ja.md) | 5 分類（curated/external/system/evolved/unmanaged）とスキル追加手順 |

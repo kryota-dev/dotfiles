@@ -46,7 +46,7 @@ flowchart TD
 | シェル環境 | `.zshrc` ロード順序、sheldon 遅延ロード、starship、per-account zsh エイリアス | [shell-environment.ja.md](shell-environment.ja.md) |
 | 開発ツールチェーン | mise バージョンピン、`Brewfile` + `.brewfile-linux-exclude`、git 1Password 署名、gitleaks | [dev-tooling.ja.md](dev-tooling.ja.md) |
 | AI エージェント層（概要） | デュアルハーネス × デュアルアカウントマトリクス、SSOT スキルライブラリ、共有ルール層 | [agents/overview.ja.md](../agents/overview.ja.md) |
-| アカウント分離 | per-account 環境変数、`_claude_with_home`、Codex `CODEX_HOME`、dmux TMUX_TMPDIR | [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) |
+| アカウント分離 | per-account 環境変数、`_claude_with_home`、Codex `CODEX_HOME` | [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) |
 | Claude Code ハーネス | `settings.json`、ECC フック、CLV2 オブザーバー、statusline、レビューサブエージェント | [agents/claude-code.ja.md](../agents/claude-code.ja.md) |
 | Codex CLI ハーネス | デュアル `CODEX_HOME`、`shared.config.toml`、`hooks.json`、gateguard | [agents/codex.ja.md](../agents/codex.ja.md) |
 | スキルプロベナンス | 5 カテゴリ分類、curated vs ECC スキルの追加方法、`skill_provenance.bats` | [agents/skills-provenance.ja.md](../agents/skills-provenance.ja.md) |
@@ -104,6 +104,6 @@ flowchart TD
 
 ### Secrets & アカウント分離
 
-シークレット値は 1Password vault にのみ存在します。chezmoi の `private_` プレフィックスにより、apply 時に 0600 ファイルとしてレンダリングされます。ソーステンプレートには `op://` 参照のみが含まれます。per-account 分離は実行時に環境変数（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`）と、dmux の場合は専用の `TMUX_TMPDIR` ソケットによって強制されます。
+シークレット値は 1Password vault にのみ存在します。chezmoi の `private_` プレフィックスにより、apply 時に 0600 ファイルとしてレンダリングされます。ソーステンプレートには `op://` 参照のみが含まれます。per-account 分離は実行時に環境変数（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`）によって強制されます。
 
 [explanation/secrets-and-isolation.ja.md](../explanation/secrets-and-isolation.ja.md) および [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) を参照してください。

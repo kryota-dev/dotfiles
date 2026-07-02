@@ -115,14 +115,13 @@ Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Br
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
-Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the four required vault references:
+Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the three required vault references:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
-- `op://kryota.dev/Dotfiles - OpenRouter API/credential`
 
-Any failure exits non-zero, which aborts the after-phase. The item list here must stay in sync with what `claude-secrets.zsh`, `dmux-secrets.zsh`, and the AWS config template actually consume.
+Any failure exits non-zero, which aborts the after-phase. The item list here must stay in sync with what `claude-secrets.zsh` and the AWS config template actually consume.
 
 ### 12 — setup-mise (`run_onchange`, after)
 

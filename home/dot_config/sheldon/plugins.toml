@@ -47,11 +47,6 @@ local = "~/.config/zsh"
 use = ["codex.zsh"]
 apply = ["defer"]
 
-[plugins.dmux-helpers]
-local = "~/.config/zsh"
-use = ["dmux.zsh"]
-apply = ["defer"]
-
 [plugins.functions]
 local = "~/.config/zsh"
 use = ["functions.zsh"]

@@ -20,7 +20,6 @@ Secret values live exclusively in the 1Password `kryota.dev` vault. They never a
             │  onepasswordRead / op read
             ▼
 ~/.config/zsh/claude-secrets.zsh    (mode 0600, private_ prefix)
-~/.config/zsh/dmux-secrets.zsh      (mode 0600, private_ prefix)
 ~/.aws/config                        (mode 0600, private_ prefix)
 ```
 
@@ -29,7 +28,6 @@ Secret values live exclusively in the 1Password `kryota.dev` vault. They never a
 The source `.tmpl` files contain only `op://` references:
 
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential"` and `onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential"`
-- `home/dot_config/zsh/private_dmux-secrets.zsh.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - OpenRouter API/credential"`
 - `home/private_dot_aws/config.tmpl` — a single `onepasswordRead "op://kryota.dev/Dotfiles - AWS Config/notesPlain"` call that renders the entire file from a 1Password Secure Note
 
 The `private_` chezmoi prefix is the mechanism that enforces `0600` on the destination file. No additional `chmod` is needed.
@@ -49,13 +47,12 @@ This lifecycle script runs once on macOS and aborts `chezmoi apply` with a non-z
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
-- `op://kryota.dev/Dotfiles - OpenRouter API/credential`
 
 If `op` is not installed, not authenticated, or an item cannot be read, `chezmoi apply` fails fast. Note that `run_once_after_11` is an AFTER-phase script — home has already been mutated by the time it runs. The actual fail-fast paths are: (1) `onepasswordRead` inside `.tmpl` files aborts apply during template render, before those files are written; and (2) `run_once_after_11` acts as a fail-fast gate before the heavier after-phase provisioning (mise, MCP, CLV2, etc.). The intent is that a partially-provisioned machine with missing secrets is worse than a clean abort at either of those points. The script is macOS-only (`{{ if ne .chezmoi.os "darwin" }}` exits early) because CI runs on Ubuntu without a 1Password installation.
 
 ### Runtime-graceful: sourcing with `[[ -r ... ]]` guards
 
-At shell startup, `claude.zsh` and `dmux.zsh` source the rendered secrets files only if they exist and are readable:
+At shell startup, `claude.zsh` sources the rendered secrets file only if it exists and is readable:
 
 ```zsh
 [[ -r "${HOME}/.config/zsh/claude-secrets.zsh" ]] && source "${HOME}/.config/zsh/claude-secrets.zsh"
@@ -94,8 +91,6 @@ The subprocess-scoped re-export means the key is available exactly where it is n
 
 The `${VAR:-}` default (empty string when the variable is unset) ensures the re-export is safe even when the secrets file was never sourced — the MCP servers receive an empty key rather than the launcher function erroring.
 
-**dmux follows the same pattern.** `dmux.zsh` sources both `dmux-secrets.zsh` and `claude-secrets.zsh` (the latter because dmux launches `claude` without `_claude_with_home`). The `dmux` and `dmux-r06` wrapper functions re-export all three keys (`OPENROUTER_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`) scoped to the `command dmux` invocation.
-
 ---
 
 ## How CI excludes secret files before `chezmoi apply`
@@ -108,7 +103,6 @@ CI (`setup-validation.yml`) runs `chezmoi apply` on macOS and Ubuntu without acc
     for f in \
       home/private_dot_aws/config.tmpl \
       home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
-      home/dot_config/zsh/private_dmux-secrets.zsh.tmpl \
       home/run_once_before_00-install-prerequisites.sh.tmpl \
       home/run_onchange_before_10-brew-bundle.sh.tmpl \
       home/run_once_after_11-validate-1password.sh.tmpl; do
@@ -149,7 +143,7 @@ _claude_with_home() {
 
 The same single subprocess boundary that isolates ECC state, CLV2 instincts, and gateguard state by account also confines the API keys to that subprocess. Neither concern requires a separate mechanism.
 
-`dmux-r06` adds the Codex account env (`CODEX_HOME`) and the dedicated tmux socket (`TMUX_TMPDIR`) to the same env-var set, extending the pattern to the multiplexer layer. The three places that define the per-account env set (`_claude_with_home`, `dmux-r06`, `cdx-r06`) must stay in sync; this is documented in `dmux.zsh` comments and is the main maintenance burden of the isolation model.
+`cdx-r06` adds the Codex account env (`CODEX_HOME`) to the same env-var set, extending the pattern to the Codex CLI. The two places that define the per-account env set (`_claude_with_home`, `cdx-r06`) must stay in sync; this is the main maintenance burden of the isolation model.
 
 The r06 config directory (`~/.claude-r06`) is entirely symlinks pointing back to `~/.claude` — settings, statusline, agents, commands, skills — so config is one SSOT while state trees diverge. Secrets are not per-account in the config-directory sense: both accounts receive the same API keys (the same 1Password items). Account isolation is about state (sessions, governance, caches), not about using different keys per account.
 

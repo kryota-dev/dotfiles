@@ -110,7 +110,7 @@
 
 | ソース | 件数 | バージョンピン |
 |---|---|---|
-| ECC（`affaan-m/ECC`） | <!-- FACT:ecc-skill-count -->127<!-- /FACT --> スキル | `.chezmoidata.toml` の `[ecc].commit` |
+| ECC（`affaan-m/ECC`） | <!-- FACT:ecc-skill-count -->126<!-- /FACT --> スキル | `.chezmoidata.toml` の `[ecc].commit` |
 | Anthropic システムスキル | 17 スキル | `.chezmoidata.toml` の `[skills].anthropic_commit` |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |

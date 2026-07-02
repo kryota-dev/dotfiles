@@ -20,7 +20,7 @@ The block contains three categories of entries (examples; see `config.toml` for 
 
 - **Runtime languages** pinned to exact versions (e.g. `node`, `python`, `ruby`, `go`, `deno`, `rust`).
 - **Registry-resolvable CLI tools** using a bare key (e.g. `gh`, `gitleaks`, `shellcheck`, `starship`, `tmux`).
-- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`, `"npm:dmux"`, `"npm:happy"`).
+- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`, `"npm:happy"`).
 
 ### `[settings]` block
 
@@ -189,7 +189,7 @@ Key settings:
 ## Cross-references
 
 - [Lifecycle scripts: ordering & trigger model](lifecycle-scripts.md) — `run_onchange_before_10` (brew bundle) and `run_onchange_after_12` (mise install) are triggered by the hashes of `dot_Brewfile` and `mise/config.toml` respectively
-- [zsh startup, prompt & shell modules](shell-environment.md) — `.zshrc` activates mise, direnv, starship, and zoxide; `dmux.zsh` and `codex.zsh` prepend the codex PATH shim
+- [zsh startup, prompt & shell modules](shell-environment.md) — `.zshrc` activates mise, direnv, starship, and zoxide
 - [CI architecture & test suite](../contributing/ci-and-tests.md) — CI duplicates the `.brewfile-linux-exclude` filter and caches mise installs on `config.toml` hash
 - [1Password secrets onboarding](../getting-started/secrets-1password.md) — the 1Password setup that enables SSH commit signing
-- [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md) — the dmux codex PATH shim and gateguard Codex gate that bridge into the AI-agent subsystem
+- [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md) — the gateguard Codex gate that bridges into the AI-agent subsystem

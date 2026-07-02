@@ -15,7 +15,6 @@ The result is a 2 × 2 matrix of harness × account combinations, all wired from
 |---|---|---|
 | **Claude Code** | `~/.claude` — alias `cld` | `~/.claude-r06` — alias `cld-r06` |
 | **Codex CLI** | `~/.codex` — alias `cdx` | `~/.codex-r06` — alias `cdx-r06` |
-| **dmux** | `dmux` (default tmux server) | `dmux-r06` (dedicated `~/.dmux-r06` socket) |
 
 Each cell represents a fully isolated runtime environment: its own session history, governance database, continuous-learning instincts, bash-command audit log, and MCP state. The config, however, is shared — both accounts within a harness point at the same deployed config files via symlinks.
 
@@ -93,7 +92,7 @@ Details of every env var and alias are in [account-isolation.md](account-isolati
 
 | Topic | Doc |
 |---|---|
-| Per-account env var table, alias matrix, dmux socket isolation | [account-isolation.md](account-isolation.md) |
+| Per-account env var table, alias matrix | [account-isolation.md](account-isolation.md) |
 | Claude Code harness: hooks, ECC, CLV2, statusline | [claude-code.md](claude-code.md) |
 | Codex CLI harness: profile config, hooks, account setup | [codex.md](codex.md) |
 | Skill taxonomy, curated inventory, external fetching, provenance enforcement | [skills-provenance.md](skills-provenance.md) |

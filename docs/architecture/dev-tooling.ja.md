@@ -20,7 +20,7 @@
 
 - **ランタイム言語** — 正確なバージョンにピン（例: `node`、`python`、`ruby`、`go`、`deno`、`rust`）
 - **レジストリ解決可能な CLI ツール** — ベアキーを使用（例: `gh`、`gitleaks`、`shellcheck`、`starship`、`tmux`）
-- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`、`"npm:dmux"`、`"npm:happy"`）
+- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`、`"npm:happy"`）
 
 ### `[settings]` ブロック
 
@@ -189,7 +189,7 @@ regexes = [
 ## 関連ドキュメント
 
 - [ライフサイクルスクリプト: 実行順序とトリガーモデル](lifecycle-scripts.ja.md) — `run_onchange_before_10`（brew bundle）と `run_onchange_after_12`（mise install）はそれぞれ `dot_Brewfile` と `mise/config.toml` のハッシュによってトリガーされる
-- [zsh スタートアップ、プロンプト、シェルモジュール](shell-environment.ja.md) — `.zshrc` が mise、direnv、starship、zoxide を activate する; `dmux.zsh` と `codex.zsh` が codex PATH シムをプリペンドする
+- [zsh スタートアップ、プロンプト、シェルモジュール](shell-environment.ja.md) — `.zshrc` が mise、direnv、starship、zoxide を activate する
 - [CI アーキテクチャとテストスイート](../contributing/ci-and-tests.ja.md) — CI が `.brewfile-linux-exclude` フィルタを複製し、`config.toml` ハッシュで mise インストールをキャッシュする
 - [1Password シークレットのオンボーディング](../getting-started/secrets-1password.ja.md) — SSH コミット署名を有効にする 1Password セットアップ
-- [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) — AI エージェントサブシステムに橋渡しする dmux codex PATH シムと gateguard Codex ゲート
+- [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) — AI エージェントサブシステムに橋渡しする gateguard Codex ゲート
