@@ -20,7 +20,7 @@ flowchart TD
     SH["シェル & ツールチェーン\n.zshrc · sheldon · starship\nmise · Brewfile · git"]
     AI["AI エージェント層\n~/.agents/skills · ~/.claude · ~/.codex\nECC · CLV2 · gateguard"]
     CI["CI & 品質ゲート\nGitHub Actions · make lint/test\nbats · setup-validation"]
-    SEC["Secrets & アカウント分離\n1Password → 0600 ファイル\nper-account 環境変数 · tmux ソケット"]
+    SEC["Secrets & アカウント分離\n1Password → 0600 ファイル\nper-account 環境変数"]
 
     BS -->|"chezmoi をインストールし\nchezmoi init --apply を実行"| CE
     CE -->|"テンプレートをレンダリング\nexternals を取得"| LS
@@ -29,7 +29,7 @@ flowchart TD
     LS -->|"brew bundle\nmise install\nsheldon lock"| SH
     LS -->|"MCP サーバーを接続\nCLV2 を有効化"| AI
     SEC -.->|"op:// を apply 時にレンダリング"| CE
-    SEC -.->|"per-account 環境変数\nTMUX_TMPDIR 分離"| AI
+    SEC -.->|"per-account 環境変数"| AI
     CI -.->|"make lint / make test-bats\nsetup-validation.yml"| CE
     CI -.->|"skill_provenance.bats"| AI
 ```

@@ -22,8 +22,10 @@
 # dmux retired (PR removing the dmux provisioning layer): the tool is no longer used,
 # so the deployed shim dir, zsh module, rendered secrets file, and the ECC
 # dmux-workflows skill (would otherwise be left behind as an unmanaged skill) are
-# removed on apply.
+# removed on apply. ~/.dmux-r06 (the runtime tmux socket dir created by the removed
+# dmux-r06 wrapper, never chezmoi-managed) is included so every machine is cleaned up.
 .config/dmux
 .config/zsh/dmux.zsh
 .config/zsh/dmux-secrets.zsh
 .agents/skills/dmux-workflows
+.dmux-r06

@@ -21,7 +21,8 @@ ghq_user = "kryota-dev"
   # vanished upstream between analysis and the pinned commit and are dropped
   # (agent-self-evaluation, brand-discovery, competitive-platform-analysis,
   # competitive-report-structure, config-gc, ml-adoption-playbook — no rename rescue;
-  # functional substitutes remain in the list). .chezmoiexternal.toml ranges over this
+  # functional substitutes remain in the list). dmux-workflows was later retired with
+  # the dmux provisioning removal, leaving 126 adopted skills. .chezmoiexternal.toml ranges over this
   # list to fetch each skill from the same ECC tarball (one cached download, version-locked
   # to `commit` above).
   skills = [

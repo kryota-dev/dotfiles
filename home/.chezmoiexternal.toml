@@ -134,7 +134,8 @@
     include = ["*/scripts/hooks/**", "*/scripts/lib/**"]
     refreshPeriod = "168h"
 
-# ECC adopted skills (#46/#15) — the reconciled 127-skill set lives in .chezmoidata.toml
+# ECC adopted skills (#46/#15) — the reconciled skill set (126 after the dmux-workflows
+# retirement) lives in .chezmoidata.toml
 # [ecc].skills. chezmoi ranges over it to emit one external entry per skill, all pulling
 # from the SAME ECC tarball as the hook runtime above (cached by URL SHA256 → one download)
 # and version-locked to [ecc].commit. Mirrors the anthropics/skills archive+include pattern;

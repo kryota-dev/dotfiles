@@ -533,6 +533,21 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_onchange_after_12-setup-mise.sh.tmpl" ]
 }
 
+@test "dmux provisioning is retired (guard against reintroduction)" {
+  # dmux was removed entirely (PR #229); none of its source artefacts may come back.
+  [ ! -e "${HOME_DIR}/dot_config/dmux" ]
+  [ ! -e "${HOME_DIR}/dot_config/zsh/dmux.zsh" ]
+  [ ! -e "${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl" ]
+  run grep -F '"npm:dmux"' "${HOME_DIR}/dot_config/mise/config.toml"
+  [ "$status" -ne 0 ]
+  run grep -F 'dmux-helpers' "${HOME_DIR}/dot_config/sheldon/plugins.toml"
+  [ "$status" -ne 0 ]
+  # Deployed leftovers must stay declared for cleanup on every machine.
+  grep -qFx '.config/dmux' "${HOME_DIR}/.chezmoiremove"
+  grep -qFx '.agents/skills/dmux-workflows' "${HOME_DIR}/.chezmoiremove"
+  grep -qFx '.dmux-r06' "${HOME_DIR}/.chezmoiremove"
+}
+
 @test "mcp setup registers all servers as user scope for every account config dir" {
   local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
   [ -f "$script" ]

@@ -20,7 +20,7 @@ flowchart TD
     SH["Shell & tooling\n.zshrc · sheldon · starship\nmise · Brewfile · git"]
     AI["AI-agent layer\n~/.agents/skills · ~/.claude · ~/.codex\nECC · CLV2 · gateguard"]
     CI["CI & quality gates\nGitHub Actions · make lint/test\nbats · setup-validation"]
-    SEC["Secrets & account isolation\n1Password → 0600 files\nper-account env vars · tmux sockets"]
+    SEC["Secrets & account isolation\n1Password → 0600 files\nper-account env vars"]
 
     BS -->|"installs chezmoi, then\nchezmoi init --apply"| CE
     CE -->|"renders templates\nfetches externals"| LS
@@ -29,7 +29,7 @@ flowchart TD
     LS -->|"brew bundle\nmise install\nsheldon lock"| SH
     LS -->|"wires MCP servers\nenables CLV2"| AI
     SEC -.->|"op:// rendered at apply"| CE
-    SEC -.->|"per-account env\nTMUX_TMPDIR isolation"| AI
+    SEC -.->|"per-account env vars"| AI
     CI -.->|"make lint / make test-bats\nsetup-validation.yml"| CE
     CI -.->|"skill_provenance.bats"| AI
 ```

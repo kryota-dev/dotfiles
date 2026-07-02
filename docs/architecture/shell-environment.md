@@ -6,7 +6,7 @@
 
 This document covers the interactive shell stack: the two-file zsh startup sequence, the synchronous-versus-deferred split, the sheldon plugin manifest, per-domain `.zsh` modules, and adjacent terminal config (tmux, readline, vim, starship).
 
-AI-agent launcher aliases (`cld`, `cld-r06`, `cdx`, …) are covered in [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md).
+AI-agent launcher aliases (`cld`, `cld-r06`, `cdx`, …) are covered in [Account isolation: aliases & env](../agents/account-isolation.md).
 
 ---
 
@@ -219,17 +219,17 @@ Configured at `home/dot_vimrc`. Defaults: UTF-8 encoding, 2-space `expandtab`, i
 
 ## Secrets pattern
 
-A 0600 file is rendered from 1Password at `chezmoi apply` and sourced by the AI-agent modules:
+A 0600 file is rendered from 1Password at `chezmoi apply` and sourced by `claude.zsh`:
 
 - `~/.config/zsh/claude-secrets.zsh` — `EXA_API_KEY` and `FIRECRAWL_API_KEY` (MCP servers for the Claude Code harness)
 
-It uses `squote` on the `onepasswordRead` output so keys containing `$` or backticks cannot expand. The file is sourced (not exported) in `claude.zsh`, keeping keys out of the general shell environment. The launcher helpers re-export them scoped inline to the agent subprocess only. Full details are in [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md) and [1Password secrets onboarding](../getting-started/secrets-1password.md).
+It uses `squote` on the `onepasswordRead` output so keys containing `$` or backticks cannot expand. The file is sourced (not exported) in `claude.zsh`, keeping keys out of the general shell environment. The launcher helpers re-export them scoped inline to the agent subprocess only. Full details are in [Account isolation: aliases & env](../agents/account-isolation.md) and [1Password secrets onboarding](../getting-started/secrets-1password.md).
 
 ---
 
 ## Cross-references
 
 - [Lifecycle scripts: ordering & trigger model](lifecycle-scripts.md) — script 40 locks the sheldon plugin set; script 50 sets the login shell these configs assume
-- [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md) — the AI-agent launcher aliases defined in `claude.zsh`, `codex.zsh`
+- [Account isolation: aliases & env](../agents/account-isolation.md) — the AI-agent launcher aliases defined in `claude.zsh`, `codex.zsh`
 - [Developer toolchain: mise, Brewfile & git](dev-tooling.md) — mise installs mise/direnv/starship/zoxide that `.zshrc` activates
 - [1Password secrets onboarding](../getting-started/secrets-1password.md) — the vault items rendered into the 0600 secrets files

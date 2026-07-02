@@ -6,7 +6,7 @@
 
 このドキュメントはインタラクティブシェルスタックを扱います。zsh の2ファイル起動シーケンス、同期ロードと遅延ロードの分担、sheldon プラグインマニフェスト、ドメイン別 `.zsh` モジュール、および隣接するターミナル設定（tmux、readline、vim、starship）を説明します。
 
-AI エージェントランチャーエイリアス（`cld`、`cld-r06`、`cdx` など）は [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) を参照してください。
+AI エージェントランチャーエイリアス（`cld`、`cld-r06`、`cdx` など）は [アカウント分離: エイリアス、env](../agents/account-isolation.ja.md) を参照してください。
 
 ---
 
@@ -219,17 +219,17 @@ macOS のみの追加（`{{ if eq .chezmoi.os "darwin" }}` 内）:
 
 ## シークレットパターン
 
-`chezmoi apply` 時に 1Password からレンダリングされる 0600 ファイルがあり、AI エージェントモジュールにソースされます。
+`chezmoi apply` 時に 1Password からレンダリングされる 0600 ファイルがあり、`claude.zsh` にソースされます。
 
 - `~/.config/zsh/claude-secrets.zsh` — `EXA_API_KEY` と `FIRECRAWL_API_KEY`（Claude Code ハーネスの MCP サーバー用）
 
-`onepasswordRead` 出力に `squote` を適用しており、`$` やバックティックを含むキーが展開されません。ファイルは `claude.zsh` でソース（export ではなく）されており、キーは一般シェル環境から隔離されています。ランチャーヘルパーはエージェントサブプロセスへのインラインスコープでのみ再 export します。詳細は [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) と [1Password シークレットのオンボーディング](../getting-started/secrets-1password.ja.md) を参照してください。
+`onepasswordRead` 出力に `squote` を適用しており、`$` やバックティックを含むキーが展開されません。ファイルは `claude.zsh` でソース（export ではなく）されており、キーは一般シェル環境から隔離されています。ランチャーヘルパーはエージェントサブプロセスへのインラインスコープでのみ再 export します。詳細は [アカウント分離: エイリアス、env](../agents/account-isolation.ja.md) と [1Password シークレットのオンボーディング](../getting-started/secrets-1password.ja.md) を参照してください。
 
 ---
 
 ## 関連ドキュメント
 
 - [ライフサイクルスクリプト: 実行順序とトリガーモデル](lifecycle-scripts.ja.md) — スクリプト 40 が sheldon プラグインセットをロックし、スクリプト 50 がこれらの設定が前提とするログインシェルを設定
-- [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) — `claude.zsh`、`codex.zsh` で定義される AI エージェントランチャーエイリアス
+- [アカウント分離: エイリアス、env](../agents/account-isolation.ja.md) — `claude.zsh`、`codex.zsh` で定義される AI エージェントランチャーエイリアス
 - [開発ツールチェーン: mise、Brewfile、git](dev-tooling.ja.md) — `.zshrc` が activate する mise/direnv/starship/zoxide を mise がインストール
 - [1Password シークレットのオンボーディング](../getting-started/secrets-1password.ja.md) — 0600 シークレットファイルにレンダリングされる vault アイテム

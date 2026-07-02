@@ -34,7 +34,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 | Doc | Description |
 |-----|-------------|
 | [AI-agent layer overview](agents/overview.md) | Dual-harness (Claude Code + Codex) × dual-account (default + r06) matrix; shared-rule and SSOT skill layers |
-| [Account isolation: aliases, env & tmux sockets](agents/account-isolation.md) | Per-account env var table, full alias matrix, and `_claude_with_home` |
+| [Account isolation: aliases & env](agents/account-isolation.md) | Per-account env var table, full alias matrix, and `_claude_with_home` |
 | [Claude Code harness config](agents/claude-code.md) | `settings.json`, ECC hook forks, CLV2 observer wiring, the 3-line statusline, and the Japanese review subagents |
 | [Codex CLI harness config](agents/codex.md) | Dual `CODEX_HOME` accounts, `hooks.json`, `shared.config.toml` SSOT, and gateguard |
 | [Skill library & provenance taxonomy](agents/skills-provenance.md) | The 5-category taxonomy (curated/external/system/evolved/unmanaged) and how to add a skill |

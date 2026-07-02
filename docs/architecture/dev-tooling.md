@@ -192,4 +192,4 @@ Key settings:
 - [zsh startup, prompt & shell modules](shell-environment.md) — `.zshrc` activates mise, direnv, starship, and zoxide
 - [CI architecture & test suite](../contributing/ci-and-tests.md) — CI duplicates the `.brewfile-linux-exclude` filter and caches mise installs on `config.toml` hash
 - [1Password secrets onboarding](../getting-started/secrets-1password.md) — the 1Password setup that enables SSH commit signing
-- [Account isolation: aliases, env & tmux sockets](../agents/account-isolation.md) — the gateguard Codex gate that bridges into the AI-agent subsystem
+- [Account isolation: aliases & env](../agents/account-isolation.md) — the gateguard Codex gate that bridges into the AI-agent subsystem

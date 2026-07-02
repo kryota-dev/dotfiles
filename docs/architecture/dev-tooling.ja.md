@@ -192,4 +192,4 @@ regexes = [
 - [zsh スタートアップ、プロンプト、シェルモジュール](shell-environment.ja.md) — `.zshrc` が mise、direnv、starship、zoxide を activate する
 - [CI アーキテクチャとテストスイート](../contributing/ci-and-tests.ja.md) — CI が `.brewfile-linux-exclude` フィルタを複製し、`config.toml` ハッシュで mise インストールをキャッシュする
 - [1Password シークレットのオンボーディング](../getting-started/secrets-1password.ja.md) — SSH コミット署名を有効にする 1Password セットアップ
-- [アカウント分離: エイリアス、env、tmux ソケット](../agents/account-isolation.ja.md) — AI エージェントサブシステムに橋渡しする gateguard Codex ゲート
+- [アカウント分離: エイリアス、env](../agents/account-isolation.ja.md) — AI エージェントサブシステムに橋渡しする gateguard Codex ゲート
