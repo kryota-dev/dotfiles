@@ -207,7 +207,7 @@ https://github.com/<OWNER>/<REPO>/commit/xxxxx
 4. **具体的な修正案を示す**: `[must]`や`[imo]`では可能な限りコード例やsuggestionを添える
 5. **テストケースの提案**: コード提案時はテストケース例も添えることがある
 6. **「思います」ではなく「思いました」**: kryota-devは「思いました」を一貫して使う
-7. **Co-Authored-By**: Claude Codeが生成に関わった場合、末尾に `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>` を付ける
+7. **署名・クレジットの禁止**: コメントに AI ツールのクレジット・署名（`Co-Authored-By` / `Generated with ...` 等）を付けない（`~/AGENTS.md` の global ルール準拠）
 
 ### アンチパターン（kryota-devが使わない表現）
 
@@ -234,7 +234,7 @@ https://github.com/<OWNER>/<REPO>/commit/xxxxx
 - Pending Reviewの確認・作成
 - GraphQLによる既存Pending Reviewへのコメント追加
 - レビューコメントの個別更新
-- 署名ルール（`Co-Authored-By`）
+- 署名・クレジットの禁止（`Co-Authored-By` 等を付けない）
 - jq使用時の注意点（`!`の問題回避）
 
 投稿時は必ず `/github-pr-comments` スキルを参照し、正しいAPIエンドポイントと手順でコメントを投稿すること。

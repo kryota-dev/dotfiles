@@ -18,36 +18,22 @@ skill inventory は次の 5 分類のいずれかに属する（`evolved` のみ
 
 なお `agent-browser` のように **CLI が specialized skill を runtime 配信する**ツールでは、discovery stub のみを `curated` で管理し、専用 skill（electron/slack/dogfood 等）は vendoring しない（`agent-browser skills get <name>` で version-matched に取得）。CLI 本体は mise で管理する（`npm:agent-browser`）。
 
-## 運用ルール
+## レビュー指摘の検証
 
-### 基本
+レビュアー（`cc-code-review` / `cc-security-review` / `codex` / 各サブエージェント）の指摘は、断定的でも誤っていることがある。対応前に必ず一次ソース（公式 doc / 実装実体 / 実挙動）で妥当性を検証する。否定的断定・仕様主張・「○○が無い」系は特に疑い、`WebFetch` 等で原文・実体・実挙動を確認し、覆ったら破棄して理由を残す。確認用サブエージェントの要約も鵜呑みにせず一次ソースで裏取りする。
 
-- **ファイルの転写・複製が必要な場合は、`cp` コマンドを使用すること**
-  - Read → Write によるトークン消費を避け、正確性を担保する
-  - 例: `cp source_file destination_file`
-- **常に日本語で対応すること**
-- **専門用語を積極的に使用すること**
-  - 一般的な表現に言い換えず、正確な技術用語・業界用語をそのまま用いる
-- **git の commit / push 操作を行う際は、事故防止のため、ユーザーに確認を取ってから行うこと**
-- **ファイルのリネーム時は `git mv` コマンドを使用し、Git 履歴を保持すること**
-  - 削除 → 新規作成ではなく、必ず `git mv old_name new_name` でリネームする
-- **ユーザーによる操作や承認が必要な場合は、通知音付きのプッシュ通知を配信して作業を即中断すること**
-  - 通知コマンド: `osascript -e 'display notification "<メッセージ>" with title "Claude Code" sound name "Glass"'`
-    - `<メッセージ>` には中断理由を簡潔に記述する（例: `1Password で git commit が失敗しました`）
-  - ユーザー操作が必要な場面の一例:
-    - `git commit` 時の1Passwordエラー
+## commit / PR / 公開物への記載禁止
 
-### ツール使用
+- **クレジット・署名を付けない**: commit message / PR 本文 / レビューコメントに、AI ツール（`happy` / `claude` / `Claude Code` / `Codex` 等）のクレジット・署名・`Co-Authored-By` trailer・"Generated with ..." 行を含めない。
+- **公開リポジトリに固有名を書かない**: **public リポジトリ**の issue / PR / コミット対象コードには、クライアント / 勤務先の固有名（製品名・組織名・workspace scope 名など）を書かず、汎用プレースホルダ（`<owner>/<repo>` / `@your-org/api` 等）を使う。作成前に固有名の混入を grep で確認し、既存の露出を見つけたら redact する。private リポジトリは対象外。
 
-- **GitHub 関連の指示や URL を受け取った際は、`gh`コマンドを使用すること**
-  - `gh`コマンドが使用できない場合は、ユーザーにトラブルシューティングを依頼してください
-- **GitHub の issue や PR、project の README に画像リンクがある場合は、`gh-asset` を使って画像をダウンロードして、その画像内の内容を含めて実装計画を作ること**
-  - `gh-asset download <asset_id> .claude/gh-assets`
-  - 参考: https://github.com/YuitoSato/gh-asset
-- **ユーザーから「Copilotにアサインして」と指示された際は、`copilot-swe-agent`をアサインすること**
+## web 検索ツールの使い分け
 
-### 開発サーバー
+web 上の情報が必要なときは、目的に応じて以下を使い分ける（利用可能な場合）:
 
-- **ターミナルセッションのトラブルを避けるため、開発サーバーの起動はユーザーに委任すること**（自動化された hook がガードレールを提供する harness では、そのツール固有の設定で緩和してよい）
+- **一般的な web 検索**: Firecrawl の検索（full-page 抽出・domain / source-type フィルタ）を既定とする。検索後に feedback を呼ぶと credit が還元される。
+- **意味・概念ベースの探索**: Exa の semantic（neural）search。キーワードが曖昧でも、意味の近い実装・記事・論文を見つけられる。
+- **特定 URL / サイトの全文取得・crawl・構造化抽出**: Firecrawl の scrape / crawl / extract（単一 URL の取得だけなら Exa の fetch でもよい）。
+- **フォールバック**: 上記 MCP が無い環境では harness 標準の web 検索（Claude Code では WebSearch）を使う。
 
 {{ includeTemplate "coding-standards.md" . }}
