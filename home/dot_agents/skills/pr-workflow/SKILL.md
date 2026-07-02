@@ -40,6 +40,8 @@ user-invocable: true
 | `standard` | 複数ファイル横断 or 新機能、テスト追加要、設計判断あり |
 | `large` | 仕様確定が必要 / 外部契約・migration・高ロールバック難度 / 影響広範 |
 
+**round-up default（fail-safe 分類）**: どの tier か迷う・境界上のときは、**必ず上位 tier に切り上げる**。誤分類は over-tiering（コスト増）側に倒し、危険な変更が light path を通過する miss を防ぐ。特に外部契約・migration・security surface（認証/認可/機密情報/外部通信）に触れる可能性があれば `standard` 以上とみなす。
+
 **operation variant**（path の重点を変える。`--operation` で override）:
 
 - `add-feature`: 新規追加。AC 網羅。
@@ -49,6 +51,8 @@ user-invocable: true
 - `mvp`: **scope gate**（最小で動く範囲に絞り、過剰実装を抑止）。
 
 **tier=large は auto-strict**（`--strict` を自動付与）。
+
+**mid-flight tier escalation（実装中の再分類）**: 分類は入口の 1 回で固定しない。`trivial`/`small` path の実装中に、**contract（外部 API/DB/UI 契約）・migration・security surface（認証/認可/機密情報/外部通信）への変更**が判明したら、その場で tier を **`standard` 以上へ引き上げ**、対応する重い path（`/sdd` + Phase 5 review 強化）へ切り替える。軽い path のまま危険な変更を通過させない（fail-safe）。escalation したら Phase 5 の `/multi-review` を必ず通す。
 
 ## Phase 1-4: tier 別 path
 
@@ -66,6 +70,8 @@ user-invocable: true
 - **PR が存在する状態で** `/multi-review`（cc-code-review + cc-security-review + codex 並列）を起動する。trivial/small は Phase 1-4 で `/create-pr` 済、standard/large は `/sdd` が PR 作成済。
 - **二重 review の扱い（決定: 併用＝役割分離）**: standard/large では `/sdd` 内蔵 review（=開発中の自己 review）と本 `/multi-review`（=最終 PR への独立 second opinion）を**役割分離で併用**する（置換・skip しない）。指摘は一次ソースで検証してから対応。
 - **（large の adversarial 強化）**: `/multi-review` 後に **adversarial verify protocol**（独立 reviewer 視点で MUST を反証し、過半が反証→棄却）を inline で 1 ラウンド追加する（外部 skill ではなく手順）。
+  - **recall sink 化を防ぐ（#224）**: 棄却は **一次ソースで根拠づけられた反証が過半** のときのみ。反証自体が不確実（裏取りできない）なら finding を **棄却せず残し user に届ける**（coverage 優先。Opus 4.8 は保守的指示に忠実で recall を落としやすいため、finding 段ではなく verification 段での取りこぼしを疑う）。
+  - **棄却ログ（可監査化＝軽量 recall 計測）**: 棄却した MUST は、**要約 + 棄却理由（一次ソース根拠）** を統合サマリー/PR の「棄却した指摘」節に必ず記録する。これにより「adversarial verify が何を落としたか」を human が毎回可視化・監査でき、recall sink 化の兆候を検知できる。黙って落とさない。
 
 ## Phase 6-7: PR resolution + CI
 
