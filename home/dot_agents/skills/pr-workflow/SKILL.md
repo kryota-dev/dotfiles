@@ -64,6 +64,7 @@ user-invocable: true
 ## Phase 5: review
 
 - **PR が存在する状態で** `/multi-review`（cc-code-review + cc-security-review + codex 並列）を起動する。trivial/small は Phase 1-4 で `/create-pr` 済、standard/large は `/sdd` が PR 作成済。
+- **aggregate-view review（#223, large tier）**: **`large` tier では `/multi-review --arch`** を使い、diff-scope の盲点（既存抽象との重複・不要な結合・意図した設計からの drift）を集約視点で検出する `architecture-reviewer` を別レイヤで走らせる。trivial/small/standard では走らせない（毎 PR は高コストなため。**per-PR コスト方針＝large / opt-in のときのみ**）。standard で必要と判断したときは明示的に `--arch` を付けて起動してよい。
 - **二重 review の扱い（決定: 併用＝役割分離）**: standard/large では `/sdd` 内蔵 review（=開発中の自己 review）と本 `/multi-review`（=最終 PR への独立 second opinion）を**役割分離で併用**する（置換・skip しない）。指摘は一次ソースで検証してから対応。
 - **（large の adversarial 強化）**: `/multi-review` 後に **adversarial verify protocol**（独立 reviewer 視点で MUST を反証し、過半が反証→棄却）を inline で 1 ラウンド追加する（外部 skill ではなく手順）。
 
