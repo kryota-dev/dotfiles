@@ -10,7 +10,7 @@
   "editor.cursorSmoothCaretAnimation": "on",
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.detectIndentation": false,
-  "editor.fontFamily": "Moralerspace Neon, "Ricty Diminished", Menlo, MesloLGS NF, 'Courier New', monospace",
+  "editor.fontFamily": "Moralerspace Neon, "Ricty Diminished", Menlo, Symbols Nerd Font Mono, 'Courier New', monospace",
   "editor.fontLigatures": true,
   "editor.formatOnPaste": true,
   "editor.formatOnSave": true,
