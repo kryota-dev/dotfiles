@@ -219,12 +219,23 @@ gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SE
   - Step 7 の投稿本文を**ミューテーション直書きから `BODY` 変数バインディング**へ変更（複数行・絵文字・記号でクエリが壊れる問題を解消）
   - `YEAR_MONTH` を Step 1 へ集約し `TZ=Asia/Tokyo` を付与（月境界の取り違え解消）
   - Step 7 投稿直前に**日跨ぎ検証**（`TODAY_JST` と現在 JST 日付の不一致確認）を追加
+- 2026-07 の見直し:
+  - Step 4（前日の投稿取得）・Step 7（投稿）を native の `gh discussion view --comments` / `gh discussion comment`（gh 2.94.0+）へ移行し、Discussion Node ID 解決を不要化。`gh discussion` は preview のため、破壊的変更に備え GraphQL 版を各ステップの Fallback として残置（Step 2 の Discussion 検索は `gh discussion list` と非等価のため GraphQL Search のまま）
 
 ### 4. 前日の投稿を取得
 
-Discussionの既存コメントから直前の投稿を取得し、「やったこと」と「レビュー」を「前日の振り返り」に使用する。
+Discussionの既存コメントから直前の投稿を取得し、「やったこと」と「レビュー」を「前日の振り返り」に使用する。native の `gh discussion view --comments` で取得する（Discussion Node ID の解決は不要）。`DISCUSSION_NUMBER` は Step 2 で特定した番号を入れる。
 
-**重要: GraphQL は変数バインディング（`-f`/`-F`）で渡す。** シングルクォート内に `${REPO_OWNER}` 等のシェル変数を直書きすると展開されず、文字列リテラル `${REPO_OWNER}` が GraphQL に送られて `Could not resolve to a Repository` で失敗する。`-f` は文字列、`-F` は数値（`number: Int!`）に使う。`DISCUSSION_NUMBER` は Step 2 で特定した番号を入れる。
+**注意: `gh discussion` は preview 機能であり、フラグや出力構造が予告なく変わりうる。** 破壊的変更で動作しなくなった場合は、末尾の Fallback に記載した `gh api graphql`（`discussion(number:).comments`）へ切り替える。
+
+```bash
+# native: 最新コメント（newest 順の先頭 1 件）の本文を取得
+gh discussion view "${DISCUSSION_NUMBER}" --repo "${REPO_FULLNAME}" \
+  --comments --order newest --limit 1 \
+  --json comments --jq '.comments.nodes[0].body'
+```
+
+**Fallback（`gh discussion` が preview 変更等で使えない場合）:** GraphQL は変数バインディング（`-f`/`-F`）で渡す。シングルクォート内に `${REPO_OWNER}` 等のシェル変数を直書きすると展開されず、文字列リテラル `${REPO_OWNER}` が GraphQL に送られて `Could not resolve to a Repository` で失敗する。`-f` は文字列、`-F` は数値（`number: Int!`）に使う。
 
 ```bash
 gh api graphql \
@@ -327,11 +338,27 @@ fi
 ```
 
 **重要（D3・D4）:**
-- GraphQL は**変数バインディング（`-f`/`-F`）で渡す**。シングルクォート内のシェル変数（`${REPO_OWNER}` 等）は展開されないため、クエリ文字列へ直書きしない。
-- **投稿本文は必ず `BODY` 変数に格納して `-f body="${BODY}"` で渡す**。ミューテーション文字列へ本文を直接埋め込まない（複数行・絵文字 🤿📣⏰・`##`・改行・引用符でクエリが壊れる）。
+- 投稿には native の `gh discussion comment`（Discussion Node ID の解決は不要）を使う。
+- **投稿本文は必ず `BODY` 変数に格納して `--body "${BODY}"` で渡す**（複数行・絵文字 🤿📣⏰・`##`・改行・引用符をそのまま安全に渡すため。ミューテーション文字列への埋め込みは不要になった）。
+- **注意: `gh discussion` は preview 機能で、フラグや挙動が予告なく変わりうる。** 破壊的変更で使えない場合は、Fallback の `gh api graphql`（`addDiscussionComment`）へ切り替える。
 
 ```bash
-# Discussion Node ID を取得（DISCUSSION_NUMBER は Step 2 で特定した番号）
+# 本文を heredoc で組み立てる（クォートなし EOF で変数展開を避け、Step 6 の下書きをそのまま流し込む）
+BODY=$(cat <<'EOF'
+## 2026/06/25
+
+✅ やったこと
+- ...（Step 6 で承認された下書きをそのまま貼る）
+EOF
+)
+
+# native: コメントを投稿する（実行後に出力されるコメント URL をユーザーへ表示する）
+gh discussion comment "${DISCUSSION_NUMBER}" --repo "${REPO_FULLNAME}" --body "${BODY}"
+```
+
+**Fallback（`gh discussion` が preview 変更等で使えない場合）:** GraphQL は変数バインディング（`-f`/`-F`）で渡す。シングルクォート内のシェル変数（`${REPO_OWNER}` 等）は展開されないためクエリ文字列へ直書きしない。本文は `-f body="${BODY}"` で渡し、Discussion Node ID を先に取得する。
+
+```bash
 DISCUSSION_ID=$(gh api graphql \
   -f owner="${REPO_OWNER}" \
   -f name="${REPO_NAME}" \
@@ -343,16 +370,6 @@ query($owner: String!, $name: String!, $number: Int!) {
   }
 }' --jq '.data.repository.discussion.id')
 
-# 本文を heredoc で組み立てる（クォートなし EOF で変数展開を避け、Step 6 の下書きをそのまま流し込む）
-BODY=$(cat <<'EOF'
-## 2026/06/25
-
-✅ やったこと
-- ...（Step 6 で承認された下書きをそのまま貼る）
-EOF
-)
-
-# コメントを投稿（body は変数バインディング）
 gh api graphql \
   -f discussionId="${DISCUSSION_ID}" \
   -f body="${BODY}" \
