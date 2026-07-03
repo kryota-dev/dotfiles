@@ -144,6 +144,19 @@ GraphQLの変数バインディング（`-f q=`）を使用することで、検
 
 3. Discussionのコメントを全取得:
 
+native の `gh discussion view --comments` で取得する（Discussion Node ID の解決は不要）。`DISCUSSION_NUMBER` は手順 2 で特定した番号を入れる。
+
+**注意: `gh discussion` は preview 機能であり、フラグや出力構造が予告なく変わりうる。** 破壊的変更で動作しなくなった場合は、下の Fallback（`gh api graphql`）へ切り替える。
+
+```bash
+# native: 全コメントを古い順で取得（--limit はコメント件数に応じて調整）
+gh discussion view DISCUSSION_NUMBER --repo "${REPO_FULLNAME}" \
+  --comments --order oldest --limit 100 \
+  --json comments --jq '.comments.nodes[] | {createdAt, body}'
+```
+
+**Fallback（`gh discussion` が preview 変更等で使えない場合）:**
+
 ```bash
 gh api graphql -f query="
 {

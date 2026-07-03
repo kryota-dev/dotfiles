@@ -53,7 +53,28 @@ gh api "repos/<repo>/stats/contributors" --jq ".[] | select(.author.login == \"$
 git log --author="$USERNAME" --grep="Co-Authored-By" --oneline --since="$SINCE_DATE" | wc -l
 git log --author="$USERNAME" --oneline --since="$SINCE_DATE" | wc -l
 
-# GitHub Discussions データ（GraphQL API）
+# GitHub Discussions データ
+# 列挙は native の `gh discussion list`（gh 2.94.0+）。Discussion 単位のメタ
+# （作成者・カテゴリ・作成日・回答採択・ラベル）を取得する。--json 出力は `.discussions[]` 配下。
+# 注意: `gh discussion` は preview 機能で、フラグ・出力構造が予告なく変わりうる。破壊的変更で
+#       動作しなくなった場合は、末尾の Fallback（`gh api graphql` の discussions クエリ）へ切り替える。
+gh discussion list --repo <repo> --limit 500 \
+  --json number,title,author,category,createdAt,answered,answerChosenBy,labels \
+  --jq '.discussions[]'
+
+# コメント本文・コメント著者・回答フラグ（isAnswer）が必要な場合は、各 discussion に対して
+# `gh discussion view --comments` を併用する（`gh discussion list` は per-comment データを返さないため）。
+# 例: 他者の Discussion への自分のコメント数、Accepted Answer 数の集計に使う。
+for num in $(gh discussion list --repo <repo> --limit 500 --json number --jq '.discussions[].number'); do
+  gh discussion view "$num" --repo <repo> --comments --limit 100 \
+    --json number,comments \
+    --jq '{number, comments: [.comments.nodes[] | {author: .author.login, createdAt, isAnswer}]}'
+done
+```
+
+**Fallback（`gh discussion` が preview 変更等で使えない場合）:** 従来の GraphQL で discussions を列挙する。
+
+```bash
 gh api graphql -f query='
   query($owner: String!, $repo: String!, $cursor: String) {
     repository(owner: $owner, name: $repo) {
@@ -85,7 +106,7 @@ gh api graphql -f query='
 - `gh auth status` でログイン状態を事前確認すること
 - APIレートリミットに注意し、必要に応じてsleepを挟むこと
 - データが取得できなかったリポジトリはスキップし、レポートにその旨を記載すること
-- Discussions機能が無効なリポジトリではGraphQLクエリがエラーになるため、エラー時はスキップすること
+- Discussions機能が無効なリポジトリでは `gh discussion list`（および Fallback の GraphQL クエリ）がエラーになるため、エラー時はスキップすること
 
 ### Step 2: 定量分析
 

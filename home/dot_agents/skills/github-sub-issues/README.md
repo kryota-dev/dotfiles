@@ -1,6 +1,7 @@
 # GitHub Sub-issues & Issue Types Management Skill
 
-GitHub の Sub-issue 機能および Issue Types 機能を GraphQL API で操作するエージェントスキルです。
+GitHub の Sub-issue 機能および Issue Types 機能を、gh CLI 2.94.0+ の native コマンド
+（`gh issue create/edit/view`）で操作するエージェントスキルです。
 
 ## 概要
 
@@ -13,35 +14,27 @@ GitHub の Sub-issue 機能および Issue Types 機能を GraphQL API で操作
 ## 提供する機能
 
 ### Sub-issue 操作
-- Parent Issue の Sub-issues 一覧取得
-- 既存 Issue を Sub-issue として追加
-- Sub-issue を親から削除
-- Issue の Parent Issue 取得
+- Parent Issue の Sub-issues 一覧取得（`gh issue view --json subIssues,subIssuesSummary`）
+- 既存 Issue を Sub-issue として追加（`gh issue edit --add-sub-issue` / `--parent`）
+- Sub-issue を親から削除（`gh issue edit --remove-sub-issue` / `--remove-parent`）
+- Issue の Parent Issue 取得（`gh issue view --json parent`）
 
 ### Issue Types 操作
-- Organization の Issue Types 一覧取得
-- Issue の現在の Issue Type 取得
-- Issue の Issue Type 設定・変更
+- Issue の現在の Issue Type 取得（`gh issue view --json issueType`）
+- Issue の Issue Type 設定・変更（`gh issue edit --type <name>` / `--remove-type`）
+- Organization の Issue Types 一覧取得（native 未対応のため GraphQL を併用）
 
 ## 重要な注意点
 
-GraphQL API で Sub-issues / Issue Types 機能を使用するには、特別なヘッダーが必須です：
-
-```bash
-# Sub-issues 操作時
--H "GraphQL-Features: sub_issues"
-
-# Issue Types 操作時
--H "GraphQL-Features: issue_types"
-```
-
-このヘッダーがないと API は正しく動作しません。
+native フラグは gh 2.94.0+ かつ GitHub.com / GHES 3.17+（relationships は 3.19+）で利用可能です。
+それ未満の環境では、SKILL.md 末尾の「Fallback: GraphQL API」に記載した `gh api graphql`
+（`GraphQL-Features: sub_issues` / `issue_types` ヘッダー付き）へフォールバックします。
 
 ## ファイル構成
 
 ```
 github-sub-issues/
-├── SKILL.md   # スキル定義（GraphQL API の使用方法）
+├── SKILL.md   # スキル定義（native gh コマンド + GraphQL fallback）
 └── README.md  # このファイル
 ```
 

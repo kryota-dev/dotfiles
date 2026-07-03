@@ -133,14 +133,17 @@ if [ -f "$TEMPLATE_FILE" ]; then
 fi
 ```
 
-### 5. Organization Issue Typesの取得
+### 5. Issue Type名の確定（任意の事前検証）
+
+native の `gh issue create --type <name>` / `gh issue edit --type <name>` は Issue Type を
+**名前**で設定するため、従来の Node ID / Issue Type ID 解決（GraphQL）は不要になった。
+テンプレートから抽出した `ISSUE_TYPE_NAME` をそのまま後続の `--type` に渡す。
 
 ```bash
-# OrganizationのIssue Typesを取得（GraphQL API）
-ISSUE_TYPE_ID=""
+# 任意: 事前に type 名が Organization に存在するか検証したい場合のみ実行する。
+# Issue Type 名の列挙に相当する native コマンドは存在しないため、この確認のみ GraphQL を使用する。
+# （Issue Type 機能は GitHub.com / GHES 3.17+ が必要。未対応環境ではこの検証はスキップしてよい）
 if [ -n "$ISSUE_TYPE_NAME" ]; then
-    echo "Organization Issue Typesを取得中..."
-
     ORG_NAME="${REPO%/*}"
     ISSUE_TYPES_JSON=$(gh api graphql \
       -H "GraphQL-Features: issue_types" \
@@ -149,10 +152,8 @@ if [ -n "$ISSUE_TYPE_NAME" ]; then
         organization(login: \"$ORG_NAME\") {
           issueTypes(first: 25) {
             nodes {
-              id
               name
               description
-              color
               isEnabled
             }
           }
@@ -160,18 +161,15 @@ if [ -n "$ISSUE_TYPE_NAME" ]; then
       }" 2>/dev/null)
 
     if [ $? -eq 0 ] && [ -n "$ISSUE_TYPES_JSON" ]; then
-        # テンプレートのtype名と一致するIssue Type IDを検索
-        ISSUE_TYPE_ID=$(echo "$ISSUE_TYPES_JSON" | jq -r --arg name "$ISSUE_TYPE_NAME" '.data.organization.issueTypes.nodes[] | select(.name == $name and .isEnabled == true) | .id')
-
-        if [ -n "$ISSUE_TYPE_ID" ]; then
-            echo "✓ Issue Type IDを取得: $ISSUE_TYPE_NAME ($ISSUE_TYPE_ID)"
+        if echo "$ISSUE_TYPES_JSON" | jq -e --arg name "$ISSUE_TYPE_NAME" '.data.organization.issueTypes.nodes[] | select(.name == $name and .isEnabled == true)' >/dev/null; then
+            echo "✓ Issue Type '$ISSUE_TYPE_NAME' を確認しました"
         else
             echo "⚠️ テンプレートのtype '$ISSUE_TYPE_NAME' に対応するIssue Typeが見つかりません"
             echo "   利用可能なIssue Types:"
-            echo "$ISSUE_TYPES_JSON" | jq -r '.data.organization.issueTypes.nodes[] | "   - \(.name): \(.description // "")"'
+            echo "$ISSUE_TYPES_JSON" | jq -r '.data.organization.issueTypes.nodes[] | select(.isEnabled == true) | "   - \(.name): \(.description // "")"'
         fi
     else
-        echo "⚠️ Organization Issue Typesの取得に失敗しました（Issue Type機能が有効でない可能性があります）"
+        echo "ℹ️ Issue Typeの事前検証をスキップします（Issue Type機能が無効、または権限がない可能性があります）。--type はそのまま試行します。"
     fi
 fi
 ```
@@ -297,6 +295,13 @@ CREATE_CMD="gh issue create --repo $REPO"
 CREATE_CMD="$CREATE_CMD --title \"$TITLE\""
 CREATE_CMD="$CREATE_CMD --body \"$ISSUE_BODY\""
 
+# Issue Typeが確定している場合は native の --type で作成時に設定する
+# 注意: Issue Type未対応の環境（GHES 3.17未満等）では --type を付けると作成が失敗するため、
+#       その場合は --type を外して作成し、Step 9 の `gh issue edit --type` フォールバックで後付けする。
+if [ -n "$ISSUE_TYPE_NAME" ]; then
+    CREATE_CMD="$CREATE_CMD --type \"$ISSUE_TYPE_NAME\""
+fi
+
 # ラベルが選択されている場合は追加
 if [ -n "$SELECTED_LABELS" ]; then
     # カンマ区切りのラベルをスペース区切りの--labelオプションに変換
@@ -318,7 +323,7 @@ if [ $? -eq 0 ]; then
     if [ "$ISSUE_TYPE" = "epic" ]; then
         echo ""
         echo "💡 ヒント: EpicにSub-issueを追加する場合は、以下のコマンドを使用してください："
-        echo "gh issue edit $ISSUE_URL --add-project <project-name>"
+        echo "gh issue edit $ISSUE_URL --add-sub-issue <child-issue-number>"
     fi
 else
     echo "❌ エラー: Issueの作成に失敗しました"
@@ -334,54 +339,18 @@ echo ""
 echo "=== 作成されたIssueの詳細 ==="
 gh issue view $ISSUE_URL --repo $REPO
 
-# Issue Typeの設定
-if [ -n "$ISSUE_TYPE_ID" ] && [ -n "$ISSUE_URL" ]; then
+# Issue Typeの設定（フォールバック / 明示確認）
+# Step 8 の `gh issue create --type` が使えなかった環境向けに、作成後に native の
+# `gh issue edit --type`（名前指定・Node ID 解決不要）で後付けする。
+# 失敗しても Issue 作成自体は成功しているため、警告のみ出して続行する（graceful fallback）。
+if [ -n "$ISSUE_TYPE_NAME" ] && [ -n "$ISSUE_URL" ]; then
     echo ""
-    echo "Issue Typeを設定中..."
+    echo "Issue Typeを確認・設定中..."
 
-    # IssueのNode IDを取得
-    ISSUE_NUMBER="${ISSUE_URL##*/}"
-    ISSUE_NODE_ID=$(gh api graphql -f query="
-    query {
-      repository(owner: \"${REPO%/*}\", name: \"${REPO#*/}\") {
-        issue(number: $ISSUE_NUMBER) {
-          id
-        }
-      }
-    }" --jq '.data.repository.issue.id')
-
-    if [ -n "$ISSUE_NODE_ID" ]; then
-        # Issue Typeを設定（GraphQL mutation）
-        RESULT=$(gh api graphql \
-          -H "GraphQL-Features: issue_types" \
-          -f query="
-          mutation {
-            updateIssueIssueType(input: {
-              issueId: \"$ISSUE_NODE_ID\"
-              issueTypeId: \"$ISSUE_TYPE_ID\"
-            }) {
-              issue {
-                title
-                number
-                url
-                issueType {
-                  name
-                  description
-                  color
-                }
-              }
-            }
-          }" 2>&1)
-
-        if [ $? -eq 0 ]; then
-            ISSUE_TYPE_SET=$(echo "$RESULT" | jq -r '.data.updateIssueIssueType.issue.issueType.name')
-            echo "✅ Issue Type '$ISSUE_TYPE_SET' を設定しました"
-        else
-            echo "⚠️ Issue Typeの設定に失敗しました"
-            echo "$RESULT"
-        fi
+    if gh issue edit "$ISSUE_URL" --repo "$REPO" --type "$ISSUE_TYPE_NAME" >/dev/null 2>&1; then
+        echo "✅ Issue Type '$ISSUE_TYPE_NAME' を設定しました"
     else
-        echo "⚠️ Issue Node IDの取得に失敗しました"
+        echo "⚠️ Issue Typeの設定に失敗しました（Issue Type機能が無効、または type名が不一致の可能性があります）"
     fi
 fi
 
@@ -407,52 +376,13 @@ if [ "$ADD_AS_SUBISSUE" = "y" ]; then
     # ※ユーザーは「Other」からIssue番号を自由入力する想定
     PARENT_ISSUE_NUMBER=""  # AskUserQuestionの結果を設定
 
-    # 作成したIssueのNode IDを取得
-    SUBISSUE_NODE_ID=$(gh api graphql -f query="
-    query {
-      repository(owner: \"${REPO%/*}\", name: \"${REPO#*/}\") {
-        issue(number: ${ISSUE_URL##*/}) {
-          id
-        }
-      }
-    }" --jq '.data.repository.issue.id')
-
-    # Parent IssueのNode IDを取得
-    PARENT_NODE_ID=$(gh api graphql -f query="
-    query {
-      repository(owner: \"${REPO%/*}\", name: \"${REPO#*/}\") {
-        issue(number: $PARENT_ISSUE_NUMBER) {
-          id
-        }
-      }
-    }" --jq '.data.repository.issue.id')
-
-    # Sub-issueとして追加（GraphQL-Features: sub_issuesヘッダーが必須）
+    # 作成した Issue を Parent の sub-issue として native に追加する（Node ID 解決は不要）。
+    # child 側から --parent を設定する（`gh issue edit PARENT --add-sub-issue CHILD` と等価）。
     echo "Sub-issueとして追加中..."
-    RESULT=$(gh api graphql \
-      -H "GraphQL-Features: sub_issues" \
-      -f query="
-      mutation {
-        addSubIssue(input: {
-          issueId: \"$PARENT_NODE_ID\"
-          subIssueId: \"$SUBISSUE_NODE_ID\"
-        }) {
-          issue {
-            number
-            title
-          }
-          subIssue {
-            number
-            title
-          }
-        }
-      }")
-
-    if [ $? -eq 0 ]; then
+    if gh issue edit "$ISSUE_URL" --repo "$REPO" --parent "$PARENT_ISSUE_NUMBER" >/dev/null 2>&1; then
         echo "✅ Issue #${ISSUE_URL##*/} を Issue #$PARENT_ISSUE_NUMBER のsub-issueとして追加しました"
     else
-        echo "❌ エラー: Sub-issueの追加に失敗しました"
-        echo "$RESULT"
+        echo "❌ エラー: Sub-issueの追加に失敗しました（Sub-issue機能が無効、または番号が不正な可能性があります）"
     fi
 fi
 
@@ -540,35 +470,14 @@ fi
 ### Sub-issue操作の独立したコマンド例
 
 ```bash
-# 既存のIssueをSub-issueとして追加
-# Step 1: Node IDを取得
-PARENT_ID=$(gh api graphql -f query='
-query {
-  repository(owner: "owner", name: "repo") {
-    issue(number: 100) { id }
-  }
-}' --jq '.data.repository.issue.id')
+# 既存のIssue #101 を Issue #100 の Sub-issue として追加（native、Node ID 解決は不要）
+gh issue edit 100 --repo owner/repo --add-sub-issue 101
 
-CHILD_ID=$(gh api graphql -f query='
-query {
-  repository(owner: "owner", name: "repo") {
-    issue(number: 101) { id }
-  }
-}' --jq '.data.repository.issue.id')
+# 複数まとめて追加
+gh issue edit 100 --repo owner/repo --add-sub-issue 101,102
 
-# Step 2: Sub-issueとして追加
-gh api graphql \
-  -H "GraphQL-Features: sub_issues" \
-  -f query="
-mutation {
-  addSubIssue(input: {
-    issueId: \"$PARENT_ID\"
-    subIssueId: \"$CHILD_ID\"
-  }) {
-    issue { number title }
-    subIssue { number title }
-  }
-}"
+# child 側から親を設定しても等価
+gh issue edit 101 --repo owner/repo --parent 100
 ```
 
 ## Sub-issue機能の詳細
@@ -577,130 +486,59 @@ mutation {
 
 GitHubのSub-issue機能は、親子関係を持つIssueの階層構造を作成できる機能です。Epic配下にタスクを整理したり、大きな機能を小さな実装タスクに分割する際に便利です。
 
-### GraphQL APIを使用したSub-issue管理
+### native gh コマンドを使用したSub-issue管理
 
-**重要**: Sub-issue機能を使用するには、GraphQL APIリクエストに `GraphQL-Features: sub_issues` ヘッダーが必須です。
+gh 2.94.0+ では Sub-issue 操作が `gh issue edit` / `gh issue view` に first-class 化され、
+Node ID 解決も `GraphQL-Features: sub_issues` ヘッダーも不要になった。番号（または URL）で直接操作する。
 
-#### 1. Issue番号からNode IDを取得
-
-```bash
-# Issue番号からNode IDを取得
-gh api graphql -f query='
-query {
-  repository(owner: "owner", name: "repo") {
-    issue(number: 123) {
-      id
-    }
-  }
-}' --jq '.data.repository.issue.id'
-```
-
-#### 2. Sub-issueを追加
+#### 1. Sub-issueを追加
 
 ```bash
-# Parent IssueにSub-issueを追加
-gh api graphql \
-  -H "GraphQL-Features: sub_issues" \
-  -f query='
-mutation {
-  addSubIssue(input: {
-    issueId: "I_kwDOxxxxxx"      # Parent IssueのNode ID
-    subIssueId: "I_kwDOyyyyyy"   # Sub-issueのNode ID
-  }) {
-    issue {
-      number
-      title
-    }
-    subIssue {
-      number
-      title
-    }
-  }
-}'
+# Parent #100 に Sub-issue #123 を追加（カンマ区切りで複数同時可）
+gh issue edit 100 --repo owner/repo --add-sub-issue 123
+gh issue edit 100 --repo owner/repo --add-sub-issue 123,124
+
+# child 側から親を設定しても等価
+gh issue edit 123 --repo owner/repo --parent 100
 ```
 
-#### 3. Sub-issueを削除
+#### 2. Sub-issueを削除
 
 ```bash
-# Sub-issueを親から削除
-gh api graphql \
-  -H "GraphQL-Features: sub_issues" \
-  -f query='
-mutation {
-  removeSubIssue(input: {
-    issueId: "I_kwDOxxxxxx"
-    subIssueId: "I_kwDOyyyyyy"
-  }) {
-    issue {
-      number
-      title
-    }
-  }
-}'
+gh issue edit 100 --repo owner/repo --remove-sub-issue 123
+
+# child 側から親を外しても等価
+gh issue edit 123 --repo owner/repo --remove-parent
 ```
 
-#### 4. Sub-issuesの一覧を取得
+#### 3. Sub-issuesの一覧を取得
 
 ```bash
-# Parent IssueのSub-issuesを取得
-gh api graphql \
-  -H "GraphQL-Features: sub_issues" \
-  -f query='
-query {
-  node(id: "I_kwDOxxxxxx") {
-    ... on Issue {
-      number
-      title
-      subIssues(first: 20) {
-        nodes {
-          number
-          title
-          state
-        }
-      }
-      subIssuesSummary {
-        total
-        completed
-        percentCompleted
-      }
-    }
-  }
-}'
+gh issue view 100 --repo owner/repo \
+  --json number,title,subIssues,subIssuesSummary \
+  --jq '{number, title, summary: .subIssuesSummary, subIssues: [.subIssues.nodes[] | {number, title, state}]}'
 ```
 
-#### 5. Parent Issueを取得
+#### 4. Parent Issueを取得
 
 ```bash
-# IssueのParent Issueを取得
-gh api graphql \
-  -H "GraphQL-Features: sub_issues" \
-  -f query='
-query {
-  node(id: "I_kwDOyyyyyy") {
-    ... on Issue {
-      number
-      title
-      parent {
-        number
-        title
-      }
-    }
-  }
-}'
+gh issue view 123 --repo owner/repo --json number,title,parent --jq '{number, title, parent}'
 ```
 
-### GitHub CLI拡張機能
+### 拡張機能・Fallback（native が使えない環境向け）
 
-GitHub CLI本体にはSub-issue機能のサポートがないため、以下のサードパーティ拡張機能が利用可能です：
+gh 2.94.0 未満や GHES 3.17 未満では native フラグが使えない。その場合は以下を利用する：
 
-- **gh-sub-issue** (by agbiotech): https://github.com/agbiotech/gh-sub-issue
-- **gh-sub-issue** (by yahsan2): https://github.com/yahsan2/gh-sub-issue
+- Fallback: `gh api graphql`（`GraphQL-Features: sub_issues` ヘッダー付き、`addSubIssue` / `removeSubIssue`、Node ID は `repository(...).issue(number:).id` で取得）
+- サードパーティ拡張機能:
+  - **gh-sub-issue** (by agbiotech): https://github.com/agbiotech/gh-sub-issue
+  - **gh-sub-issue** (by yahsan2): https://github.com/yahsan2/gh-sub-issue
 
 ### 制限事項
 
 - 1つのParent Issueに最大100個のSub-issueを追加可能
 - 最大8レベルまでネスト可能
-- Sub-issue機能はGraphQL APIでのみ利用可能（REST APIでは一部のみ対応）
+- native コマンドは gh 2.94.0+ かつ GitHub.com / GHES 3.17+ が必要（それ未満は GraphQL fallback）
 
 ### 参考リンク
 
@@ -729,11 +567,13 @@ assignees: ""
 ---
 ```
 
-### GraphQL APIを使用したIssue Type管理
+### Issue Type管理
 
-**重要**: Issue Type機能を使用するには、GraphQL APIリクエストに `GraphQL-Features: issue_types` ヘッダーが必須です。
+gh 2.94.0+ では Issue Type の取得・設定が `gh issue view` / `gh issue edit` に first-class 化され、
+Node ID / Issue Type ID の解決は不要になった（`--type` は名前で指定する）。ただし Organization の
+Issue Type 名を**列挙**する native コマンドは無いため、その確認のみ GraphQL を使用する。
 
-#### 1. Organization Issue Typesの取得
+#### 1. Organization Issue Typesの取得（native 未対応のため GraphQL を使用）
 
 ```bash
 gh api graphql \
@@ -743,59 +583,30 @@ query {
   organization(login: "ORG_NAME") {
     issueTypes(first: 25) {
       nodes {
-        id
         name
         description
-        color
         isEnabled
       }
     }
   }
-}'
+}' --jq '.data.organization.issueTypes.nodes[] | select(.isEnabled == true) | "\(.name): \(.description // "")"'
 ```
 
 #### 2. IssueのTypeを取得
 
 ```bash
-gh api graphql \
-  -H "GraphQL-Features: issue_types" \
-  -f query='
-query {
-  repository(owner: "OWNER", name: "REPO") {
-    issue(number: 123) {
-      title
-      number
-      issueType {
-        name
-        description
-        color
-      }
-    }
-  }
-}'
+gh issue view 123 --repo owner/repo --json number,title,issueType \
+  --jq '{number, title, issueType: .issueType.name}'
 ```
 
 #### 3. IssueのTypeを設定/変更
 
 ```bash
-gh api graphql \
-  -H "GraphQL-Features: issue_types" \
-  -f query='
-mutation($issueId: ID!, $issueTypeId: ID!) {
-  updateIssueIssueType(input: {
-    issueId: $issueId
-    issueTypeId: $issueTypeId
-  }) {
-    issue {
-      title
-      issueType {
-        name
-      }
-    }
-  }
-}' \
-  -f issueId="ISSUE_NODE_ID" \
-  -f issueTypeId="ISSUE_TYPE_ID"
+# 名前で直接指定（Node ID / Issue Type ID の解決は不要）
+gh issue edit 123 --repo owner/repo --type "Enhancement"
+
+# Issue Type を外す
+gh issue edit 123 --repo owner/repo --remove-type
 ```
 
 #### 4. Organization Issue Typesの作成（REST API）
@@ -845,7 +656,7 @@ Issue Templateの`type`フィールドは、Organizationで定義されたIssue 
 - GitHub CLIの認証が必須
 - 適切な権限（Issue作成権限）が必要
 - テンプレートファイルはMarkdown形式で作成
-- Sub-issue機能を使用する場合は `GraphQL-Features: sub_issues` ヘッダーが必須
-- Issue Type機能を使用する場合は `GraphQL-Features: issue_types` ヘッダーが必須
+- Sub-issue / Issue Type の設定は native の `gh issue create/edit`（gh 2.94.0+、GitHub.com / GHES 3.17+）を使用する。列挙用の GraphQL fallback を除き `GraphQL-Features` ヘッダーは不要
+- native が使えない環境（gh 2.94.0 未満 / GHES 3.17 未満）では `gh api graphql`（`GraphQL-Features: sub_issues` / `issue_types` ヘッダー付き）へフォールバックする
 - Issue TypesはOrganizationでのみ利用可能（個人リポジトリでは自動設定されません）
 - テンプレートの`type`フィールドは、Organizationで定義されたIssue Type名と完全一致する必要があります
