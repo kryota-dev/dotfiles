@@ -259,8 +259,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          mkdir -p ~/.config/chezmoi
-          cp home/.chezmoi.toml ~/.config/chezmoi/chezmoi.toml
           for attempt in 1 2 3; do
             if installer=$(curl -fsLS get.chezmoi.io) && [ -n "$installer" ]; then
               break
