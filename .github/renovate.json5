@@ -48,6 +48,36 @@
       currentValueTemplate: 'main',
     },
     {
+      // Official drawio skill from jgraph/drawio-mcp (external in .chezmoiexternal.toml).
+      // Same tracking pattern as anthropic_commit above.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        'drawio_mcp_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'jgraph/drawio-mcp',
+      datasourceTemplate: 'git-refs',
+      packageNameTemplate: 'https://github.com/jgraph/drawio-mcp',
+      currentValueTemplate: 'main',
+    },
+    {
+      // Official Supabase agent skills — one pin covers both external entries
+      // (supabase and supabase-postgres-best-practices).
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        'supabase_agent_skills_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'supabase/agent-skills',
+      datasourceTemplate: 'git-refs',
+      packageNameTemplate: 'https://github.com/supabase/agent-skills',
+      currentValueTemplate: 'main',
+    },
+    {
       customType: 'regex',
       managerFilePatterns: [
         '/home/\\.chezmoidata\\.toml$/',
@@ -85,6 +115,15 @@
     {
       // ECC ships third-party executable hook code: never auto-merge, always review.
       matchDepNames: ['affaan-m/ECC'],
+      automerge: false,
+    },
+    {
+      // Third-party skill archives (drawio, supabase). Content is markdown-only today
+      // (no shell/JS/Python payload), so supply-chain risk is limited to prompt-injected
+      // instructions — but the digest datasource means Renovate produces `digest` PRs
+      // whose automerge behaviour is otherwise inherited implicitly. Pin it explicitly
+      // to `false` so a compromised upstream cannot ride the pin-automerge lane.
+      matchDepNames: ['jgraph/drawio-mcp', 'supabase/agent-skills'],
       automerge: false,
     },
   ],
