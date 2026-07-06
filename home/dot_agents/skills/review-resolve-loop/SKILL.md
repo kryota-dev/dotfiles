@@ -529,9 +529,6 @@ gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
 @{reviewer} **対応しました（ {COMMIT_SHA} ）**
 
 {変更内容の簡潔な説明}
-
----
-*Co-Authored-By: {モデル名} <noreply@anthropic.com>*
 ```
 
 コミット SHA の前後には**半角スペースが必須**。スペースがないと GitHub がリンクとして認識しない。
@@ -546,9 +543,6 @@ gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
 - 本PRのスコープ外のため、別途対応を検討します
 - 前回の {URL} レビューで回答済みです
 - {コードパス}:{行番号} の実装を確認した結果、{具体的根拠}
-
----
-*Co-Authored-By: {モデル名} <noreply@anthropic.com>*
 ```
 
 **review body への返信（Issue comment として投稿）:**
@@ -561,8 +555,6 @@ review body への返信は Issue comment として投稿する。hidden marker 
 {返信内容}
 
 <!-- review-body-reply: {reviewId} -->
----
-*Co-Authored-By: {モデル名} <noreply@anthropic.com>*
 ```
 
 > **Note**: 人間・ボット（`coderabbitai` 等）への返信には `@{reviewer}` メンションを付け、`[bot]` サフィックスはメンションから除く（`coderabbitai[bot]` → `@coderabbitai`）。**セルフレビュー（`@{自分のlogin}`）と `github-actions` へはメンションを付けない**（自分宛は無意味、`@github-actions` は通知効果なし）。
