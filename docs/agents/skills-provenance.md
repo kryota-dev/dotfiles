@@ -64,45 +64,45 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (49 skills)
+## Curated skill inventory (38 skills)
 
-The 49 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 38 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
-### Git, PR, and GitHub workflow (~12 skills)
+### Git, PR, and GitHub workflow (13 skills)
 
-Core day-to-day development cycle automation.
+Core day-to-day development cycle automation, plus the parallel-dev triad (`repo-radar` → `issue-fleet` / `renovate-sweep`) added in the 2026-07-06 stocktake.
 
-`commit`, `create-pr`, `create-issue`, `fetch-pr-comments`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `ghostwrite-comment`, `open-pr-files`, `delete-merged-branches`
+`commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `delete-merged-branches`
 
-### Code review and multi-agent orchestration (~5 skills)
+### Code review and multi-agent orchestration (5 skills)
 
 Review pipelines that spawn subagents or coordinate multiple reviewers.
 
 `cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`
 
-### Planning and spec-driven development (~6 skills)
+### Planning and spec-driven development (5 skills)
 
 Structured task decomposition, requirement analysis, and end-to-end delivery flows.
 
-`planning`, `sdd`, `spec`, `grill-me`, `prompt-conform`, `pr-workflow`
+`planning`, `sdd`, `grill-me`, `prompt-conform`, `pr-workflow`
 
-### Session and context management (~7 skills)
+### Session and context management (5 skills)
 
-Managing conversation state, compacting transcripts, and post-session capture.
+Managing conversation state, compacting transcripts, and post-session capture. `session-summary` has both a lightweight default mode and a `--archive` deep-mode (JSONL archive + subagent summary) folded in from the retired `save-session` skill.
 
-`save-session`, `session-summary`, `prune-session-transcript`, `compact-docs`, `cleanup-plan`, `retrospective-codify`, `self-evaluate`
+`session-summary`, `prune-session-transcript`, `compact-docs`, `cleanup-plan`, `retrospective-codify`
 
-### Worktree and dotfiles tooling (5 skills)
+### Worktree and dotfiles tooling (4 skills)
 
 `wtp` (worktree-plus) workflows and chezmoi/git repo tooling.
 
-`wtp`, `wtp-cleanup`, `wtp-workspace`, `chezmoi`, `git-filter-path`
+`wtp`, `wtp-cleanup`, `chezmoi`, `git-filter-path`
 
-### Domain, database, test, and media utilities (14 skills)
+### Domain, database, media, and productivity utilities (6 skills)
 
-Miscellaneous functional skills spanning databases, frontend testing, and media conversion.
+Miscellaneous functional skills spanning databases, media conversion, and daily productivity.
 
-`supabase`, `supabase-postgres-best-practices`, `vitest-error-analysis`, `fix-migration-leftover`, `drawio`, `drawio-skill-cli`, `webp-convert`, `serena`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `copilot-agent-task`, `pr-draft-summary`
+`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`
 
 ---
 
@@ -112,6 +112,8 @@ Miscellaneous functional skills spanning databases, frontend testing, and media 
 |---|---|---|
 | ECC (`affaan-m/ECC`) | <!-- FACT:ecc-skill-count -->126<!-- /FACT --> skills | `[ecc].commit` in `.chezmoidata.toml` |
 | Anthropic system skills | 17 skills | `[skills].anthropic_commit` in `.chezmoidata.toml` |
+| jgraph/drawio-mcp (`drawio`) | 1 skill | `[skills].drawio_mcp_commit` in `.chezmoidata.toml` |
+| supabase/agent-skills (`supabase`, `supabase-postgres-best-practices`) | 2 skills | `[skills].supabase_agent_skills_commit` in `.chezmoidata.toml` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
 
