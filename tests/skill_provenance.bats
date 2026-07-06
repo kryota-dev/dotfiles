@@ -60,8 +60,9 @@ _skill_is_external() {
     name="$(basename "$dir")"
     # Non-empty check (not strict structural validation): a skill must contain at
     # least one regular file. maxdepth 2 also counts files one level down
-    # (references/, templates/), so discovery-only skills like wtp-workspace
-    # (trigger-eval.json) and skills whose files live only in subdirs still pass.
+    # (references/, templates/), so discovery-first skills like wtp
+    # (trigger-eval.json alongside SKILL.md) and skills whose files live only in
+    # subdirs still pass.
     if [ -z "$(find "$dir" -maxdepth 2 -type f -print -quit)" ]; then
       echo "empty curated skill dir: $name"
       false
@@ -110,8 +111,16 @@ _skill_is_external() {
 
 @test "skill provenance: retired unmanaged skills are absent from source" {
   # Removed as unmanaged in Phase 3-6; none should be curated back in by mistake.
+  # Extended 2026-07-06 stocktake: 8 outright retirements + 3 merges into kin skills.
+  # (drawio, supabase, and supabase-postgres-best-practices moved to external in
+  # .chezmoiexternal.toml, not deleted, so they are covered by the "no skill is
+  # both curated and external" guard above and are not repeated here.)
   local s
-  for s in agentcore vercel-sandbox patch-remote-control find-skills; do
+  for s in \
+    agentcore vercel-sandbox patch-remote-control find-skills \
+    self-evaluate ghostwrite-comment spec serena drawio-skill-cli \
+    copilot-agent-task open-pr-files vitest-error-analysis \
+    fetch-pr-comments save-session wtp-workspace; do
     [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
       echo "unmanaged skill leaked into source: $s"
       false

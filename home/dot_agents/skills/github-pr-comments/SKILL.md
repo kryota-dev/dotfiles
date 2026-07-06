@@ -1,12 +1,23 @@
 ---
 name: github-pr-comments
 description: GitHub PRのコメント・レビュー取得・作成。PRコメント、レビューコメント、pending review、coderabbitai除外フィルタリングに対応。PR URL や番号を指定して操作する。
-version: 2.0.0
+argument-hint: "[pr-number-or-url]"
+version: 2.1.0
 ---
 
 # GitHub PR Comments Skill
 
 GitHub Pull Request のコメント・レビューの取得と作成を行うスキルです。ボットコメント（coderabbitai 等）の除外フィルタリング、および Pending Review へのレビューコメント追加（REST API / GraphQL）に対応しています。
+
+## Slash 起動
+
+このスキルは slash command として起動でき、その場合は `$ARGUMENTS` に PR 情報が入る:
+
+- **PR URL の場合**（例: `https://github.com/<owner>/<repo>/pull/8597`）: URL から `owner`, `repo`, `PR番号` を抽出
+- **PR 番号のみの場合**（例: `8597`）: 現在のリポジトリから `owner`, `repo` を取得（`git remote get-url origin` を使用）
+- **引数なしで起動された場合**: どの PR を対象にするか AskUserQuestion で確認する
+
+引数を解決したら以降の取得コマンド節に進む。
 
 ## 重要: Claude Code での jq 使用時の注意点
 
@@ -331,6 +342,45 @@ mutation {
     thread { isResolved }
   }
 }'
+```
+
+## 取得結果の出力形式（取得系操作の場合）
+
+取得系（本文・レビュー・レビューコメント・Issue コメント）を利用者へ報告する際は、以下のフォーマットで整理する。空セクションは省略してよい。
+
+```markdown
+## PR #{番号} の内容
+
+### タイトル
+{タイトル}
+
+### 作者
+{作者}
+
+### PR本文
+{本文}
+
+---
+
+## レビュー
+
+### {ユーザー名} ({状態})
+> {レビュー本文}
+
+---
+
+## レビューコメント（ファイル別）
+
+### {ユーザー名} のコメント
+**ファイル**: {path}:{line}
+> {コメント本文}
+
+---
+
+## Issueコメント
+
+### {ユーザー名}
+> {コメント本文}
 ```
 
 ## 注意事項

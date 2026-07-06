@@ -122,6 +122,37 @@
     include = ["*/skills/xlsx/**"]
     refreshPeriod = "168h"
 
+# Official drawio skill from https://github.com/jgraph/drawio-mcp
+# The skill lives at plugins/claude-code/skills/drawio/ inside the repo, so
+# stripComponents=5 drops "drawio-mcp-<sha>/plugins/claude-code/skills/drawio/"
+# and each file lands directly under ~/.agents/skills/drawio/.
+# Pinned commit hash is defined in .chezmoidata.toml [skills.drawio_mcp_commit].
+[".agents/skills/drawio"]
+    type = "archive"
+    url = "https://github.com/jgraph/drawio-mcp/archive/{{ .skills.drawio_mcp_commit }}.tar.gz"
+    stripComponents = 5
+    include = ["*/plugins/claude-code/skills/drawio/**"]
+    refreshPeriod = "168h"
+
+# Official Supabase agent skills from https://github.com/supabase/agent-skills
+# Both entries share the same tarball URL — chezmoi caches by URL SHA256, so
+# only one download occurs. Layout mirrors anthropics/skills:
+# "agent-skills-<sha>/skills/<name>/" with stripComponents=3.
+# Pinned commit hash is defined in .chezmoidata.toml [skills.supabase_agent_skills_commit].
+[".agents/skills/supabase"]
+    type = "archive"
+    url = "https://github.com/supabase/agent-skills/archive/{{ .skills.supabase_agent_skills_commit }}.tar.gz"
+    stripComponents = 3
+    include = ["*/skills/supabase/**"]
+    refreshPeriod = "168h"
+
+[".agents/skills/supabase-postgres-best-practices"]
+    type = "archive"
+    url = "https://github.com/supabase/agent-skills/archive/{{ .skills.supabase_agent_skills_commit }}.tar.gz"
+    stripComponents = 3
+    include = ["*/skills/supabase-postgres-best-practices/**"]
+    refreshPeriod = "168h"
+
 # Everything Claude Code (ECC) hook runtime — https://github.com/affaan-m/ECC
 # Only scripts/hooks + scripts/lib are fetched here (the hook runtime that later PRs wire
 # into settings.json). Adopted skills are deployed by the list-driven block below; ECC

@@ -29,3 +29,23 @@
 .config/zsh/dmux-secrets.zsh
 .agents/skills/dmux-workflows
 .dmux-r06
+
+# Curated skill inventory cleanup (2026-07-06 stocktake). Eleven skills were retired
+# from the source tree — eight outright (broken references, byte-duplicate content,
+# CLI --help transcription, in-model equivalents) and three merged into their kin
+# skills (fetch-pr-comments → github-pr-comments, save-session → session-summary,
+# wtp-workspace → wtp). The three vendored-official skills (drawio, supabase,
+# supabase-postgres-best-practices) that moved to external in .chezmoiexternal.toml
+# are intentionally NOT listed here — those destinations are managed by chezmoi's
+# archive external and would fight with .chezmoiremove if both tried to own them.
+.agents/skills/self-evaluate
+.agents/skills/ghostwrite-comment
+.agents/skills/spec
+.agents/skills/serena
+.agents/skills/drawio-skill-cli
+.agents/skills/copilot-agent-task
+.agents/skills/open-pr-files
+.agents/skills/vitest-error-analysis
+.agents/skills/fetch-pr-comments
+.agents/skills/save-session
+.agents/skills/wtp-workspace
