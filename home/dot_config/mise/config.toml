@@ -34,7 +34,7 @@ terraform = "1.15.7"
 tmux = "3.6a"
 uv = "0.11.26"
 yazi = "26.5.6"
-zoxide = "0.9.9"
+zoxide = "0.10.0"
 
 # ubi-backed CLIs (no mise/aqua registry entry)
 "ubi:googleworkspace/cli" = { version = "0.22.5", exe = "gws" }
