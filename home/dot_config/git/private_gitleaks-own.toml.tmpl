@@ -1,0 +1,44 @@
+# gitleaks config for OWN-NAMESPACE repos (deployed to ~/.config/git/gitleaks-own.toml).
+# The global pre-commit hook selects this config only when the repo's origin
+# remote is under the user's own GitHub namespaces (or the repo has no remote
+# yet). Client/work repos legitimately contain their own identifiers, so they
+# get the base ~/.config/git/gitleaks.toml instead — see
+# hooks/executable_pre-commit for the selection logic.
+#
+# Mirrors the base config (default ruleset + 1Password allowlist) and adds the
+# client-identifier rule on top. Kept self-contained rather than [extend]ing
+# the base file to avoid chained-extend depth semantics.
+#
+# This is a chezmoi template (`private_` prefix -> deployed with mode 0600)
+# because the client-identifier rule below injects a regex pattern read from
+# 1Password at apply time; the pattern itself must never be committed to this
+# public repo. Constraints on the 1Password value (field `pattern`): a single
+# `name1|name2|...` alternation, regex-escaped where needed, no `'''`, no
+# newlines — run_once_after_11-validate-1password.sh smoke-tests this.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global allowlist for the cross-harness pre-commit scan"
+
+# 1Password references are pointers, not secrets: chezmoi templates render
+# them at apply time via onepasswordRead, and `op://` URIs resolve through
+# the 1Password CLI. Neither embeds the secret value in the source tree.
+# regexTarget = "line" matches the whole staged line (vault names may contain
+# spaces), not just the extracted secret value.
+regexTarget = "line"
+regexes = [
+  '''op://\S.*''',
+  '''onepasswordRead''',
+]
+
+# NOTE: no path-based allowlist. This config is loaded globally via
+# core.hooksPath, so a `paths` entry would blind the scanner to that path in
+# EVERY repo. Planning notes under .kryota-dev are already excluded from git
+# tracking via ~/.gitignore_global, so they never reach the staging area.
+
+[[rules]]
+id = "client-identifiers"
+description = "Client/employer identifiers must not reach public repos"
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''

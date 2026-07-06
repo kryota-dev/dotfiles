@@ -138,7 +138,7 @@ The signing key (`user.signingkey`) is the SSH public key fingerprint stored in 
 
 ### Global gitleaks config
 
-`home/dot_config/git/gitleaks.toml` extends the default ruleset and adds two allowlist regexes:
+`home/dot_config/git/private_gitleaks.toml.tmpl` extends the default ruleset and adds two allowlist regexes:
 
 ```toml
 [extend]
@@ -155,6 +155,44 @@ regexes = [
 `op://` URIs are 1Password references, not secrets. `onepasswordRead` is the chezmoi template function that reads them. Neither embeds a secret value in the source tree.
 
 **No `paths` allowlist is defined.** Because this config is loaded globally via `core.hooksPath`, a `paths` entry would blind the scanner to that path in _every_ repository. Files that should never reach staging (e.g. `.kryota-dev/` planning notes) are excluded via `~/.gitignore_global` instead.
+
+### Client-identifier rule (own-namespace repos only, injected from 1Password)
+
+A second config, `private_gitleaks-own.toml.tmpl` (rendered to `~/.config/git/gitleaks-own.toml`
+with mode 0600), mirrors the base config and adds a `client-identifiers` rule whose regex
+must never appear in this public repo:
+
+```toml
+[[rules]]
+id = "client-identifiers"
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''
+```
+
+**Owner-scoped selection.** The pre-commit hook picks the config by the repo's `origin`
+remote: repos under the maintainer's own GitHub namespaces (`kryota-dev`, `ryota-k0827`) —
+and repos with no remote yet, which may be pushed public later — get `gitleaks-own.toml`;
+client/work repos legitimately contain their own identifiers everywhere, so they get the
+base `gitleaks.toml` and are never blocked by this rule. If `gitleaks-own.toml` has not
+been rendered yet (fresh machine before the 1Password item exists), the hook falls back to
+the base config.
+
+At `chezmoi apply` time, the pattern is read from the 1Password item `Dotfiles - Redact
+Patterns` (vault `kryota.dev`, field `pattern`), which holds a single `name1|name2|…`
+alternation of client/employer identifiers (regex-escaped where needed; no `'''`, no
+newlines). `run_once_after_11-validate-1password.sh.tmpl` re-validates the item on apply:
+existence, non-empty value, no `'''`, and that the value compiles as a regex. Note that on
+a fresh machine the file template renders _before_ that script runs, so a missing item
+surfaces as a raw chezmoi/op error first — the script is a diagnosis layer, not a gate.
+Creating the item itself is a manual, out-of-band step for the maintainer — its value is
+never written to this repo.
+
+**This rule's only enforcement point is the local pre-commit hook.** There is no
+server-side backstop for it: the pattern cannot be reproduced in CI (no 1Password there),
+and GitHub secret scanning does not cover custom identifier regexes. `git commit
+--no-verify` bypasses it entirely.
+
+On a false positive, use the same escape hatch as any other gitleaks finding:
+`git commit --no-verify`.
 
 ### Caveats
 
