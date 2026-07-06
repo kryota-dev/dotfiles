@@ -64,9 +64,9 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（38 スキル）
+## キュレーテッドスキルインベントリ（39 スキル）
 
-`home/dot_agents/skills/` の 38 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 39 スキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（13 スキル）
 
@@ -74,11 +74,11 @@
 
 `commit`、`create-pr`、`create-issue`、`pr-draft-summary`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`renovate-sweep`、`issue-fleet`、`repo-radar`、`delete-merged-branches`
 
-### コードレビューとマルチエージェントオーケストレーション（5 スキル）
+### コードレビューとマルチエージェントオーケストレーション（6 スキル）
 
 サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。
 
-`cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`
+`cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`、`review-fleet`
 
 ### 計画とスペック駆動開発（5 スキル）
 
