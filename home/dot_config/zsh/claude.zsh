@@ -19,11 +19,18 @@ _claude_with_home() {
   # EXA_API_KEY/FIRECRAWL_API_KEY are exported here (scoped to "$@") so Claude Code can expand
   # the "${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}" placeholders in its MCP env at spawn. The :-
   # default keeps this safe when the secrets file is absent.
+  # ECC_DISABLED_HOOKS defaults to skipping the edit-write gateguard-fact-force gate: it removes
+  # the deny-then-retry friction on first-touch file Edits and unblocks the CLV2 observer's
+  # instinct writes (each observer run is a fresh `claude --print` session, so the gate's
+  # "checked" cache resets and every instinct Write hits an initial deny that Haiku transcribes
+  # instead of retrying); destructive-Bash and routine-Bash gates stay active. The :- default
+  # lets claude-config's own ECC_DISABLED_HOOKS override still win.
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
     CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
+    ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-pre:edit-write:gateguard-fact-force}" \
     EXA_API_KEY="${EXA_API_KEY:-}" \
     FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
     "$@"
