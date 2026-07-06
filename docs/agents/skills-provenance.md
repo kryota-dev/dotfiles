@@ -64,9 +64,9 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (39 skills)
+## Curated skill inventory (40 skills)
 
-The 39 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 40 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (13 skills)
 
@@ -98,11 +98,11 @@ Managing conversation state, compacting transcripts, and post-session capture. `
 
 `wtp`, `wtp-cleanup`, `chezmoi`, `git-filter-path`
 
-### Domain, database, media, and productivity utilities (6 skills)
+### Domain, database, media, and productivity utilities (7 skills)
 
 Miscellaneous functional skills spanning databases, media conversion, and daily productivity.
 
-`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`
+`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `redact-patterns`
 
 ---
 
