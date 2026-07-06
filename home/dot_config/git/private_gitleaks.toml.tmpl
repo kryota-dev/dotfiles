@@ -2,6 +2,11 @@
 # Referenced by ~/.config/git/hooks/pre-commit via --config. Extends the
 # bundled default ruleset and allowlists known non-secrets so the global
 # hook does not block legitimate commits.
+#
+# This is a chezmoi template (`private_` prefix -> deployed with mode 0600)
+# because the client-identifier rule below injects a regex pattern read from
+# 1Password at apply time; the pattern itself must never be committed to this
+# public repo.
 
 [extend]
 useDefault = true
@@ -24,3 +29,8 @@ regexes = [
 # core.hooksPath, so a `paths` entry would blind the scanner to that path in
 # EVERY repo. Planning notes under .kryota-dev are already excluded from git
 # tracking via ~/.gitignore_global, so they never reach the staging area.
+
+[[rules]]
+id = "client-identifiers"
+description = "Client/employer identifiers must not reach public repos"
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''

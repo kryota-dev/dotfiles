@@ -138,7 +138,7 @@ The signing key (`user.signingkey`) is the SSH public key fingerprint stored in 
 
 ### Global gitleaks config
 
-`home/dot_config/git/gitleaks.toml` extends the default ruleset and adds two allowlist regexes:
+`home/dot_config/git/private_gitleaks.toml.tmpl` extends the default ruleset and adds two allowlist regexes:
 
 ```toml
 [extend]
@@ -155,6 +155,27 @@ regexes = [
 `op://` URIs are 1Password references, not secrets. `onepasswordRead` is the chezmoi template function that reads them. Neither embeds a secret value in the source tree.
 
 **No `paths` allowlist is defined.** Because this config is loaded globally via `core.hooksPath`, a `paths` entry would blind the scanner to that path in _every_ repository. Files that should never reach staging (e.g. `.kryota-dev/` planning notes) are excluded via `~/.gitignore_global` instead.
+
+### Client-identifier rule (injected from 1Password)
+
+The config is a chezmoi template (`private_` prefix, rendered with mode 0600) rather than
+plain source, because it defines a `client-identifiers` rule whose regex must never appear
+in this public repo:
+
+```toml
+[[rules]]
+id = "client-identifiers"
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''
+```
+
+At `chezmoi apply` time, the pattern is read from the 1Password item `Dotfiles - Redact
+Patterns` (vault `kryota.dev`, field `pattern`), which holds a single `name1|name2|…`
+alternation of client/employer identifiers that must not land in a commit. `run_once_after_11-validate-1password.sh.tmpl`
+checks that this item exists before apply proceeds. Creating the item itself is a manual,
+out-of-band step for the maintainer — its value is never written to this repo.
+
+On a false positive, use the same escape hatch as any other gitleaks finding:
+`git commit --no-verify`.
 
 ### Caveats
 

@@ -672,6 +672,11 @@ SECRETS
   grep -qF 'op://kryota.dev/Dotfiles - Firecrawl API/credential' "$script"
 }
 
+@test "1Password validation requires the redact-patterns item" {
+  local script="${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+  grep -qF 'op://kryota.dev/Dotfiles - Redact Patterns/pattern' "$script"
+}
+
 @test "project .mcp.json keeps only project-scoped servers" {
   # context7/deepwiki were moved to user scope (run_onchange_after_13); the repo's own
   # .mcp.json must keep the project-specific spec-workflow but no longer declare them.
@@ -883,9 +888,11 @@ _gate_decision() {
   grep -q 'git-common-dir' "$hook"
   grep -q 'BASH_SOURCE' "$hook"
   grep -q -- '-ef' "$hook"
-  [ -f "${HOME_DIR}/dot_config/git/gitleaks.toml" ]
+  [ -f "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl" ]
   # The global config must not carry a path allowlist (it would blind every repo).
-  ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/gitleaks.toml"
+  ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl"
+  # The client-identifier pattern must be injected from 1Password, never hardcoded.
+  grep -q 'onepasswordRead' "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl"
 }
 
 # Regression (this PR): the chain step must not infinite-loop when core.hooksPath
