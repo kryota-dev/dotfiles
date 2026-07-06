@@ -156,9 +156,9 @@ regexes = [
 
 **`paths` allowlist は定義されていません。** このコンフィグは `core.hooksPath` 経由でグローバルにロードされるため、`paths` エントリを設定すると_すべての_リポジトリでそのパスをスキャナーが見えなくなります。ステージングに到達すべきでないファイル（`.kryota-dev/` 計画メモなど）は代わりに `~/.gitignore_global` で除外されています。
 
-### クライアント識別子ルール（1Password から注入）
+### クライアント識別子ルール（自分名義リポジトリのみ、1Password から注入）
 
-この設定はプレーンなソースファイルではなく chezmoi テンプレート（`private_` プレフィックス、モード 0600 で展開）です。理由は、このリポジトリに正規表現自体を絶対に含めてはならない `client-identifiers` ルールを定義しているためです:
+2 つ目の設定ファイル `private_gitleaks-own.toml.tmpl`（`~/.config/git/gitleaks-own.toml` へモード 0600 で展開）は、base 設定をミラーした上で `client-identifiers` ルールを追加します。この正規表現自体はこの public リポジトリに絶対に含めてはなりません:
 
 ```toml
 [[rules]]
@@ -166,7 +166,11 @@ id = "client-identifiers"
 regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''
 ```
 
-`chezmoi apply` 実行時、パターンは 1Password のアイテム `Dotfiles - Redact Patterns`（ボールト `kryota.dev`、フィールド `pattern`）から読み込まれます。このアイテムは、コミットに含まれてはならないクライアント/勤務先識別子の `name1|name2|…` 形式の単一アルタネーションを保持します。`run_once_after_11-validate-1password.sh.tmpl` は apply が進む前にこのアイテムの存在を検証します。アイテム自体の作成はメンテナーが手動で行う out-of-band な手順であり、その値がこのリポジトリに書き込まれることはありません。
+**owner-scoped な設定選択。** pre-commit フックはリポジトリの `origin` remote で設定を出し分けます: メンテナー自身の GitHub namespace（`kryota-dev`、`ryota-k0827`）配下のリポジトリ — および remote 未設定のリポジトリ（後で public に push されうるため fail-safe 側に倒す）— には `gitleaks-own.toml` を、クライアント/業務リポジトリ（自身の識別子が正当に頻出する）には base の `gitleaks.toml` を適用します。このためクライアントリポジトリの commit がこのルールでブロックされることはありません。`gitleaks-own.toml` が未展開の場合（1Password アイテム作成前のフレッシュマシン）は base 設定にフォールバックします。
+
+`chezmoi apply` 実行時、パターンは 1Password のアイテム `Dotfiles - Redact Patterns`（ボールト `kryota.dev`、フィールド `pattern`）から読み込まれます。このアイテムは `name1|name2|…` 形式の単一アルタネーション（必要に応じて regex エスケープ済み、`'''` と改行は禁止）を保持します。`run_once_after_11-validate-1password.sh.tmpl` は apply 時にこのアイテムを再検証します: 存在・非空・`'''` 不在・regex としてコンパイル可能であること。なおフレッシュマシンではファイルテンプレートの展開がこのスクリプトより先に走るため、アイテム欠落時はまず chezmoi/op の生エラーが表面化します — スクリプトは gate ではなく診断レイヤーです。アイテム自体の作成はメンテナーが手動で行う out-of-band な手順であり、その値がこのリポジトリに書き込まれることはありません。
+
+**このルールの唯一の強制ポイントはローカル pre-commit フックです。** サーバーサイドのバックストップは存在しません: パターンは CI で再現できず（1Password 非接続）、GitHub secret scanning はカスタム識別子 regex を対象外とします。`git commit --no-verify` で完全にバイパスできます。
 
 誤検知が発生した場合は、他の gitleaks 検出と同じエスケープハッチを使用します: `git commit --no-verify`。
 

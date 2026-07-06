@@ -888,11 +888,11 @@ _gate_decision() {
   grep -q 'git-common-dir' "$hook"
   grep -q 'BASH_SOURCE' "$hook"
   grep -q -- '-ef' "$hook"
-  [ -f "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl" ]
+  [ -f "${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl" ]
   # The global config must not carry a path allowlist (it would blind every repo).
-  ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl"
+  ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl"
   # The client-identifier pattern must be injected from 1Password, never hardcoded.
-  grep -q 'onepasswordRead' "${HOME_DIR}/dot_config/git/private_gitleaks.toml.tmpl"
+  grep -q 'onepasswordRead' "${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl"
 }
 
 # Regression (this PR): the chain step must not infinite-loop when core.hooksPath
