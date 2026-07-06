@@ -64,45 +64,45 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（49 スキル）
+## キュレーテッドスキルインベントリ（38 スキル）
 
-`home/dot_agents/skills/` の 49 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 38 スキルをテーマ別にグループ化しています。
 
-### Git、PR、GitHub ワークフロー（約 12 スキル）
+### Git、PR、GitHub ワークフロー（13 スキル）
 
-日常的な開発サイクルの自動化の中核。
+日常的な開発サイクルの自動化の中核。2026-07-06 の棚卸しで並列開発トライアド（`repo-radar` → `issue-fleet` / `renovate-sweep`）が追加されました。
 
-`commit`、`create-pr`、`create-issue`、`fetch-pr-comments`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`ghostwrite-comment`、`open-pr-files`、`delete-merged-branches`
+`commit`、`create-pr`、`create-issue`、`pr-draft-summary`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`renovate-sweep`、`issue-fleet`、`repo-radar`、`delete-merged-branches`
 
-### コードレビューとマルチエージェントオーケストレーション（約 5 スキル）
+### コードレビューとマルチエージェントオーケストレーション（5 スキル）
 
 サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。
 
 `cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`
 
-### 計画とスペック駆動開発（約 6 スキル）
+### 計画とスペック駆動開発（5 スキル）
 
 構造化されたタスク分解、要件分析、エンドツーエンドのデリバリーフロー。
 
-`planning`、`sdd`、`spec`、`grill-me`、`prompt-conform`、`pr-workflow`
+`planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 
-### セッションとコンテキスト管理（約 7 スキル）
+### セッションとコンテキスト管理（5 スキル）
 
-会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。
+会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。
 
-`save-session`、`session-summary`、`prune-session-transcript`、`compact-docs`、`cleanup-plan`、`retrospective-codify`、`self-evaluate`
+`session-summary`、`prune-session-transcript`、`compact-docs`、`cleanup-plan`、`retrospective-codify`
 
-### ワークツリーと dotfiles ツール（5 スキル）
+### ワークツリーと dotfiles ツール（4 スキル）
 
 `wtp`（worktree-plus）ワークフローと chezmoi/git リポジトリツール。
 
-`wtp`、`wtp-cleanup`、`wtp-workspace`、`chezmoi`、`git-filter-path`
+`wtp`、`wtp-cleanup`、`chezmoi`、`git-filter-path`
 
-### ドメイン、データベース、テスト、メディアユーティリティ（14 スキル）
+### ドメイン、データベース、メディア、生産性ユーティリティ（6 スキル）
 
-データベース、フロントエンドテスト、メディア変換にまたがる各種機能スキル。
+データベース、メディア変換、日々の生産性にまたがる各種機能スキル。
 
-`supabase`、`supabase-postgres-best-practices`、`vitest-error-analysis`、`fix-migration-leftover`、`drawio`、`drawio-skill-cli`、`webp-convert`、`serena`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`copilot-agent-task`、`pr-draft-summary`
+`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`
 
 ---
 
@@ -112,6 +112,8 @@
 |---|---|---|
 | ECC（`affaan-m/ECC`） | <!-- FACT:ecc-skill-count -->126<!-- /FACT --> スキル | `.chezmoidata.toml` の `[ecc].commit` |
 | Anthropic システムスキル | 17 スキル | `.chezmoidata.toml` の `[skills].anthropic_commit` |
+| jgraph/drawio-mcp（`drawio`） | 1 スキル | `.chezmoidata.toml` の `[skills].drawio_mcp_commit` |
+| supabase/agent-skills（`supabase`、`supabase-postgres-best-practices`） | 2 スキル | `.chezmoidata.toml` の `[skills].supabase_agent_skills_commit` |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
 

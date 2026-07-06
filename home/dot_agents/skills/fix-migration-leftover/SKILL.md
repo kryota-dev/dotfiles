@@ -41,7 +41,7 @@ docker ps --format "{{.Names}} {{.Image}}" | grep -i postgres
 docker exec <コンテナ名> psql -U postgres -c "\l"
 ```
 
-開発用DB（`spec_tracker_development` 等）を使用する。
+開発用DB（`<project>_development` 等）を使用する。
 
 ### Step 4: 残骸の確認
 
@@ -108,6 +108,6 @@ pnpm -F <api-package> db:migrate
 
 ## 注意事項
 
-- **テスト用DBにも同様の残骸がある可能性がある**。テスト実行時にエラーが出た場合は `spec_tracker_test_worker_*` DBも確認する
+- **テスト用DBにも同様の残骸がある可能性がある**。テスト実行時にエラーが出た場合は `<project>_test_worker_*` DBも確認する
 - テーブルのドロップは依存関係（FK制約等）によって失敗する場合がある。その場合は `CASCADE` オプションの使用をユーザーに確認する
 - このスキルはローカル開発環境専用。本番・ステージング環境では使用しない
