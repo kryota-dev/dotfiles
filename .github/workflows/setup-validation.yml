@@ -69,7 +69,8 @@ jobs:
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
             home/run_once_after_11-validate-1password.sh.tmpl \
             home/run_once_after_30-setup-fonts.sh.tmpl \
-            home/run_once_after_90-other-apps.sh.tmpl; do
+            home/run_once_after_90-other-apps.sh.tmpl \
+            home/dot_config/git/private_gitleaks.toml.tmpl; do
             if [ -f "$f" ]; then
               mv "$f" /tmp/chezmoi-excluded/
               echo "Excluded: $f"
@@ -291,7 +292,8 @@ jobs:
             home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
             home/run_once_before_00-install-prerequisites.sh.tmpl \
             home/run_onchange_before_10-brew-bundle.sh.tmpl \
-            home/run_once_after_11-validate-1password.sh.tmpl; do
+            home/run_once_after_11-validate-1password.sh.tmpl \
+            home/dot_config/git/private_gitleaks.toml.tmpl; do
             if [ -f "$f" ]; then
               mv "$f" /tmp/chezmoi-excluded/
               echo "Excluded: $f"
