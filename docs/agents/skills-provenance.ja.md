@@ -64,9 +64,9 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（39 スキル）
+## キュレーテッドスキルインベントリ（40 スキル）
 
-`home/dot_agents/skills/` の 39 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 40 スキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（13 スキル）
 
@@ -98,11 +98,11 @@
 
 `wtp`、`wtp-cleanup`、`chezmoi`、`git-filter-path`
 
-### ドメイン、データベース、メディア、生産性ユーティリティ（6 スキル）
+### ドメイン、データベース、メディア、生産性ユーティリティ（7 スキル）
 
 データベース、メディア変換、日々の生産性にまたがる各種機能スキル。
 
-`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`
+`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`
 
 ---
 
