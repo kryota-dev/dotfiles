@@ -181,6 +181,42 @@ The scope (`in_ecc && in_list`) ensures that an unrelated `skills` key added to 
 
 ---
 
+## Skill argument conventions
+
+### `argument-hint` canonical shape
+
+The `argument-hint` frontmatter field follows this shape:
+
+```
+<positional> [--option=<value>]
+```
+
+Rules:
+- **Required positionals come first**, in angle-bracket notation: `<slug>`, `<path>`, `<issue-url-or-feature-description>`
+- **Options come after**, in `[--name=<value>]` form (square brackets = optional)
+- **Alternatives within a single positional slot** are joined with ` | ` inside `<...>`: `<pr|session|topic>`
+- **Short flags** (`-q`, `-w`, `-o`) are acceptable for well-known conventions (e.g., `webp-convert`)
+
+Concrete example: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
+
+Skills that already follow this shape: `zenn-draft` (`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]`), `webp-convert` (`<image-path-or-glob> [-q quality] [-w width] [-o output-dir]`), `multi-review` (`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`).
+
+### `(Recommended)` marker convention
+
+When presenting choices via `AskUserQuestion`, append `(Recommended)` at the **end** of an `options[].label` string to visually signal the preferred default:
+
+```json
+{ "label": "Post with body summary (Recommended)", "description": "..." }
+```
+
+The harness renders `(Recommended)` as-is — there is no native `recommended: true` field in the `AskUserQuestion` schema. Use at most **one** `(Recommended)` per question; it marks the option the caller should default-select.
+
+Skills using this convention: `review-fleet` (`全部（表示の全 PR） (Recommended)`), `multi-review` (`サマリーを body に含めて投稿 (Recommended)`).
+
+> Existing skills are not being retroactively audited to match this convention (deferred until this doc SSOT landed). This section is the canonical reference for new and updated skills.
+
+---
+
 ## See also
 
 - [overview.md](overview.md) — dual-harness, dual-account architecture
