@@ -15,7 +15,7 @@ user-invocable: true
 記事化の初動コスト（素材集め・構成・文体合わせ）を 2〜4 時間から 30 分に圧縮する。
 **生成するのは published: false のドラフトまで**であり、公開に関わる操作は一切行わない。
 
-対象リポジトリ: `~/ghq/github.com/ryota-k0827/zenn-qiita-content`（`articles/` のみ。`qiita/` は ztoq 同期の管轄のため触らない）
+対象リポジトリ: `~/ghq/github.com/kryota-dev/zenn-qiita-content`（`articles/` のみ。`qiita/` は ztoq 同期の管轄のため触らない）
 
 ## 引数
 
@@ -43,7 +43,7 @@ user-invocable: true
 - 直近に追加・更新された記事 2〜3 本を Read し、次を合わせる: 口調（です・ます調）、見出しの粒度、コード例の密度、冒頭リード（対象読者とゴールの提示）の型。
 
 ```bash
-git -C ~/ghq/github.com/ryota-k0827/zenn-qiita-content log --pretty=format: --name-only -- articles/ \
+git -C ~/ghq/github.com/kryota-dev/zenn-qiita-content log --pretty=format: --name-only -- articles/ \
   | grep -v '^$' | awk '!seen[$0]++' | head -3
 # git log 由来のため削除済みファイルを拾いうる。[ -f "<repo>/<path>" ] で存在確認してから Read する
 ```
@@ -88,7 +88,7 @@ gitleaks detect --no-git \
 以下を提示して終了する:
 
 1. 生成ファイルのパス（`articles/<slug>.md`）と全文
-2. プレビュー手順: `cd ~/ghq/github.com/ryota-k0827/zenn-qiita-content && npx zenn preview`（http://localhost:8000）
+2. プレビュー手順: `cd ~/ghq/github.com/kryota-dev/zenn-qiita-content && npx zenn preview`（http://localhost:8000）
 3. 公開までの人間の手順: 内容確認 → `published: true` → `npm run check:spell` → commit / push
    （注意: repo は public のため、**`published: false` のままでも push した時点で GitHub 上では全文が公開される**。push 自体が公開判断である）
 4. 残タスク（画像差し込み・リンク確認・タイトル推敲など）
