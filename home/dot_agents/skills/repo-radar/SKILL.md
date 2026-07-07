@@ -104,7 +104,8 @@ gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
 - Renovate が 3 件以上 → 「`renovate-sweep --all` で一括処理できます」
 - trivial/small 級の assign Issue が 2 件以上 → 「`issue-fleet <番号列>` で並列処理できます」
 - レビュー指摘が溜まった自分の PR → 「`review-resolve-loop` で対応できます」
-- レビュー依頼された他人の PR → 「`multi-review` / `cc-code-review` でレビューできます」
+- **レビュー依頼された他人の PR が 2 件以上** → 「`review-fleet` で収集→分類→計画表→バッチ実行できます」（cross-repo でも 1 コマンド）
+- **レビュー依頼された他人の PR が 1 件だけ** → 「`multi-review` / `cc-code-review` でレビューできます」
 
 ## Phase 4: 投稿（`--post` 時のみ）
 
