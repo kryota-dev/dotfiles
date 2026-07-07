@@ -94,6 +94,29 @@ load helpers/setup
   [ "$broken" -eq 0 ]
 }
 
+@test "docs_facts: every <!-- FACT:curated-skill-count --> marker matches the curated skill dir count" {
+  local actual
+  actual="$(find "${HOME_DIR}/dot_agents/skills" -mindepth 1 -maxdepth 1 -type d | grep -c .)"
+  [ "$actual" -ge 10 ] || {
+    echo "sanity: curated skill dir count resolved to $actual (<10) — the layout likely moved"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:curated-skill-count is $val but home/dot_agents/skills has $actual dirs"
+        false
+      }
+    done < <(grep -oE 'FACT:curated-skill-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:curated-skill-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:curated-skill-count markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
+
 @test "docs_facts: every EN doc has a .ja.md mirror and vice versa" {
   local f sibling missing=0
   while IFS= read -r f; do

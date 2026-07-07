@@ -25,12 +25,17 @@ _claude_with_home() {
   # "checked" cache resets and every instinct Write hits an initial deny that Haiku transcribes
   # instead of retrying); destructive-Bash and routine-Bash gates stay active. The :- default
   # lets claude-config's own ECC_DISABLED_HOOKS override still win.
+  # ECC_OBSERVER_TIMEOUT_SECONDS raises the CLV2 observer watchdog above its 120s default:
+  # the Haiku analysis pass (up to a 500-line observation batch and 100 --max-turns) cannot
+  # finish in 120s, so every run was SIGTERMed (observer log exit 143) and no instinct was
+  # ever written (#256). The :- default keeps an explicit override winning.
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
     CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
     ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-pre:edit-write:gateguard-fact-force}" \
+    ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
     EXA_API_KEY="${EXA_API_KEY:-}" \
     FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
     "$@"

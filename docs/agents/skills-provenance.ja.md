@@ -64,9 +64,9 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（40 スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->45<!-- /FACT --> スキル）
 
-`home/dot_agents/skills/` の 40 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 45 スキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（13 スキル）
 
@@ -86,11 +86,11 @@
 
 `planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 
-### セッションとコンテキスト管理（5 スキル）
+### セッションとコンテキスト管理（6 スキル）
 
-会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。
+会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。
 
-`session-summary`、`prune-session-transcript`、`compact-docs`、`cleanup-plan`、`retrospective-codify`
+`session-summary`、`prune-session-transcript`、`compact-docs`、`cleanup-plan`、`retrospective-codify`、`knowledge-distill`
 
 ### ワークツリーと dotfiles ツール（4 スキル）
 
@@ -98,11 +98,11 @@
 
 `wtp`、`wtp-cleanup`、`chezmoi`、`git-filter-path`
 
-### ドメイン、データベース、メディア、生産性ユーティリティ（7 スキル）
+### ドメイン、データベース、メディア、生産性ユーティリティ（11 スキル）
 
-データベース、メディア変換、日々の生産性にまたがる各種機能スキル。
+データベース、メディア変換、日々の生産性にまたがる各種機能スキルに加え、2026-07-07 のラウンドで追加された朝ルーチン・レポーティング/発信系スキル（`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`）。
 
-`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`
+`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`、`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`
 
 ---
 

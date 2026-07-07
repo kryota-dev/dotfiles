@@ -431,6 +431,7 @@ A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these vari
 | `CLAUDE_CONFIG_DIR` | `cld`/`cld-r06` alias | Selects which `~/.claude*` directory Claude Code uses |
 | `ECC_AGENT_DATA_HOME` | `cld`/`cld-r06` alias | Governs where ECC (and the hook forks) write state |
 | `CLV2_HOMUNCULUS_DIR` | `cld`/`cld-r06` alias | Homunculus data directory for CLV2 instincts/clusters |
+| `ECC_OBSERVER_TIMEOUT_SECONDS` | `cld`/`cld-r06` alias | Default 300; raises the CLV2 observer watchdog so the Haiku analysis pass can finish instead of dying at 120s (#256). The `:-` form keeps an explicit override winning |
 
 ---
 

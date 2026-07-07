@@ -64,9 +64,9 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (40 skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->45<!-- /FACT --> skills)
 
-The 40 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 45 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (13 skills)
 
@@ -86,11 +86,11 @@ Structured task decomposition, requirement analysis, and end-to-end delivery flo
 
 `planning`, `sdd`, `grill-me`, `prompt-conform`, `pr-workflow`
 
-### Session and context management (5 skills)
+### Session and context management (6 skills)
 
-Managing conversation state, compacting transcripts, and post-session capture. `session-summary` has both a lightweight default mode and a `--archive` deep-mode (JSONL archive + subagent summary) folded in from the retired `save-session` skill.
+Managing conversation state, compacting transcripts, and post-session capture. `session-summary` has both a lightweight default mode and a `--archive` deep-mode (JSONL archive + subagent summary) folded in from the retired `save-session` skill. `knowledge-distill` audits the ECC learning loop weekly and routes accumulated learnings to their promotion targets (proposals only).
 
-`session-summary`, `prune-session-transcript`, `compact-docs`, `cleanup-plan`, `retrospective-codify`
+`session-summary`, `prune-session-transcript`, `compact-docs`, `cleanup-plan`, `retrospective-codify`, `knowledge-distill`
 
 ### Worktree and dotfiles tooling (4 skills)
 
@@ -98,11 +98,11 @@ Managing conversation state, compacting transcripts, and post-session capture. `
 
 `wtp`, `wtp-cleanup`, `chezmoi`, `git-filter-path`
 
-### Domain, database, media, and productivity utilities (7 skills)
+### Domain, database, media, and productivity utilities (11 skills)
 
-Miscellaneous functional skills spanning databases, media conversion, and daily productivity.
+Miscellaneous functional skills spanning databases, media conversion, and daily productivity, plus the morning-routine and reporting/publishing skills added in the 2026-07-07 rounds (`gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`).
 
-`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `redact-patterns`
+`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `redact-patterns`, `gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`
 
 ---
 
