@@ -651,7 +651,8 @@ SECRETS
 
   # -f: no rc files. Source claude.zsh, then check (a) the keys do NOT leak into the parent
   # shell's exported env, and (b) they DO reach a subprocess launched via _claude_with_home.
-  run zsh -fc "
+  # Isolate from wrapper-inherited MCP keys (#269) — the regression guard below still fires if claude.zsh leaks.
+  run env -u EXA_API_KEY -u FIRECRAWL_API_KEY zsh -fc "
     export HOME='$tmp'
     source '$zsh'
     printf 'PARENT_EXA=[%s]\n' \"\$(printenv EXA_API_KEY)\"
