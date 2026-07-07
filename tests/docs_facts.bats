@@ -117,6 +117,27 @@ load helpers/setup
   }
 }
 
+@test "docs_facts: every <!-- FACT:onepassword-vault-item-count --> marker matches 4 required vault items" {
+  # SSOT: 4 vault items as of PR #248 (feat(gitleaks): add 1Password-injected client-identifier rule).
+  # Items: Dotfiles - AWS Config, Dotfiles - Exa API, Dotfiles - Firecrawl API, Dotfiles - Redact Patterns.
+  # If items are added or removed, update this constant AND every marker in docs/.
+  local expected=4
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$expected" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:onepassword-vault-item-count is $val but expected $expected"
+        false
+      }
+    done < <(grep -oE 'FACT:onepassword-vault-item-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:onepassword-vault-item-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:onepassword-vault-item-count markers found under ${DOCS_DIR} — add them to the secrets docs"
+    false
+  }
+}
+
 @test "docs_facts: every EN doc has a .ja.md mirror and vice versa" {
   local f sibling missing=0
   while IFS= read -r f; do

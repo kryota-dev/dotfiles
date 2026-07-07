@@ -21,6 +21,7 @@
             ▼
 ~/.config/zsh/claude-secrets.zsh    (モード 0600, private_ プレフィックス)
 ~/.aws/config                        (モード 0600, private_ プレフィックス)
+~/.config/git/gitleaks-own.toml     (モード 0600, private_ プレフィックス)
 ```
 
 `~/.ssh/config` も `private_` 0600 ファイル（`home/private_dot_ssh/config.tmpl` からデプロイ）ですが、1Password からレンダリングされるものでは**ありません**。OS 分岐テンプレートロジックのみを使用しており、`op://` や `onepasswordRead` の参照を一切含みません。
@@ -29,6 +30,7 @@
 
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential"` および `onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential"`
 - `home/private_dot_aws/config.tmpl` — 1Password Secure Note からファイル全体をレンダリングする単一の `onepasswordRead "op://kryota.dev/Dotfiles - AWS Config/notesPlain"` 呼び出し
+- `home/dot_config/git/private_gitleaks-own.toml.tmpl` — `onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern"` で自社名前空間リポジトリ用 gitleaks 設定にクライアント識別子正規表現を注入
 
 `private_` chezmoi プレフィックスは、デスティネーションファイルに `0600` を適用するメカニズムです。追加の `chmod` は不要です。
 
@@ -42,11 +44,12 @@
 
 ### Apply-strict: `run_once_after_11-validate-1password.sh.tmpl`
 
-このライフサイクルスクリプトは macOS 上で一度だけ実行され、必要な 1Password アイテムが見つからないか到達不能な場合、ゼロ以外の終了コードで `chezmoi apply` を中断します。確認されるアイテムは以下のとおりです:
+このライフサイクルスクリプトは macOS 上で一度だけ実行され、<!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの必要な 1Password アイテムのいずれかが見つからないか到達不能な場合、ゼロ以外の終了コードで `chezmoi apply` を中断します。確認されるアイテムは以下のとおりです:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
+- `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
 
 `op` がインストールされていない、認証されていない、またはアイテムが読み取れない場合、`chezmoi apply` はフェイルファストします。注意点として、`run_once_after_11` は AFTER フェーズのスクリプトであり、実行時点ではホームディレクトリはすでに変更されています。実際のフェイルファストパスは次の 2 つです: (1) `.tmpl` ファイル内の `onepasswordRead` がテンプレートレンダリング中に apply を中断する（当該ファイルが書き込まれる前）; (2) `run_once_after_11` が後続の重い after フェーズプロビジョニング（mise、MCP、CLV2 等）の前のフェイルファストゲートとして機能する。シークレットが欠落した状態で途中までプロビジョニングされたマシンは、これらいずれかの時点でのクリーンな中断よりも悪い結果をもたらすという考えに基づいています。スクリプトは macOS のみです（`{{ if ne .chezmoi.os "darwin" }}` で早期終了）。CI は 1Password インストールなしで Ubuntu 上で実行されるためです。
 
@@ -105,7 +108,8 @@ CI（`setup-validation.yml`）は 1Password にアクセスせずに macOS と U
       home/dot_config/zsh/private_claude-secrets.zsh.tmpl \
       home/run_once_before_00-install-prerequisites.sh.tmpl \
       home/run_onchange_before_10-brew-bundle.sh.tmpl \
-      home/run_once_after_11-validate-1password.sh.tmpl; do
+      home/run_once_after_11-validate-1password.sh.tmpl \
+      home/dot_config/git/private_gitleaks-own.toml.tmpl; do
       if [ -f "$f" ]; then mv "$f" /tmp/chezmoi-excluded/; fi
     done
     # macOS ジョブはさらに除外:
