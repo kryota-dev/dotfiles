@@ -74,6 +74,7 @@ gitleaks detect --no-git \
   --config ~/.config/git/gitleaks-own.toml
 ```
 
+- config（`~/.config/git/gitleaks-own.toml`）が存在しない場合は固有名検出と区別できないため、検査せずに `chezmoi apply` での再デプロイを案内して中断する。
 - 検出時: 該当箇所を汎用化して再検査する（通過するまでループ）。
 - パターン網羅の不足に気づいた場合（検出されるべき固有名が素通りした場合）は、`redact-patterns` skill でのパターン追加を**ユーザーに提案**する（本 skill からは追加しない）。
 - 機械検査に加えて意味的な検査も行う: 内部事情・非公開の数値・スクリーンショット指示内の写り込みがないか。

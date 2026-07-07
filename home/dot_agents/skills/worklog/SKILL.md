@@ -22,7 +22,7 @@ user-invocable: true
 | `--period` | `this-week` | 集計期間（JST）。`this-week`=今週月曜〜実行時点、`last-week`=先週月〜日、`this-month` / `last-month` / `YYYY-MM`、`<start>..<end>`（`YYYY-MM-DD..YYYY-MM-DD`） |
 | `--scope` | all | `owner` または `owner/repo` のカンマ区切りで絞り込み（例: `--scope=kryota-dev,kryota-dev/dotfiles`） |
 | `--csv` | off | Markdown に加えて同名の .csv も出力する |
-| `--out` | `~/dotfiles/.kryota-dev/worklog/` | 出力先ディレクトリ。git 追跡領域が指定された場合は警告して確認する |
+| `--out` | `~/dotfiles/.kryota-dev/worklog/` | 出力先ディレクトリ。git 追跡領域（`git -C <dir> rev-parse --is-inside-work-tree` が true かつ `git -C <dir> check-ignore -q <dir>` が偽）が指定された場合は警告して確認する |
 
 ## 安全原則
 
@@ -60,6 +60,7 @@ gh search prs --author=@me --created "${START_DATE}..${END_DATE}" --limit 100 \
   --json repository,number,title,url,createdAt,state,isDraft
 
 # 3. 期間内に自分がレビューした PR（author が自分のものは Phase 3 で除外）
+#    ※ --updated は「PR の最終更新日」での近似であり、レビュー実施日そのものではない
 gh search prs --reviewed-by=@me --updated "${START_DATE}..${END_DATE}" --limit 100 \
   --json repository,number,title,url,author
 
@@ -90,7 +91,7 @@ git -C <path> log --author="$(git -C <path> config user.email)" \
 
 ## Phase 4: 出力
 
-`--out`（既定 `~/dotfiles/.kryota-dev/worklog/`）に `<LABEL>.md` を書き出す。同名ファイルが既にある場合は差分を提示して上書き確認する。
+`--out`（既定 `~/dotfiles/.kryota-dev/worklog/`）に `<LABEL>.md` を書き出す（ディレクトリがなければ `mkdir -p` で作成）。同名ファイルが既にある場合は差分を提示して上書き確認する。
 
 ```markdown
 <!-- INTERNAL: 内部資料。クライアント固有名を含む。公開物へ転記する前に

@@ -44,7 +44,7 @@ H="${CLV2_HOMUNCULUS_DIR:-$HOME/.claude/ecc-homunculus}"    # 未設定なら既
 jq '.observer' "$H/config.json"                              # enabled / run_interval / min_observations
 ls "$H/instincts/personal/" 2>/dev/null | wc -l              # instinct 蓄積数
 ls -lt "$H"/projects/*/observations.jsonl 2>/dev/null | head -3   # 観測の鮮度（記録が進んでいるか）
-ls "$H"/projects/*/observations.archive/ 2>/dev/null | tail -3    # 分析が完走した痕跡（archive 移動）
+ls "$H"/projects/*/observations.archive/ 2>/dev/null | tail -3    # 分析の処理痕跡（processed-<時刻> 名はソート=時系列のため tail が直近）
 grep -h 'timed out' "$H"/projects/*/*.log 2>/dev/null | tail -3   # timeout 痕跡（#256 の再発監視）
 printf '%s\n' "${ECC_OBSERVER_TIMEOUT_SECONDS:-unset (この場合 observer は既定 120s)}"
 ```
@@ -98,6 +98,7 @@ python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
 | (d) ルール化 | pr-workflow | AGENTS.md / CLAUDE.md への追記 diff 案 |
 
 - 各提案に根拠（instinct ID / session-summary の該当箇所）を必ず添える。
+- ※ (a) は要件上「`/evolve` で evolved skill 化」だが、adopt-ideas 方針（auto-files 不使用、task #34）により retrospective-codify の instinct-clusters 入力経由で実現する。
 - レポート末尾に「今週の routing 決定」チェックリスト（ユーザーが GO / NO-GO を記入する欄）を含める。
 
 ## 運用メモ
