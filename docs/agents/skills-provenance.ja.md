@@ -193,13 +193,14 @@ awk '
 
 ルール：
 - **必須の位置引数を先頭に**、山括弧記法で記述する: `<slug>`、`<path>`、`<issue-url-or-feature-description>`
+- **省略可能な位置引数**は山括弧トークンを角括弧で包む: `[<name>]`（例: `[<テーマ>]`）
 - **オプションはその後**に `[--name=<value>]` 形式（角括弧 = 省略可能）
-- **単一スロット内の代替案**は `<...>` 内で ` | ` で連結する: `<pr|session|topic>`
-- **短フラグ**（`-q`、`-w`、`-o`）は既知の慣例（例: `webp-convert`）では許容
+- **単一スロット内の代替案**は `<...>` 内で `|`（スペースなし）で連結する: `<pr|session|topic>`
+- **短フラグ**（`-q`、`-w`、`-o`）は既知の慣例では許容
 
 具体例: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
 
-この形に従っている既存スキル: `zenn-draft`（`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]`）、`webp-convert`（`<image-path-or-glob> [-q quality] [-w width] [-o output-dir]`）、`multi-review`（`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`）。
+この形に従っている既存スキル: `zenn-draft`（`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` は上記の省略可能な位置引数ルールに従う）、`pr-workflow`（`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`）、`issue-fleet`（`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`）、`multi-review`（`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`）。
 
 ### `(Recommended)` マーカー規約
 
@@ -209,7 +210,7 @@ awk '
 { "label": "サマリー付きで投稿 (Recommended)", "description": "..." }
 ```
 
-ハーネスは `(Recommended)` をそのまま描画します — `AskUserQuestion` スキーマには `recommended: true` のようなネイティブフィールドは存在しません。1 問につき `(Recommended)` は最大 **1 つ**まで使用します。これはユーザーが既定で選ぶべき選択肢を示すマーカーです。
+ハーネスは `(Recommended)` をそのまま描画します — 現時点で `AskUserQuestion` スキーマには `recommended: true` のようなネイティブフィールドは存在しません（**要検証**: harness 更新で schema が変わる可能性あり — 変更があれば本規約は追随する）。1 問につき `(Recommended)` は最大 **1 つ**まで使用します。これはユーザーが既定で選ぶべき選択肢を示すマーカーです。
 
 この規約を使用しているスキル: `review-fleet`（`全部（表示の全 PR） (Recommended)`）、`multi-review`（`サマリーを body に含めて投稿 (Recommended)`）。
 

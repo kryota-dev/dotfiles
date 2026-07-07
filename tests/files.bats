@@ -656,12 +656,14 @@ SECRETS
     export HOME='$tmp'
     source '$zsh'
     printf 'PARENT_EXA=[%s]\n' \"\$(printenv EXA_API_KEY)\"
+    printf 'PARENT_FC=[%s]\n' \"\$(printenv FIRECRAWL_API_KEY)\"
     printf 'SUB_EXA=[%s]\n' \"\$(_claude_with_home '$tmp' printenv EXA_API_KEY)\"
     printf 'SUB_FC=[%s]\n' \"\$(_claude_with_home '$tmp' printenv FIRECRAWL_API_KEY)\"
   "
   [ "$status" -eq 0 ]
   # Non-exported in the parent: printenv finds nothing.
   echo "$output" | grep -qF 'PARENT_EXA=[]'
+  echo "$output" | grep -qF 'PARENT_FC=[]'
   # Exported (scoped) into the subprocess: the values come through.
   echo "$output" | grep -qF 'SUB_EXA=[exa-test-key]'
   echo "$output" | grep -qF 'SUB_FC=[fc-test-key]'
