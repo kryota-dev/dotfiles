@@ -181,6 +181,43 @@ awk '
 
 ---
 
+## スキル引数の規約
+
+### `argument-hint` の正規形
+
+`argument-hint` フロントマターフィールドは以下の形に従います：
+
+```
+<positional> [--option=<value>]
+```
+
+ルール：
+- **必須の位置引数を先頭に**、山括弧記法で記述する: `<slug>`、`<path>`、`<issue-url-or-feature-description>`
+- **省略可能な位置引数**は山括弧トークンを角括弧で包む: `[<name>]`（例: `[<テーマ>]`）
+- **オプションはその後**に `[--name=<value>]` 形式（角括弧 = 省略可能）
+- **単一スロット内の代替案**は `<...>` 内で `|`（スペースなし）で連結する: `<pr|session|topic>`
+- **短フラグ**（`-q`、`-w`、`-o`）は既知の慣例では許容
+
+具体例: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
+
+この形に従っている既存スキル: `zenn-draft`（`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` は上記の省略可能な位置引数ルールに従う）、`pr-workflow`（`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`）、`issue-fleet`（`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`）、`multi-review`（`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`）。
+
+### `(Recommended)` マーカー規約
+
+`AskUserQuestion` で選択肢を提示する際、`options[].label` 文字列の**末尾**に `(Recommended)` を付加することで、推奨デフォルトを視覚的に示します：
+
+```json
+{ "label": "サマリー付きで投稿 (Recommended)", "description": "..." }
+```
+
+ハーネスは `(Recommended)` をそのまま描画します — 現時点で `AskUserQuestion` スキーマには `recommended: true` のようなネイティブフィールドは存在しません（**要検証**: harness 更新で schema が変わる可能性あり — 変更があれば本規約は追随する）。1 問につき `(Recommended)` は最大 **1 つ**まで使用します。これはユーザーが既定で選ぶべき選択肢を示すマーカーです。
+
+この規約を使用しているスキル: `review-fleet`（`全部（表示の全 PR） (Recommended)`）、`multi-review`（`サマリーを body に含めて投稿 (Recommended)`）。
+
+> 既存スキルをこの規約に合わせて遡及的に更新することはしない（この SSOT ドキュメントが定着するまで保留）。このセクションは新規・更新スキルの正規リファレンスとして機能する。
+
+---
+
 ## 関連ドキュメント
 
 - [overview.ja.md](overview.ja.md) — デュアルハーネス、デュアルアカウントアーキテクチャ

@@ -181,6 +181,43 @@ The scope (`in_ecc && in_list`) ensures that an unrelated `skills` key added to 
 
 ---
 
+## Skill argument conventions
+
+### `argument-hint` canonical shape
+
+The `argument-hint` frontmatter field follows this shape:
+
+```
+<positional> [--option=<value>]
+```
+
+Rules:
+- **Required positionals come first**, in angle-bracket notation: `<slug>`, `<path>`, `<issue-url-or-feature-description>`
+- **Optional positionals** wrap the angle-bracket token in square brackets: `[<name>]` (e.g., `[<テーマ>]`)
+- **Options come after**, in `[--name=<value>]` form (square brackets = optional)
+- **Alternatives within a single positional slot** are joined with `|` (no spaces) inside `<...>`: `<pr|session|topic>`
+- **Short flags** (`-q`, `-w`, `-o`) are acceptable for well-known conventions
+
+Concrete example: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
+
+Skills that already follow this shape: `zenn-draft` (`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` is an optional positional per the rule above), `pr-workflow` (`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`), `issue-fleet` (`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`), `multi-review` (`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`).
+
+### `(Recommended)` marker convention
+
+When presenting choices via `AskUserQuestion`, append `(Recommended)` at the **end** of an `options[].label` string to visually signal the preferred default:
+
+```json
+{ "label": "Post with body summary (Recommended)", "description": "..." }
+```
+
+The harness renders `(Recommended)` as-is — there is no native `recommended: true` field in the `AskUserQuestion` schema as of this writing (**note**: harness schema updates may add such a field; if so, update this convention to match). Use at most **one** `(Recommended)` per question; it marks the option the caller should default-select.
+
+Skills using this convention: `review-fleet` (`全部（表示の全 PR） (Recommended)`), `multi-review` (`サマリーを body に含めて投稿 (Recommended)`).
+
+> Existing skills are not being retroactively audited to match this convention (deferred until this doc SSOT landed). This section is the canonical reference for new and updated skills.
+
+---
+
 ## See also
 
 - [overview.md](overview.md) — dual-harness, dual-account architecture
