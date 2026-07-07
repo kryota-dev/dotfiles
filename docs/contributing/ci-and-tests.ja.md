@@ -105,13 +105,14 @@ awk パーサーは `[ecc]` テーブルの `skills` 配列のみにスコープ
 
 `chezmoi apply` の前に、両ジョブは CI 環境では `op` の呼び出しやインタラクティブ/インストールステップの実行を試みないよう、一連のファイルを `/tmp/chezmoi-excluded/` に移動します。各ファイルは `for f in …; do if [ -f "$f" ]; then mv …; fi; done` ループ内で移動されるため、エントリが見つからなくてもステップは中断されません。
 
-**両ジョブ**で除外されるファイル（5 ファイル）：
+**両ジョブ**で除外されるファイル（<!-- FACT:ci-both-exclusion-count -->6<!-- /FACT --> ファイル）：
 
 - `home/private_dot_aws/config.tmpl`
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl`
 - `home/run_once_before_00-install-prerequisites.sh.tmpl`
 - `home/run_onchange_before_10-brew-bundle.sh.tmpl`
 - `home/run_once_after_11-validate-1password.sh.tmpl`
+- `home/dot_config/git/private_gitleaks-own.toml.tmpl`
 
 **macOS ジョブのみ**で除外されるファイル：
 
