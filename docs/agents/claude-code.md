@@ -27,6 +27,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
   - [ecc-state-reader.js](#ecc-state-readerjs)
 - [Statusline](#statusline)
 - [CLV2 observer wiring](#clv2-observer-wiring)
+- [Scheduled morning radar](#scheduled-morning-radar)
 - [Review subagents](#review-subagents)
 - [r06 work account](#r06-work-account)
 - [Env vars reference](#env-vars-reference)
@@ -41,6 +42,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/executable_ecc-hook.sh` | `~/.claude/ecc-hook.sh` (0755) |
 | `home/dot_claude/executable_statusline.sh` | `~/.claude/statusline.sh` (0755) |
 | `home/dot_claude/executable_clv2-session-notify.sh` | `~/.claude/clv2-session-notify.sh` (0755) |
+| `home/dot_claude/executable_morning-radar.sh` | `~/.claude/morning-radar.sh` (0755) |
 | `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
@@ -369,6 +371,23 @@ The CLV2 `observe.sh` script is wired into both `PreToolUse` and `PostToolUse` a
 The script is invoked directly (not via the ECC `observe-runner.js`) because the ECC plugin root has no `skills/` tree, so the runner cannot locate `observe.sh`. The script resolves its own `SKILL_ROOT` from `$0`. Both hooks are async so they never add per-tool latency.
 
 **Enabling the observer.** The observer must be enabled in each account's runtime `<homunculus>/config.json`. This is done by `run_onchange_after_14-enable-clv2-observer.sh.tmpl`, which writes `observer.enabled=true` via a `jq` merge after each `chezmoi apply` that changes the lifecycle script's content hash. Editing the CLV2 skill's own `config.json` would be clobbered by the chezmoi external's 168-hour refresh.
+
+---
+
+## Scheduled morning radar
+
+Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headless on weekday mornings and hands the result off as a macOS notification. Detection + notify only — downstream skills (issue-fleet / renovate-sweep / review-fleet) are never auto-dispatched.
+
+| Piece | Path | Role |
+|---|---|---|
+| LaunchAgent plist | `home/Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` → `~/Library/LaunchAgents/` | Fires Mon–Fri 09:00 local time (this Mac is assumed to be on JST) |
+| Wrapper | `~/.claude/morning-radar.sh` | Runs `claude -p "/morning-brief …"` on the personal account, saves the brief, notifies |
+| Registration | `run_onchange_after_30-register-launchd-agents.sh.tmpl` | `launchctl bootout → bootstrap` whenever the plist changes; skipped in CI ([lifecycle scripts](../architecture/lifecycle-scripts.md)) |
+
+- **Schedule semantics.** launchd coalesces fires missed while asleep into one run on wake; days the Mac is powered off are skipped. A date marker under `~/.local/state/morning-radar/` caps execution at one billed run per day; `~/.claude/morning-radar.sh --force` bypasses it for manual reruns.
+- **Degraded mode.** The claude.ai Gmail/Calendar connectors cannot complete OAuth headless, so the brief degrades to GitHub + local context with an explicit fetch-failure note — the behavior documented in morning-brief SKILL.md.
+- **Permissions & cost.** The wrapper passes an explicit `--allowedTools` allowlist (read-only `gh`/`git` and file reads; `Write` scoped to the brief output dir) and never uses `--dangerously-skip-permissions`. The model is pinned to `sonnet`, turns are capped with `--max-turns`, and a 600 s watchdog is the billing backstop. The weekday 5-runs/week spend was pre-approved on #257.
+- **Output contract.** The brief lands in `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md`; the final response is a single `HEADLINE:` line the wrapper relays into the notification (argv-passed to osascript — no AppleScript string interpolation).
 
 ---
 
