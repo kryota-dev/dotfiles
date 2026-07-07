@@ -64,7 +64,7 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (45 skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->45<!-- /FACT --> skills)
 
 The 45 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 

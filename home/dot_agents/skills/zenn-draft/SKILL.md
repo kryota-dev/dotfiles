@@ -30,7 +30,7 @@ user-invocable: true
 - **公開系操作の禁止**: `git add` / `commit` / `push`、`published: true` への変更、デプロイ、Zenn / Qiita への直接投稿を行わない。
 - **既存記事を上書きしない**: slug 重複時は別 slug を提案する。
 - **クライアント案件由来の素材は汎用化**: 固有名・内部 URL・非公開の数値は `<owner>/<repo>` や一般名詞へ置換してから記事に載せる（public リポジトリへの固有名記載禁止ルールに従う）。
-- 生成後の redact 検査（Phase 4）を必ず通してからハンドオフする。
+- **redact 検査（Phase 4）を通過するまで public repo の作業ツリーに置かない**（一時領域で生成し、通過後に移動する）。
 
 ## Phase 1: 素材選定
 
@@ -45,12 +45,14 @@ user-invocable: true
 ```bash
 git -C ~/ghq/github.com/ryota-k0827/zenn-qiita-content log --pretty=format: --name-only -- articles/ \
   | grep -v '^$' | awk '!seen[$0]++' | head -3
+# git log 由来のため削除済みファイルを拾いうる。[ -f "<repo>/<path>" ] で存在確認してから Read する
 ```
 
-## Phase 3: ドラフト生成
+## Phase 3: ドラフト生成（一時領域）
 
 - slug を決定する: `--slug` 指定値、なければ内容ベースの kebab-case（12〜50 字、`a-z0-9_-` のみ。例: `gha-nodejs-cache` のような既存の意味付き slug の慣習に合わせる）。`articles/<slug>.md` の存在を確認し、重複していれば別案を提示する。
-- `articles/<slug>.md` に生成する。frontmatter は既存記事と同形式:
+- **まず一時領域 `~/dotfiles/.kryota-dev/zenn-drafts/<slug>.md`（gitignore 済み）に生成する**。redact 検査（Phase 4）を通過するまで public repo の作業ツリー（`articles/`）には置かない — セッション中断時に未検査ドラフトが public repo に残置される時間窓を消すため。
+- frontmatter は既存記事と同形式:
 
 ```yaml
 ---
@@ -65,12 +67,12 @@ published: false # 固定。true への変更は人間のみが行う
 - 構成: リード（誰向け・何が得られる）→ 背景 / 課題 → 本編（コード例は実際に動くもの）→ まとめ → 参考リンク。
 - 画像が必要な箇所は `images/` への配置指示をプレースホルダで示す（画像の生成・コピーはしない）。
 
-## Phase 4: redact 検査（必須）
+## Phase 4: redact 検査（必須）→ 移動
 
 ```bash
 # own-namespace 用 strict config の client-identifiers ルールで機械検査（gitleaks は Go RE2）
 gitleaks detect --no-git \
-  --source ~/ghq/github.com/ryota-k0827/zenn-qiita-content/articles/<slug>.md \
+  --source ~/dotfiles/.kryota-dev/zenn-drafts/<slug>.md \
   --config ~/.config/git/gitleaks-own.toml
 ```
 
@@ -78,15 +80,17 @@ gitleaks detect --no-git \
 - 検出時: 該当箇所を汎用化して再検査する（通過するまでループ）。
 - パターン網羅の不足に気づいた場合（検出されるべき固有名が素通りした場合）は、`redact-patterns` skill でのパターン追加を**ユーザーに提案**する（本 skill からは追加しない）。
 - 機械検査に加えて意味的な検査も行う: 内部事情・非公開の数値・スクリーンショット指示内の写り込みがないか。
+- **検査通過後に `articles/<slug>.md` へ移動**し、一時領域のファイルは残さない。
 - 補足: zenn repo は own-namespace のため commit 時にも gitleaks pre-commit hook が同じルールで再検査する（多層防御）。ただし本 skill は commit しないため、**ハンドオフ前検査が唯一の必須ゲート**である。
 
 ## Phase 5: ハンドオフ
 
 以下を提示して終了する:
 
-1. 生成ファイルのパスと全文
+1. 生成ファイルのパス（`articles/<slug>.md`）と全文
 2. プレビュー手順: `cd ~/ghq/github.com/ryota-k0827/zenn-qiita-content && npx zenn preview`（http://localhost:8000）
 3. 公開までの人間の手順: 内容確認 → `published: true` → `npm run check:spell` → commit / push
+   （注意: repo は public のため、**`published: false` のままでも push した時点で GitHub 上では全文が公開される**。push 自体が公開判断である）
 4. 残タスク（画像差し込み・リンク確認・タイトル推敲など）
 
 ## 運用メモ

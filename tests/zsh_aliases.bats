@@ -21,6 +21,18 @@ load helpers/setup
   [ "$output" = "happy|$HOME/.claude-r06|$HOME/.claude-r06|$HOME/.claude-r06/.gateguard|claude --resume" ]
 }
 
+@test "claude.zsh: _claude_with_home raises the observer timeout with an overridable default" {
+  run zsh -fc "
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"\$ECC_OBSERVER_TIMEOUT_SECONDS\"; }
+    _claude_with_home \"\$HOME/.claude\"
+    ECC_OBSERVER_TIMEOUT_SECONDS=45 _claude_with_home \"\$HOME/.claude\"
+  "
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "300" ]
+  [ "${lines[1]}" = "45" ]
+}
+
 @test "claude.zsh: _claude_with_home defaults to claude when no command is given" {
   run zsh -fc "
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
