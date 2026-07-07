@@ -23,3 +23,14 @@ _ecc_skill_list() {
     in_ecc && in_list  { print }
   ' "${HOME_DIR}/.chezmoidata.toml" | grep -oE '"[^"]+"' | tr -d '"'
 }
+
+# Resolve the ITEMS=(...) array in run_once_after_11-validate-1password.sh.tmpl.
+# Each entry is a "op://kryota.dev/..." string; comments inside the array (starting
+# with #) are ignored. Kept dependency-free (no yq / no chezmoi).
+_onepassword_item_list() {
+  awk '
+    /^ITEMS=\(/                { in_arr = 1; next }
+    in_arr && /^\)/            { in_arr = 0 }
+    in_arr && /"op:\/\//      { print }
+  ' "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+}

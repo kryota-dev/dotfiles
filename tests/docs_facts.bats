@@ -117,6 +117,55 @@ load helpers/setup
   }
 }
 
+@test "docs_facts: every <!-- FACT:onepassword-vault-item-count --> marker matches the ITEMS array in validate-1password" {
+  # SSOT: the ITEMS=(...) array in home/run_once_after_11-validate-1password.sh.tmpl.
+  # _onepassword_item_list (helpers/setup.bash) parses it; this test ensures the docs
+  # markers stay in sync with the script — adding/removing an op:// entry automatically
+  # fails the test without touching this file.
+  local expected
+  expected="$(_onepassword_item_list | grep -c .)"
+  [ "$expected" -ge 3 ] || {
+    echo "sanity: _onepassword_item_list resolved to $expected (<3) — the extractor likely broke"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$expected" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:onepassword-vault-item-count is $val but ITEMS array has $expected entries"
+        false
+      }
+    done < <(grep -oE 'FACT:onepassword-vault-item-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:onepassword-vault-item-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:onepassword-vault-item-count markers found under ${DOCS_DIR} — add them to the secrets docs"
+    false
+  }
+}
+
+@test "docs_facts: every <!-- FACT:ci-both-exclusion-count --> marker matches the Ubuntu job exclusion count" {
+  # SSOT: .github/workflows/setup-validation.yml lines 290-296 (Ubuntu job's
+  # "Exclude CI-incompatible files" step for f in \...; do block). Count is 6 as of
+  # PR #271 — PR #248 added home/dot_config/git/private_gitleaks-own.toml.tmpl.
+  # Update this constant AND every marker in docs/ when entries are added or removed.
+  local expected=6
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$expected" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:ci-both-exclusion-count is $val but expected $expected"
+        false
+      }
+    done < <(grep -oE 'FACT:ci-both-exclusion-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:ci-both-exclusion-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:ci-both-exclusion-count markers found under ${DOCS_DIR} — add them to the CI docs"
+    false
+  }
+}
+
 @test "docs_facts: every EN doc has a .ja.md mirror and vice versa" {
   local f sibling missing=0
   while IFS= read -r f; do

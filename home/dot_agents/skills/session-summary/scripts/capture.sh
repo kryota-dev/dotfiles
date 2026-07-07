@@ -18,6 +18,12 @@ set -euo pipefail
 #   2. $HOME/.claude*/projects     （標準 ~/.claude のほか、~/.claude-r06 等の派生環境）
 
 SESSION_ID="${1:?Error: セッションIDが必要です}"
+# SESSION_ID は探索/出力パスに補間されるため、path traversal (../, /, 等) の
+# 混入を境界で拒否する (#255)。許可: 半角英数字とハイフンのみ。
+if [[ ! "$SESSION_ID" =~ ^[A-Za-z0-9-]+$ ]]; then
+  echo "Error: SESSION_ID に許可されない文字が含まれています (許可: A-Za-z0-9-)" >&2
+  exit 1
+fi
 LABEL_RAW="${2:-session}"
 # ラベルに含まれる '/' をファイル名安全な '-' に置換
 LABEL="${LABEL_RAW//\//-}"

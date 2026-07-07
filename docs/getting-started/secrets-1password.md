@@ -44,7 +44,7 @@ Before running `chezmoi apply` on macOS:
 1. **1Password desktop app** installed and signed in.
 2. **CLI integration enabled**: 1Password → Settings → Developer → "Integrate with 1Password CLI".
 3. **1Password CLI (`op`)** installed: `brew install --cask 1password-cli`.
-4. All three vault items listed below exist in the `kryota.dev` vault.
+4. All <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> vault items listed below exist in the `kryota.dev` vault.
 
 ---
 
@@ -91,6 +91,19 @@ Used by the `exa` user-scope Claude Code MCP server. The rendered file sets `EXA
 
 Used by the `firecrawl` user-scope Claude Code MCP server. Sets `FIRECRAWL_API_KEY` in the same file.
 
+### 4. `Dotfiles - Redact Patterns`
+
+| Attribute | Value |
+|-----------|-------|
+| Vault | `kryota.dev` |
+| Item title | `Dotfiles - Redact Patterns` |
+| Field reference | `pattern` |
+| op:// URI | `op://kryota.dev/Dotfiles - Redact Patterns/pattern` |
+| Rendered to | `~/.config/git/gitleaks-own.toml` (`dot_config/git/private_gitleaks-own.toml.tmpl`) |
+| File mode | `0600` (via `private_` prefix) |
+
+Store the client/employer identifier pattern as a `name1|name2|...` alternation (regex-escaped where needed; no `'''`, no newlines). chezmoi renders it into the owner-scoped gitleaks config at apply time. The `run_once_after_11` script additionally smoke-tests this value — it verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal), and compiles as a valid regex. A broken pattern would silently disable the client-identifier rule on every commit in own-namespace repos.
+
 ---
 
 ## What breaks when an item is missing or renamed
@@ -100,8 +113,9 @@ Used by the `firecrawl` user-scope Claude Code MCP server. Sets `FIRECRAWL_API_K
 | `Dotfiles - AWS Config` | `chezmoi apply` exits 1 at the validation gate | `~/.aws/config` not written; AWS CLI unusable |
 | `Dotfiles - Exa API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; exa MCP server starts but fails to authenticate |
 | `Dotfiles - Firecrawl API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; firecrawl MCP server starts but fails to authenticate |
+| `Dotfiles - Redact Patterns` | `chezmoi apply` exits 1 at the validation gate | `gitleaks-own.toml` not rendered; client-identifier gitleaks rule inactive in own-namespace repos |
 
-Because the gate checks all three items before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
+Because the gate checks all four items before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
 
 ---
 
@@ -116,6 +130,9 @@ The templates use chezmoi's `onepasswordRead` function:
 # private_claude-secrets.zsh.tmpl
 EXA_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential" | squote }}
 FIRECRAWL_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential" | squote }}
+
+# dot_config/git/private_gitleaks-own.toml.tmpl
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''
 ```
 
 Key points:
@@ -128,7 +145,7 @@ Key points:
 
 ## CI exclusions
 
-`setup-validation.yml` excludes all 1Password-dependent files before running `chezmoi apply` in CI. The following 5 files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
+`setup-validation.yml` excludes all 1Password-dependent files before running `chezmoi apply` in CI. The following 6 files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
 
 ```
 home/private_dot_aws/config.tmpl
@@ -136,6 +153,7 @@ home/dot_config/zsh/private_claude-secrets.zsh.tmpl
 home/run_once_before_00-install-prerequisites.sh.tmpl
 home/run_onchange_before_10-brew-bundle.sh.tmpl
 home/run_once_after_11-validate-1password.sh.tmpl
+home/dot_config/git/private_gitleaks-own.toml.tmpl
 ```
 
 The **macOS job** additionally excludes `home/run_once_after_90-other-apps.sh.tmpl` (and a stale reference to `home/run_once_after_30-setup-fonts.sh.tmpl` that no longer exists — tolerated by an `if [ -f ]` guard).

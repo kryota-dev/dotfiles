@@ -44,7 +44,7 @@ macOS で `chezmoi apply` を実行する前に:
 1. **1Password デスクトップアプリ**がインストールされ、サインイン済みであること。
 2. **CLI 統合が有効**: 1Password → 設定 → デベロッパー → "1Password CLI と統合"。
 3. **1Password CLI（`op`）**がインストール済み: `brew install --cask 1password-cli`。
-4. 以下に示す 3 つの Vault アイテムすべてが `kryota.dev` Vault に存在すること。
+4. 以下に示す <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの Vault アイテムすべてが `kryota.dev` Vault に存在すること。
 
 ---
 
@@ -91,6 +91,19 @@ macOS で `chezmoi apply` を実行する前に:
 
 `firecrawl` ユーザースコープ Claude Code MCP サーバーが使用します。同じファイルに `FIRECRAWL_API_KEY` を設定します。
 
+### 4. `Dotfiles - Redact Patterns`
+
+| 属性 | 値 |
+|-----|---|
+| Vault | `kryota.dev` |
+| アイテムタイトル | `Dotfiles - Redact Patterns` |
+| フィールド参照 | `pattern` |
+| op:// URI | `op://kryota.dev/Dotfiles - Redact Patterns/pattern` |
+| レンダリング先 | `~/.config/git/gitleaks-own.toml`（`dot_config/git/private_gitleaks-own.toml.tmpl`） |
+| ファイルモード | `0600`（`private_` プレフィックスによる） |
+
+クライアント/勤務先の識別子パターンを `name1|name2|...` の交替形式で保存します（必要に応じて regex エスケープ済み; `'''` と改行は不可）。chezmoi は apply 時にこれを自社名前空間リポジトリ用の gitleaks 設定にレンダリングします。`run_once_after_11` スクリプトはさらにこの値をスモークテストします——パターンが非空であること、TOML 生文字列リテラルを破壊する `'''` を含まないこと、有効な正規表現としてコンパイルできることを検証します。破損したパターンは自社名前空間リポジトリのすべてのコミットでクライアント識別子ルールをサイレントに無効化してしまいます。
+
 ---
 
 ## アイテムが欠落またはリネームされた場合の影響
@@ -100,8 +113,9 @@ macOS で `chezmoi apply` を実行する前に:
 | `Dotfiles - AWS Config` | 検証ゲートで `chezmoi apply` が exit 1 | `~/.aws/config` が書き込まれない、AWS CLI が使用不可 |
 | `Dotfiles - Exa API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、exa MCP サーバーが認証失敗 |
 | `Dotfiles - Firecrawl API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、firecrawl MCP サーバーが認証失敗 |
+| `Dotfiles - Redact Patterns` | 検証ゲートで `chezmoi apply` が exit 1 | `gitleaks-own.toml` がレンダリングされない、自社名前空間リポジトリでクライアント識別子 gitleaks ルールが無効化 |
 
-ゲートはすべての 3 アイテムを成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
+ゲートはすべての 4 アイテムを成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
 
 ---
 
@@ -116,6 +130,9 @@ macOS で `chezmoi apply` を実行する前に:
 # private_claude-secrets.zsh.tmpl
 EXA_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Exa API/credential" | squote }}
 FIRECRAWL_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/credential" | squote }}
+
+# dot_config/git/private_gitleaks-own.toml.tmpl
+regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/pattern" | trim }})'''
 ```
 
 重要なポイント:
@@ -128,7 +145,7 @@ FIRECRAWL_API_KEY={{ onepasswordRead "op://kryota.dev/Dotfiles - Firecrawl API/c
 
 ## CI での除外
 
-`setup-validation.yml` は CI で `chezmoi apply` を実行する前に 1Password 依存のファイルをすべて除外します。以下の 5 ファイルは **両方のジョブ**（macOS および Ubuntu）で `/tmp/chezmoi-excluded/` に移動されます:
+`setup-validation.yml` は CI で `chezmoi apply` を実行する前に 1Password 依存のファイルをすべて除外します。以下の 6 ファイルは **両方のジョブ**（macOS および Ubuntu）で `/tmp/chezmoi-excluded/` に移動されます:
 
 ```
 home/private_dot_aws/config.tmpl
@@ -136,6 +153,7 @@ home/dot_config/zsh/private_claude-secrets.zsh.tmpl
 home/run_once_before_00-install-prerequisites.sh.tmpl
 home/run_onchange_before_10-brew-bundle.sh.tmpl
 home/run_once_after_11-validate-1password.sh.tmpl
+home/dot_config/git/private_gitleaks-own.toml.tmpl
 ```
 
 **macOS ジョブ**はさらに `home/run_once_after_90-other-apps.sh.tmpl` を除外します（および `home/run_once_after_30-setup-fonts.sh.tmpl` への古い参照も含みますが、そのスクリプトはもう存在しないため `if [ -f ]` ガードにより無視されます）。

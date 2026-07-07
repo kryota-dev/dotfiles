@@ -49,3 +49,8 @@
 .agents/skills/fetch-pr-comments
 .agents/skills/save-session
 .agents/skills/wtp-workspace
+
+# github-projects: skill.md was renamed to SKILL.md (#254 / PR #271) so Claude Code
+# skill discovery picks it up. On case-sensitive filesystems the old lowercase copy
+# would otherwise stay behind. Deployed path is ~/.agents/skills/github-projects/.
+.agents/skills/github-projects/skill.md

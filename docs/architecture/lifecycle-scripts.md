@@ -115,13 +115,16 @@ Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Br
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
-Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the three required vault references:
+Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> required vault references:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
+- `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
 
-Any failure exits non-zero, which aborts the after-phase. The item list here must stay in sync with what `claude-secrets.zsh` and the AWS config template actually consume.
+For the `Dotfiles - Redact Patterns` item the script goes further than a simple existence check: it also verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal in `private_gitleaks-own.toml.tmpl`), and compiles as a valid regex. A broken pattern would otherwise allow `chezmoi apply` to succeed while silently disabling the client-identifier gitleaks rule on every commit in own-namespace repos.
+
+Any failure exits non-zero, which aborts the after-phase. The item list here must stay in sync with what `claude-secrets.zsh`, the AWS config template, and `private_gitleaks-own.toml.tmpl` actually consume.
 
 ### 12 — setup-mise (`run_onchange`, after)
 

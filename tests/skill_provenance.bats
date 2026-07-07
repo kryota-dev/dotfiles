@@ -70,6 +70,52 @@ _skill_is_external() {
   done
 }
 
+@test "skill provenance: every curated skill has an uppercase SKILL.md with valid frontmatter" {
+  # Regression test for #254: lowercase skill.md + missing frontmatter made the skill
+  # invisible to Claude Code skill discovery. This test catches both problems in source.
+  #
+  # Exclusions (mirroring the "non-empty" test above):
+  #   - agent-browser: only the discovery stub is vendored; the specialized skills are
+  #     CLI-served at runtime (agent-browser skills get <name>) and are not curated.
+  local dir name skill_files
+  for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    [ "$name" = "agent-browser" ] && continue
+
+    # 1. Exactly one uppercase SKILL.md must exist (no skill.md lowercase accepted).
+    skill_files="$(find "$dir" -maxdepth 1 -name 'SKILL.md' -type f | wc -l | tr -d ' ')"
+    [ "$skill_files" -eq 1 ] || {
+      echo "curated skill '$name': expected exactly 1 SKILL.md, found $skill_files"
+      echo "  (check for missing or incorrectly-cased skill.md in ${dir})"
+      false
+    }
+
+    local skill_file="${dir}SKILL.md"
+
+    # 2. First line must be '---' (YAML frontmatter start).
+    local first_line
+    first_line="$(head -1 "$skill_file")"
+    [ "$first_line" = "---" ] || {
+      echo "curated skill '$name': SKILL.md does not start with --- (got: '$first_line')"
+      false
+    }
+
+    # 3. Frontmatter block must contain both 'name:' and 'description:' fields.
+    # Extract lines between the first two '---' separators and grep within them.
+    local fm
+    fm="$(awk 'NR==1{next} /^---/{exit} {print}' "$skill_file")"
+    echo "$fm" | grep -q '^name:' || {
+      echo "curated skill '$name': SKILL.md frontmatter missing 'name:' field"
+      false
+    }
+    echo "$fm" | grep -q '^description:' || {
+      echo "curated skill '$name': SKILL.md frontmatter missing 'description:' field"
+      false
+    }
+  done
+}
+
 @test "skill provenance: external skills are declared in .chezmoiexternal.toml" {
   [ -f "${HOME_DIR}/.chezmoiexternal.toml" ]
   # The ECC hook runtime must be declared as an external.

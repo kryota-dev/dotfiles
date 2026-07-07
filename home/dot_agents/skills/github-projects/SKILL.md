@@ -1,3 +1,8 @@
+---
+name: github-projects
+description: 'GitHub Projects (ProjectV2) の操作: プロジェクト/フィールド ID の 4 段階解決、Issue のステータス更新、Issue のプロジェクト追加を GraphQL 経由で行う。「GitHub Projects」「ProjectV2」「Issue のステータス変更」「プロジェクトへの追加」が言及された際に使用。'
+---
+
 # GitHub Projects Management Skill
 
 GitHub Projects (ProjectV2) の操作を行うスキルです。issueのステータス管理やプロジェクト情報の取得を行います。
