@@ -148,20 +148,26 @@ if [ "$STATUS" -ne 0 ]; then
   exit 1
 fi
 
-# Written only on success: a failed run leaves the stamp absent so the same
-# day can be retried manually (the approved budget is one successful run/day).
-printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
-
-HEADLINE="$(grep -E '^HEADLINE:' "$STDOUT_FILE" | tail -1 | sed 's/^HEADLINE:[[:space:]]*//')"
+# Trailing `|| true` keeps a missing HEADLINE line from aborting the script
+# here: grep exits 1 on no match, which pipefail + set -e would turn into a
+# script-level exit, skipping the fallback and the notification below.
+HEADLINE="$(grep -E '^HEADLINE:' "$STDOUT_FILE" | tail -1 | sed 's/^HEADLINE:[[:space:]]*//' || true)"
 if [ -z "$HEADLINE" ]; then
   HEADLINE="brief generated (no headline)"
 fi
 
-if [ ! -f "$BRIEF_FILE" ]; then
-  log "warn: brief file missing at $BRIEF_FILE"
-  notify_user "Morning radar finished but the brief file is missing — log: $LOG_FILE" "Morning Radar"
-  exit 0
+# Verify the brief before stamping the day done: a missing/empty file means the
+# run broke its output contract, so treat it as a failure (notify + exit 1) and
+# leave the stamp absent so the day stays retryable.
+if [ ! -s "$BRIEF_FILE" ]; then
+  log "error: brief file missing or empty at $BRIEF_FILE"
+  notify_user "Morning radar failed: brief file missing — log: $LOG_FILE" "Morning Radar"
+  exit 1
 fi
+
+# Written only on success: a failed run leaves the stamp absent so the same
+# day can be retried manually (the approved budget is one successful run/day).
+printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
 
 log "done: $HEADLINE"
 notify_user "$HEADLINE — $BRIEF_FILE" "Morning Radar"
