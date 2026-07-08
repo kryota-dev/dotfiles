@@ -40,7 +40,8 @@ flowchart TD
         G --> H["16 migrate-claude-binary\nrun_once\n(symlink ~/.local/bin/claude\n-> mise installs/claude/latest)"]
         H --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
-        J --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
+        J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
+        J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
         K --> L["50 set-login-shell\nrun_once · Linux only\n(chsh -s zsh, graceful on sudo fail)"]
         L --> M["90 other-apps\nrun_once · macOS only\n(Logi Options+ / Google IME download prompts)\n(non-TTY short-circuits immediately)"]
     end
@@ -75,6 +76,7 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `10-brew-bundle` | `dot_Brewfile` |
 | `12-setup-mise` | `dot_config/mise/config.toml` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
+| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
@@ -97,6 +99,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | `16-migrate-claude-binary` | both | No OS guard; guards on binary existance at runtime |
 | `18-setup-agent-browser` | dual | `{{ if linux }}` adds `--with-deps` |
 | `20-macos-defaults` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
+| `30-register-launchd-agents` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `40-setup-sheldon` | both | No OS guard |
 | `50-set-login-shell` | **Linux only** | Entire body inside `{{ if linux }}`; renders near-empty on macOS |
 | `90-other-apps` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
@@ -152,6 +155,10 @@ Runs `mise exec -- agent-browser install` (with `--with-deps` on Linux to pull s
 
 Applies `defaults write` for keyboard, Finder, Dock, DesktopServices, clock, and scroll settings, then runs `killall Dock Finder SystemUIServer` to apply them immediately. Self-hashes using `joinPath .chezmoi.sourceDir` so any edit to the script body re-triggers it.
 
+### 30 — register-launchd-agents (`run_onchange`, after, macOS only)
+
+Registers the repo-managed launchd LaunchAgents — currently one, `dev.kryota.morning-radar`, which fires the weekday-morning brief (kryota-dev/dotfiles#257; see [Scheduled morning radar](../agents/claude-code.md) in the Claude Code harness doc). Performs `launchctl bootout || true` then `launchctl bootstrap gui/$UID` so a changed plist is reloaded idempotently; the plist template's embedded hash is the re-trigger key (wrapper-script edits need no re-registration — launchd execs the current file on every fire). Skips registration when `$CI` is set: headless runners have no gui launchd domain, and the in-script guard keeps the render/apply path CI-validated (unlike excluding the file in the workflow). Outside CI a bootstrap failure hard-fails so chezmoi retries on the next apply (convention #6).
+
 ### 40 — setup-sheldon (`run_onchange`, after)
 
 Runs `sheldon lock` to regenerate the zsh plugin lockfile consumed by `.zshrc`. Re-triggered by the `plugins.toml` hash. Exits 0 with a warning when `sheldon` is not yet installed.
@@ -185,7 +192,7 @@ Scripts 13 and 14 invoke tools through `mise exec --` rather than via PATH becau
 
 ## Conventions for adding scripts
 
-1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…15…17…19…30…` (before 40), `…41-49…` (between sheldon and login-shell).
+1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…15…17…19…31-39…` (before 40), `…41-49…` (between sheldon and login-shell).
 2. Use `run_once_` for expensive/irreversible operations; `run_onchange_` for idempotent sync.
 3. For `run_onchange_` scripts that must react to an external file, embed `{{ include "<path>" | sha256sum }}` in a leading comment.
 4. Start every script with `#!/bin/bash` and `set -euo pipefail` — or place the shebang inside the OS template guard if the entire script is OS-specific.

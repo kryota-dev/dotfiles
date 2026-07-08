@@ -76,7 +76,11 @@ user-invocable: true
 
 ## 運用メモ
 
-- 平日朝の定時実行（cron / routine）に載せる場合は read-only 部分のみを対象とし、
-  その設定は課金を伴うため **user の明示依頼で**行う（kryota-dev/dotfiles#257 と統合予定）。
+- 平日朝の定時実行は kryota-dev/dotfiles#257 で実装済み: launchd LaunchAgent
+  `dev.kryota.morning-radar`（平日 9:00 JST）が wrapper `~/.claude/morning-radar.sh` 経由で
+  本 skill を headless 縮退モードで起動する（read-only 収集のみ。`--post` は使わない）。
+- **headless 呼び出し時の出力契約**（wrapper のプロンプトと同期を保つこと）: ブリーフ全文を
+  `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md` へ Write し、最終応答は
+  `HEADLINE: <1 行サマリー>` のみとする（wrapper が macOS 通知に転載する）。
 - 収集 4 系統のうち MCP 依存（Gmail / Calendar）は headless 実行時に認証切れの可能性がある。
   その場合もエラーで止めず、GitHub + ローカルコンテキストのみで縮退出力する。

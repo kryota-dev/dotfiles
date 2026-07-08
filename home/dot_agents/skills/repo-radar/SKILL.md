@@ -50,6 +50,15 @@ gh search prs --author=app/renovate --state=open --owner kryota-dev --owner kryo
 
 # 5. 自分が involves の直近更新（メンション・コメント返信待ちの取りこぼし防止）
 gh search prs --involves=@me --state=open --limit 30 --json number,title,url,repository,updatedAt
+
+# 6. 定点観測 watchlist（kryota-dev/dotfiles#257）: 1〜5 は全て @me スコープのため、
+#    誰にも assign されていない issue はここでしか可視化されない。対象 repo は
+#    ローカル設定 ~/.config/repo-radar/watchlist（1 行 1 owner/repo、# コメント可。
+#    クライアント固有名を含み得るためコミット禁止のローカル専用ファイル）で定義する。
+#    ファイルが無い / 空の場合は本検索をスキップし、レポートにその旨を明記する。
+while IFS= read -r repo; do
+  gh issue list -R "$repo" --state open --limit 50 --json number,title,labels,updatedAt
+done < <(grep -vE '^\s*(#|$)' ~/.config/repo-radar/watchlist 2>/dev/null)
 ```
 
 自分が author の PR（2 の結果）については、repo ごとに詳細を取り直す:
@@ -75,6 +84,7 @@ gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
 | P2 | 自分の PR の未解決レビュースレッド、mergeable=CONFLICTING | マージへの直接障害 |
 | P3 | Renovate 滞留（`--days` 超過分を強調） | 溜まるほど conflict 率が上がる |
 | P4 | assign 済み Issue（更新が古い順） | 着手待ちのバックログ |
+| P4 | watchlist repo の open issue（定点観測、assign 不問） | 着手待ち。**2 件以上でレポート冒頭に昇格**（backlog #12 コンテンツ修正 SOP テンプレの再開トリガー） |
 
 ## Phase 3: レポート出力
 
@@ -95,6 +105,10 @@ gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
 ## P4: バックログ（assign 済み Issue <N> 件）
 ...
 
+## 定点観測: watchlist open issue <N> 件
+（2 件以上のときはレポート冒頭に 1 行で明記し、morning-brief 経由では HEADLINE に含める。
+watchlist 未設定時は「未設定」と明記）
+
 ## 推奨ネクストアクション
 1. <最もレバレッジの高い 1 手>
 ```
@@ -106,6 +120,7 @@ gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
 - レビュー指摘が溜まった自分の PR → 「`review-resolve-loop` で対応できます」
 - **レビュー依頼された他人の PR が 2 件以上** → 「`review-fleet` で収集→分類→計画表→バッチ実行できます」（cross-repo でも 1 コマンド）
 - **レビュー依頼された他人の PR が 1 件だけ** → 「`multi-review` / `cc-code-review` でレビューできます」
+- **watchlist repo の小粒コンテンツ修正 issue が 2 件以上** → 「`issue-fleet` で処理し、同時に SOP テンプレを作成できます（backlog #12 の再開条件）」
 
 ## Phase 4: 投稿（`--post` 時のみ）
 
@@ -113,5 +128,6 @@ gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){
 
 ## 運用メモ
 
-- 毎朝の定例にする場合は、このレポート生成だけなら read-only なので、Claude Code のスケジュール実行（cron / routine）に載せられる。その設定は本 skill の範囲外とし、user の明示依頼で行う。
+- 毎朝の定例は kryota-dev/dotfiles#257 で実装済み: launchd LaunchAgent `dev.kryota.morning-radar`
+  （平日 9:00 JST）が morning-brief 経由で本 skill の Phase 1〜2 を headless 実行する。
 - 検索 limit（30/50）を超えて溢れた場合は、溢れた旨をレポート末尾に必ず明記する（silent truncation 禁止）。

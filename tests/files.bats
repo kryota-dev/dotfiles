@@ -75,10 +75,82 @@ load helpers/setup
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_40-setup-sheldon.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_16-migrate-claude-binary.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_50-set-login-shell.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_once_after_90-other-apps.sh.tmpl" ]
+}
+
+@test "morning-radar launchd agent source files exist" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_morning-radar.sh" ]
+  [ -f "${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl" ]
+}
+
+@test "morning-radar plist schedules weekdays only and never runs at load" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl"
+  # RunAtLoad must stay absent so (re-)registration never triggers a billed run.
+  run grep -q '<key>RunAtLoad</key>' "$plist"
+  [ "$status" -ne 0 ]
+  # Mon-Fri at 09:00 local time: exactly five Weekday/Hour entries (#257).
+  [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 5 ]
+  [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 5 ]
+  # The Weekday values must be exactly Mon-Fri (1-5), not just five entries.
+  local weekdays
+  weekdays="$(grep -A1 '<key>Weekday</key>' "$plist" | grep -oE '[0-9]+' | sort -u | paste -sd, -)"
+  [ "$weekdays" = "1,2,3,4,5" ]
+}
+
+@test "morning-radar plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
+@test "morning-radar wrapper keeps the explicit permission allowlist" {
+  local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  bash -n "$wrapper"
+  # Permission model is an explicit allowlist (#257): flag any bypass creep.
+  run grep -q 'dangerously-skip-permissions' "$wrapper"
+  [ "$status" -ne 0 ]
+  run grep -q 'bypassPermissions' "$wrapper"
+  [ "$status" -ne 0 ]
+  grep -q -- '--allowedTools' "$wrapper"
+  grep -q -- '--max-turns' "$wrapper"
+  # Model stays pinned so the pre-approved recurring cost is predictable (R2.7).
+  grep -q -- '--model' "$wrapper"
+  # Personal-account isolation must stay explicit (R2.1).
+  grep -q 'CLAUDE_CONFIG_DIR' "$wrapper"
+  # AppleScript injection guard: notification text passes via argv (R3.3).
+  grep -q 'on run argv' "$wrapper"
+}
+
+@test "morning-radar wrapper skips a second run on the same day" {
+  local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  # Pre-seed today's stamp in a sandboxed HOME/XDG state dir (R1.5). claude is
+  # not resolvable from the sandbox HOME, so a bypassed guard exits 1 instead.
+  mkdir -p "${tmp}/state/morning-radar"
+  printf '%s\n' "$(date +%F)" >"${tmp}/state/morning-radar/last-run"
+  run env HOME="$tmp" XDG_STATE_HOME="${tmp}/state" bash "$wrapper"
+  [ "$status" -eq 0 ]
+}
+
+@test "launchd registration script embeds the plist hash and guards CI" {
+  local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
+  # Re-registration is keyed to the plist content (embedded-hash trick).
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
+  # CI runners have no gui launchd domain; the script must self-skip there.
+  grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
+  # Template-stripped body must be valid bash (same strip trick as make lint).
+  bash -n <(sed '/{{/d' "$script")
 }
 
 @test "prerequisites installs Rosetta 2 behind an arm64 guard" {
