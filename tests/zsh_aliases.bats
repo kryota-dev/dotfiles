@@ -65,11 +65,12 @@ load helpers/setup
   [ "$output" = "claude|--model claude-fable-5" ]
 }
 
-@test "claude.zsh: _claude_fable appends the orchestrator prompt when the file is readable" {
-  # Regression guard: when the orchestrator prompt file exists, its content must be passed
-  # via --append-system-prompt so the Fable 5 main session receives the delegation policy.
+@test "claude.zsh: _claude_fable appends the orchestrator prompt file when it is readable" {
+  # Regression guard: when the orchestrator prompt file exists, its path (not its content)
+  # must be passed via --append-system-prompt-file so the CLI reads it at process start
+  # and the prompt body stays out of argv.
   mkdir -p "$BATS_TEST_TMPDIR/.claude"
-  printf 'ORCHESTRATOR_PROMPT_MARKER\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  : >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
   run zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
@@ -77,7 +78,35 @@ load helpers/setup
     _claude_fable \"\$HOME/.claude\" claude
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|--model claude-fable-5 --append-system-prompt ORCHESTRATOR_PROMPT_MARKER" ]
+  [ "$output" = "claude|--model claude-fable-5 --append-system-prompt-file $BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md" ]
+}
+
+@test "claude.zsh: _claude_fable passes fable flags through the happy wrapper" {
+  # Regression guard for hcldf/hcldf-r06: verify the fable flags actually reach the happy
+  # wrapper as CLI args instead of being silently swallowed. The four-alias definition test
+  # below only string-matches the alias body; this executes the call path.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    happy() { print -r -- \"happy|\$*\"; }
+    _claude_fable \"\$HOME/.claude\" happy claude --resume
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "happy|claude --resume --model claude-fable-5" ]
+}
+
+@test "claude.zsh: _claude_fable defaults to claude when no command is given" {
+  # Symmetry with _claude_with_home's own default-command fallback: bare invocation
+  # (e.g. `_claude_fable "$HOME/.claude"`) must launch `claude` rather than exec'ing
+  # `--model` as the command.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"claude|\$*\"; }
+    _claude_fable \"\$HOME/.claude\"
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude|--model claude-fable-5" ]
 }
 
 @test "claude.zsh: cldf/cldf-r06/hcldf/hcldf-r06 wire the fable orchestrator per account and happy wrapper" {

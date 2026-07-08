@@ -67,12 +67,18 @@ alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gat
 # instead. The prompt file is shared with the r06 account via an absolute path (same
 # precedent as hooks-fork); when it is absent (before chezmoi apply or after manual
 # removal) the session still starts, just without the orchestrator prompt.
+# The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
+# (content) so the prompt body stays out of argv — the CLI reads the file at process start,
+# avoiding argv-length and control-char concerns as the prompt grows.
 _claude_fable() {
   local home_dir="$1"
   shift
+  # Symmetry with _claude_with_home: allow a bare `_claude_fable "$HOME/.claude"` to still
+  # launch a fable session instead of exec'ing `--model` as a command.
+  (($#)) || set -- claude
   local prompt_file="$HOME/.claude/fable-orchestrator-prompt.md"
   local -a fable_flags=(--model claude-fable-5)
-  [[ -r "$prompt_file" ]] && fable_flags+=(--append-system-prompt "$(<"$prompt_file")")
+  [[ -r "$prompt_file" ]] && fable_flags+=(--append-system-prompt-file "$prompt_file")
   _claude_with_home "$home_dir" "$@" "${fable_flags[@]}"
 }
 alias cldf='_claude_fable "$HOME/.claude" claude'

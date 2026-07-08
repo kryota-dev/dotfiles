@@ -56,7 +56,7 @@ These are the user-facing entry points. Each alias corresponds to one cell in th
 The `cldf` / `cldf-r06` / `hcldf` / `hcldf-r06` aliases start Claude Code in an **orchestrator configuration**: the main session runs on `claude-fable-5` for overview / planning / synthesis, and task execution is steered into Sonnet subagents. They wrap `_claude_with_home` (same account-isolation environment as `cld` family) with a thin `_claude_fable` helper that:
 
 - pins the main model to the full ID `--model claude-fable-5` (not the `fable` alias, so the delegation prompt's Sonnet-5-era guidance and the main model generation never silently drift apart), and
-- appends `home/dot_claude/fable-orchestrator-prompt.md` (deployed to `~/.claude/fable-orchestrator-prompt.md`) as the system prompt when the file is readable. When the file is absent (before `chezmoi apply` or after manual removal) the session still starts, just without the orchestrator prompt.
+- points at `home/dot_claude/fable-orchestrator-prompt.md` (deployed to `~/.claude/fable-orchestrator-prompt.md`) via `--append-system-prompt-file <path>` when the file is readable. The path (not the content) is passed to the CLI, which reads the file at process start — this keeps the prompt body out of argv even as the prompt grows. When the file is absent (before `chezmoi apply` or after manual removal) the session still starts, just without the orchestrator prompt.
 
 The prompt file is deliberately kept at `~/.claude/…` and read by both accounts via that absolute path — same "default account dir shared across accounts" precedent as `hooks-fork/`.
 
