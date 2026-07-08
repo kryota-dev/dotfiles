@@ -57,6 +57,29 @@ alias hcld-r06='_claude_with_home "$HOME/.claude-r06" happy claude'
 #   ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
 alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude" claude'
 
+# Fable 5 orchestrator: run the main session on Fable 5 and steer task execution into
+# Sonnet subagents via the orchestrator system prompt. The model is pinned to the full ID
+# (not the "fable" alias) so the prompt's Sonnet-5-era delegation checklist and the main
+# model generation cannot silently drift apart — update both together when the model
+# generation changes. CLAUDE_CODE_SUBAGENT_MODEL is deliberately NOT set: it outranks
+# per-invocation model params and agent frontmatter, which would kill the "escalate a
+# hard verification to fable" path; the orchestrator prompt steers subagent model choice
+# instead. The prompt file is shared with the r06 account via an absolute path (same
+# precedent as hooks-fork); when it is absent (before chezmoi apply or after manual
+# removal) the session still starts, just without the orchestrator prompt.
+_claude_fable() {
+  local home_dir="$1"
+  shift
+  local prompt_file="$HOME/.claude/fable-orchestrator-prompt.md"
+  local -a fable_flags=(--model claude-fable-5)
+  [[ -r "$prompt_file" ]] && fable_flags+=(--append-system-prompt "$(<"$prompt_file")")
+  _claude_with_home "$home_dir" "$@" "${fable_flags[@]}"
+}
+alias cldf='_claude_fable "$HOME/.claude" claude'
+alias cldf-r06='_claude_fable "$HOME/.claude-r06" claude'
+alias hcldf='_claude_fable "$HOME/.claude" happy claude'
+alias hcldf-r06='_claude_fable "$HOME/.claude-r06" happy claude'
+
 # ecc-* CLIs (PR-C, #4/#5): inspect the per-account ECC governance state.db that the
 # governance-capture fork writes. Account is selected by ECC_AGENT_DATA_HOME; the reader
 # defaults to ~/.claude when it is unset, so a plain shell shows the default account. To
