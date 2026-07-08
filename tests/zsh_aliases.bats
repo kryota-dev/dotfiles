@@ -50,6 +50,54 @@ load helpers/setup
   [[ "$output" == *".claude-r06"* ]]
 }
 
+@test "claude.zsh: _claude_fable pins the main model to claude-fable-5 and skips the prompt when absent" {
+  # Regression guard: the fable orchestrator alias family (cldf/cldf-r06/hcldf/hcldf-r06)
+  # must always pin the main model to the full ID `claude-fable-5` (not the "fable" alias),
+  # and must NOT pass --append-system-prompt when the orchestrator prompt file is missing
+  # (chezmoi apply hasn't run yet or the file was removed).
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"claude|\$*\"; }
+    _claude_fable \"\$HOME/.claude\" claude
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude|--model claude-fable-5" ]
+}
+
+@test "claude.zsh: _claude_fable appends the orchestrator prompt when the file is readable" {
+  # Regression guard: when the orchestrator prompt file exists, its content must be passed
+  # via --append-system-prompt so the Fable 5 main session receives the delegation policy.
+  mkdir -p "$BATS_TEST_TMPDIR/.claude"
+  printf 'ORCHESTRATOR_PROMPT_MARKER\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"claude|\$*\"; }
+    _claude_fable \"\$HOME/.claude\" claude
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "claude|--model claude-fable-5 --append-system-prompt ORCHESTRATOR_PROMPT_MARKER" ]
+}
+
+@test "claude.zsh: cldf/cldf-r06/hcldf/hcldf-r06 wire the fable orchestrator per account and happy wrapper" {
+  # Regression guard: all four fable aliases must go through _claude_fable, exactly two
+  # must use the happy wrapper (hcldf/hcldf-r06), and exactly two must target the r06
+  # account (cldf-r06/hcldf-r06).
+  run zsh -fc "source '${HOME_DIR}/dot_config/zsh/claude.zsh'; alias cldf cldf-r06 hcldf hcldf-r06"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cldf="* ]]
+  [[ "$output" == *"cldf-r06="* ]]
+  [[ "$output" == *"hcldf="* ]]
+  [[ "$output" == *"hcldf-r06="* ]]
+  fable_count=$(printf '%s\n' "$output" | grep -c _claude_fable)
+  [ "$fable_count" -eq 4 ]
+  happy_count=$(printf '%s\n' "$output" | grep -c "happy claude")
+  [ "$happy_count" -eq 2 ]
+  r06_count=$(printf '%s\n' "$output" | grep -c '\.claude-r06')
+  [ "$r06_count" -eq 2 ]
+}
+
 @test "codex.zsh: hcdx/hcdx-r06 wrap codex in happy with the work CODEX_HOME" {
   run zsh -fc "source '${HOME_DIR}/dot_config/zsh/codex.zsh'; alias hcdx hcdx-r06"
   [ "$status" -eq 0 ]
