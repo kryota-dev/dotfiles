@@ -19,7 +19,7 @@
     "MAX_THINKING_TOKENS": "127999",
     "ECC_GOVERNANCE_CAPTURE": "1",
     "ECC_HOOK_PROFILE": "strict",
-    "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete",
+    "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete,pre:edit-write:gateguard-fact-force",
     "ECC_QUALITY_GATE_FIX": "true",
     "GATEGUARD_BASH_EXTRA_DESTRUCTIVE": "\\b(?:chezmoi\\s+(?:destroy|forget|purge)\\b|terraform\\s+(?:destroy|state\\s+rm|workspace\\s+delete|force-unlock)\\b|terraform\\s+apply\\s+(?:[^&|;]*\\s)?-{1,2}auto-approve\\b|kubectl\\s+delete\\b|helm\\s+(?:uninstall|delete)\\b|docker\\s+(?:system\\s+prune|volume\\s+(?:rm|prune)|image\\s+prune|container\\s+prune|network\\s+prune)\\b|docker\\s+(?:rm|rmi)\\b(?=[^&|;]*\\s(?:--force\\b|-[a-zA-Z]*f\\b))|brew\\s+(?:uninstall|autoremove|untap)\\b|mas\\s+uninstall\\b|mise\\s+(?:uninstall|implode|prune)\\b|aqua\\s+(?:rm|prune)\\b|gh\\s+(?:repo\\s+delete|release\\s+delete|secret\\s+(?:delete|remove)|cache\\s+delete|run\\s+delete)\\b|aws\\s+s3\\s+r[mb]\\b|aws\\s+(?:ec2\\s+terminate-instances|iam\\s+delete-|dynamodb\\s+delete-table|rds\\s+delete-)|aws\\s+\\S+\\s+delete-|gcloud\\s+(?:\\S+\\s+){1,5}delete\\b|supabase\\s+db\\s+reset\\b|supabase\\s+projects\\s+delete\\b|pnpm\\s+(?:purge|store\\s+prune)\\b|npm\\s+(?:unpublish|publish)\\b|yarn\\s+(?:unpublish|publish)\\b|defaults\\s+delete\\b|git\\s+filter-(?:repo|branch)\\b)"
   },
@@ -195,7 +195,7 @@
             "timeout": 5
           }
         ],
-        "description": "Fact-forcing gate: require articulating impact before the first Edit/Write per file",
+        "description": "Fact-forcing gate: require articulating impact before the first Edit/Write per file (disabled by default via env.ECC_DISABLED_HOOKS, #280; wiring kept for per-session re-enable)",
         "id": "pre:edit-write:gateguard-fact-force"
       },
       {

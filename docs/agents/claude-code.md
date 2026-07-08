@@ -161,7 +161,7 @@ flowchart TD
 |---|---|---|
 | `pre:edit-write:suggest-compact` | `Edit\|Write` | Suggests manual compaction at logical intervals |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | Blocks edits to linter/formatter config files |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file |
+| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file (disabled by default via `ECC_DISABLED_HOOKS`, #280) |
 | `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | Captures governance events to per-account `state.db` (fork, direct `node`) |
 | `pre:bash:dispatcher` | `Bash` | Runs block-no-verify, auto-tmux-dev, tmux/git-push reminders, commit-quality, and the destructive gateguard gate in sequence |
 | `pre:mcp-health-check` | `mcp__.*` | Probes MCP server health; matcher is narrowed to avoid paying cost for non-MCP tools |
@@ -444,7 +444,7 @@ A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these vari
 |---|---|---|
 | `ECC_GOVERNANCE_CAPTURE` | `settings.json env` | `1` = enable governance event capture |
 | `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = run all hooks gated on strict profile |
-| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`) |
+| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`, `pre:edit-write:gateguard-fact-force`) |
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = quality-gate auto-fixes files instead of blocking |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | Regex of additional destructive command patterns; SSOT shared with Codex gate |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | Fixed to `~/.agents/skills/ecc`; skips ECC's plugin fallback scan |

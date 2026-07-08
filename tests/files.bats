@@ -130,6 +130,16 @@ load helpers/setup
   grep -q 'on run argv' "$wrapper"
 }
 
+@test "morning-radar wrapper does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
+  # settings.json's env block is the effective SSOT for ECC_DISABLED_HOOKS (Claude Code
+  # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
+  # default here would be dead code that never actually takes effect.
+  local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  [ -f "$wrapper" ]
+  run grep -qF 'ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-' "$wrapper"
+  [ "$status" -ne 0 ]
+}
+
 @test "morning-radar wrapper skips a second run on the same day" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   local tmp
@@ -396,6 +406,22 @@ load helpers/setup
       and $m[0].hooks[0].timeout==10
       and ($m[0].hooks[0].command|endswith("/continuous-learning-v2/hooks/observe.sh post"))
       and ($m[0].hooks[0].command|contains("observe-runner")|not)
+  ' "$s" >/dev/null
+}
+
+@test "settings.json ECC_DISABLED_HOOKS is the effective SSOT for disabling gateguard-fact-force (#280)" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # Claude Code applies settings.json's env block with precedence over shell-inherited env
+  # vars, so this is the only place that can actually disable the gate; it must carry the
+  # gateguard-fact-force id alongside the three pre-existing post:bash:* ids (none dropped).
+  jq -e '
+    (.env.ECC_DISABLED_HOOKS | split(",")) as $ids
+    | ($ids | index("pre:edit-write:gateguard-fact-force")) != null
+      and ($ids | index("post:bash:command-log-audit")) != null
+      and ($ids | index("post:bash:command-log-cost")) != null
+      and ($ids | index("post:bash:build-complete")) != null
   ' "$s" >/dev/null
 }
 
@@ -739,6 +765,16 @@ SECRETS
   # Exported (scoped) into the subprocess: the values come through.
   echo "$output" | grep -qF 'SUB_EXA=[exa-test-key]'
   echo "$output" | grep -qF 'SUB_FC=[fc-test-key]'
+}
+
+@test "claude.zsh does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
+  # settings.json's env block is the effective SSOT for ECC_DISABLED_HOOKS (Claude Code
+  # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
+  # default in _claude_with_home would be dead code that never actually takes effect.
+  local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  [ -f "$zsh" ]
+  run grep -qF 'ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-' "$zsh"
+  [ "$status" -ne 0 ]
 }
 
 @test "1Password validation requires the exa and firecrawl API keys" {

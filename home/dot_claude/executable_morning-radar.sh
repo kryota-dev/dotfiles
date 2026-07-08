@@ -113,7 +113,6 @@ CLAUDE_CONFIG_DIR="$HOME/.claude" \
   CLV2_HOMUNCULUS_DIR="$HOME/.claude/ecc-homunculus" \
   ECC_MCP_HEALTH_STATE_PATH="$HOME/.claude/mcp-health-cache.json" \
   GATEGUARD_STATE_DIR="$HOME/.claude/.gateguard" \
-  ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-pre:edit-write:gateguard-fact-force}" \
   ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
   claude "${CLAUDE_ARGS[@]}" -p "$PROMPT" >"$STDOUT_FILE" 2>>"$LOG_FILE" &
 CLAUDE_PID=$!
