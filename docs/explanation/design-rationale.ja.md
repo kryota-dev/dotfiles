@@ -40,7 +40,7 @@ Renovate の `customManager` 正規表現については [externals-and-pinning.
 
 **なぜ:** ECC はガバナンスキャプチャ、gateguard、CLV2 継続学習など多数の動作をカバーする充実したフックフレームワークを提供しています。その大部分を再実装することはメンテナンスコストが高く利点がありません。最小限のフォークで上流コードを再利用することで、フォークは薄く保たれ、ピンをバンプした際に上流のバグ修正を自動的に取り込めます。
 
-「ソースのみ external」アプローチ（tarball に `node_modules` を含まない）は意図的です。大きなバイナリツリーを `~/.agents/skills/ecc/` に配置するのを避け、フォークが ECC の `sql.js`/`ajv` 依存ではなく `node:sqlite`（mise がピンする Node ≥ 22.5 が提供）を使用するよう強制します。
+「ソースのみ external」アプローチ（tarball に `node_modules` を含まない）は意図的です。大きなバイナリツリーを `~/.agents/skills/ecc/` に配置するのを避け、フォークが ECC の `sql.js`/`ajv` 依存ではなく `node:sqlite`（mise がピンする Node ≥ 22.5 が提供）を使用するよう強制します。トレードオフは Node バージョンの下限であり、`home/dot_config/mise/config.toml` の mise ピンで担保されます。
 
 薄い `ecc-hook.sh` ランチャーは `settings.json` を読みやすくするために存在します。ECC のデフォルト配布では各フックエントリに ~1.5 KB の難読化された `node -e` blob が埋め込まれており、プラグインルートをランタイムスキャンします。External が固定パスにあるため、そのスキャンは不要です。各 blob を `ecc-hook.sh` の一行呼び出しに置き換えることで、フックグラフが一目で理解できるようになります。
 
@@ -54,7 +54,7 @@ Renovate の `customManager` 正規表現については [externals-and-pinning.
 
 **なぜ:** 長時間（~2 日）セッションのトランスクリプト分析で、ピン留めされた v2.0.0 ランタイムの gate に 4 つの摩擦が見つかりました: 30 分の無操作 TTL により「セッションごとに 1 回」のアーミングが「バーストごとに 1 回」へ劣化する。要求されるファクトが無意味なターゲット（scratch ファイル、spec ドキュメント、PR ドラフト）にも gate が発火する。Claude Code 自身の read-before-edit 検証との重なりで 1 ファイルあたり最大 3 往復かかる。deny メッセージが実際のメカニズムを隠している——deny 自体がファイルをアーミングし、どんなリトライも通過するため、提示されたファクトは一度も検証されない。
 
-上流は v2.0.0 ピンの後にこの一部を独立に修正しています: セッションごとの予算超過後の denial 圧縮（affaan-m/ECC#2227）と、`GATEGUARD_EXEMPT_GLOBS` によるオプトインのパス除外（affaan-m/ECC#2432）。残る摩擦（TTL、read-before-edit との重なり、deny メッセージの誠実さ）は gate を再有効化した場合にのみ問題になります——`settings.json` の配線は再有効化を意図的に可能なまま残していますが（#280）、現在それを行うものはなく、再有効化には env ではなく `claude --settings` オーバーレイが必要です（#281）。この repo が無効のまま維持する gate のために upstream issue を起票しても、ローカルの利点がない追跡義務が生まれるだけです。
+上流は v2.0.0 ピンの後にこの一部を独立に修正しています（2026-07 時点の状況）: セッションごとの予算超過後の denial 圧縮（affaan-m/ECC#2227）と、`GATEGUARD_EXEMPT_GLOBS` によるオプトインのパス除外（affaan-m/ECC#2432）。残る摩擦（TTL、read-before-edit との重なり、deny メッセージの誠実さ）は gate を再有効化した場合にのみ問題になります——`settings.json` の配線は再有効化を意図的に可能なまま残していますが（#280）、現在それを行うものはなく、再有効化には env ではなく `claude --settings` オーバーレイが必要です（#281）。この repo が無効のまま維持する gate のために upstream issue を起票しても、ローカルの利点がない追跡義務が生まれるだけです。
 
 将来の ECC ピンバンプでこの問いが再浮上した場合は、upstream contribution を検討する前に、2.0.0 以降の上流ノブ（`GATEGUARD_EXEMPT_GLOBS`、`GATEGUARD_FACT_FORCE_FULL_DENIALS`）で再評価してください。
 
