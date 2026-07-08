@@ -49,9 +49,12 @@ alias hcld-r06='_claude_with_home "$HOME/.claude-r06" happy claude'
 # Dedicated session for intentional config edits on the DEFAULT account (~/.claude): routes
 # through _claude_with_home (so ECC state stays isolated to ~/.claude) and disables the ECC
 # config-protection / gateguard-fact-force gates so Claude can edit settings.json / biome.json /
-# eslint.config.* etc. For the r06 account, prefix the same var to cld-r06:
-#   ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
-alias claude-config='ECC_DISABLED_HOOKS=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude" claude'
+# eslint.config.* etc. The opt-out goes through ECC_DISABLED_HOOKS_EXTRA: settings.json's env
+# block overrides a shell-exported ECC_DISABLED_HOOKS (#280) but leaves EXTRA untouched, and
+# ecc-hook.sh merges it into ECC_DISABLED_HOOKS for the hook runtime (#281). For the r06
+# account, prefix the same var to cld-r06:
+#   ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
+alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude" claude'
 
 # Fable 5 orchestrator: run the main session on Fable 5 and steer task execution into
 # Sonnet subagents via the orchestrator system prompt. The model is pinned to the full ID

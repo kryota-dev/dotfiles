@@ -32,6 +32,15 @@ if [ ! -f "$bootstrap" ]; then
   exit 0
 fi
 
+# Per-session opt-out channel (#281): settings.json's env block overrides any
+# shell-exported ECC_DISABLED_HOOKS, so aliases can't extend it directly. Variables
+# NOT defined in settings.json env (like ECC_DISABLED_HOOKS_EXTRA) do pass through
+# from the shell, so merge them here before the ECC runtime resolves the single
+# ECC_DISABLED_HOOKS value. Trim/lowercase normalization is left to hook-flags.js.
+if [ -n "${ECC_DISABLED_HOOKS_EXTRA:-}" ]; then
+  export ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:+$ECC_DISABLED_HOOKS,}${ECC_DISABLED_HOOKS_EXTRA}"
+fi
+
 # plugin-hook-bootstrap.js reads argv as: [node, bootstrap, mode, relPath, ...args].
 # `node` is the mode (spawn the target with the node runtime); "$@" supplies
 # relPath plus any run-with-flags arguments.
