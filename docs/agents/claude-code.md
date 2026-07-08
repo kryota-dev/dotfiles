@@ -193,7 +193,7 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 | `post:ecc-context-monitor` | `*` | No | Warns on context exhaustion, high cost, scope creep, or tool loops |
 | `post:observe:continuous-learning` | `*` | Yes | CLV2 `observe.sh post`; captures `tool_complete` to `observations.jsonl` |
 | `post:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | No | Captures governance events from tool outputs (fork, direct `node`) |
-| `post:bash:dispatcher` | `Bash` | Yes | PR-created detection; `command-log-audit/cost/build-complete` disabled via `ECC_DISABLED_HOOKS` |
+| `post:bash:dispatcher` | `Bash` | Yes | PR-created detection; `command-log-audit/cost/build-complete` disabled via `ECC_DISABLED_HOOKS` (which also disables `pre:edit-write:gateguard-fact-force`) |
 | `post:bash:command-log-audit` | `Bash` | No | Account-aware bash-command log fork (direct `node`) |
 | `post:edit:accumulate` | `Edit\|Write\|MultiEdit` | No | Collects edited JS/TS paths for Stop-time batched typecheck |
 | `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | Auto-formats `.json/.md/.go/.py` via biome/prettier/gofmt/ruff |
@@ -444,7 +444,7 @@ A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these vari
 |---|---|---|
 | `ECC_GOVERNANCE_CAPTURE` | `settings.json env` | `1` = enable governance event capture |
 | `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = run all hooks gated on strict profile |
-| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`) |
+| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`, `pre:edit-write:gateguard-fact-force`) |
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = quality-gate auto-fixes files instead of blocking |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | Regex of additional destructive command patterns; SSOT shared with Codex gate |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | Fixed to `~/.agents/skills/ecc`; skips ECC's plugin fallback scan |
