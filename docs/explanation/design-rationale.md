@@ -48,6 +48,20 @@ See [claude-code.md](../agents/claude-code.md) for the full hook graph and the t
 
 ---
 
+## The fact-forcing gate stays disabled
+
+**Decision:** ECC's `pre:edit-write:gateguard-fact-force` gate (state impact facts before the first edit of each file) remains disabled by default via `env.ECC_DISABLED_HOOKS` in `settings.json` (#280), and the long-session frictions catalogued in #282 are not escalated upstream. #282 was closed as moot; no upstream issue was filed.
+
+**Why:** Transcript analysis of a long-lived (~2 day) session surfaced four frictions with the gate as shipped in the pinned v2.0.0 runtime: a 30-minute inactivity TTL that degrades "once per session" arming to "once per burst"; gating of targets where the demanded facts carry no signal (scratch files, spec documents, PR drafts); up-to-3-round-trip stacking with Claude Code's own read-before-edit validation; and a deny message that hides the actual mechanism — the deny itself arms the file and any retry passes, so the presented facts are never verified.
+
+Upstream independently fixed part of this after the v2.0.0 pin: condensed denials after a per-session budget (affaan-m/ECC#2227) and opt-in path exemptions via `GATEGUARD_EXEMPT_GLOBS` (affaan-m/ECC#2432). The remaining frictions (TTL, read-before-edit stacking, deny-message honesty) only matter if the gate is re-enabled — which the `settings.json` wiring deliberately keeps possible (#280) but nothing currently does, and re-enabling requires a `claude --settings` overlay rather than env (#281). Filing an upstream issue for a gate this repo keeps off would create a tracking obligation with no local benefit.
+
+If a future ECC pin bump re-opens the question, re-evaluate against the post-2.0.0 upstream knobs (`GATEGUARD_EXEMPT_GLOBS`, `GATEGUARD_FACT_FORCE_FULL_DENIALS`) before considering an upstream contribution.
+
+See [claude-code.md](../agents/claude-code.md) for the hook graph and the `ECC_DISABLED_HOOKS` / `ECC_DISABLED_HOOKS_EXTRA` channels.
+
+---
+
 ## Config shared, state isolated, for the dual-account model
 
 **Decision:** The r06 work account (`~/.claude-r06`) is implemented as six symlinks pointing back to `~/.claude` for all configuration files (settings, statusline, agents, commands, skills, CLAUDE.md). Runtime state diverges via per-account environment variables set in the zsh launcher aliases.

@@ -161,7 +161,7 @@ flowchart TD
 |---|---|---|
 | `pre:edit-write:suggest-compact` | `Edit\|Write` | 論理的な区切りで手動コンパクトを提案 |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | リンター/フォーマッター設定ファイルへの編集をブロック |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | ファイルごとの初回編集前に影響の明示を要求（`ECC_DISABLED_HOOKS` によりデフォルト無効、#280） |
+| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | ファイルごとの初回編集前に影響の明示を要求（`ECC_DISABLED_HOOKS` によりデフォルト無効、#280。判断として無効のまま維持——[design rationale](../explanation/design-rationale.ja.md#fact-forcing-gate-は無効のまま維持)、#282 参照） |
 | `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | ガバナンスイベントをアカウントごとの `state.db` にキャプチャ (fork、直接 `node`) |
 | `pre:bash:dispatcher` | `Bash` | block-no-verify、auto-tmux-dev、tmux/git-push リマインダー、コミット品質、破壊的コマンドのゲートを順番に実行 |
 | `pre:mcp-health-check` | `mcp__.*` | MCP サーバーのヘルスをプローブ；MCP 以外のツールのコストを回避するためマッチャーを絞り込み |
