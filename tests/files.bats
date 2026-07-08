@@ -135,6 +135,7 @@ load helpers/setup
   # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
   # default here would be dead code that never actually takes effect.
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  [ -f "$wrapper" ]
   run grep -qF 'ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-' "$wrapper"
   [ "$status" -ne 0 ]
 }
@@ -771,6 +772,7 @@ SECRETS
   # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
   # default in _claude_with_home would be dead code that never actually takes effect.
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  [ -f "$zsh" ]
   run grep -qF 'ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-' "$zsh"
   [ "$status" -ne 0 ]
 }

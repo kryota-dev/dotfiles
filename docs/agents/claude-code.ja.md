@@ -161,7 +161,7 @@ flowchart TD
 |---|---|---|
 | `pre:edit-write:suggest-compact` | `Edit\|Write` | 論理的な区切りで手動コンパクトを提案 |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | リンター/フォーマッター設定ファイルへの編集をブロック |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | ファイルごとの初回編集前に影響の明示を要求 |
+| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | ファイルごとの初回編集前に影響の明示を要求（`ECC_DISABLED_HOOKS` によりデフォルト無効、#280） |
 | `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | ガバナンスイベントをアカウントごとの `state.db` にキャプチャ (fork、直接 `node`) |
 | `pre:bash:dispatcher` | `Bash` | block-no-verify、auto-tmux-dev、tmux/git-push リマインダー、コミット品質、破壊的コマンドのゲートを順番に実行 |
 | `pre:mcp-health-check` | `mcp__.*` | MCP サーバーのヘルスをプローブ；MCP 以外のツールのコストを回避するためマッチャーを絞り込み |
@@ -193,7 +193,7 @@ flowchart TD
 | `post:ecc-context-monitor` | `*` | No | コンテキスト枯渇、高コスト、スコープクリープ、ツールループに警告 |
 | `post:observe:continuous-learning` | `*` | Yes | CLV2 `observe.sh post`；`tool_complete` を `observations.jsonl` にキャプチャ |
 | `post:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | No | ツール出力からガバナンスイベントをキャプチャ (fork、直接 `node`) |
-| `post:bash:dispatcher` | `Bash` | Yes | PR 作成検出；`command-log-audit/cost/build-complete` は `ECC_DISABLED_HOOKS` で無効（同フラグは `pre:edit-write:gateguard-fact-force` も無効化） |
+| `post:bash:dispatcher` | `Bash` | Yes | PR 作成検出；`command-log-audit/cost/build-complete` は `ECC_DISABLED_HOOKS` で無効 |
 | `post:bash:command-log-audit` | `Bash` | No | アカウント対応 bash コマンドログ fork (直接 `node`) |
 | `post:edit:accumulate` | `Edit\|Write\|MultiEdit` | No | Stop 時の一括型チェック用に編集した JS/TS パスを収集 |
 | `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | `.json/.md/.go/.py` を biome/prettier/gofmt/ruff で自動フォーマット |

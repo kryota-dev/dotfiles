@@ -161,7 +161,7 @@ flowchart TD
 |---|---|---|
 | `pre:edit-write:suggest-compact` | `Edit\|Write` | Suggests manual compaction at logical intervals |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | Blocks edits to linter/formatter config files |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file |
+| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file (disabled by default via `ECC_DISABLED_HOOKS`, #280) |
 | `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | Captures governance events to per-account `state.db` (fork, direct `node`) |
 | `pre:bash:dispatcher` | `Bash` | Runs block-no-verify, auto-tmux-dev, tmux/git-push reminders, commit-quality, and the destructive gateguard gate in sequence |
 | `pre:mcp-health-check` | `mcp__.*` | Probes MCP server health; matcher is narrowed to avoid paying cost for non-MCP tools |
@@ -193,7 +193,7 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 | `post:ecc-context-monitor` | `*` | No | Warns on context exhaustion, high cost, scope creep, or tool loops |
 | `post:observe:continuous-learning` | `*` | Yes | CLV2 `observe.sh post`; captures `tool_complete` to `observations.jsonl` |
 | `post:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | No | Captures governance events from tool outputs (fork, direct `node`) |
-| `post:bash:dispatcher` | `Bash` | Yes | PR-created detection; `command-log-audit/cost/build-complete` disabled via `ECC_DISABLED_HOOKS` (which also disables `pre:edit-write:gateguard-fact-force`) |
+| `post:bash:dispatcher` | `Bash` | Yes | PR-created detection; `command-log-audit/cost/build-complete` disabled via `ECC_DISABLED_HOOKS` |
 | `post:bash:command-log-audit` | `Bash` | No | Account-aware bash-command log fork (direct `node`) |
 | `post:edit:accumulate` | `Edit\|Write\|MultiEdit` | No | Collects edited JS/TS paths for Stop-time batched typecheck |
 | `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | Auto-formats `.json/.md/.go/.py` via biome/prettier/gofmt/ruff |
