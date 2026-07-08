@@ -226,7 +226,7 @@ flowchart TD
 
 **フェイルオープン動作。** `plugin-hook-bootstrap.js` が存在しない場合（`chezmoi apply` が external をフェッチする前の新規マシン）、ランチャーは stdin をそのまま渡して終了コード 0 — ECC 自身の missing-runtime 規約に合わせたサイレント no-op です。
 
-**セッション単位の opt-out — `ECC_DISABLED_HOOKS_EXTRA`。** `settings.json` の `env` ブロックはシェルで export した `ECC_DISABLED_HOOKS` を上書きするため、`ECC_DISABLED_HOOKS=… cld-r06` のような prefix 起動はサイレントに無効でした（#281）。そこでランチャーは、`settings.json` が定義しない変数 `ECC_DISABLED_HOOKS_EXTRA`（シェルの export がそのままフックプロセスへ届く）をディスパッチ前に `ECC_DISABLED_HOOKS` へマージします。`claude-config` エイリアスはこのチャネルを使います。同じ優先順位により `ECC_HOOK_PROFILE` は `settings.json` の値（`strict`）に固定され、シェル側のプロファイル切替はありません。
+**セッション単位の opt-out — `ECC_DISABLED_HOOKS_EXTRA`。** `settings.json` の `env` ブロックはシェルで export した `ECC_DISABLED_HOOKS` を上書きするため、`ECC_DISABLED_HOOKS=… cld-r06` のような prefix 起動はサイレントに無効でした（#281）。そこでランチャーは、`settings.json` が定義しない変数 `ECC_DISABLED_HOOKS_EXTRA`（シェルの export がそのままフックプロセスへ届く）をディスパッチ前に `ECC_DISABLED_HOOKS` へマージします。`claude-config` エイリアスはこのチャネルを使います。同じ優先順位により `ECC_HOOK_PROFILE` は `settings.json` の値（`strict`）に固定され、シェル側のプロファイル切替はありません。なおこのチャネルはスコープされていません: launcher を経由する任意のフック ID — Bash destructive gate を含む — をこの方法で無効化でき、セッションの shell env を設定できるもの（例: allow 済み direnv の `.envrc`）であれば到達できます。
 
 **settings.json でのコマンドパターン：**
 

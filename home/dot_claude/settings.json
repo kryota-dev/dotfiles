@@ -183,7 +183,7 @@
             "timeout": 5
           }
         ],
-        "description": "Block edits to linter/formatter config files (bypass with ECC_DISABLED_HOOKS=pre:config-protection)",
+        "description": "Block edits to linter/formatter config files (bypass per session with ECC_DISABLED_HOOKS_EXTRA=pre:config-protection, #281)",
         "id": "pre:config-protection"
       },
       {
@@ -195,7 +195,7 @@
             "timeout": 5
           }
         ],
-        "description": "Fact-forcing gate: require articulating impact before the first Edit/Write per file (disabled by default via env.ECC_DISABLED_HOOKS, #280; wiring kept for per-session re-enable)",
+        "description": "Fact-forcing gate: require articulating impact before the first Edit/Write per file (disabled by default via env.ECC_DISABLED_HOOKS, #280; wiring kept — re-enabling needs a claude --settings override, not env, #281)",
         "id": "pre:edit-write:gateguard-fact-force"
       },
       {

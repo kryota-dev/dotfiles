@@ -824,8 +824,19 @@ SECRETS
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
   [ -f "$zsh" ]
   grep -qF "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force " "$zsh"
-  run grep -F "claude-config='ECC_DISABLED_HOOKS=" "$zsh"
+  # Catch the dead pattern anywhere on the alias line, not just right after the opening
+  # quote (e.g. a FOO=1 ECC_DISABLED_HOOKS=... prefix would regress silently otherwise).
+  run grep -E "alias claude-config=.*['[:space:]]ECC_DISABLED_HOOKS=" "$zsh"
   [ "$status" -ne 0 ]
+}
+
+@test "settings.json leaves ECC_DISABLED_HOOKS_EXTRA undefined so the shell passthrough works (#281)" {
+  # The EXTRA channel only works because settings.json's env does NOT define it — a
+  # settings.json entry would override the shell export and kill the channel.
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  jq -e '.env | has("ECC_DISABLED_HOOKS_EXTRA") | not' "$s" >/dev/null
 }
 
 @test "1Password validation requires the exa and firecrawl API keys" {

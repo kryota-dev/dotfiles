@@ -22,6 +22,8 @@ _claude_with_home() {
   # The edit-write gateguard-fact-force gate is disabled via env.ECC_DISABLED_HOOKS in
   # settings.json, which overrides shell-inherited env — settings.json is the effective
   # SSOT for this flag; an alias-level default here would be dead code (see #280).
+  # Per-session opt-outs instead go through ECC_DISABLED_HOOKS_EXTRA, which ecc-hook.sh
+  # merges into ECC_DISABLED_HOOKS (see claude-config below, #281).
   # ECC_OBSERVER_TIMEOUT_SECONDS raises the CLV2 observer watchdog above its 120s default:
   # the Haiku analysis pass (up to a 500-line observation batch and 100 --max-turns) cannot
   # finish in 120s, so every run was SIGTERMed (observer log exit 143) and no instinct was
@@ -51,7 +53,9 @@ alias hcld-r06='_claude_with_home "$HOME/.claude-r06" happy claude'
 # config-protection / gateguard-fact-force gates so Claude can edit settings.json / biome.json /
 # eslint.config.* etc. The opt-out goes through ECC_DISABLED_HOOKS_EXTRA: settings.json's env
 # block overrides a shell-exported ECC_DISABLED_HOOKS (#280) but leaves EXTRA untouched, and
-# ecc-hook.sh merges it into ECC_DISABLED_HOOKS for the hook runtime (#281). For the r06
+# ecc-hook.sh merges it into ECC_DISABLED_HOOKS for the hook runtime (#281). The
+# gateguard-fact-force id is redundant with the settings.json default (#280) but kept
+# deliberately so the alias contract survives a future default flip. For the r06
 # account, prefix the same var to cld-r06:
 #   ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
 alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force _claude_with_home "$HOME/.claude" claude'
