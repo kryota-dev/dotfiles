@@ -47,6 +47,7 @@
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
+| `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md`（`cldf`/`hcldf` が `--append-system-prompt-file` で読み込む） |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (シンボリックリンク) |
 | `home/dot_claude-r06/symlink_*.tmpl` | `~/.claude-r06/{settings.json,CLAUDE.md,statusline.sh,agents,commands,skills}` (シンボリックリンク) |
 
