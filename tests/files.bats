@@ -777,6 +777,68 @@ SECRETS
   [ "$status" -ne 0 ]
 }
 
+@test "ecc-hook.sh merges ECC_DISABLED_HOOKS_EXTRA into ECC_DISABLED_HOOKS for the hook runtime (#281)" {
+  # settings.json's env block overrides any shell-exported ECC_DISABLED_HOOKS, so a
+  # per-session opt-out needs a variable settings.json does NOT define: the launcher
+  # comma-joins a shell-exported ECC_DISABLED_HOOKS_EXTRA into ECC_DISABLED_HOOKS
+  # before the ECC runtime (hook-flags.js) resolves it as a single value.
+  local launcher="${HOME_DIR}/dot_claude/executable_ecc-hook.sh"
+  [ -f "$launcher" ]
+  command -v node >/dev/null 2>&1 || skip "node unavailable"
+  local tmp; tmp=$(mktemp -d)
+  mkdir -p "$tmp/scripts/hooks"
+  # Stub bootstrap that prints the value the ECC runtime would read.
+  printf '%s\n' 'process.stdout.write(process.env.ECC_DISABLED_HOOKS || "")' \
+    >"$tmp/scripts/hooks/plugin-hook-bootstrap.js"
+
+  # Base + extra: comma-joined union.
+  run env CLAUDE_PLUGIN_ROOT="$tmp" ECC_DISABLED_HOOKS="a,b" ECC_DISABLED_HOOKS_EXTRA="c,d" \
+    bash "$launcher" </dev/null
+  [ "$status" -eq 0 ]
+  [ "$output" = "a,b,c,d" ]
+
+  # Extra only (no base): no leading comma.
+  run env -u ECC_DISABLED_HOOKS CLAUDE_PLUGIN_ROOT="$tmp" ECC_DISABLED_HOOKS_EXTRA="c,d" \
+    bash "$launcher" </dev/null
+  [ "$status" -eq 0 ]
+  [ "$output" = "c,d" ]
+
+  # No extra: base value passes through untouched (pre-#281 behaviour preserved).
+  run env -u ECC_DISABLED_HOOKS_EXTRA CLAUDE_PLUGIN_ROOT="$tmp" ECC_DISABLED_HOOKS="a,b" \
+    bash "$launcher" </dev/null
+  [ "$status" -eq 0 ]
+  [ "$output" = "a,b" ]
+
+  # Bootstrap missing + extra set: fail-open passthrough still wins (no merge attempted).
+  local tmp2; tmp2=$(mktemp -d)
+  run env CLAUDE_PLUGIN_ROOT="$tmp2" ECC_DISABLED_HOOKS_EXTRA="c,d" \
+    bash "$launcher" <<<"passthrough"
+  [ "$status" -eq 0 ]
+  [ "$output" = "passthrough" ]
+  rm -rf "$tmp" "$tmp2"
+}
+
+@test "claude-config routes its per-session gate opt-out through ECC_DISABLED_HOOKS_EXTRA (#281)" {
+  # A plain ECC_DISABLED_HOOKS= assignment on the alias is dead code (settings.json env
+  # wins over shell-inherited values); the alias must use the launcher-merged EXTRA channel.
+  local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  [ -f "$zsh" ]
+  grep -qF "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force " "$zsh"
+  # Catch the dead pattern anywhere on the alias line, not just right after the opening
+  # quote (e.g. a FOO=1 ECC_DISABLED_HOOKS=... prefix would regress silently otherwise).
+  run grep -E "alias claude-config=.*['[:space:]]ECC_DISABLED_HOOKS=" "$zsh"
+  [ "$status" -ne 0 ]
+}
+
+@test "settings.json leaves ECC_DISABLED_HOOKS_EXTRA undefined so the shell passthrough works (#281)" {
+  # The EXTRA channel only works because settings.json's env does NOT define it — a
+  # settings.json entry would override the shell export and kill the channel.
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  jq -e '.env | has("ECC_DISABLED_HOOKS_EXTRA") | not' "$s" >/dev/null
+}
+
 @test "1Password validation requires the exa and firecrawl API keys" {
   local script="${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
   grep -qF 'op://kryota.dev/Dotfiles - Exa API/credential' "$script"

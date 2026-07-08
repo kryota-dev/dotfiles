@@ -106,7 +106,7 @@ The `permissions.deny` list blocks:
 
 ## Hooks graph
 
-The hooks are wired in `settings.json` and dispatched through either the ECC launcher or direct `node` invocations. The ECC dispatcher (`run-with-flags.js`) self-gates on `ECC_HOOK_PROFILE` (set to `strict`) and `ECC_DISABLED_HOOKS`.
+The hooks are wired in `settings.json` and dispatched through either the ECC launcher or direct `node` invocations. The ECC dispatcher (`run-with-flags.js`) self-gates on `ECC_HOOK_PROFILE` (set to `strict`) and `ECC_DISABLED_HOOKS` (with any per-session `ECC_DISABLED_HOOKS_EXTRA` already merged in by the launcher, #281).
 
 ```mermaid
 flowchart TD
@@ -220,11 +220,13 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 
 ## ECC launcher — ecc-hook.sh
 
-`~/.claude/ecc-hook.sh` is a 38-line bash script that replaces ECC's ~1.5 KB per-hook minified `node -e` blobs in `settings.json`.
+`~/.claude/ecc-hook.sh` is a small bash launcher that replaces ECC's ~1.5 KB per-hook minified `node -e` blobs in `settings.json`.
 
 **Why it exists.** ECC normally ships each hook command as an inline blob whose bulk is plugin-root fallback resolution — scanning `~/.claude/plugins/…` for an installed ECC. Because this dotfiles repo manages ECC as a chezmoi external (not a Claude plugin), the plugin root is fixed at `~/.agents/skills/ecc`. The fallback scan is dead weight and made `settings.json` unreadable. The launcher sets `CLAUDE_PLUGIN_ROOT` once and hands the hook spec to ECC's own `plugin-hook-bootstrap.js`, which resolves and dispatches the target script.
 
 **Fail-open behavior.** If `plugin-hook-bootstrap.js` is absent (fresh machine before `chezmoi apply` has fetched the external), the launcher passes stdin straight through and exits 0 — a silent no-op, matching ECC's own missing-runtime convention.
+
+**Per-session opt-out — `ECC_DISABLED_HOOKS_EXTRA`.** `settings.json`'s `env` block overrides any shell-exported `ECC_DISABLED_HOOKS`, which made prefix invocations like `ECC_DISABLED_HOOKS=… cld-r06` silently ineffective (#281). The launcher therefore merges a shell-exported `ECC_DISABLED_HOOKS_EXTRA` — a variable `settings.json` does not define, so it reaches the hook process untouched — into `ECC_DISABLED_HOOKS` before dispatching. This is the channel the `claude-config` alias uses. The same precedence pins `ECC_HOOK_PROFILE` to the `settings.json` value (`strict`); there is no shell-side profile override. Note that the channel is not scoped: any hook ID routed through the launcher — including the Bash destructive gates — can be disabled this way, and anything that can set shell env for the session (e.g. an allowed direnv `.envrc`) can reach it.
 
 **Usage pattern in settings.json:**
 
@@ -443,8 +445,9 @@ A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these vari
 | Variable | Set in | Effect |
 |---|---|---|
 | `ECC_GOVERNANCE_CAPTURE` | `settings.json env` | `1` = enable governance event capture |
-| `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = run all hooks gated on strict profile |
+| `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = run all hooks gated on strict profile. Pinned: settings.json env overrides shell exports, so there is no per-session profile switch (#281) |
 | `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`, `pre:edit-write:gateguard-fact-force`) |
+| `ECC_DISABLED_HOOKS_EXTRA` | shell (`claude-config` alias, prefix invocation) | Per-session additive opt-out: `ecc-hook.sh` comma-joins it into `ECC_DISABLED_HOOKS`, since settings.json env overrides the base variable (#281) |
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = quality-gate auto-fixes files instead of blocking |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | Regex of additional destructive command patterns; SSOT shared with Codex gate |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | Fixed to `~/.agents/skills/ecc`; skips ECC's plugin fallback scan |
