@@ -103,17 +103,27 @@ load helpers/setup
   # (repeating the same flag is allowed) instead of --append-system-prompt-file, which would
   # otherwise collide with happy's own flag and abort the launch. Direct (non-happy) launches
   # keep --append-system-prompt-file (covered by the readable-prompt-file test above).
+  #
+  # The fixture is intentionally multi-line with internal whitespace: the core guarantee is that
+  # the whole prompt body reaches happy as a SINGLE argv element (not split on whitespace or
+  # newlines). The happy mock asserts the arg count and the exact prompt arg. zsh's $(<file)
+  # strips the trailing newline, so the expected value ($'line one\nline two with spaces') has
+  # none. Asserting $4 == --append-system-prompt also rejects a stray --append-system-prompt-file.
   mkdir -p "$BATS_TEST_TMPDIR/.claude"
-  printf 'ORCHESTRATOR-BODY\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  printf 'line one\nline two with spaces\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
   run zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
-    happy() { print -r -- \"happy|\$*\"; }
+    happy() {
+      [[ \$# -eq 5 ]] || { print -r -- \"argc=\$#\"; return 1; }
+      [[ \$4 == --append-system-prompt ]] || { print -r -- \"flag=\$4\"; return 1; }
+      [[ \$5 == \$'line one\nline two with spaces' ]] || { print -r -- \"body=[\$5]\"; return 1; }
+      print -r -- ok
+    }
     _claude_fable \"\$HOME/.claude\" happy claude
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "happy|claude --model claude-fable-5 --append-system-prompt ORCHESTRATOR-BODY" ]
-  [[ "$output" != *"--append-system-prompt-file"* ]]
+  [ "$output" = "ok" ]
 }
 
 @test "claude.zsh: _claude_fable defaults to claude when no command is given" {

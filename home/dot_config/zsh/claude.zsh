@@ -77,8 +77,11 @@ alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-wri
 # --append-system-prompt, and Claude Code >= 2.1.185 refuses to mix --append-system-prompt
 # with --append-system-prompt-file ("Cannot use both ... Please use only one."), which aborted
 # the happy variants at launch. So when routing through happy ($1 == happy) the prompt is
-# inlined via --append-system-prompt instead — repeating the same flag is allowed, so ours
-# coexists with happy's. The prompt is small (~6 KB) and static, so the argv cost is moot.
+# inlined via --append-system-prompt instead — repeating the same flag is allowed (observed on
+# claude 2.1.205), so ours coexists with happy's. The prompt is small (~6 KB) and static, so the
+# argv cost is moot; note that inlining exposes the body in argv (readable by same-user
+# processes), so keep fable-orchestrator-prompt.md secret-free — revert to the file form if
+# happy ever honors --append-system-prompt-file.
 _claude_fable() {
   local home_dir="$1"
   shift
