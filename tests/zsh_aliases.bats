@@ -95,6 +95,37 @@ load helpers/setup
   [ "$output" = "happy|claude --resume --model claude-fable-5" ]
 }
 
+@test "claude.zsh: _claude_fable inlines the orchestrator prompt via --append-system-prompt through happy" {
+  # Regression guard for hcldf/hcldf-r06: the happy (slopus/happy) wrapper always injects its
+  # own --append-system-prompt, and Claude Code >= 2.1.185 rejects mixing --append-system-prompt
+  # with --append-system-prompt-file ("Cannot use both ... Please use only one."). So when
+  # routing through happy, the orchestrator prompt must be inlined via --append-system-prompt
+  # (repeating the same flag is allowed) instead of --append-system-prompt-file, which would
+  # otherwise collide with happy's own flag and abort the launch. Direct (non-happy) launches
+  # keep --append-system-prompt-file (covered by the readable-prompt-file test above).
+  #
+  # The fixture is intentionally multi-line with internal whitespace: the core guarantee is that
+  # the whole prompt body reaches happy as a SINGLE argv element (not split on whitespace or
+  # newlines). The happy mock asserts the arg count and the exact prompt arg. zsh's $(<file)
+  # strips the trailing newline, so the expected value ($'line one\nline two with spaces') has
+  # none. Asserting $4 == --append-system-prompt also rejects a stray --append-system-prompt-file.
+  mkdir -p "$BATS_TEST_TMPDIR/.claude"
+  printf 'line one\nline two with spaces\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    happy() {
+      [[ \$# -eq 5 ]] || { print -r -- \"argc=\$#\"; return 1; }
+      [[ \$4 == --append-system-prompt ]] || { print -r -- \"flag=\$4\"; return 1; }
+      [[ \$5 == \$'line one\nline two with spaces' ]] || { print -r -- \"body=[\$5]\"; return 1; }
+      print -r -- ok
+    }
+    _claude_fable \"\$HOME/.claude\" happy claude
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok" ]
+}
+
 @test "claude.zsh: _claude_fable defaults to claude when no command is given" {
   # Symmetry with _claude_with_home's own default-command fallback: bare invocation
   # (e.g. `_claude_fable "$HOME/.claude"`) must launch `claude` rather than exec'ing
