@@ -446,10 +446,14 @@ load helpers/setup
   # `claude plugin marketplace add`. It knows exactly two origins: the built-in
   # claude-plugins-official, and whatever extraKnownMarketplaces declares. A plugin whose
   # marketplace is neither would fail at apply time on a fresh machine, so catch it here instead.
+  # The `as $known` binding must be parenthesized: jq binds `as` tighter than `+`, so
+  # `a + b as $x | c` means `a + (b as $x | c)` and would try to add an array to a boolean.
   jq -e '
-    (.extraKnownMarketplaces | keys) + ["claude-plugins-official"] as $known
-    | [.enabledPlugins | keys[] | sub("^.*@"; "")]
-    | all(. as $m | $known | index($m) != null)
+    (((.extraKnownMarketplaces | keys) + ["claude-plugins-official"]) as $known
+      | .enabledPlugins
+      | keys
+      | map(sub("^.*@"; ""))
+      | all(IN($known[])))
   ' "$s" >/dev/null
 }
 
