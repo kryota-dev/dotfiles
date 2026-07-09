@@ -9,14 +9,18 @@ set -euo pipefail
 #     Volatile and chezmoiignored, so it starts empty on a fresh machine.
 #
 # The CLI does not bridge the two on its own: `enabledPlugins` only toggles an already-installed
-# plugin, and `extraKnownMarketplaces` does not register the marketplace. Both gaps are upstream
-# wontfix (anthropics/claude-code#23737 closed as duplicate, #45323 closed as not planned: "Plugins
-# configured in org managed settings do not auto-install in the CLI"). Without this script, a new
-# machine gets settings.json's declaration but no plugins. Verified against claude 2.1.185: the
-# `autoInstallEnabledPlugins` and `forcedPlugins` keys those issues ask for do not exist in the binary.
+# plugin, and `extraKnownMarketplaces` does not register the marketplace -- nor is its `ref` honoured
+# unless the ref is passed on the command line. Both gaps are upstream wontfix
+# (anthropics/claude-code#23737 closed as duplicate, #45323 closed as not planned: "Plugins configured
+# in org managed settings do not auto-install in the CLI"). Without this script, a new machine gets
+# settings.json's declaration but no plugins. Verified against claude 2.1.205 (the mise-pinned version
+# in dot_config/mise/config.toml): the `autoInstallEnabledPlugins` and `forcedPlugins` keys those
+# issues ask for do not exist in the binary.
 #
-# The plugin and marketplace lists below are rendered from settings.json, so the declaration has a
-# single source of truth and the run_onchange key changes only when the declaration itself changes.
+# The declaration below is rendered from settings.json, so it has a single source of truth and the
+# run_onchange key changes only when the declaration itself changes. It is emitted as JSON inside a
+# quoted heredoc rather than as bash array literals: a value containing a quote or `$(...)` would
+# otherwise be evaluated as script source at render time, which no amount of runtime quoting fixes.
 #
 # `claude plugin marketplace add` and `claude plugin install` rewrite "$CLAUDE_CONFIG_DIR/settings.json"
 # with their own serializer, which reorders the top-level keys and drops the per-hook `id`/`description`
@@ -32,28 +36,27 @@ if ! command -v mise &>/dev/null; then
   exit 0
 fi
 
-if ! command -v jq &>/dev/null; then
-  echo "WARNING: jq is not installed; skipping Claude Code plugin setup."
-  exit 0
+# Prefer a PATH jq (brew installs it in run_onchange_before_10), else the mise-managed jq. Never a
+# silent `exit 0`: that would mark this run_onchange "done" and never retry once jq lands (the same
+# reasoning as run_onchange_after_14-enable-clv2-observer).
+if command -v jq &>/dev/null; then
+  jq_cmd=(jq)
+else
+  jq_cmd=(mise exec -- jq)
+fi
+if ! "${jq_cmd[@]}" --version >/dev/null 2>&1; then
+  echo "ERROR: neither a PATH jq nor a mise-managed jq is usable; cannot reconcile Claude Code plugins." >&2
+  exit 1
 fi
 
-# Rendered from settings.json .enabledPlugins — only the entries switched on. Each id is
-# "<plugin>@<marketplace>", which is also how the CLI addresses them.
-plugins=(
-{{- range $id, $enabled := $settings.enabledPlugins }}
-{{- if $enabled }}
-  "{{ $id }}"
-{{- end }}
-{{- end }}
-)
-
-# Rendered from settings.json .extraKnownMarketplaces as "<name>=<source>", where <source> is the
-# argument `claude plugin marketplace add` accepts (an owner/repo shorthand, or a git URL).
-declared_marketplaces=(
-{{- range $name, $marketplace := $settings.extraKnownMarketplaces }}
-  "{{ $name }}={{ if eq $marketplace.source.source "github" }}{{ $marketplace.source.repo }}{{ else }}{{ $marketplace.source.url }}{{ end }}"
-{{- end }}
-)
+# Rendered from settings.json: only `enabledPlugins` and `extraKnownMarketplaces`, so an unrelated
+# edit elsewhere in settings.json leaves this script body -- and thus the run_onchange key -- untouched.
+# The heredoc is quoted, so the JSON is never expanded by the shell.
+declaration_json="$(
+  cat <<'CLAUDE_PLUGIN_DECLARATION'
+{{ dict "enabledPlugins" $settings.enabledPlugins "extraKnownMarketplaces" $settings.extraKnownMarketplaces | toJson }}
+CLAUDE_PLUGIN_DECLARATION
+)"
 
 # claude-plugins-official ships with Claude Code, so it is not an "extra" marketplace and must not be
 # declared in settings.json. It still has to be registered before any of its plugins can be installed.
@@ -64,64 +67,94 @@ OFFICIAL_MARKETPLACE_SOURCE="anthropics/claude-plugins-official"
 # cld-r06 -> ~/.claude-r06). The two share one settings.json via a symlink, but each keeps its own
 # plugins/ runtime, so every account has to be reconciled separately.
 config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
+settings_file="${config_dirs[0]}/settings.json"
+
+plugins=()
+plugin_list="$(printf '%s' "$declaration_json" | "${jq_cmd[@]}" -r '.enabledPlugins // {} | to_entries[] | select(.value == true) | .key')"
+while IFS= read -r plugin; do
+  if [ -n "$plugin" ]; then
+    plugins+=("$plugin")
+  fi
+done <<<"$plugin_list"
 
 if [ "${#plugins[@]}" -eq 0 ]; then
   echo "==> No plugins declared in settings.json; nothing to reconcile."
   exit 0
 fi
 
-settings_file="$HOME/.claude/settings.json"
 settings_snapshot="$(mktemp)"
-cp "$settings_file" "$settings_snapshot"
 
 restore_settings() {
-  # Undo the CLI's rewrite. Written through the existing path so the file keeps its inode.
-  cat "$settings_snapshot" >"$settings_file"
+  # Undo the CLI's rewrite. Written through the existing path so the file keeps its inode. Guarded on
+  # a non-empty snapshot: the trap is armed before `cp` runs, and restoring an empty snapshot would
+  # truncate settings.json.
+  if [ -s "$settings_snapshot" ]; then
+    cat "$settings_snapshot" >"$settings_file"
+  fi
   rm -f "$settings_snapshot"
   # `--scope user` targets "$CLAUDE_CONFIG_DIR/settings.json", which for the work account is the
   # symlink deployed from dot_claude-r06/symlink_settings.json.tmpl. A CLI that rewrites the file
   # atomically (temp file + rename) would leave a regular file in the symlink's place.
-  local work_settings="$HOME/.claude-r06/settings.json"
+  local work_settings="${config_dirs[1]}/settings.json"
   if [ -e "$work_settings" ] && [ ! -L "$work_settings" ]; then
     ln -sfn "$settings_file" "$work_settings"
   fi
 }
 trap restore_settings EXIT
 
-# Map a marketplace name to the source argument for `claude plugin marketplace add`.
+cp "$settings_file" "$settings_snapshot"
+
+# Map a marketplace name to the source argument for `claude plugin marketplace add`. Only the `github`
+# and `git` source types are supported; the other five the settings schema allows (url, hostPattern,
+# npm, file, directory) would need a different argument shape, so they fail loudly rather than
+# rendering an empty argument.
+#
+# A declared `ref` is appended as "<source>#<ref>". Declaring it in settings.json alone is not enough:
+# the CLI ignores the declared ref and checks out the default branch unless the ref is part of the
+# argument. Only branches and tags work -- `#<commit-sha>` fails, because the ref reaches `git clone
+# --branch`.
 marketplace_source() {
-  local name="$1" entry
-  for entry in ${declared_marketplaces[@]+"${declared_marketplaces[@]}"}; do
-    if [ "${entry%%=*}" = "$name" ]; then
-      printf '%s' "${entry#*=}"
-      return 0
-    fi
-  done
+  local name="$1"
   if [ "$name" = "$OFFICIAL_MARKETPLACE" ]; then
     printf '%s' "$OFFICIAL_MARKETPLACE_SOURCE"
     return 0
   fi
-  return 1
+  # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+  printf '%s' "$declaration_json" | "${jq_cmd[@]}" -er --arg m "$name" '
+    .extraKnownMarketplaces[$m].source
+    | (if .source == "github" then .repo
+       elif .source == "git" then .url
+       else error("unsupported marketplace source type \"\(.source)\" for \($m)")
+       end) as $base
+    | if (.ref // "") == "" then $base else "\($base)#\(.ref)" end
+  '
 }
 
 failed=0
 for config_dir in "${config_dirs[@]}"; do
   echo "==> Reconciling Claude Code plugins in ${config_dir}..."
+  mkdir -p "$config_dir"
   known_marketplaces="${config_dir}/plugins/known_marketplaces.json"
-  # `plugin list --json` prints each installed plugin's "<plugin>@<marketplace>" id. It is empty (and
-  # exits non-zero) before the plugin runtime exists, which is the expected state on a first apply.
-  installed="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin list --json 2>/dev/null | jq -r '.[].id' || true)"
+  # `plugin list --json` prints one object per installed plugin. Filter to user scope, the scope this
+  # script installs into: a project- or local-scoped plugin of the same name must not mask a missing
+  # user-scoped one. The command is empty (and exits non-zero) before the plugin runtime exists, which
+  # is the expected state on a first apply.
+  installed="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin list --json 2>/dev/null | "${jq_cmd[@]}" -r '.[] | select(.scope == "user") | .id' || true)"
 
   for plugin in "${plugins[@]}"; do
     marketplace="${plugin##*@}"
 
-    if [ ! -f "$known_marketplaces" ] || ! jq -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
+    # Presence is keyed on the marketplace name only: an entry already registered under a different
+    # source is trusted as-is. Rewriting it would need local write access to known_marketplaces.json,
+    # which already implies control of this machine.
+    # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+    if [ ! -f "$known_marketplaces" ] || ! "${jq_cmd[@]}" -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
       if ! source_spec="$(marketplace_source "$marketplace")"; then
-        printf 'ERROR: plugin %s needs marketplace %s, which is neither %s nor declared in settings.json extraKnownMarketplaces\n' "$plugin" "$marketplace" "$OFFICIAL_MARKETPLACE" >&2
+        printf 'ERROR: cannot resolve a source for marketplace %s (needed by %s); declare it in settings.json extraKnownMarketplaces\n' "$marketplace" "$plugin" >&2
         failed=1
         continue
       fi
-      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$source_spec" 2>&1)"; then
+      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$source_spec" --scope user 2>&1)"; then
         printf 'ERROR: failed to add marketplace %s (%s) in %s\n%s\n' "$marketplace" "$source_spec" "$config_dir" "$out" >&2
         failed=1
         continue
