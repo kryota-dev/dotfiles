@@ -38,7 +38,8 @@ flowchart TD
         E --> F["13 setup-mcp\nrun_onchange\n(registers 4 user-scope MCP servers\nvia mise exec -- claude)"]
         F --> G["14 enable-clv2-observer\nrun_onchange\n(sets observer.enabled=true\nin per-account homunculus config.json)"]
         G --> H["16 migrate-claude-binary\nrun_once\n(symlink ~/.local/bin/claude\n-> mise installs/claude/latest)"]
-        H --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
+        H --> H2["17 setup-claude-plugins\nrun_onchange\n(registers marketplaces + installs plugins\ndeclared in dot_claude/settings.json)"]
+        H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
         J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -75,12 +76,21 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 |--------|-----------------|
 | `10-brew-bundle` | `dot_Brewfile` |
 | `12-setup-mise` | `dot_config/mise/config.toml` |
+| `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
 `20-macos-defaults` uses a `joinPath` self-hash — editing the script itself is enough to re-apply all macOS `defaults write` calls.
+
+`17-setup-claude-plugins` reaches the same result without a hash: it reads
+`dot_claude/settings.json` with `include | fromJson` and embeds just the `enabledPlugins` and
+`extraKnownMarketplaces` objects into the script body as JSON, inside a quoted heredoc. That keeps
+one source of truth *and* re-triggers the script precisely when the declaration changes — an
+unrelated edit elsewhere in settings.json leaves the rendered body untouched. The quoted heredoc
+matters: rendering the values into bash array literals would let a value containing a quote or
+`$(...)` execute as script source at render time.
 
 ---
 
@@ -97,6 +107,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | `13-setup-mcp` | both | No OS guard; both accounts processed |
 | `14-enable-clv2-observer` | both | No OS guard |
 | `16-migrate-claude-binary` | both | No OS guard; guards on binary existance at runtime |
+| `17-setup-claude-plugins` | both | No OS guard; both accounts processed |
 | `18-setup-agent-browser` | dual | `{{ if linux }}` adds `--with-deps` |
 | `20-macos-defaults` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `30-register-launchd-agents` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |

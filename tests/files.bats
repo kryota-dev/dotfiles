@@ -425,6 +425,192 @@ load helpers/setup
   ' "$s" >/dev/null
 }
 
+@test "settings.json declares codex and claude-code-setup as enabled plugins" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # settings.json is the single source of truth for the plugin set:
+  # run_onchange_after_17-setup-claude-plugins.sh.tmpl renders its install list from
+  # exactly these entries, so dropping one here silently stops installing it.
+  jq -e '
+    .enabledPlugins["codex@openai-codex"] == true
+      and .enabledPlugins["claude-code-setup@claude-plugins-official"] == true
+  ' "$s" >/dev/null
+}
+
+@test "settings.json: every enabled plugin resolves to a known marketplace (#17 reconciler contract)" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The reconciler resolves a plugin's "<name>@<marketplace>" suffix to a source it can pass to
+  # `claude plugin marketplace add`. It knows exactly two origins: the built-in
+  # claude-plugins-official, and whatever extraKnownMarketplaces declares. A plugin whose
+  # marketplace is neither would fail at apply time on a fresh machine, so catch it here instead.
+  # The `as $known` binding must be parenthesized: jq binds `as` tighter than `+`, so
+  # `a + b as $x | c` means `a + (b as $x | c)` and would try to add an array to a boolean.
+  jq -e '
+    (((.extraKnownMarketplaces | keys) + ["claude-plugins-official"]) as $known
+      | .enabledPlugins
+      | keys
+      | map(sub("^.*@"; ""))
+      | all(IN($known[])))
+  ' "$s" >/dev/null
+}
+
+@test "settings.json: extraKnownMarketplaces entries carry a source the reconciler can resolve" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The reconciler resolves only the `github` (repo) and `git` (url) source types of the seven the
+  # settings schema allows; the rest (url, hostPattern, npm, file, directory) carry a different
+  # identifying field and would make `marketplace add` fail at apply time.
+  jq -e '
+    .extraKnownMarketplaces
+    | all(.[]; .source
+      | if .source == "github" then (.repo | length) > 0
+        elif .source == "git" then (.url | length) > 0
+        else false end)
+  ' "$s" >/dev/null
+}
+
+@test "settings.json: every extraKnownMarketplaces entry is pinned to a ref" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # A marketplace is executable code installed unattended by `chezmoi apply`, so it must not track a
+  # moving default branch. Only branches and tags work: `#<commit-sha>` reaches `git clone --branch`
+  # and fails, so the pin is necessarily a tag rather than a commit.
+  jq -e '.extraKnownMarketplaces | all(.[]; (.source.ref | length) > 0)' "$s" >/dev/null
+}
+
+@test "chezmoi source files exist: claude plugin reconciler script" {
+  [ -f "${HOME_DIR}/run_onchange_after_17-setup-claude-plugins.sh.tmpl" ]
+}
+
+# Drive the rendered reconciler against a throwaway HOME with fake `mise`/`claude` on PATH. The fake
+# claude reproduces the two behaviours the script exists to handle: it rewrites settings.json with its
+# own serializer (dropping the hook `id` annotations), and it replaces the work account's settings.json
+# symlink with a regular file via an atomic rename.
+_reconciler_sandbox() {
+  local sandbox="$1"
+  mkdir -p "${sandbox}/home/.claude" "${sandbox}/home/.claude-r06" "${sandbox}/bin"
+  cp "${HOME_DIR}/dot_claude/settings.json" "${sandbox}/home/.claude/settings.json"
+  ln -sfn "${sandbox}/home/.claude/settings.json" "${sandbox}/home/.claude-r06/settings.json"
+
+  cat >"${sandbox}/bin/mise" <<'FAKE_MISE'
+#!/usr/bin/env bash
+[ "${1:-}" = "exec" ] && shift
+[ "${1:-}" = "--" ] && shift
+exec "$@"
+FAKE_MISE
+
+  cat >"${sandbox}/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+set -euo pipefail
+cfg="${CLAUDE_CONFIG_DIR:?}"
+log="${FAKE_CLAUDE_LOG:?}"
+case "${1:-} ${2:-}" in
+  "plugin list")
+    # Exits non-zero before the runtime exists, exactly like the real CLI.
+    [ -f "${cfg}/plugins/installed.json" ] || exit 1
+    cat "${cfg}/plugins/installed.json"
+    ;;
+  "plugin marketplace")
+    src="$4"
+    echo "marketplace-add ${cfg##*/} ${src}" >>"$log"
+    case "$src" in
+      anthropics/claude-plugins-official*) key=claude-plugins-official ;;
+      openai/codex-plugin-cc*) key=openai-codex ;;
+      *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
+    esac
+    mkdir -p "${cfg}/plugins"
+    [ -f "${cfg}/plugins/known_marketplaces.json" ] || echo '{}' >"${cfg}/plugins/known_marketplaces.json"
+    jq --arg k "$key" '.[$k] = {}' "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
+    mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
+    ;;
+  "plugin install")
+    id="$3"
+    [ "${FAKE_CLAUDE_INSTALL_FAILS:-0}" = "1" ] && { echo "boom" >&2; exit 1; }
+    echo "install ${cfg##*/} ${id}" >>"$log"
+    mkdir -p "${cfg}/plugins"
+    [ -f "${cfg}/plugins/installed.json" ] || echo '[]' >"${cfg}/plugins/installed.json"
+    jq --arg i "$id" '. + [{id: $i, scope: "user"}]' "${cfg}/plugins/installed.json" >"${cfg}/plugins/inst.tmp"
+    mv "${cfg}/plugins/inst.tmp" "${cfg}/plugins/installed.json"
+    # Reproduce the CLI's settings.json rewrite: drop the hook annotations, and replace the file (an
+    # atomic rename, which clobbers the work account's symlink).
+    jq 'del(.hooks.SessionStart[0].id, .hooks.SessionStart[0].description)' "${cfg}/settings.json" >"${cfg}/settings.tmp"
+    mv "${cfg}/settings.tmp" "${cfg}/settings.json"
+    ;;
+  *) echo "unexpected fake claude invocation: $*" >&2; exit 1 ;;
+esac
+FAKE_CLAUDE
+  chmod +x "${sandbox}/bin/mise" "${sandbox}/bin/claude"
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/run_onchange_after_17-setup-claude-plugins.sh.tmpl" >"${sandbox}/reconcile.sh"
+}
+
+@test "claude plugin reconciler: installs per account, passes the pinned ref, restores settings.json" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+
+  # The declared ref must reach the CLI: declaring it in settings.json alone does not pin anything.
+  grep -qF 'marketplace-add .claude openai/codex-plugin-cc#v1.0.6' "${sandbox}/calls.log"
+  grep -qF 'marketplace-add .claude-r06 openai/codex-plugin-cc#v1.0.6' "${sandbox}/calls.log"
+  grep -qF 'marketplace-add .claude anthropics/claude-plugins-official' "${sandbox}/calls.log"
+
+  # Both plugins land in both accounts.
+  [ "$(grep -c '^install .claude ' "${sandbox}/calls.log")" -eq 2 ]
+  [ "$(grep -c '^install .claude-r06 ' "${sandbox}/calls.log")" -eq 2 ]
+
+  # The hook annotations the fake CLI stripped are back, and the work account's symlink was repaired.
+  jq -e '.hooks.SessionStart[0] | has("id") and has("description")' "${sandbox}/home/.claude/settings.json"
+  [ -L "${sandbox}/home/.claude-r06/settings.json" ]
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a second run is a no-op" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  : >"${sandbox}/calls.log"
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+  # Nothing to add, nothing to install.
+  [ ! -s "${sandbox}/calls.log" ]
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a failed install exits non-zero so chezmoi retries" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_INSTALL_FAILS=1 bash "${sandbox}/reconcile.sh"
+  [ "$status" -ne 0 ]
+  # A partially-reconciled run must still leave settings.json as chezmoi wrote it.
+  jq -e '.hooks.SessionStart[0] | has("id")' "${sandbox}/home/.claude/settings.json"
+
+  rm -rf "$sandbox"
+}
+
 @test "clv2 observer enable script is present and idempotently forces observer.enabled" {
   local script="${HOME_DIR}/run_onchange_after_14-enable-clv2-observer.sh.tmpl"
   [ -f "$script" ]

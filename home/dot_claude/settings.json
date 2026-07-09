@@ -473,8 +473,17 @@
   },
   "model": "claude-opus-4-8[1m]",
   "enabledPlugins": {
-    "codex@openai-codex": true
+    "codex@openai-codex": true,
+    "claude-code-setup@claude-plugins-official": true
   },
-  "extraKnownMarketplaces": {},
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc",
+        "ref": "v1.0.6"
+      }
+    }
+  },
   "agentPushNotifEnabled": true
 }

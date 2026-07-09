@@ -70,11 +70,38 @@
 
 `statusLine` フィールドは `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh` を指し、同じ settings.json を両アカウントで共用できます。
 
-Codex プラグインは `enabledPlugins` で有効化されています：
+2つのプラグインを宣言しています：
 
-```json
-"enabledPlugins": { "codex@openai-codex": true }
-```
+| プラグイン | 提供内容 |
+|---|---|
+| `codex@openai-codex` | Claude Code 内から Codex CLI（OpenAI）へ相談する機能 |
+| `claude-code-setup@claude-plugins-official` | Anthropic 公式の read-only コードベース分析ツール。hooks・skills・MCP サーバー・サブエージェントを推奨する |
+
+`enabledPlugins` がプラグインを、`extraKnownMarketplaces` がその入手元となる非公式 marketplace を宣言します
+（`openai-codex` → `openai/codex-plugin-cc`、タグ `v1.0.6` に pin）。ただしどちらのキーも、それ自体は
+インストールを行いません。CLI は `enabledPlugins` を「*すでにインストール済みの*プラグイン」の有効/無効
+スイッチとして扱い、settings.json に宣言があるだけでは marketplace を登録しません
+（[anthropics/claude-code#23737](https://github.com/anthropics/claude-code/issues/23737)（duplicate でクローズ）、
+[#45323](https://github.com/anthropics/claude-code/issues/45323)（not planned でクローズ）を参照）。
+各アカウントのプラグイン実体は `$CLAUDE_CONFIG_DIR/plugins/` にあり、chezmoiignore 対象なので新しいマシンでは空です。
+
+このギャップを埋めるのが `run_onchange_after_17-setup-claude-plugins.sh.tmpl` です。settings.json から
+レンダリングした宣言を JSON として埋め込み（＝宣言の単一ソースを保つ）、不足している marketplace の
+登録とプラグインのインストールをアカウントごとに実行します。
+
+marketplace は `chezmoi apply` が無人でインストールする実行コードなので、可変な既定ブランチを追ってはいけません。
+この pin には落とし穴が 2 つあります。宣言した `ref` は **CLI 引数に含めない限り無視される**ため、スクリプトは
+`<repo>#<ref>` を渡します。また ref は `git clone --branch` に届くので、**コミット SHA は使えません** —
+ブランチかタグのみです。したがって `openai-codex` はタグで pin しており、このリポジトリが chezmoi external に
+用いているコミット pin より弱い保証になります（タグは上流で移動しうる）。現状タグの更新は手動編集で、
+Renovate の `github-tags` datasource への接続は別途追跡します。
+
+**settings.json は chezmoi のものであり、CLI のものではありません。** `claude plugin install`・
+`claude plugin marketplace add`・対話的な `/plugin` マネージャは、いずれもこのファイルを自前のシリアライザで
+書き戻します。その結果トップレベルのキーが並べ替えられ、各 hook の `id`・`description` 注釈が失われます。
+機能は壊れません（hook は JSON のキーではなく `command` 内の引数で識別されるため）が、書き戻された
+ファイルを `chezmoi add` してはいけません。注釈付きの版に戻すには `chezmoi apply` を実行します。
+スクリプト 17 も同じことを自前で行い、終了時にスナップショットを書き戻します。
 
 ---
 
