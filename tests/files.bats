@@ -425,6 +425,50 @@ load helpers/setup
   ' "$s" >/dev/null
 }
 
+@test "settings.json declares codex and claude-code-setup as enabled plugins" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # settings.json is the single source of truth for the plugin set:
+  # run_onchange_after_17-setup-claude-plugins.sh.tmpl renders its install list from
+  # exactly these entries, so dropping one here silently stops installing it.
+  jq -e '
+    .enabledPlugins["codex@openai-codex"] == true
+      and .enabledPlugins["claude-code-setup@claude-plugins-official"] == true
+  ' "$s" >/dev/null
+}
+
+@test "settings.json: every enabled plugin resolves to a known marketplace (#17 reconciler contract)" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The reconciler resolves a plugin's "<name>@<marketplace>" suffix to a source it can pass to
+  # `claude plugin marketplace add`. It knows exactly two origins: the built-in
+  # claude-plugins-official, and whatever extraKnownMarketplaces declares. A plugin whose
+  # marketplace is neither would fail at apply time on a fresh machine, so catch it here instead.
+  jq -e '
+    (.extraKnownMarketplaces | keys) + ["claude-plugins-official"] as $known
+    | [.enabledPlugins | keys[] | sub("^.*@"; "")]
+    | all(. as $m | $known | index($m) != null)
+  ' "$s" >/dev/null
+}
+
+@test "settings.json: extraKnownMarketplaces entries carry a source the reconciler can resolve" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The template renders `repo` for github sources and `url` for everything else. An entry with
+  # neither would render an empty `marketplace add` argument.
+  jq -e '
+    .extraKnownMarketplaces
+    | all(.[]; if .source.source == "github" then (.source.repo | length) > 0 else (.source.url | length) > 0 end)
+  ' "$s" >/dev/null
+}
+
+@test "chezmoi source files exist: claude plugin reconciler script" {
+  [ -f "${HOME_DIR}/run_onchange_after_17-setup-claude-plugins.sh.tmpl" ]
+}
+
 @test "clv2 observer enable script is present and idempotently forces observer.enabled" {
   local script="${HOME_DIR}/run_onchange_after_14-enable-clv2-observer.sh.tmpl"
   [ -f "$script" ]
