@@ -1,0 +1,148 @@
+#!/bin/bash
+set -euo pipefail
+
+# Reconcile each Claude Code account's plugin runtime with the declaration in dot_claude/settings.json.
+#
+# Plugin state is split in two places:
+#   - Declaration: settings.json `extraKnownMarketplaces` + `enabledPlugins` (chezmoi-owned, versioned).
+#   - Runtime: "$CLAUDE_CONFIG_DIR/plugins/" (marketplace clones, install cache, installed_plugins.json).
+#     Volatile and chezmoiignored, so it starts empty on a fresh machine.
+#
+# The CLI does not bridge the two on its own: `enabledPlugins` only toggles an already-installed
+# plugin, and `extraKnownMarketplaces` does not register the marketplace. Both gaps are upstream
+# wontfix (anthropics/claude-code#23737 closed as duplicate, #45323 closed as not planned: "Plugins
+# configured in org managed settings do not auto-install in the CLI"). Without this script, a new
+# machine gets settings.json's declaration but no plugins. Verified against claude 2.1.185: the
+# `autoInstallEnabledPlugins` and `forcedPlugins` keys those issues ask for do not exist in the binary.
+#
+# The plugin and marketplace lists below are rendered from settings.json, so the declaration has a
+# single source of truth and the run_onchange key changes only when the declaration itself changes.
+#
+# `claude plugin marketplace add` and `claude plugin install` rewrite "$CLAUDE_CONFIG_DIR/settings.json"
+# with their own serializer, which reorders the top-level keys and drops the per-hook `id`/`description`
+# annotations chezmoi ships. We snapshot the file up front and write it back on exit, so the CLI's
+# normalization never outlives this script.
+#
+# claude is mise-managed (dot_config/mise/config.toml) and installed by run_onchange_after_12, so it is
+# invoked through `mise exec` rather than PATH, for the same reason as run_onchange_after_13-setup-mcp.
+
+{{ $settings := include "dot_claude/settings.json" | fromJson }}
+if ! command -v mise &>/dev/null; then
+  echo "WARNING: mise is not installed; skipping Claude Code plugin setup."
+  exit 0
+fi
+
+if ! command -v jq &>/dev/null; then
+  echo "WARNING: jq is not installed; skipping Claude Code plugin setup."
+  exit 0
+fi
+
+# Rendered from settings.json .enabledPlugins — only the entries switched on. Each id is
+# "<plugin>@<marketplace>", which is also how the CLI addresses them.
+plugins=(
+{{- range $id, $enabled := $settings.enabledPlugins }}
+{{- if $enabled }}
+  "{{ $id }}"
+{{- end }}
+{{- end }}
+)
+
+# Rendered from settings.json .extraKnownMarketplaces as "<name>=<source>", where <source> is the
+# argument `claude plugin marketplace add` accepts (an owner/repo shorthand, or a git URL).
+declared_marketplaces=(
+{{- range $name, $marketplace := $settings.extraKnownMarketplaces }}
+  "{{ $name }}={{ if eq $marketplace.source.source "github" }}{{ $marketplace.source.repo }}{{ else }}{{ $marketplace.source.url }}{{ end }}"
+{{- end }}
+)
+
+# claude-plugins-official ships with Claude Code, so it is not an "extra" marketplace and must not be
+# declared in settings.json. It still has to be registered before any of its plugins can be installed.
+OFFICIAL_MARKETPLACE="claude-plugins-official"
+OFFICIAL_MARKETPLACE_SOURCE="anthropics/claude-plugins-official"
+
+# Each account is isolated by CLAUDE_CONFIG_DIR (see dot_config/zsh/claude.zsh: cld -> ~/.claude,
+# cld-r06 -> ~/.claude-r06). The two share one settings.json via a symlink, but each keeps its own
+# plugins/ runtime, so every account has to be reconciled separately.
+config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
+
+if [ "${#plugins[@]}" -eq 0 ]; then
+  echo "==> No plugins declared in settings.json; nothing to reconcile."
+  exit 0
+fi
+
+settings_file="$HOME/.claude/settings.json"
+settings_snapshot="$(mktemp)"
+cp "$settings_file" "$settings_snapshot"
+
+restore_settings() {
+  # Undo the CLI's rewrite. Written through the existing path so the file keeps its inode.
+  cat "$settings_snapshot" >"$settings_file"
+  rm -f "$settings_snapshot"
+  # `--scope user` targets "$CLAUDE_CONFIG_DIR/settings.json", which for the work account is the
+  # symlink deployed from dot_claude-r06/symlink_settings.json.tmpl. A CLI that rewrites the file
+  # atomically (temp file + rename) would leave a regular file in the symlink's place.
+  local work_settings="$HOME/.claude-r06/settings.json"
+  if [ -e "$work_settings" ] && [ ! -L "$work_settings" ]; then
+    ln -sfn "$settings_file" "$work_settings"
+  fi
+}
+trap restore_settings EXIT
+
+# Map a marketplace name to the source argument for `claude plugin marketplace add`.
+marketplace_source() {
+  local name="$1" entry
+  for entry in ${declared_marketplaces[@]+"${declared_marketplaces[@]}"}; do
+    if [ "${entry%%=*}" = "$name" ]; then
+      printf '%s' "${entry#*=}"
+      return 0
+    fi
+  done
+  if [ "$name" = "$OFFICIAL_MARKETPLACE" ]; then
+    printf '%s' "$OFFICIAL_MARKETPLACE_SOURCE"
+    return 0
+  fi
+  return 1
+}
+
+failed=0
+for config_dir in "${config_dirs[@]}"; do
+  echo "==> Reconciling Claude Code plugins in ${config_dir}..."
+  known_marketplaces="${config_dir}/plugins/known_marketplaces.json"
+  # `plugin list --json` prints each installed plugin's "<plugin>@<marketplace>" id. It is empty (and
+  # exits non-zero) before the plugin runtime exists, which is the expected state on a first apply.
+  installed="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin list --json 2>/dev/null | jq -r '.[].id' || true)"
+
+  for plugin in "${plugins[@]}"; do
+    marketplace="${plugin##*@}"
+
+    if [ ! -f "$known_marketplaces" ] || ! jq -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
+      if ! source_spec="$(marketplace_source "$marketplace")"; then
+        printf 'ERROR: plugin %s needs marketplace %s, which is neither %s nor declared in settings.json extraKnownMarketplaces\n' "$plugin" "$marketplace" "$OFFICIAL_MARKETPLACE" >&2
+        failed=1
+        continue
+      fi
+      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$source_spec" 2>&1)"; then
+        printf 'ERROR: failed to add marketplace %s (%s) in %s\n%s\n' "$marketplace" "$source_spec" "$config_dir" "$out" >&2
+        failed=1
+        continue
+      fi
+    fi
+
+    if printf '%s\n' "$installed" | grep -qxF "$plugin"; then
+      continue
+    fi
+    if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin install "$plugin" --scope user 2>&1)"; then
+      printf 'ERROR: failed to install plugin %s in %s\n%s\n' "$plugin" "$config_dir" "$out" >&2
+      failed=1
+    fi
+  done
+done
+
+if [ "$failed" -ne 0 ]; then
+  # Exit non-zero so chezmoi does not record this run as successful and retries on the next apply,
+  # instead of freezing a partially-reconciled state (same contract as run_onchange_after_13-setup-mcp).
+  echo "ERROR: one or more Claude Code plugins failed to install; chezmoi will retry on the next apply." >&2
+  exit 1
+fi
+
+echo "==> Claude Code plugins reconciled."
