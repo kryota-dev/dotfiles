@@ -70,11 +70,32 @@ This document covers the Claude Code harness configuration deployed by this dotf
 
 The `statusLine` field points to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh` so the same settings file works for both accounts.
 
-The Codex plugin is enabled via `enabledPlugins`:
+Two plugins are declared:
 
-```json
-"enabledPlugins": { "codex@openai-codex": true }
-```
+| Plugin | Provides |
+|---|---|
+| `codex@openai-codex` | Codex CLI (OpenAI) consultation from within Claude Code |
+| `claude-code-setup@claude-plugins-official` | Anthropic-official read-only codebase analyzer that recommends hooks, skills, MCP servers, and subagents |
+
+`enabledPlugins` names the plugins, and `extraKnownMarketplaces` names the non-official marketplaces
+they come from (`openai-codex` → `openai/codex-plugin-cc`). Neither key installs anything by itself:
+the CLI treats `enabledPlugins` as a switch for plugins that are *already* installed, and it does not
+register a marketplace merely because settings.json declares one — see
+[anthropics/claude-code#23737](https://github.com/anthropics/claude-code/issues/23737) (closed as
+duplicate) and [#45323](https://github.com/anthropics/claude-code/issues/45323) (closed as not
+planned). Each account's plugin runtime lives in `$CLAUDE_CONFIG_DIR/plugins/`, which is
+chezmoiignored and therefore empty on a new machine.
+
+`run_onchange_after_17-setup-claude-plugins.sh.tmpl` closes that gap. It renders both lists out of
+settings.json — so the declaration keeps a single source of truth — then registers the marketplaces
+and installs the plugins that are missing, once per account.
+
+**settings.json belongs to chezmoi, not to the CLI.** `claude plugin install`, `claude plugin
+marketplace add`, and the interactive `/plugin` manager each rewrite the file with their own
+serializer: top-level keys are reordered and every hook's `id` and `description` annotation is
+dropped. Nothing breaks — hooks are identified by the argument inside their `command`, not by those
+keys — but never `chezmoi add` the rewritten file. Run `chezmoi apply` to restore the annotated
+version; script 17 does the same for itself by writing back a snapshot when it exits.
 
 ---
 

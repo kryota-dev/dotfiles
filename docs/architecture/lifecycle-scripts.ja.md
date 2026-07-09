@@ -38,7 +38,8 @@ flowchart TD
         E --> F["13 setup-mcp\nrun_onchange\n(mise exec -- claude 経由で\n4つの user-scope MCP サーバーを登録)"]
         F --> G["14 enable-clv2-observer\nrun_onchange\n(per-account homunculus config.json に\nobserver.enabled=true を書き込む)"]
         G --> H["16 migrate-claude-binary\nrun_once\n(~/.local/bin/claude を\nmise installs/claude/latest へ symlink)"]
-        H --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
+        H --> H2["17 setup-claude-plugins\nrun_onchange\n(dot_claude/settings.json が宣言する\nmarketplace 登録 + plugin インストール)"]
+        H2 --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS のみ\n(repo 管理 LaunchAgent の launchctl bootstrap\nCI ではスキップ)"]
         J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -75,12 +76,18 @@ flowchart TD
 |-----------|----------------------|
 | `10-brew-bundle` | `dot_Brewfile` |
 | `12-setup-mise` | `dot_config/mise/config.toml` |
+| `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | 自分自身のソースファイル（任意の編集で再トリガー） |
 
 `20-macos-defaults` は `joinPath` による自己ハッシュを使用しており、スクリプト自体を編集するだけで全 `defaults write` が再適用されます。
+
+`17-setup-claude-plugins` はハッシュを使わずに同じ結果を得ています。`include | fromJson` で
+`dot_claude/settings.json` から plugin と marketplace のリストを直接レンダリングするため、宣言そのものが
+スクリプト本文に埋め込まれます。これにより単一ソースを保ちつつ、宣言が変わったときにだけ再実行されます
+（settings.json の無関係な箇所を編集しても、レンダリング後の本文は変わりません）。
 
 ---
 
@@ -97,6 +104,7 @@ flowchart TD
 | `13-setup-mcp` | 両対応 | OS ガードなし。両アカウントを処理 |
 | `14-enable-clv2-observer` | 両対応 | OS ガードなし |
 | `16-migrate-claude-binary` | 両対応 | OS ガードなし。バイナリ存在をランタイムで確認 |
+| `17-setup-claude-plugins` | 両対応 | OS ガードなし。両アカウントを処理 |
 | `18-setup-agent-browser` | 両対応 | `{{ if linux }}` で `--with-deps` を追加 |
 | `20-macos-defaults` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `30-register-launchd-agents` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
