@@ -73,6 +73,12 @@ alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-wri
 # The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
 # (content) so the prompt body stays out of argv — the CLI reads the file at process start,
 # avoiding argv-length and control-char concerns as the prompt grows.
+# Exception (hcldf/hcldf-r06): the happy (slopus/happy) wrapper always injects its own
+# --append-system-prompt, and Claude Code >= 2.1.185 refuses to mix --append-system-prompt
+# with --append-system-prompt-file ("Cannot use both ... Please use only one."), which aborted
+# the happy variants at launch. So when routing through happy ($1 == happy) the prompt is
+# inlined via --append-system-prompt instead — repeating the same flag is allowed, so ours
+# coexists with happy's. The prompt is small (~6 KB) and static, so the argv cost is moot.
 _claude_fable() {
   local home_dir="$1"
   shift
@@ -81,7 +87,13 @@ _claude_fable() {
   (($#)) || set -- claude
   local prompt_file="$HOME/.claude/fable-orchestrator-prompt.md"
   local -a fable_flags=(--model claude-fable-5)
-  [[ -r "$prompt_file" ]] && fable_flags+=(--append-system-prompt-file "$prompt_file")
+  if [[ -r "$prompt_file" ]]; then
+    if [[ "$1" == happy ]]; then
+      fable_flags+=(--append-system-prompt "$(<"$prompt_file")")
+    else
+      fable_flags+=(--append-system-prompt-file "$prompt_file")
+    fi
+  fi
   _claude_with_home "$home_dir" "$@" "${fable_flags[@]}"
 }
 alias cldf='_claude_fable "$HOME/.claude" claude'

@@ -95,6 +95,27 @@ load helpers/setup
   [ "$output" = "happy|claude --resume --model claude-fable-5" ]
 }
 
+@test "claude.zsh: _claude_fable inlines the orchestrator prompt via --append-system-prompt through happy" {
+  # Regression guard for hcldf/hcldf-r06: the happy (slopus/happy) wrapper always injects its
+  # own --append-system-prompt, and Claude Code >= 2.1.185 rejects mixing --append-system-prompt
+  # with --append-system-prompt-file ("Cannot use both ... Please use only one."). So when
+  # routing through happy, the orchestrator prompt must be inlined via --append-system-prompt
+  # (repeating the same flag is allowed) instead of --append-system-prompt-file, which would
+  # otherwise collide with happy's own flag and abort the launch. Direct (non-happy) launches
+  # keep --append-system-prompt-file (covered by the readable-prompt-file test above).
+  mkdir -p "$BATS_TEST_TMPDIR/.claude"
+  printf 'ORCHESTRATOR-BODY\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    happy() { print -r -- \"happy|\$*\"; }
+    _claude_fable \"\$HOME/.claude\" happy claude
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "happy|claude --model claude-fable-5 --append-system-prompt ORCHESTRATOR-BODY" ]
+  [[ "$output" != *"--append-system-prompt-file"* ]]
+}
+
 @test "claude.zsh: _claude_fable defaults to claude when no command is given" {
   # Symmetry with _claude_with_home's own default-command fallback: bare invocation
   # (e.g. `_claude_fable "$HOME/.claude"`) must launch `claude` rather than exec'ing
