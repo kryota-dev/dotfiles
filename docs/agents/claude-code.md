@@ -161,7 +161,7 @@ flowchart TD
 |---|---|---|
 | `pre:edit-write:suggest-compact` | `Edit\|Write` | Suggests manual compaction at logical intervals |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | Blocks edits to linter/formatter config files |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file (disabled by default via `ECC_DISABLED_HOOKS`, #280) |
+| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file (disabled by default via `ECC_DISABLED_HOOKS`, #280; stays disabled by decision — see [design rationale](../explanation/design-rationale.md#the-fact-forcing-gate-stays-disabled), #282) |
 | `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | Captures governance events to per-account `state.db` (fork, direct `node`) |
 | `pre:bash:dispatcher` | `Bash` | Runs block-no-verify, auto-tmux-dev, tmux/git-push reminders, commit-quality, and the destructive gateguard gate in sequence |
 | `pre:mcp-health-check` | `mcp__.*` | Probes MCP server health; matcher is narrowed to avoid paying cost for non-MCP tools |
