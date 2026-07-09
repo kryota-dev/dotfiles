@@ -210,3 +210,4 @@ dogfood-output/
 # Personal files
 .kryota-dev
 *.local.*
+AGENTS.override.md
