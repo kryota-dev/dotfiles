@@ -84,11 +84,13 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 
 `20-macos-defaults` uses a `joinPath` self-hash — editing the script itself is enough to re-apply all macOS `defaults write` calls.
 
-`17-setup-claude-plugins` reaches the same result without a hash: it renders the plugin and
-marketplace lists straight out of `dot_claude/settings.json` with `include | fromJson`, so the
-declaration is embedded in the script body. That keeps one source of truth *and* re-triggers the
-script precisely when the declaration changes — an unrelated edit elsewhere in settings.json leaves
-the rendered body untouched.
+`17-setup-claude-plugins` reaches the same result without a hash: it reads
+`dot_claude/settings.json` with `include | fromJson` and embeds just the `enabledPlugins` and
+`extraKnownMarketplaces` objects into the script body as JSON, inside a quoted heredoc. That keeps
+one source of truth *and* re-triggers the script precisely when the declaration changes — an
+unrelated edit elsewhere in settings.json leaves the rendered body untouched. The quoted heredoc
+matters: rendering the values into bash array literals would let a value containing a quote or
+`$(...)` execute as script source at render time.
 
 ---
 

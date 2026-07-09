@@ -85,9 +85,11 @@ flowchart TD
 `20-macos-defaults` は `joinPath` による自己ハッシュを使用しており、スクリプト自体を編集するだけで全 `defaults write` が再適用されます。
 
 `17-setup-claude-plugins` はハッシュを使わずに同じ結果を得ています。`include | fromJson` で
-`dot_claude/settings.json` から plugin と marketplace のリストを直接レンダリングするため、宣言そのものが
-スクリプト本文に埋め込まれます。これにより単一ソースを保ちつつ、宣言が変わったときにだけ再実行されます
-（settings.json の無関係な箇所を編集しても、レンダリング後の本文は変わりません）。
+`dot_claude/settings.json` を読み、`enabledPlugins` と `extraKnownMarketplaces` だけを JSON として
+quoted heredoc の中に埋め込みます。これにより単一ソースを保ちつつ、宣言が変わったときにだけ再実行されます
+（settings.json の無関係な箇所を編集しても、レンダリング後の本文は変わりません）。quoted heredoc であることが
+重要で、値を bash の配列リテラルとしてレンダリングすると、クォートや `$(...)` を含む値がレンダリング時に
+スクリプト本文として評価されてしまいます。
 
 ---
 
