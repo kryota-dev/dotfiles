@@ -47,6 +47,8 @@ zoxide = "0.10.0"
 # end-to-end encryption (`happy claude` / `happy codex`). CLI only; the mobile/web apps
 # are installed separately and paired at runtime.
 "npm:happy" = "1.1.10"
+pandoc = "3.10"
+typst = "0.15.0"
 
 [settings]
 # Pin precompiled CPython to a flavor that ships lib/; latest mise otherwise
