@@ -4,7 +4,7 @@ node = "24.18.0"
 python = "3.14.6"
 ruby = "4.0.6"
 go = "1.26.5"
-deno = "2.9.2"
+deno = "2.9.3"
 rust = "1.96.1"
 
 # CLI tools (auto-selected via registry)
