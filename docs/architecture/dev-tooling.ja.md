@@ -174,10 +174,43 @@ regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/p
 
 誤検知が発生した場合は、他の gitleaks 検出と同じエスケープハッチを使用します: `git commit --no-verify`。
 
+### per-repo フックマネージャー（lefthook, husky）との共存
+
+`core.hooksPath` はリポジトリごとに単一値のため、グローバル policy hook と per-repo
+フックマネージャーが同時に所有することはできません。新しい lefthook（v2）はグローバル
+`core.hooksPath` が設定されていると `install` を拒否し、guardrail を壊す逃げ道しか提示しません
+— **いずれも使用しないこと**:
+
+- `lefthook install --reset-hooks-path` は `git config --global --unset-all core.hooksPath` を実行し、gitleaks guardrail を**マシン全体で無効化**します（`internal/command/install.go` の `unsetHooksPathConfig` で確認済み）。絶対に実行しないこと。
+- `lefthook install --force` を**ローカル `core.hooksPath` 未設定のまま**実行すると、グローバルディレクトリ（`~/.config/git/hooks`）へ install され、gitleaks フックをクロバーします。
+- グローバル `core.hooksPath` を手動で unset するのも `--reset-hooks-path` と同じ結果になります。
+
+lefthook には既存フックをチェーンする仕組みがない（生成フックは `lefthook run` を呼ぶだけで、
+既存フックは `.old` へ退避される）ため、両者はリポジトリごとに分離する必要があります。安全な
+レシピは `dot_gitconfig.tmpl` で定義した `lefthook-adopt` エイリアスで、**per-clone・非追跡**の
+ローカル `core.hooksPath`（`.git/hooks-lefthook`）を設定し、`lefthook install -f` がそこへ install
+されるようにします — ローカル値はこのクローンでのみグローバルを上書きするため、他のすべての
+リポジトリでは guardrail が無傷のまま残ります:
+
+```bash
+git lefthook-adopt          # ローカル core.hooksPath = .git/hooks-lefthook を設定（per-clone・非追跡）
+lefthook install -f         # そのローカルディレクトリへ install（または: pnpm exec lefthook install -f）
+```
+
+ローカル `core.hooksPath` はグローバルを上書きするため、そのリポジトリではグローバル gitleaks
+フックが走らなくなります。namespace に応じて guardrail を補います:
+
+- **自分名義リポジトリ**: リポジトリの `lefthook.yml` に `gitleaks` コマンドを追加し、lefthook にスキャンを走らせます。
+- **クライアント/業務リポジトリ**: CI/サーバーサイドの gitleaks バックストップに依存します（上記の owner-scoped な設定選択と整合）。
+
+リポジトリの `prepare`/`postinstall` が `lefthook install` を実行している場合は
+`lefthook install -f` に変更します。これはグローバル `core.hooksPath` を持たないマシンでは
+no-op の差分であり、`npm`/`pnpm install` がガードで失敗するのを防ぎます。
+
 ### 注意事項
 
 - `git commit --no-verify` はフックをバイパスします。これはハーネスごとのポリシーとして意図的です。CI/サーバーサイドの gitleaks がバックストップとなります。
-- 独自の `core.hooksPath` を設定するリポジトリ（例: husky）はグローバルフックに到達しません。
+- 独自の `core.hooksPath` を設定するリポジトリ（例: husky、または上記の `lefthook-adopt` レシピ）はグローバルフックに到達しません — [per-repo フックマネージャーとの共存](#per-repo-フックマネージャーlefthook-huskyとの共存) を参照。
 - フックがチェーンするのは `pre-commit` のみです。`.git/hooks` の他のフックタイプ（`commit-msg`、`post-commit` など）はチェーンされません。それらに依存するリポジトリは `core.hooksPath` を設定するフックマネージャーを使用する必要があります。
 
 ---

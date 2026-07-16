@@ -31,3 +31,13 @@
 [ghq]
 	root = ~/ghq
 	user = {{ .ghq_user }}
+[alias]
+	# Onboard a repo that uses a per-repo hook manager (lefthook, husky) WITHOUT
+	# disabling the global gitleaks guardrail. git's core.hooksPath is single-valued,
+	# so this sets a PER-CLONE, non-tracked local core.hooksPath (.git/hooks-lefthook);
+	# a following `lefthook install -f` then installs into THAT dir, leaving the global
+	# hooksPath (the gitleaks guardrail) intact for every other repo.
+	# WARNING: never run `lefthook install --reset-hooks-path` — it executes
+	# `git config --global --unset-all core.hooksPath` and disables the guardrail
+	# machine-wide. See docs/architecture/dev-tooling.md.
+	lefthook-adopt = "!f() { git config --local core.hooksPath .git/hooks-lefthook && echo 'Set local core.hooksPath -> .git/hooks-lefthook (per-clone; global gitleaks guardrail untouched).' && echo 'Next: run  lefthook install -f   (or: pnpm exec lefthook install -f).' && echo 'Own-namespace repo? add a gitleaks command to lefthook.yml so the guardrail still runs here.'; }; f"

@@ -194,10 +194,44 @@ and GitHub secret scanning does not cover custom identifier regexes. `git commit
 On a false positive, use the same escape hatch as any other gitleaks finding:
 `git commit --no-verify`.
 
+### Coexisting with per-repo hook managers (lefthook, husky)
+
+`core.hooksPath` is single-valued per repo, so a global policy hook and a per-repo
+hook manager cannot both own it. Modern lefthook (v2) refuses to `install` while a
+global `core.hooksPath` is set and offers only escape hatches that break the
+guardrail — **do not use them**:
+
+- `lefthook install --reset-hooks-path` runs `git config --global --unset-all core.hooksPath`, disabling the gitleaks guardrail **machine-wide** (verified in `internal/command/install.go`, `unsetHooksPathConfig`). Never run it.
+- `lefthook install --force` **with no local `core.hooksPath`** installs into the global dir (`~/.config/git/hooks`), clobbering the gitleaks hook.
+- Manually unsetting the global `core.hooksPath` has the same effect as `--reset-hooks-path`.
+
+lefthook has no mechanism to chain a pre-existing hook (its generated hook only
+calls `lefthook run`; any existing hook is backed up to `.old`), so the two must be
+separated per repo. The safe recipe is the `lefthook-adopt` alias defined in
+`dot_gitconfig.tmpl`, which sets a **per-clone, non-tracked** local `core.hooksPath`
+(`.git/hooks-lefthook`) so that `lefthook install -f` installs there — the local
+value overrides the global only for this clone, leaving the guardrail untouched for
+every other repo:
+
+```bash
+git lefthook-adopt          # sets local core.hooksPath = .git/hooks-lefthook (per-clone, untracked)
+lefthook install -f         # installs into that local dir (or: pnpm exec lefthook install -f)
+```
+
+Because a local `core.hooksPath` overrides the global one, the global gitleaks hook
+no longer runs in that repo. Restore the guardrail there per namespace:
+
+- **Own-namespace repos**: add a `gitleaks` command to the repo's `lefthook.yml` so lefthook runs the scan.
+- **Client/work repos**: rely on the CI/server-side gitleaks backstop (consistent with the owner-scoped config selection above).
+
+If the repo's `prepare`/`postinstall` runs `lefthook install`, change it to
+`lefthook install -f`; that is a no-op difference on machines without the global
+`core.hooksPath` and prevents `npm`/`pnpm install` from failing on the guard.
+
 ### Caveats
 
 - `git commit --no-verify` bypasses the hook. This is intentional per-harness policy. CI/server-side gitleaks is the backstop.
-- A repo that sets its own `core.hooksPath` (e.g. husky) never reaches the global hook at all.
+- A repo that sets its own `core.hooksPath` (e.g. husky, or the `lefthook-adopt` recipe above) never reaches the global hook at all — see [Coexisting with per-repo hook managers](#coexisting-with-per-repo-hook-managers-lefthook-husky).
 - The hook chains only `pre-commit`. Other hook types (`commit-msg`, `post-commit`, etc.) from `.git/hooks` are not chained; repos relying on those must use a hook manager that also sets `core.hooksPath`.
 
 ---
