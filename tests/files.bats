@@ -14,6 +14,20 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_gitconfig.tmpl" ]
 }
 
+@test "git lefthook-adopt alias sets a per-clone LOCAL core.hooksPath and never touches global" {
+  local gc="${HOME_DIR}/dot_gitconfig.tmpl"
+  # Coexistence helper for lefthook/husky repos: it must onboard a repo WITHOUT
+  # disabling the global gitleaks guardrail (docs/architecture/dev-tooling.md).
+  local def
+  def="$(grep 'lefthook-adopt =' "$gc")"
+  [ -n "$def" ]
+  # The alias DEFINITION line must set a local hooksPath and must NEVER carry
+  # --global: unsetting/rewriting the global core.hooksPath (what lefthook's own
+  # --reset-hooks-path does) is exactly the guardrail-destroying move to avoid.
+  [[ "$def" == *"config --local core.hooksPath"* ]]
+  [[ "$def" != *"--global"* ]]
+}
+
 @test "chezmoi source files exist: private_dot_ssh/config.tmpl" {
   [ -f "${HOME_DIR}/private_dot_ssh/config.tmpl" ]
 }
