@@ -11,7 +11,7 @@ ghq_user = "kryota-dev"
   # Official drawio skill from https://github.com/jgraph/drawio-mcp
   # (plugins/claude-code/skills/drawio/). Pinned to a full commit SHA so
   # `chezmoi apply` cannot drift under a moved default branch.
-  drawio_mcp_commit = "662417735af194d750bda1cdf10cc374df6577a9"
+  drawio_mcp_commit = "c3fcfa5a7227e873e9ee51451b54c291d81b0099"
   # Official Supabase agent skills from https://github.com/supabase/agent-skills
   # (skills/supabase/ and skills/supabase-postgres-best-practices/). Same pinning
   # rationale as above; a single pin covers both external entries because both
