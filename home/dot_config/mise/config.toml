@@ -46,7 +46,7 @@ zoxide = "0.10.0"
 # happy (slopus/happy): a wrapper that runs Claude Code / Codex with phone control and
 # end-to-end encryption (`happy claude` / `happy codex`). CLI only; the mobile/web apps
 # are installed separately and paired at runtime.
-"npm:happy" = "1.1.10"
+"npm:happy" = "1.2.0"
 pandoc = "3.10"
 typst = "0.15.0"
 
