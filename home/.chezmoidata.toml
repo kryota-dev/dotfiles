@@ -7,7 +7,7 @@ ghq_user = "kryota-dev"
   moralerspace_font = "2.0.0"
 
 [skills]
-  anthropic_commit = "9d2f1ae187231d8199c64b5b762e1bdf2244733d"
+  anthropic_commit = "1f630fdf9259cec4a14913127dfd7c3b69ef72eb"
   # Official drawio skill from https://github.com/jgraph/drawio-mcp
   # (plugins/claude-code/skills/drawio/). Pinned to a full commit SHA so
   # `chezmoi apply` cannot drift under a moved default branch.
