@@ -42,7 +42,7 @@ zoxide = "0.10.0"
 # npm-backed CLIs (no registry entry). agent-browser ships its specialized skills
 # (electron/slack/dogfood/...) via `agent-browser skills get`, so they are loaded at
 # runtime instead of being vendored; only the discovery stub is chezmoi-managed.
-"npm:agent-browser" = "0.31.2"
+"npm:agent-browser" = "0.33.0"
 # happy (slopus/happy): a wrapper that runs Claude Code / Codex with phone control and
 # end-to-end encryption (`happy claude` / `happy codex`). CLI only; the mobile/web apps
 # are installed separately and paired at runtime.
