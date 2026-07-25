@@ -130,23 +130,108 @@ marketplace_source() {
   '
 }
 
+# The user-scoped plugins the runtime reports, as a JSON array. `plugin list --json` prints one object
+# per installed plugin. Filter to user scope, the scope this script installs into: a project- or
+# local-scoped plugin of the same name must not mask a missing user-scoped one. The command is empty
+# (and exits non-zero) before the plugin runtime exists, which is the expected state on a first apply,
+# so an unreadable list degrades to "nothing installed" rather than aborting.
+list_installed_plugins() {
+  local out
+  out="$(CLAUDE_CONFIG_DIR="$1" mise exec -- claude plugin list --json 2>/dev/null | "${jq_cmd[@]}" -c '[.[] | select(.scope == "user")]' 2>/dev/null || true)"
+  if [ -z "$out" ]; then
+    printf '[]'
+    return 0
+  fi
+  printf '%s' "$out"
+}
+
+# Whether the runtime lists a plugin at all, keyed on its "<name>@<marketplace>" id.
+plugin_is_installed() {
+  # shellcheck disable=SC2016  # $id is a jq variable bound by --arg, not a shell expansion.
+  printf '%s' "$installed_json" | "${jq_cmd[@]}" -e --arg id "$1" 'any(.[]; .id == $id)' >/dev/null 2>&1
+}
+
+# The version the runtime records for an installed plugin, empty when it is absent or unversioned.
+installed_plugin_version() {
+  # shellcheck disable=SC2016  # $id is a jq variable bound by --arg, not a shell expansion.
+  printf '%s' "$installed_json" | "${jq_cmd[@]}" -r --arg id "$1" 'map(select(.id == $id)) | .[0].version // ""'
+}
+
+# The ref settings.json pins a marketplace to, empty when none is declared. Only a pinned marketplace
+# can be converged: without a declared ref there is no expected revision to hold the runtime against,
+# so claude-plugins-official (ships with the CLI, never pinned here) is installed but never updated.
+declared_marketplace_ref() {
+  # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+  printf '%s' "$declaration_json" | "${jq_cmd[@]}" -r --arg m "$1" '.extraKnownMarketplaces[$m].source.ref // ""'
+}
+
+# How the runtime's registration compares to what settings.json declares: 0 it matches, 1 it differs,
+# 2 it cannot be told. The registration keeps its own copy of the source (ref included) in
+# known_marketplaces.json, so a bumped pin stays invisible until the two copies are compared -- and
+# `claude plugin marketplace update` would keep pulling the stale registered ref. Both sides are reduced
+# to the fields that decide what gets checked out instead of being compared whole, so a field the CLI
+# later adds to its own copy cannot make every apply look like a pin change.
+#
+# "Cannot be told" is kept distinct from "differs" because acting on a difference unregisters a
+# marketplace: a file caught half-written by a concurrent CLI run is not evidence that the pin moved.
+registration_state() {
+  local name="$1" known_file="$2" verdict
+  [ -f "$known_file" ] || return 2
+  # shellcheck disable=SC2016  # $m and $known are jq variables bound by --arg/--slurpfile.
+  verdict="$(printf '%s' "$declaration_json" | "${jq_cmd[@]}" -r --arg m "$name" --slurpfile known "$known_file" '
+    def ident: [(.source // ""), (.repo // .url // ""), (.ref // "")];
+    if (.extraKnownMarketplaces[$m].source // {} | ident) == ($known[0][$m].source // {} | ident)
+    then "match" else "differ" end
+  ' 2>/dev/null)" || return 2
+  case "$verdict" in
+    match) return 0 ;;
+    differ) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+# The version a pinned marketplace offers for a plugin, read from the local marketplace clone rather
+# than from the network: once the registration matches the pin, the clone sits at the pinned ref, so
+# its manifest is the expected version. `installLocation` is where the runtime says it put the clone;
+# the conventional path is only a fallback for an entry that predates the field. Fails when the clone
+# or the plugin entry is missing, which the caller reports instead of guessing a version.
+marketplace_plugin_version() {
+  local name="$1" plugin_name="$2" known_file="$3" config_dir="$4"
+  local location=""
+  if [ -f "$known_file" ]; then
+    # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+    location="$("${jq_cmd[@]}" -r --arg m "$name" '.[$m].installLocation // ""' "$known_file" 2>/dev/null || true)"
+  fi
+  if [ -z "$location" ]; then
+    location="${config_dir}/plugins/marketplaces/${name}"
+  fi
+  local manifest="${location}/.claude-plugin/marketplace.json"
+  [ -f "$manifest" ] || return 1
+  # shellcheck disable=SC2016  # $p is a jq variable bound by --arg, not a shell expansion.
+  "${jq_cmd[@]}" -er --arg p "$plugin_name" 'first(.plugins[] | select(.name == $p) | .version)' "$manifest" 2>/dev/null
+}
+
+# A failure to install, or to re-register a marketplace that was just unregistered, is fatal (chezmoi
+# retries); any other failure to converge an already-installed plugin only warns. See the exit contract
+# at the bottom of this script.
 failed=0
+warned=0
+converged=0
 for config_dir in "${config_dirs[@]}"; do
   echo "==> Reconciling Claude Code plugins in ${config_dir}..."
   mkdir -p "$config_dir"
   known_marketplaces="${config_dir}/plugins/known_marketplaces.json"
-  # `plugin list --json` prints one object per installed plugin. Filter to user scope, the scope this
-  # script installs into: a project- or local-scoped plugin of the same name must not mask a missing
-  # user-scoped one. The command is empty (and exits non-zero) before the plugin runtime exists, which
-  # is the expected state on a first apply.
-  installed="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin list --json 2>/dev/null | "${jq_cmd[@]}" -r '.[] | select(.scope == "user") | .id' || true)"
+  installed_json="$(list_installed_plugins "$config_dir")"
 
   for plugin in "${plugins[@]}"; do
     marketplace="${plugin##*@}"
+    plugin_name="${plugin%@*}"
+    declared_ref="$(declared_marketplace_ref "$marketplace")"
 
-    # Presence is keyed on the marketplace name only: an entry already registered under a different
+    # An unpinned marketplace is keyed on its name only: an entry already registered under a different
     # source is trusted as-is. Rewriting it would need local write access to known_marketplaces.json,
-    # which already implies control of this machine.
+    # which already implies control of this machine. A pinned one is held to its declaration, because
+    # the pin is the whole point of declaring it.
     # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
     if [ ! -f "$known_marketplaces" ] || ! "${jq_cmd[@]}" -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
       if ! source_spec="$(marketplace_source "$marketplace")"; then
@@ -159,23 +244,113 @@ for config_dir in "${config_dirs[@]}"; do
         failed=1
         continue
       fi
+      # An earlier plugin in this loop may have unregistered this marketplace to re-register it, and
+      # unregistering can take its plugins with it, so the list captured at the top of the account may
+      # no longer be true.
+      installed_json="$(list_installed_plugins "$config_dir")"
+    elif [ -n "$declared_ref" ]; then
+      registration=0
+      registration_state "$marketplace" "$known_marketplaces" || registration=$?
+      if [ "$registration" -eq 2 ]; then
+        printf 'WARNING: cannot read the registration of marketplace %s in %s; leaving it untouched\n' "$marketplace" "$config_dir" >&2
+        warned=1
+        continue
+      fi
+      if [ "$registration" -eq 1 ]; then
+        # The pin moved. Updating the marketplace in place would follow the ref stored in the stale
+        # registration, so the registration itself is replaced.
+        if ! source_spec="$(marketplace_source "$marketplace")"; then
+          printf 'WARNING: cannot resolve a source for marketplace %s (needed by %s) in %s; leaving its registration on the previous ref\n' "$marketplace" "$plugin" "$config_dir" >&2
+          warned=1
+          continue
+        fi
+        echo "==> Re-registering marketplace ${marketplace} in ${config_dir} at ${declared_ref}..."
+        if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace remove "$marketplace" --scope user 2>&1)"; then
+          # Only a warning: the previous registration is still in place, so the account keeps working
+          # off the ref it already had.
+          printf 'WARNING: failed to unregister marketplace %s in %s; it stays on its previous ref\n%s\n' "$marketplace" "$config_dir" "$out" >&2
+          warned=1
+          continue
+        fi
+        if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$source_spec" --scope user 2>&1)"; then
+          # Fatal, unlike the other convergence failures: the marketplace has just been unregistered,
+          # so the account is left without one it declares -- strictly worse than the stale ref it
+          # started from. Nothing would pick this up later either, because the run_onchange key is the
+          # rendered body and the declaration has not changed; exiting non-zero is what makes chezmoi
+          # retry on the next apply.
+          printf 'ERROR: failed to register marketplace %s (%s) in %s after unregistering it\n%s\n' "$marketplace" "$source_spec" "$config_dir" "$out" >&2
+          failed=1
+          continue
+        fi
+        # Unregistering a marketplace can take its plugins with it, so the list captured before the
+        # re-registration may still claim a plugin is installed when it no longer is.
+        installed_json="$(list_installed_plugins "$config_dir")"
+      fi
     fi
 
-    if printf '%s\n' "$installed" | grep -qxF "$plugin"; then
+    if ! plugin_is_installed "$plugin"; then
+      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin install "$plugin" --scope user 2>&1)"; then
+        printf 'ERROR: failed to install plugin %s in %s\n%s\n' "$plugin" "$config_dir" "$out" >&2
+        failed=1
+      fi
       continue
     fi
-    if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin install "$plugin" --scope user 2>&1)"; then
-      printf 'ERROR: failed to install plugin %s in %s\n%s\n' "$plugin" "$config_dir" "$out" >&2
-      failed=1
+
+    # Installed, so from here on the question is whether it matches the pin. Nothing to match against
+    # without one.
+    [ -n "$declared_ref" ] || continue
+
+    if ! expected_version="$(marketplace_plugin_version "$marketplace" "$plugin_name" "$known_marketplaces" "$config_dir")"; then
+      printf 'WARNING: cannot read the version %s offers for %s in %s; skipping the version check\n' "$marketplace" "$plugin" "$config_dir" >&2
+      warned=1
+      continue
     fi
+    installed_version="$(installed_plugin_version "$plugin")"
+    if [ "$installed_version" = "$expected_version" ]; then
+      continue
+    fi
+
+    echo "==> Updating ${plugin} in ${config_dir} (${installed_version:-unknown} -> ${expected_version})..."
+    if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin update "$plugin" --scope user 2>&1)"; then
+      printf 'WARNING: failed to update plugin %s in %s from %s to %s\n%s\n' "$plugin" "$config_dir" "${installed_version:-unknown}" "$expected_version" "$out" >&2
+      warned=1
+      continue
+    fi
+
+    # Verify instead of trusting the exit code: the CLI has been seen leaving a plugin on its previous
+    # revision after reporting success. Checked once and not retried -- a retry would repeat the same
+    # call against the same inputs.
+    installed_json="$(list_installed_plugins "$config_dir")"
+    installed_version="$(installed_plugin_version "$plugin")"
+    if [ "$installed_version" != "$expected_version" ]; then
+      printf 'WARNING: %s in %s is still at %s after updating to %s; converge it by hand (docs/agents/codex.md, "Converging the installed version")\n' "$plugin" "$config_dir" "${installed_version:-unknown}" "$expected_version" >&2
+      warned=1
+      continue
+    fi
+    converged=1
   done
 done
 
 if [ "$failed" -ne 0 ]; then
   # Exit non-zero so chezmoi does not record this run as successful and retries on the next apply,
   # instead of freezing a partially-reconciled state (same contract as run_onchange_after_13-setup-mcp).
-  echo "ERROR: one or more Claude Code plugins failed to install; chezmoi will retry on the next apply." >&2
+  echo "ERROR: one or more Claude Code plugins could not be installed or registered; chezmoi will retry on the next apply." >&2
   exit 1
+fi
+
+if [ "$warned" -ne 0 ]; then
+  # Deliberately not fatal. A plugin that is installed but off its pin still works, whereas failing
+  # here would make chezmoi re-run this script on every apply -- and the causes above (a CLI that
+  # ignores the ref, an unreadable marketplace clone) do not resolve by being retried.
+  #
+  # Nothing picks these up later on its own, though: the run_onchange key is this script's rendered
+  # body, so an unchanged declaration will not re-trigger the run. The warning is the only prompt to
+  # act, which is why it names the manual procedure.
+  echo "WARNING: one or more plugins could not be converged onto their pinned version; converge them by hand (docs/agents/codex.md, \"Converging the installed version\") -- an unchanged declaration will not re-trigger this script." >&2
+fi
+
+if [ "$converged" -ne 0 ]; then
+  echo "==> Restart Claude Code for the updated plugins to take effect."
 fi
 
 echo "==> Claude Code plugins reconciled."

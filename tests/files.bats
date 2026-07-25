@@ -616,6 +616,10 @@ load helpers/setup
 # claude reproduces the two behaviours the script exists to handle: it rewrites settings.json with its
 # own serializer (dropping the hook `id` annotations), and it replaces the work account's settings.json
 # symlink with a regular file via an atomic rename.
+#
+# It also mirrors the parts of the runtime the version reconciliation reads: the registration keeps its
+# own copy of the source (ref included) plus an installLocation, the marketplace clone carries a
+# manifest whose version is whatever the requested ref ships, and installed plugins carry a version.
 _reconciler_sandbox() {
   local sandbox="$1"
   mkdir -p "${sandbox}/home/.claude" "${sandbox}/home/.claude-r06" "${sandbox}/bin"
@@ -634,6 +638,15 @@ FAKE_MISE
 set -euo pipefail
 cfg="${CLAUDE_CONFIG_DIR:?}"
 log="${FAKE_CLAUDE_LOG:?}"
+
+# The version the marketplace clone offers for a plugin id, empty when it offers none.
+_clone_version() {
+  local id="$1"
+  local marketplace="${id##*@}" name="${id%@*}"
+  jq -r --arg p "$name" 'first(.plugins[] | select(.name == $p) | .version) // ""' \
+    "${cfg}/plugins/marketplaces/${marketplace}/.claude-plugin/marketplace.json" 2>/dev/null || true
+}
+
 case "${1:-} ${2:-}" in
   "plugin list")
     # Exits non-zero before the runtime exists, exactly like the real CLI.
@@ -641,17 +654,50 @@ case "${1:-} ${2:-}" in
     cat "${cfg}/plugins/installed.json"
     ;;
   "plugin marketplace")
-    src="$4"
-    echo "marketplace-add ${cfg##*/} ${src}" >>"$log"
-    case "$src" in
-      anthropics/claude-plugins-official*) key=claude-plugins-official ;;
-      openai/codex-plugin-cc*) key=openai-codex ;;
-      *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
+    case "$3" in
+      add)
+        src="$4"
+        [ "${FAKE_CLAUDE_MARKETPLACE_ADD_FAILS:-0}" = "1" ] && { echo "add boom" >&2; exit 1; }
+        echo "marketplace-add ${cfg##*/} ${src}" >>"$log"
+        repo="${src%%#*}"
+        ref=""
+        [ "$src" = "$repo" ] || ref="${src#*#}"
+        case "$repo" in
+          anthropics/claude-plugins-official) key=claude-plugins-official; provides=claude-code-setup ;;
+          openai/codex-plugin-cc) key=openai-codex; provides=codex ;;
+          *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
+        esac
+        # The clone lands on the requested ref, so its manifest is what that ref ships.
+        version="${ref#v}"
+        [ -n "$version" ] || version="1.0.0"
+        location="${cfg}/plugins/marketplaces/${key}"
+        mkdir -p "${cfg}/plugins" "${location}/.claude-plugin"
+        jq -n --arg n "$key" --arg p "$provides" --arg v "$version" \
+          '{name: $n, plugins: [{name: $p, version: $v}]}' >"${location}/.claude-plugin/marketplace.json"
+        [ -f "${cfg}/plugins/known_marketplaces.json" ] || echo '{}' >"${cfg}/plugins/known_marketplaces.json"
+        jq --arg k "$key" --arg r "$repo" --arg ref "$ref" --arg loc "$location" \
+          '.[$k] = {
+             source: ({source: "github", repo: $r} + (if $ref == "" then {} else {ref: $ref} end)),
+             installLocation: $loc
+           }' "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
+        mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
+        ;;
+      remove)
+        name="$4"
+        echo "marketplace-remove ${cfg##*/} ${name}" >>"$log"
+        jq --arg k "$name" 'del(.[$k])' "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
+        mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
+        rm -rf "${cfg}/plugins/marketplaces/${name}"
+        # Optional: a CLI that takes the marketplace's plugins with it, which is what the reconciler
+        # re-reads the installed list for.
+        if [ "${FAKE_CLAUDE_REMOVE_UNINSTALLS:-0}" = "1" ] && [ -f "${cfg}/plugins/installed.json" ]; then
+          jq --arg m "$name" 'map(select((.id | split("@") | last) != $m))' \
+            "${cfg}/plugins/installed.json" >"${cfg}/plugins/inst.tmp"
+          mv "${cfg}/plugins/inst.tmp" "${cfg}/plugins/installed.json"
+        fi
+        ;;
+      *) echo "unexpected fake claude marketplace invocation: $*" >&2; exit 1 ;;
     esac
-    mkdir -p "${cfg}/plugins"
-    [ -f "${cfg}/plugins/known_marketplaces.json" ] || echo '{}' >"${cfg}/plugins/known_marketplaces.json"
-    jq --arg k "$key" '.[$k] = {}' "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
-    mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
     ;;
   "plugin install")
     id="$3"
@@ -659,12 +705,26 @@ case "${1:-} ${2:-}" in
     echo "install ${cfg##*/} ${id}" >>"$log"
     mkdir -p "${cfg}/plugins"
     [ -f "${cfg}/plugins/installed.json" ] || echo '[]' >"${cfg}/plugins/installed.json"
-    jq --arg i "$id" '. + [{id: $i, scope: "user"}]' "${cfg}/plugins/installed.json" >"${cfg}/plugins/inst.tmp"
+    jq --arg i "$id" --arg v "$(_clone_version "$id")" \
+      '. + [{id: $i, version: $v, scope: "user"}]' "${cfg}/plugins/installed.json" >"${cfg}/plugins/inst.tmp"
     mv "${cfg}/plugins/inst.tmp" "${cfg}/plugins/installed.json"
     # Reproduce the CLI's settings.json rewrite: drop the hook annotations, and replace the file (an
     # atomic rename, which clobbers the work account's symlink).
     jq 'del(.hooks.SessionStart[0].id, .hooks.SessionStart[0].description)' "${cfg}/settings.json" >"${cfg}/settings.tmp"
     mv "${cfg}/settings.tmp" "${cfg}/settings.json"
+    ;;
+  "plugin update")
+    id="$3"
+    [ "${FAKE_CLAUDE_UPDATE_FAILS:-0}" = "1" ] && { echo "update boom" >&2; exit 1; }
+    echo "update ${cfg##*/} ${id}" >>"$log"
+    # The record is updated straight away, as observed on a real runtime: "restart required to apply"
+    # is about the running session picking the plugin up, not about when `plugin list` reports it.
+    # Reports success while leaving the plugin where it was -- the behaviour the reconciler verifies
+    # against instead of trusting the exit code.
+    [ "${FAKE_CLAUDE_UPDATE_NOOP:-0}" = "1" ] && exit 0
+    jq --arg i "$id" --arg v "$(_clone_version "$id")" \
+      'map(if .id == $i then .version = $v else . end)' "${cfg}/plugins/installed.json" >"${cfg}/plugins/inst.tmp"
+    mv "${cfg}/plugins/inst.tmp" "${cfg}/plugins/installed.json"
     ;;
   *) echo "unexpected fake claude invocation: $*" >&2; exit 1 ;;
 esac
@@ -672,6 +732,36 @@ FAKE_CLAUDE
   chmod +x "${sandbox}/bin/mise" "${sandbox}/bin/claude"
   chezmoi execute-template --source "${HOME_DIR}" \
     <"${HOME_DIR}/run_onchange_after_17-setup-claude-plugins.sh.tmpl" >"${sandbox}/reconcile.sh"
+}
+
+# The ref settings.json pins openai-codex to. Read rather than hardcoded so a pin bump does not have to
+# be mirrored into every convergence test.
+_pinned_codex_ref() {
+  jq -r '.extraKnownMarketplaces["openai-codex"].source.ref' "${HOME_DIR}/dot_claude/settings.json"
+}
+
+# Rewind one account's runtime to the state a `chezmoi apply` finds right after the pin is bumped: the
+# registration and the marketplace clone still sit on the previous ref, and the installed plugin is the
+# version that ref shipped. The unpinned marketplace is left with an installed version its clone does
+# not offer, so a reconciler that converged unpinned marketplaces too would show up as an update call.
+_reconciler_rewind() {
+  local sandbox="$1" account="$2" ref="$3"
+  local dir="${sandbox}/home/${account}/plugins"
+  local version="${ref#v}"
+
+  jq --arg r "$ref" '.["openai-codex"].source.ref = $r' "${dir}/known_marketplaces.json" >"${dir}/km.tmp"
+  mv "${dir}/km.tmp" "${dir}/known_marketplaces.json"
+
+  jq --arg v "$version" '.plugins = [.plugins[] | .version = $v]' \
+    "${dir}/marketplaces/openai-codex/.claude-plugin/marketplace.json" >"${dir}/mp.tmp"
+  mv "${dir}/mp.tmp" "${dir}/marketplaces/openai-codex/.claude-plugin/marketplace.json"
+
+  jq --arg v "$version" '
+    map(if .id == "codex@openai-codex" then .version = $v
+        elif .id == "claude-code-setup@claude-plugins-official" then .version = "0.0.1"
+        else . end)
+  ' "${dir}/installed.json" >"${dir}/inst.tmp"
+  mv "${dir}/inst.tmp" "${dir}/installed.json"
 }
 
 @test "claude plugin reconciler: installs per account, passes the pinned ref, restores settings.json" {
@@ -732,6 +822,173 @@ FAKE_CLAUDE
   [ "$status" -ne 0 ]
   # A partially-reconciled run must still leave settings.json as chezmoi wrote it.
   jq -e '.hooks.SessionStart[0] | has("id")' "${sandbox}/home/.claude/settings.json"
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a moved pin re-registers the marketplace and converges the plugin" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox pinned_ref pinned_version account
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+  pinned_ref="$(_pinned_codex_ref)"
+  pinned_version="${pinned_ref#v}"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  _reconciler_rewind "$sandbox" .claude v0.0.9
+  _reconciler_rewind "$sandbox" .claude-r06 v0.0.9
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+
+  for account in .claude .claude-r06; do
+    # Updating the marketplace in place would follow the ref its stale registration stored, so the
+    # registration is replaced before the plugin is updated -- once per account.
+    grep -qF "marketplace-remove ${account} openai-codex" "${sandbox}/calls.log"
+    grep -qF "marketplace-add ${account} openai/codex-plugin-cc#${pinned_ref}" "${sandbox}/calls.log"
+    grep -qF "update ${account} codex@openai-codex" "${sandbox}/calls.log"
+    jq -e --arg v "$pinned_version" 'any(.[]; .id == "codex@openai-codex" and .version == $v)' \
+      "${sandbox}/home/${account}/plugins/installed.json"
+  done
+
+  # An unpinned marketplace has no declared revision to converge onto, so it is never updated -- even
+  # though the rewind left its clone offering a version the runtime does not have installed.
+  ! grep -qE '^update .* claude-code-setup@claude-plugins-official' "${sandbox}/calls.log"
+
+  [[ "$output" == *"Restart Claude Code"* ]]
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a failed update warns instead of failing the apply" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  _reconciler_rewind "$sandbox" .claude v0.0.9
+  _reconciler_rewind "$sandbox" .claude-r06 v0.0.9
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_UPDATE_FAILS=1 bash "${sandbox}/reconcile.sh"
+  # Zero on purpose: a plugin that is off its pin still works, and failing here would make chezmoi
+  # re-run this script on every apply for a cause that retrying does not fix.
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"* ]]
+  [[ "$output" != *"Restart Claude Code"* ]]
+  jq -e 'any(.[]; .id == "codex@openai-codex" and .version == "0.0.9")' \
+    "${sandbox}/home/.claude/plugins/installed.json"
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: an update the CLI ignores is caught by verification, not retried" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  _reconciler_rewind "$sandbox" .claude v0.0.9
+  _reconciler_rewind "$sandbox" .claude-r06 v0.0.9
+  : >"${sandbox}/calls.log"
+
+  # The fake reports success while leaving the plugin on its previous version.
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_UPDATE_NOOP=1 bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING"* ]]
+  [[ "$output" != *"Restart Claude Code"* ]]
+  # One attempt per account: retrying would repeat the same call against the same inputs.
+  [ "$(grep -c '^update ' "${sandbox}/calls.log")" -eq 2 ]
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: an unreadable clone manifest warns instead of guessing a version" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  rm -f "${sandbox}/home/.claude/plugins/marketplaces/openai-codex/.claude-plugin/marketplace.json"
+  : >"${sandbox}/calls.log"
+
+  # stderr is redirected inside the command rather than read out of bats' merged $output, so this
+  # pins the "warnings go to stderr" half of the contract too.
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" FAKE_CLAUDE_LOG="${sandbox}/calls.log" \
+    bash -c 'bash "$1" 2>"$2"' _ "${sandbox}/reconcile.sh" "${sandbox}/err.log"
+  [ "$status" -eq 0 ]
+  grep -q 'WARNING' "${sandbox}/err.log"
+  # No expected version means no basis for an update, so none is attempted.
+  ! grep -q '^update ' "${sandbox}/calls.log"
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: failing to re-register after unregistering is fatal" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  # Only the default account drifts, so the run also covers the asymmetric case.
+  _reconciler_rewind "$sandbox" .claude v0.0.9
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_MARKETPLACE_ADD_FAILS=1 bash "${sandbox}/reconcile.sh"
+  # Non-zero unlike the other convergence failures: the marketplace is now unregistered, and an
+  # unchanged declaration would never re-trigger this run_onchange script on its own.
+  [ "$status" -ne 0 ]
+  grep -qF 'marketplace-remove .claude openai-codex' "${sandbox}/calls.log"
+  jq -e 'has("openai-codex") | not' "${sandbox}/home/.claude/plugins/known_marketplaces.json"
+  # The work account was already on the pin, so it is left alone.
+  ! grep -q ' .claude-r06 ' "${sandbox}/calls.log"
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a re-registration that uninstalls the plugin reinstalls it" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox pinned_version
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+  pinned_version="$(_pinned_codex_ref)"
+  pinned_version="${pinned_version#v}"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  _reconciler_rewind "$sandbox" .claude v0.0.9
+  _reconciler_rewind "$sandbox" .claude-r06 v0.0.9
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_REMOVE_UNINSTALLS=1 bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+  # Re-reading the installed list after the re-registration is what makes this reachable: the list
+  # captured at the top of the account still claimed the plugin was there.
+  grep -qF 'install .claude codex@openai-codex' "${sandbox}/calls.log"
+  grep -qF 'install .claude-r06 codex@openai-codex' "${sandbox}/calls.log"
+  jq -e --arg v "$pinned_version" 'any(.[]; .id == "codex@openai-codex" and .version == $v)' \
+    "${sandbox}/home/.claude/plugins/installed.json"
 
   rm -rf "$sandbox"
 }
