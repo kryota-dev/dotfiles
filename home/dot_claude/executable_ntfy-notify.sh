@@ -27,9 +27,12 @@
 
 set -eu
 
-# Overridable so tests can point the script at a fixture — or at nothing, to exercise the
-# not-yet-bootstrapped path.
-readonly ENV_FILE="${NTFY_NOTIFY_ENV_FILE:-${HOME}/.config/ntfy/notify-env}"
+# ${HOME:-} rather than ${HOME}: this file is sourced, so under `set -u` an unset HOME
+# would abort the hook and break the "always exits 0" contract. Tests point the script at a
+# fixture by overriding HOME itself; there is deliberately no dedicated override variable,
+# because `. "$ENV_FILE"` EXECUTES the file — an env var naming an arbitrary path would be
+# a persistent code-execution primitive for anything that can set the hook's environment.
+readonly ENV_FILE="${HOME:-}/.config/ntfy/notify-env"
 # Codepoints, not bytes: the truncation happens inside jq, whose string slicing is
 # Unicode-aware. `cut -c` and BSD `awk substr` are byte-oriented and would split a
 # multi-byte character in half.
@@ -50,32 +53,36 @@ elif [ -x /usr/bin/jq ]; then
   JQ='/usr/bin/jq'
 fi
 
-# AppleScript string literals have no backslash-escape syntax, so an unescaped double
-# quote or backslash in an assistant message breaks the generated script outright. Mirror
-# what ECC's desktop-notify.js did: drop backslashes, swap " for a curly quote.
-# LC_ALL=C on every byte-manipulation pipeline below: BSD tr/sed abort with "illegal byte
-# sequence" on input that is not valid in the current locale, and hook payloads and git
-# branch names are arbitrary bytes. Under C these are pure byte filters that cannot fail
-# that way, so a stray byte truncates nothing.
-applescript_safe() {
-  # SC1003: '\\' is deliberate — inside single quotes it is two characters, which is how
-  # tr spells "one backslash". This is a backslash-stripping filter, not a quoting mistake.
-  # shellcheck disable=SC1003
-  printf '%s' "$1" | LC_ALL=C tr -d '\\' | LC_ALL=C sed 's/"/“/g'
-}
-
+# $1 = body, $2 = title. Both are passed as argv rather than interpolated into the script
+# text, which is the pattern morning-radar.sh already established in this directory: the
+# message never enters the AppleScript source, so there is no injection surface and nothing
+# needs escaping. An earlier revision of this hook did interpolate, and therefore had to
+# delete backslashes and rewrite double quotes to keep the generated script parseable —
+# silently mangling any path or code fragment in the notification. argv passing keeps the
+# text byte-for-byte.
 notify_local() {
-  local body title
   if command -v osascript >/dev/null 2>&1; then
-    body="$(applescript_safe "$1")"
-    title="$(applescript_safe "$2")"
-    osascript -e "display notification \"${body}\" with title \"${title}\"" >/dev/null 2>&1 || true
+    osascript \
+      -e 'on run argv' \
+      -e 'display notification (item 1 of argv) with title (item 2 of argv)' \
+      -e 'end run' \
+      -- "$1" "$2" >/dev/null 2>&1 || true
   elif command -v notify-send >/dev/null 2>&1; then
-    # Linux desktops. The strings are separate argv entries here, so none of the
-    # AppleScript rewriting applies; `--` stops a title beginning with a dash from being
-    # parsed as an option. Kept because the ECC hook this replaces covered non-macOS too,
-    # and the fallback is the only path left when the server is unreachable.
-    notify-send -- "$2" "$1" >/dev/null 2>&1 || true
+    # Linux desktops. Same argv principle; `--` stops a title beginning with a dash from
+    # being parsed as an option. Kept because the ECC hook this replaces covered non-macOS
+    # too, and the fallback is the only path left when the server is unreachable.
+    #
+    # argv passing stops shell injection but not markup: a freedesktop server advertising
+    # body-markup renders a subset of HTML, including links, and libnotify does not escape
+    # it. The body here is model-generated text, so escape the three XML-significant
+    # characters rather than letting a prompt-injected reply render a clickable link under
+    # a trusted "repo/branch · account" title.
+    # The title is escaped too: it embeds the branch name, and git happily accepts a
+    # branch containing `<`, so "trusted title" is an assumption rather than a fact.
+    local nbody ntitle
+    nbody="$(printf '%s' "$1" | LC_ALL=C sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')"
+    ntitle="$(printf '%s' "$2" | LC_ALL=C sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')"
+    notify-send -- "$ntitle" "$nbody" >/dev/null 2>&1 || true
   fi
   return 0
 }
@@ -83,6 +90,10 @@ notify_local() {
 # ntfy tags travel as one comma-separated list, so a component containing a comma would
 # silently split into two tags. Reduce every component to [A-Za-z0-9_-] — which is also
 # ntfy's own topic charset — and collapse the runs that leaves behind.
+#
+# LC_ALL=C throughout: BSD tr/sed abort with "illegal byte sequence" on input that is not
+# valid in the current locale, and branch names are arbitrary bytes. Under C these are pure
+# byte filters that cannot fail that way, so a stray byte truncates nothing.
 tag_safe() {
   printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9_-' '-' | LC_ALL=C tr -s '-' | LC_ALL=C sed 's/^-//; s/-$//'
 }
@@ -170,7 +181,7 @@ fi
 
 # Which account produced this: cld (~/.claude) or cld-r06 (~/.claude-r06). The wrapper
 # exports CLAUDE_CONFIG_DIR per account, so the directory name is the discriminator.
-account="$(basename "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}")"
+account="$(basename "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}")"
 case "$account" in
   '.claude') account='cld' ;;
   '.claude-r06') account='r06' ;;
@@ -191,10 +202,14 @@ fi
 # Markdown decoration is stripped before the emptiness test. That makes a line of pure
 # structure (`---`, a code fence, an empty bullet) fall through to the next line, and turns
 # "## 実装完了" into "実装完了" rather than shipping the marker to the lock screen.
+# Field order follows the actual hook schemas, not just Notification/Stop: StopFailure
+# carries `error` (and no message), SessionEnd carries `reason`. Reading only `message` and
+# `last_assistant_message` published a literal "(no message text)" for exactly the two
+# events that matter most — a failed turn is the only priority-5 event there is.
 raw_message="$(payload_field '.message')"
-if [ -z "$raw_message" ]; then
-  raw_message="$(payload_field '.last_assistant_message')"
-fi
+[ -n "$raw_message" ] || raw_message="$(payload_field '.error')"
+[ -n "$raw_message" ] || raw_message="$(payload_field '.reason')"
+[ -n "$raw_message" ] || raw_message="$(payload_field '.last_assistant_message')"
 summary="$(printf '%s\n' "$raw_message" |
   awk '{ sub(/^[ \t]+/, ""); sub(/^[#>*+`~=_-]+[ \t]*/, ""); sub(/[ \t*`_]+$/, "") } NF > 0 { print; exit }')" || summary=''
 if [ -n "$summary" ] && [ -n "$JQ" ]; then
@@ -206,17 +221,34 @@ if [ -n "$summary" ] && [ -n "$JQ" ]; then
 fi
 [ -n "$summary" ] || summary="$EMPTY_SUMMARY_PLACEHOLDER"
 
+channel_configured=0
 NTFY_BASE_URL=''
 NTFY_TOPIC=''
 NTFY_TOKEN=''
 if [ -r "$ENV_FILE" ]; then
+  # `set +u` around the source: an unset-variable expansion inside a sourced file is a
+  # fatal shell error that `|| true` cannot catch, and it would take the hook down with it.
+  # chezmoi renders this file with single-quoted literals, so there is nothing to expand —
+  # this only guarantees the failure mode.
+  set +u
   # shellcheck source=/dev/null
   . "$ENV_FILE" || true
+  set -u
+fi
+
+# A non-https base URL cannot carry the bearer token safely; treat it as unconfigured so
+# the local fallback runs instead of a doomed request.
+case "${NTFY_BASE_URL}" in
+  https://*) ;;
+  *) NTFY_BASE_URL='' ;;
+esac
+
+if [ -n "$NTFY_BASE_URL" ] && [ -n "$NTFY_TOPIC" ] && [ -n "$NTFY_TOKEN" ]; then
+  channel_configured=1
 fi
 
 published=0
-if [ -n "$JQ" ] &&
-  [ -n "$NTFY_BASE_URL" ] && [ -n "$NTFY_TOPIC" ] && [ -n "$NTFY_TOKEN" ] &&
+if [ -n "$JQ" ] && [ "$channel_configured" -eq 1 ] &&
   command -v curl >/dev/null 2>&1; then
   # SC2016: every $name in the filter is a jq variable bound by --arg / --argjson.
   # shellcheck disable=SC2016
@@ -229,19 +261,43 @@ if [ -n "$JQ" ] &&
     '{topic: $topic, title: $title, message: $message, priority: $priority, tags: ($tags | split(","))}' \
     2>/dev/null)" || body=''
   if [ -n "$body" ]; then
-    if printf '%s' "$body" | curl --silent --fail \
+    # Explicit status check rather than --fail: --fail only treats >= 400 as an error, so a
+    # 3xx would be reported as success and the publish would be silently lost with no
+    # fallback. --proto '=https' refuses a plaintext base URL (the token travels in a
+    # header), --noproxy '*' keeps the body and token away from any proxy the hook's
+    # environment happens to define, and `--` stops a URL beginning with a dash being read
+    # as an option. A connection failure yields 000 and falls through to the fallback.
+    http_code="$(printf '%s' "$body" | curl --silent \
+      --proto '=https' --noproxy '*' \
       --max-time "$CURL_MAX_SECONDS" \
       --header "Authorization: Bearer ${NTFY_TOKEN}" \
       --header 'Content-Type: application/json' \
       --data-binary @- \
-      "$NTFY_BASE_URL" >/dev/null 2>&1; then
-      published=1
-    fi
+      --output /dev/null --write-out '%{http_code}' \
+      -- "$NTFY_BASE_URL" 2>/dev/null)" || http_code='000'
+    case "$http_code" in
+      2??) published=1 ;;
+    esac
   fi
 fi
 
+# Fallback policy depends on whether the channel exists yet, which is not a detail: this
+# feature ships with the channel disabled, so "never bootstrapped" is the state every
+# machine is in the moment it lands.
+#   - Configured: any priority >= FALLBACK_MIN_PRIORITY, so a transient publish failure
+#     still reaches the desktop.
+#   - Never bootstrapped: turn-end events only. The retired ECC hook fired on Stop alone,
+#     and falling back for every priority-3-and-up event would turn its removal into a
+#     roughly sevenfold INCREASE in local popups — the opposite of the invariant this
+#     design set itself.
 if [ "$published" -eq 0 ] && [ "$priority" -ge "$FALLBACK_MIN_PRIORITY" ]; then
-  notify_local "$summary" "$title"
+  if [ "$channel_configured" -eq 1 ]; then
+    notify_local "$summary" "$title"
+  else
+    case "$hook_event" in
+      'Stop' | 'StopFailure') notify_local "$summary" "$title" ;;
+    esac
+  fi
 fi
 
 exit 0
