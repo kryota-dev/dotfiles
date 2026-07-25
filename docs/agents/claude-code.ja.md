@@ -59,7 +59,7 @@
 
 | 設定 | 値 | 備考 |
 |---|---|---|
-| `model` | `claude-opus-4-8[1m]` | 1 M コンテキストのピン固定モデル |
+| `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | 1 M コンテキストのピン固定モデル（`home/dot_claude/settings.json` と同期） |
 | `language` | `Japanese` | 会話出力はすべて日本語 |
 | `alwaysThinkingEnabled` | `false` | 拡張思考はタスク単位でオプトイン |
 | `cleanupPeriodDays` | `20` | 20 日より古いセッションを自動削除 |

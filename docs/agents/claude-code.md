@@ -59,7 +59,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 
 | Setting | Value | Notes |
 |---|---|---|
-| `model` | `claude-opus-4-8[1m]` | Pinned model with 1 M context |
+| `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | Pinned model with 1 M context (kept in sync with `home/dot_claude/settings.json`) |
 | `language` | `Japanese` | All conversational output in Japanese |
 | `alwaysThinkingEnabled` | `false` | Extended thinking opt-in is per-task |
 | `cleanupPeriodDays` | `20` | Auto-prune sessions older than 20 days |
