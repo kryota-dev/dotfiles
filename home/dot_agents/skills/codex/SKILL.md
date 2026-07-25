@@ -44,7 +44,7 @@ if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME
 
 ## 実行コマンド
 
-レビュー目的では **read-only sandbox** で十分。`--full-auto` は `--sandbox workspace-write` のエイリアスのため、レビューでは付けない。書き込みが必要な用途のときのみ `--full-auto` または `--sandbox workspace-write` を明示する。
+レビュー目的では **read-only sandbox** で十分。`--sandbox read-only` を明示する。書き込みが必要な用途のときのみ `--sandbox workspace-write` を明示する。
 
 ### 推奨形式: stdin から prompt を渡し、結果のみをファイルに出力する
 
@@ -85,9 +85,8 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> "<reque
 | `-o, --output-last-message <FILE>` | 結果ファイルパス | assistant 最終メッセージ（レビュー結果）のみをファイル出力。進捗ログが混入しない |
 | `--color never` | - | ANSI エスケープの混入防止 |
 | `-`（位置引数） | stdin から prompt を読み込む | バックグラウンド実行で stdin 待ちを防ぐ |
-| `--full-auto` | （付けない） | `--sandbox workspace-write` のエイリアス。レビュー用途では不要、`--sandbox read-only` と併用すると挙動が紛らわしくなる |
 
-（実機確認: codex-cli 0.139.0。`codex exec --help` で `-o, --output-last-message <FILE>` と `-p, --profile <CONFIG_PROFILE_V2>` を確認。`--profile shared` で `model: gpt-5.5` / `reasoning effort: xhigh`（`shared.config.toml`）が適用されることも実機確認済み。公式: https://developers.openai.com/codex/noninteractive ）
+（実機確認: インストール済みの codex CLI（`codex --version` で確認可能）。`codex exec --help` で `-o, --output-last-message <FILE>` と `-p, --profile <CONFIG_PROFILE_V2>` を確認。`--profile shared` で `shared.config.toml`（SSOT）の model / reasoning effort 設定が適用されることも実機確認済み。公式: https://developers.openai.com/codex/noninteractive ）
 
 ## 引数の解釈
 
@@ -247,12 +246,6 @@ PROMPT
 heredoc 内に `$(gh pr diff ...)` 等のコマンド置換をインラインで埋め込むと、`run_in_background: true` 環境で稀にプロンプトが空のまま `codex` に渡り、`No prompt provided via stdin.` で即終了することがある（コマンド置換の実行と stdin 供給のタイミング競合と推定）。
 
 **回避策**: 差分やコマンド出力は heredoc に直接書かず、**事前に変数へ確保**してから `<<PROMPT`（クォート無し）で `${VAR}` 展開する。上記「PR 差分のレビュー」の例を参照。発生時は 1 回リトライ（事前確保パターンに切り替え）する。
-
-### `--full-auto` と `--sandbox` の関係
-
-- `--full-auto` は `--sandbox workspace-write` のエイリアス。`--sandbox read-only` と併用すると意図が紛らわしい
-- レビュー用途では `--full-auto` を **付けない**。`--sandbox read-only` のみ指定する
-- 書き込みが必要な用途では `--full-auto` か `--sandbox workspace-write` のどちらか一方のみ指定する
 
 ### タイムアウト
 
