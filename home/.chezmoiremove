@@ -54,7 +54,8 @@
 .agents/skills/dmux-workflows
 .dmux-r06
 
-# happy (slopus/happy) retired in #331 — deliberately NOT listed here, unlike dmux above.
+# happy (slopus/happy) retired in #331 / PR #333 — deliberately NOT listed here, unlike dmux
+# above.
 # happy owned no deployed files of its own (it lived as lines inside claude.zsh/codex.zsh/
 # mise config), and its runtime dir ~/.happy holds phone-pairing and E2E key material
 # rather than dmux's regenerable socket dir. A standing per-apply deletion would therefore
@@ -70,8 +71,9 @@
 #   2. Unpair/remove this device in the Happy mobile/web app BEFORE step 3. Deleting the
 #      local access.key is not revocation — any backup copy stays a valid credential.
 #   3. rm -rf ~/.happy
-#   4. mise prune   # or: mise uninstall npm:happy@<version>; then drop the leftover
-#      ~/.local/share/mise/shims/happy and .../shims/happy-mcp
+#   4. mise uninstall npm:happy@<version>   # surgical; bare `mise prune` spans every tool
+#      rm -f ~/.local/share/mise/shims/happy ~/.local/share/mise/shims/happy-mcp
+#      (plain `mise reshim` only ADDS shims — it does not remove orphaned ones)
 # Note: ~/.happy/logs holds sessions from BOTH accounts (the pairing was shared), so this
 # is a data-classification cleanup, not just a disk-space one. On APFS do not chase a
 # secure erase (srm is gone, `rm -P` is meaningless on SSD) — FileVault is the real control.

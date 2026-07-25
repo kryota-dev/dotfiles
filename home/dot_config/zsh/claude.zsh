@@ -1,8 +1,8 @@
 # Claude Code account isolation.
 # Each account gets its own config dir plus ECC/CLV2/gateguard state dirs, so cld and
 # cld-r06 never share sessions, governance state.db, instincts, or hook caches.
-# The command to run is passed after the home dir ("claude ..."), so it runs with exactly
-# that per-account environment.
+# The command to run is passed after the home dir rather than hard-coded, so the helper
+# stays agnostic about what it launches while still pinning the per-account environment.
 
 # MCP API keys (exa, firecrawl) rendered from 1Password into a 0600 file. Sourced (not
 # exported) so the keys stay out of the general shell environment; _claude_with_home re-exports
@@ -66,6 +66,10 @@ alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-wri
 # The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
 # (content) so the prompt body stays out of argv — the CLI reads the file at process start,
 # avoiding argv-length and control-char concerns as the prompt grows.
+# The two flags are mutually exclusive: Claude Code >= 2.1.185 aborts with "Cannot use both
+# ... Please use only one." So a wrapper that injects its own --append-system-prompt cannot
+# simply be layered on top of this helper — it would have to inline the prompt instead. The
+# retired phone-control wrapper needed exactly that separate code path (#331).
 _claude_fable() {
   local home_dir="$1"
   shift

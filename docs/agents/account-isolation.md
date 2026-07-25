@@ -29,7 +29,7 @@ The r06 Claude config directory (`~/.claude-r06`) contains only symlinks pointin
 
 ## Alias matrix
 
-These are the user-facing entry points. Each alias corresponds to one cell in the 2 × 2 harness × account matrix.
+These are the user-facing entry points. The base is a 2 × 2 harness × account matrix (Claude Code / Codex × personal / work), plus purpose-specific variants layered on the Claude Code side.
 
 | Alias | Harness | Account | Effect |
 |---|---|---|---|
