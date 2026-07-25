@@ -1,6 +1,3 @@
-personality = "pragmatic"
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-
+{{ includeTemplate "codex-model-pin.toml" . -}}
 [features]
 multi_agent = true
