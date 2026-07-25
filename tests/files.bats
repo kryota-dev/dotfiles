@@ -853,10 +853,14 @@ FAKE_CLAUDE
   [ ! -e "${HOME_DIR}/dot_config/dmux" ]
   [ ! -e "${HOME_DIR}/dot_config/zsh/dmux.zsh" ]
   [ ! -e "${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl" ]
-  run grep -F '"npm:dmux"' "${HOME_DIR}/dot_config/mise/config.toml"
-  [ "$status" -ne 0 ]
-  run grep -F 'dmux-helpers' "${HOME_DIR}/dot_config/sheldon/plugins.toml"
-  [ "$status" -ne 0 ]
+  # Same fail-open trap the happy guard below documents: grep exits 2 on a missing file, so
+  # assert existence first and require exactly 1 rather than merely non-zero.
+  [ -f "${HOME_DIR}/dot_config/mise/config.toml" ]
+  [ -f "${HOME_DIR}/dot_config/sheldon/plugins.toml" ]
+  run grep -Ei 'dmux' "${HOME_DIR}/dot_config/mise/config.toml"
+  [ "$status" -eq 1 ]
+  run grep -Ei 'dmux' "${HOME_DIR}/dot_config/sheldon/plugins.toml"
+  [ "$status" -eq 1 ]
   # Deployed leftovers must stay declared for cleanup on every machine.
   grep -qFx '.config/dmux' "${HOME_DIR}/.chezmoiremove"
   grep -qFx '.agents/skills/dmux-workflows' "${HOME_DIR}/.chezmoiremove"
@@ -875,13 +879,17 @@ FAKE_CLAUDE
   # grep exits 2 (not 1) when the file is missing, so a bare `status -ne 0` would pass
   # vacuously if any of these were renamed away. Assert existence first, then require
   # exactly 1 (matched nothing) rather than "non-zero".
+  local f
   for f in "$cz" "$cx" "$mc" "$st" "$cr"; do [ -f "$f" ]; done
 
   run grep -Ei 'happy|hcld' "$cz"
   [ "$status" -eq 1 ]
   run grep -Ei 'happy|hcdx' "$cx"
   [ "$status" -eq 1 ]
-  run grep -F '"npm:happy"' "$mc"
+  # Substring rather than the exact `"npm:happy"` spelling: TOML also accepts literal-string
+  # keys ('npm:happy' = ...), which an exact match would wave through. config.toml holds no
+  # "happy" substring at all today, so the broader pattern cannot false-positive.
+  run grep -Ei 'happy' "$mc"
   [ "$status" -eq 1 ]
   # includeCoAuthoredBy is DEPRECATED in the Claude Code settings schema and survived only
   # because happy-cli read that one key. For Claude Code itself, attribution.commit/.pr now

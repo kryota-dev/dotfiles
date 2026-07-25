@@ -46,12 +46,20 @@ load helpers/setup
 }
 
 @test "claude.zsh: cld/cld-r06 launch claude per account" {
-  run zsh -fc "source '${HOME_DIR}/dot_config/zsh/claude.zsh'; alias cld cld-r06"
+  # Pin each alias body exactly instead of counting matches. Counting ".claude-r06" once
+  # still passes if the two accounts are swapped, and a substring check for
+  # _claude_with_home still passes if cld degrades to a bare `claude` — the swap is
+  # precisely what this guards. HOME is redirected so sourcing claude.zsh cannot pick up
+  # the real ~/.config/zsh/claude-secrets.zsh; alias bodies keep $HOME unexpanded, so the
+  # expected strings are unaffected.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    alias cld cld-r06
+  "
   [ "$status" -eq 0 ]
-  [[ "$output" == *"_claude_with_home"* ]]
-  [[ "$output" == *".claude-r06"* ]]
-  r06_count=$(printf '%s\n' "$output" | grep -c '\.claude-r06')
-  [ "$r06_count" -eq 1 ]
+  printf '%s\n' "$output" | grep -qFx "cld='_claude_with_home \"\$HOME/.claude\" claude'"
+  printf '%s\n' "$output" | grep -qFx "cld-r06='_claude_with_home \"\$HOME/.claude-r06\" claude'"
 }
 
 @test "claude.zsh: _claude_fable pins the main model to claude-fable-5 and skips the prompt when absent" {
@@ -130,13 +138,14 @@ load helpers/setup
 @test "codex.zsh: cdx/cdx-r06 inject --profile shared and scope CODEX_HOME to the work account" {
   # Regression guard: both aliases must inject --profile shared (bare `codex` silently
   # ignores shared.config.toml), and only cdx-r06 may set CODEX_HOME — cdx deliberately
-  # leaves it unset so Codex falls back to the default ~/.codex.
-  run zsh -fc "source '${HOME_DIR}/dot_config/zsh/codex.zsh'; alias cdx cdx-r06"
+  # leaves it unset so Codex falls back to the default ~/.codex. Pinning both bodies
+  # exactly is what rejects an account swap; counting occurrences would not.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/codex.zsh'
+    alias cdx cdx-r06
+  "
   [ "$status" -eq 0 ]
-  [[ "$output" == *"codex --profile shared"* ]]
-  [[ "$output" == *"CODEX_HOME=\$HOME/.codex-r06"* ]]
-  profile_count=$(printf '%s\n' "$output" | grep -c -- '--profile shared')
-  [ "$profile_count" -eq 2 ]
-  codex_home_count=$(printf '%s\n' "$output" | grep -c 'CODEX_HOME=')
-  [ "$codex_home_count" -eq 1 ]
+  printf '%s\n' "$output" | grep -qFx "cdx='codex --profile shared'"
+  printf '%s\n' "$output" | grep -qFx "cdx-r06='CODEX_HOME=\$HOME/.codex-r06 codex --profile shared'"
 }
