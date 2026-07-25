@@ -7,8 +7,6 @@ tap "satococoa/tap"
 tap "smudge/smudge"
 tap "supabase/tap"
 tap "yuitosato/gh-asset"
-# TIFF library and utilities
-brew "libtiff"
 # Declarative CLI Version manager
 brew "aqua"
 # Download with resuming and segmented downloading
@@ -37,6 +35,8 @@ brew "fb303"
 brew "edencommon"
 # Play, record, convert, and stream select audio and video codecs
 brew "ffmpeg"
+# TIFF library and utilities
+brew "libtiff"
 # Command-line outline and bitmap font editor/converter
 brew "fontforge"
 # Distributed revision control system
@@ -47,6 +47,10 @@ brew "git-crypt"
 brew "git-filter-repo"
 # Prevents you from committing sensitive information to a git repo
 brew "git-secrets"
+# GNU implementation of the famous stream editor
+brew "gnu-sed"
+# GNU grep, egrep and fgrep
+brew "grep"
 # Website copier/offline browser
 brew "httrack"
 # Tools and libraries to manipulate images in select formats
@@ -59,10 +63,14 @@ brew "libaacs"
 brew "libyaml"
 # Fast, async, resource-friendly link checker
 brew "lychee"
+# Interpreter for the AWK Programming Language
+brew "mawk"
 # Polyglot runtime manager (asdf rust clone)
 brew "mise"
 # Ambitious Vim-fork focused on extensibility and agility
 brew "neovim"
+# Send push notifications to your phone or desktop via PUT/POST
+brew "ntfy"
 # PDF rendering library (based on the xpdf-3.0 code base)
 brew "poppler"
 # Perl-powered file rename script with many helpful built-ins
@@ -81,8 +89,9 @@ brew "tree"
 brew "vim"
 # Watch files and take action when they change
 brew "watchman"
-# Internet file retriever
+# Convert HTML to PDF
 brew "weasyprint"
+# Internet file retriever
 brew "wget"
 # Library to create, extract, and modify Windows Imaging files
 brew "wimlib"
@@ -110,6 +119,8 @@ cask "brave-browser"
 cask "chatgpt"
 # Anthropic's official Claude AI desktop app
 cask "claude"
+# Tool to remove unnecessary files and folders from disk
+cask "cleanmymac"
 # Free app that makes your Internet safer
 cask "cloudflare-warp"
 # Ghostty-based terminal with vertical tabs and notifications for AI coding agents
@@ -124,6 +135,8 @@ cask "deepl"
 cask "discord"
 # App to build and share containerised applications and microservices
 cask "docker-desktop"
+# Online diagram software
+cask "drawio"
 # Collaborative team software
 cask "figma", args: { appdir: "/Applications" }
 # Web browser
