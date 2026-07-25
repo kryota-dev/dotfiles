@@ -24,6 +24,20 @@ _ecc_skill_list() {
   ' "${HOME_DIR}/.chezmoidata.toml" | grep -oE '"[^"]+"' | tr -d '"'
 }
 
+# Octal permission bits of a file or directory (e.g. 700), on both CI platforms.
+#
+# The obvious `stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"` chain is wrong on GNU: there
+# `-f` means --file-system, so stat prints a multi-line filesystem report to stdout AND exits
+# non-zero, and the command substitution ends up capturing that report concatenated with the
+# fallback's output. Detect the implementation instead — only GNU stat understands --version.
+_file_mode() {
+  if stat --version >/dev/null 2>&1; then
+    stat -c '%a' "$1"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+
 # Resolve the ITEMS=(...) array in run_once_after_11-validate-1password.sh.tmpl.
 # Each entry is a "op://kryota.dev/..." string; comments inside the array (starting
 # with #) are ignored. Kept dependency-free (no yq / no chezmoi).

@@ -710,11 +710,9 @@ FAKE_CLAUDE
   # there approved, which is exactly what kept instinct generation dead (#336).
   [ ! -e "$tmp/.claude/ecc-homunculus" ]
   # The state dir stays private. observations.jsonl records tool input/output, and it now lives
-  # in the shared ~/.local/share tree rather than under the config dir. stat's flags differ
-  # between macOS and Linux, so try the BSD form first and fall back to the GNU one.
+  # in the shared ~/.local/share tree rather than under the config dir.
   local mode
-  mode=$(stat -f '%Lp' "$tmp/.local/share/ecc-homunculus-default" 2>/dev/null ||
-    stat -c '%a' "$tmp/.local/share/ecc-homunculus-default")
+  mode=$(_file_mode "$tmp/.local/share/ecc-homunculus-default")
   [ "$mode" = "700" ]
   # Fresh-write branch: an account dir with no prior config gets a fully-formed enabled config.
   mkdir -p "$tmp/.claude-r06"
