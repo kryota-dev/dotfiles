@@ -104,8 +104,14 @@ orphaned な 1.0.6 キャッシュディレクトリが有効な 1.0.4 の隣に
 claude plugin marketplace update openai-codex && claude plugin update codex@openai-codex
 ```
 
-終了コードを信用せず、事後に検証してください（CLI は宣言された `ref` を経路によっては無視することが
-知られているため）。marketplace clone が pin されたタグを describe すること
+その後、**対象アカウントの Claude Code セッションを再起動してください**。`claude plugin update` は
+ディスク上のインストールを書き換えるだけで（CLI 自身が `Restart to apply changes.` と出力します）、
+稼働中のセッションは古いバージョンを使い続けます。下記の検証は*インストール済みの状態*を読むため、
+**再起動しないと「検証は新バージョンを報告するのに、動いているセッションは旧バージョン」**という
+食い違いが起こります。
+
+終了コードを信用せず、事後に検証してください（CLI は宣言された `ref` を経路によっては無視するため。
+その 2 つの落とし穴は次の段落で説明しています）。marketplace clone が pin されたタグを describe すること
 （`git -C "$CLAUDE_CONFIG_DIR/plugins/marketplaces/openai-codex" describe --tags`）、`claude plugin list`
 が新しいバージョンを報告すること、`$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json` に記録された
 `gitCommitSha` がタグのコミットと一致することの 3 点です。orphaned キャッシュ状態からの復旧に手動

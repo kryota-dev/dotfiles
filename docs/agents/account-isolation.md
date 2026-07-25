@@ -99,6 +99,8 @@ Running the bare binary name bypasses the account machinery entirely:
 
 The bare `claude` invocation is not an error, but it silently uses the default account dirs and ignores the ECC/CLV2/gateguard state isolation that the aliases provide. For `codex`, the SSOT model, personality, and multi-agent feature configuration are all absent when invoked bare.
 
+One more route leaks the same way without being a bare invocation: the `codex@openai-codex` plugin's **`codex-rescue` agent does not propagate `CODEX_HOME`**, so invoking it from a work-account session runs Codex against the personal account. Skills therefore never call it — see [Codex CLI harness](codex.md) for the full prohibition and its other reasons.
+
 ---
 
 ## See also

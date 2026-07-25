@@ -145,6 +145,46 @@ load helpers/setup
   }
 }
 
+# The Codex pin reaches the docs two ways: inside TOML sample blocks (where an HTML comment
+# would break the sample) and in prose. So prose carries FACT markers, and the samples are
+# checked separately by matching `model = "..."` at line start — which in these two files only
+# ever occurs inside the profile samples. Prose mentions of the *drifted* base-config value
+# (`gpt-5.5`) are inline code, never line-initial, so this shape does not catch them.
+@test "docs_facts: the Codex model pin matches codex-model-pin.toml in both markers and samples" {
+  local pin
+  pin="$(grep -oE '^model[[:space:]]*=[[:space:]]*"[^"]+"' "${HOME_DIR}/.chezmoitemplates/codex-model-pin.toml" | sed 's/.*"\(.*\)"/\1/')"
+  [ -n "$pin" ] || {
+    echo "sanity: codex-model-pin.toml has no model line — the fragment moved or changed shape"
+    false
+  }
+
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$pin" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:codex-model-pin is '$val' but codex-model-pin.toml pins '$pin'"
+        false
+      }
+    done < <(grep -oE 'FACT:codex-model-pin -->[^<]+' "$f" | sed 's/.*-->//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+  done < <(grep -rlF 'FACT:codex-model-pin' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:codex-model-pin markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+
+  local doc sample
+  for doc in "${DOCS_DIR}/agents/codex.md" "${DOCS_DIR}/agents/codex.ja.md"; do
+    [ -f "$doc" ] || continue
+    while IFS= read -r sample; do
+      [ "$sample" = "$pin" ] || {
+        echo "${doc#"${REPO_ROOT}/"}: a TOML sample pins '$sample' but codex-model-pin.toml pins '$pin'"
+        false
+      }
+    done < <(grep -oE '^model[[:space:]]*=[[:space:]]*"[^"]+"' "$doc" | sed 's/.*"\(.*\)"/\1/')
+  done
+}
+
 @test "docs_facts: every <!-- FACT:claude-agent-count --> marker matches the agent definition count" {
   local actual
   actual="$(find "${HOME_DIR}/dot_claude/agents" -maxdepth 1 -name '*.md' | grep -c .)"

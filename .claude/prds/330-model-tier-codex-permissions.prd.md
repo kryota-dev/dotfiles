@@ -329,3 +329,32 @@ tier" passes silently.
 1. If the `gpt-5.6-terra` smoke test fails (AC-006), fall back to `gpt-5.5` and report
    the hold-back explicitly in the PR-2 description and at GATE 1 — no silent
    acceptance (safe default; re-escalation happens naturally at the gate).
+
+---
+
+## Addendum — superseded by measurement (PR #338)
+
+The acceptance criteria above are left as approved. Two of them turned out to rest on
+assumptions that measurement disproved during PR-4; they are recorded here rather than
+edited in place, so the approved record stays intact.
+
+- **AC-008 — scoping the network opt-in with a `network_proxy` domain allowlist.**
+  There is no allowlist. `features.network_proxy` is a boolean toggle, and no allowlist
+  key is reachable through `-c` (`features.network_proxy.allowed_domains` is rejected by
+  the config parser; `network_proxy.*` and `sandbox_workspace_write.allowed_domains` are
+  unknown fields). Worse, enabling the toggle under `codex exec` blocks egress entirely
+  instead of filtering it, while the startup banner still reports network as enabled.
+  Network opt-in is therefore parent-mediated only, and the direct route
+  (`sandbox_workspace_write.network_access=true`) grants *unrestricted* egress.
+
+- **AC-027 — keeping this repository permanently untrusted.** Not reachable while the
+  `agent` profile is in use. A single `codex exec --profile agent` run writes
+  `trust_level = "trusted"` back into the unmanaged base config, and it resolves to the
+  main worktree even when `--cd` points at a linked one — so working in a throwaway
+  branch worktree trusts the whole repository. Once trusted, a project-local
+  `.codex/config.toml` overrides the managed profile's `model` and `sandbox_mode`
+  (narrowing direction verified; escalation deliberately not tested, so treat it as
+  unproven rather than ruled out). "Never trusted" is consequently not claimed as an
+  invariant. The mitigations that survive — and a new fail-closed pre-delegation check
+  for an unexpected `.codex/` — are documented in `docs/agents/codex.md`
+  ("Project trust and project-local .codex/") and in the codex skill.

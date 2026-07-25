@@ -105,8 +105,14 @@ account by hand, once per `CLAUDE_CONFIG_DIR`:
 claude plugin marketplace update openai-codex && claude plugin update codex@openai-codex
 ```
 
-Verify afterwards rather than trusting the exit code, because the CLI is known to ignore a declared
-`ref` on some paths: the marketplace clone should still describe as the pinned tag
+Then **restart the Claude Code session for that account**. `claude plugin update` only rewrites the
+on-disk installation — it says so itself (`Restart to apply changes.`) — so a running session keeps
+using the old version. This matters because the verification below reads the *installed* state and
+will happily report the new version while the live session is still on the old one.
+
+Verify afterwards rather than trusting the exit code, because the CLI ignores a declared `ref` on
+some paths (the two sharp edges described in the paragraph after this one): the marketplace clone
+should still describe as the pinned tag
 (`git -C "$CLAUDE_CONFIG_DIR/plugins/marketplaces/openai-codex" describe --tags`), `claude plugin
 list` should report the new version, and the `gitCommitSha` recorded in
 `$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json` should match the tag's commit. Recovery from the

@@ -137,7 +137,7 @@ Inside `workspace-write`, `<writable_root>/.git`, `.agents`, and `.codex` stay r
 
 `$CODEX_HOME/config.toml` is **not** managed by chezmoi. Codex writes it itself — model-migration notices, TUI state, and project trust entries all land there — so this repo deliberately leaves it alone rather than fighting the CLI for ownership.
 
-The consequence worth knowing: it carries its own `model` key, and it drifts. At the time of writing, `~/.codex/config.toml` holds `model = "gpt-5.5"` while the managed pin is `gpt-5.6-terra`. Both are true at once because profiles layer *on top of* the base config:
+The consequence worth knowing: it carries its own `model` key, and it drifts. At the time of writing, `~/.codex/config.toml` holds `model = "gpt-5.5"` while the managed pin is <!-- FACT:codex-model-pin -->gpt-5.6-terra<!-- /FACT -->. Both are true at once because profiles layer *on top of* the base config:
 
 | Invocation | Effective model |
 |---|---|
@@ -156,7 +156,8 @@ The original intent for this repo was to stay untrusted permanently, so that a b
 
 1. **The `agent` profile writes trust back.** A single `codex exec --profile agent` run adds `trust_level = "trusted"` for the project to `$CODEX_HOME/config.toml`. Deleting the entry only lasts until the next run. `--profile shared --sandbox read-only` does **not** do this, so review-only legs leave trust untouched. The `-c approval_policy=never` override is not the trigger — the profile alone is enough.
 2. **Trust resolves to the main worktree, not to `--cd`.** Running with `--cd <linked worktree>` added the path of the *main* worktree (the parent of `git rev-parse --git-common-dir`). Working in a throwaway branch worktree therefore trusts the entire repository, every other worktree included.
-3. **A trusted project's local `.codex/config.toml` overrides the managed profile.** With a planted `.codex/config.toml`, `model` was overridden (`gpt-5.6-terra` → `gpt-5.5`) and `sandbox_mode` was overridden (`workspace-write` → `read-only`). `approval_policy` was *not* overridable in the same test — the profile's value won.
+3. **A trusted project's local `.codex/config.toml` overrides the managed profile.** With one planted **in the `--cd` directory** (the linked worktree), `model` was overridden (<!-- FACT:codex-model-pin -->gpt-5.6-terra<!-- /FACT --> → `gpt-5.5`) and `sandbox_mode` was overridden (`workspace-write` → `read-only`). `approval_policy` was *not* overridable in the same test — the profile's value won.
+4. **Config resolves to `--cd`, unlike trust.** The same file planted in the *main* worktree, with `--cd` still pointing at the linked one, had no effect — the pin held. So the two resolve differently: trust to the main worktree (finding 2), project-local config to `--cd`. That asymmetry is why the pre-delegation check only needs to look at the `--cd` directory.
 
 The `sandbox_mode` override was exercised only in the safe direction (narrowing the sandbox). Whether it also escalates was deliberately not tested: demonstrating that the override mechanism reaches `sandbox_mode` is the finding, and granting a planted config real escalation is not a test worth running. Treat escalation as unproven but plausible rather than as ruled out.
 
@@ -173,7 +174,7 @@ Nothing in this repository adds a trust entry, and none should be added by hand.
 
 ## codex-rescue is not an orchestration entry point
 
-The `codex@openai-codex` plugin ships a `codex-rescue` agent. Skills never invoke it; every Codex call from `pr-workflow`, `sdd`, and `multi-review` goes through `codex exec --profile shared|agent` in Bash instead. The reasons are recorded once, in the codex skill's 禁止事項:
+The `codex@openai-codex` plugin ships a `codex-rescue` agent. Skills never invoke it; every Codex call from `pr-workflow`, `sdd`, and `multi-review` goes through `codex exec --profile shared|agent` in Bash instead. Summarized here; the authoritative list lives in the codex skill's forbidden-actions section:
 
 - it does not pass `--profile`, so the managed model/effort pin and permission posture do not apply;
 - it does not propagate `CODEX_HOME`, so a work-account session would run against the personal account — the account isolation this harness exists to maintain;
