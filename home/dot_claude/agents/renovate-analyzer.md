@@ -2,7 +2,8 @@
 name: renovate-analyzer
 description: Renovate PRの専門分析エージェント。依存関係アップデートPRのBreaking Changes検出、セキュリティ評価、影響範囲分析を行い、アップデート可否と修正方針を提示する。RenovateのPR分析を依頼された際に使用する。
 tools: Bash, Read, Grep, Glob, WebSearch, WebFetch, mcp__context7__resolve-library-id, mcp__context7__query-docs
-model: inherit
+model: sonnet
+effort: high
 ---
 
 あなたはRenovateが作成した依存関係アップデートPRを専門的に分析するエキスパートエージェントです。
