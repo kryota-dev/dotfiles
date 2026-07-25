@@ -11,12 +11,24 @@
 .claude/agents/sdd-work-reviewer.md
 .claude/agents/sdd-design-reviewer.md
 
+# General to this entire file, not just this block: a .chezmoiremove entry is a standing
+# declaration, not a one-shot cleanup. chezmoi re-deletes the destination path on every
+# future `chezmoi apply`, so if a user or another tool ever puts a file back at one of
+# these paths, it vanishes again on the next apply with no warning. (~/.claude/skills and
+# ~/.codex/skills are both symlinks to ~/.agents/skills, verified on disk, so a single
+# `.agents/skills/<name>` entry here removes the path for both harnesses at once — and a
+# skill authored from either harness lands on that same shared path.)
+#
 # agent-browser specialized skills. The CLI serves these at runtime via
 # `agent-browser skills get <name>` (version-matched, never stale), so vendoring the
 # static SKILL.md is redundant. Only the discovery stub (dot_agents/skills/agent-browser)
 # stays managed; these previously-deployed copies are removed.
-# All five skills left the source tree together, but only the first three were listed
-# here at the time, so agentcore and vercel-sandbox lingered as unmanaged runtime dirs.
+# #145 (2026-06-12) removed all five skills from source in one commit, but .chezmoiremove
+# did not exist yet, so nothing was registered for any of them. #174 (2026-06-22)
+# re-curated electron/slack/dogfood, and #175 (2026-06-23) re-removed those same three
+# and registered only them here. agentcore and vercel-sandbox were never re-curated after
+# #145, so neither commit had a removal target for them, and their already-deployed
+# copies lingered unregistered until this PR.
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood

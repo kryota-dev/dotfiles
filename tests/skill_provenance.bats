@@ -52,12 +52,15 @@ _skill_is_external() {
     }
   done
 
-  # The source dir itself must contain nothing but SKILL.md: no frozen references/
+  # The commit content itself must be nothing but SKILL.md: no frozen references/
   # or templates/ copies left behind (they'd go stale and contradict the stub-only
   # policy, e.g. references/commands.md documenting a `find` action the daemon
-  # never supported).
+  # never supported). Checked via `git ls-files` rather than `find` on disk: Finder
+  # can drop .DS_Store / AppleDouble (._*) files into this dir on macOS, and those are
+  # gitignored (never committed) but would still make a `find`-based check false-positive.
   local leftover
-  leftover="$(find "${HOME_DIR}/dot_agents/skills/agent-browser" -mindepth 1 -not -name 'SKILL.md')"
+  leftover="$(git -C "${REPO_ROOT}" ls-files 'home/dot_agents/skills/agent-browser/' \
+    | grep -vx 'home/dot_agents/skills/agent-browser/SKILL.md' || true)"
   [ -z "$leftover" ] || {
     echo "agent-browser source dir has non-SKILL.md content:"
     echo "$leftover"
