@@ -123,18 +123,26 @@ All version-defining inputs live in `home/.chezmoidata.toml`. The external decla
 
 ## The `agent-browser` discovery-stub pattern
 
-`agent-browser` is curated as a **discovery stub only** (`home/dot_agents/skills/agent-browser/SKILL.md`). Its specialized skills (electron, slack, dogfood) are **not vendored** in this repo. They would go stale quickly and are served at runtime by the agent-browser CLI itself:
+`agent-browser` is curated as a **discovery stub only**: the source tree contains exactly one file, `home/dot_agents/skills/agent-browser/SKILL.md`. Neither `references/` nor `templates/` is vendored — both were removed from source (they were a frozen, already-stale copy of pre-0.32 content that nothing linked to). Its specialized skills (electron, slack, dogfood, agentcore, vercel-sandbox) are **not vendored** either. They would go stale quickly and are served at runtime by the agent-browser CLI itself:
 
 ```
 agent-browser skills get <name>
 ```
 
-The previously-deployed copies of the specialized skills are force-removed via `home/.chezmoiremove`:
+The previously-deployed copies are force-removed via `home/.chezmoiremove`, in two groups:
 
 ```
+# The specialized skills the CLI now serves at runtime.
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood
+.agents/skills/agentcore
+.agents/skills/vercel-sandbox
+
+# The stub's own references/ and templates/ — a frozen copy that predates the
+# runtime-serving CLI and was never linked from SKILL.md.
+.agents/skills/agent-browser/references
+.agents/skills/agent-browser/templates
 ```
 
 Removing a file from the chezmoi source does not delete an already-deployed copy; `.chezmoiremove` is what tells chezmoi to ensure those paths are absent on every apply.
@@ -147,7 +155,7 @@ Removing a file from the chezmoi source does not delete an already-deployed copy
 
 **Deterministic source-side assertions** (always fail CI on violation):
 
-- `agent-browser` vendors only its discovery stub; `electron`/`slack`/`dogfood` are absent from source and listed in `.chezmoiremove`.
+- `agent-browser` vendors only its discovery stub: the five specialized skills (`electron`/`slack`/`dogfood`/`agentcore`/`vercel-sandbox`) are absent from source and listed in `.chezmoiremove`; the source dir has no committed content beyond `SKILL.md`; and `.chezmoiremove` also carries removal targets for the stub's own now-deleted `references/` and `templates/`.
 - Every curated skill directory in source is non-empty (contains at least one regular file at depth ≤ 2).
 - `.chezmoiexternal.toml` declares at least one `[".agents/skills/..."]` external entry, and includes the ECC range block wired to `[ecc].commit`.
 - No skill name appears in both the curated source tree and the external declarations (never-both rule).

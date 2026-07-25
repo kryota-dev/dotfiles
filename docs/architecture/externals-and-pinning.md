@@ -179,7 +179,7 @@ Removing a file from the chezmoi source tree (via `git rm`) does **not** remove 
 1. Remove from source: `git rm home/path/to/file` (or remove the name from `.ecc.skills`).
 2. Add the `$HOME`-relative destination path to `home/.chezmoiremove`.
 
-Current `.chezmoiremove` entries:
+An excerpt of `home/.chezmoiremove` — read the file itself for the full list, which also covers the retired dmux layer, the 2026-07-06 stocktake, and a case-rename cleanup:
 
 ```
 # Orphaned SDD agents
@@ -192,6 +192,12 @@ Current `.chezmoiremove` entries:
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood
+.agents/skills/agentcore
+.agents/skills/vercel-sandbox
+
+# agent-browser discovery stub's own frozen references/ and templates/ copies
+.agents/skills/agent-browser/references
+.agents/skills/agent-browser/templates
 ```
 
-The `agent-browser` specialized skills are a concrete example of the pattern: they were previously vendored as static files, then replaced by a CLI that serves version-matched copies at runtime. The static copies were removed from source **and** their destination paths were added to `.chezmoiremove` to ensure clean removal on the next `chezmoi apply`.
+The `agent-browser` specialized skills are a concrete example of the pattern: they were previously vendored as static files, then replaced by a CLI that serves version-matched copies at runtime. The static copies were removed from source **and** their destination paths were added to `.chezmoiremove` to ensure clean removal on the next `chezmoi apply`. The stub's own `references/` and `templates/` went through the same two-step removal once they turned out to be an unlinked, already-stale copy of pre-0.32 content.
