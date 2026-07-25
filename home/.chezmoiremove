@@ -19,6 +19,14 @@
 .agents/skills/slack
 .agents/skills/dogfood
 
+# agent-browser discovery stub's own references/ and templates/. These were a frozen
+# copy of pre-0.32 vendored content, never linked from SKILL.md and already stale (e.g.
+# a documented `find` action the daemon never supported). `agent-browser skills get core
+# --full` serves the version-matched equivalent, so only SKILL.md stays curated.
+# Removing them from source alone would not delete an already-deployed copy, hence here.
+.agents/skills/agent-browser/references
+.agents/skills/agent-browser/templates
+
 # dmux retired (PR removing the dmux provisioning layer): the tool is no longer used,
 # so the deployed shim dir, zsh module, rendered secrets file, and the ECC
 # dmux-workflows skill (would otherwise be left behind as an unmanaged skill) are
