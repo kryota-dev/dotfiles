@@ -108,12 +108,9 @@ multi_agent = true
 
 `home/.chezmoitemplates/codex-agent-config.toml` が設定本体で、`dot_codex/private_agent.config.toml.tmpl` と `dot_codex-r06/private_agent.config.toml.tmpl` の両方からインクルードされ、両アカウントに `$CODEX_HOME/agent.config.toml`（mode 0600）としてデプロイされます。`--profile agent` で選択される named `agent` プロファイルであり、Codex が実装ワーカーや CI 修正ワーカーとして動くときにスキルが使う非対話ポスチャです。
 
-`shared` と同様に `codex-model-pin.toml` から model pin をインクルードします。2 つのプロファイルを分けるのは permission キーです（レンダリング結果、コメント省略）：
+`shared` と同様に `codex-model-pin.toml` から model pin をインクルードします（値は pin 側にあり、ここでは再掲しません）。2 つのプロファイルを分けるのは permission キーです：
 
 ```toml
-personality = "pragmatic"
-model = "gpt-5.6-terra"
-model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 web_search = "cached"
@@ -125,7 +122,7 @@ multi_agent = true
 network_access = false
 ```
 
-- `sandbox_mode = "workspace-write"` — Codex はワークスペース内のファイルを編集できます。保護パス（`.git`、`.agents`、`.codex`）は再帰的に read-only のままのため、Codex は git 状態を stage・commit・その他の書き込みできません。親の Claude セッションが diff をレビューしてコミットします。
+- `sandbox_mode = "workspace-write"` — Codex はワークスペース内のファイルを編集できます。保護パス（`.git`、`.agents`、`.codex`）は再帰的に read-only のままです（この保護はプロファイルの宣言ではなく Codex CLI 自体が提供します）。そのため Codex は git 状態への stage・commit などの書き込みはできません。親の Claude セッションが diff をレビューしてコミットします。
 - `approval_policy = "never"` — 承認プロンプトに応答できる人間がいない非対話 `codex exec` 実行に必要です。
 - `web_search = "cached"` と `network_access = false` — デフォルトではライブネットワークなし。本当にネットワークアクセスが必要な呼び出し側だけが、呼び出しごとにオプトインします（`-c sandbox_workspace_write.network_access=true`）。このオプトイン境界はポリシー統制であり技術統制ではありません — `-c` オーバーライドはプロファイル値より優先されます。この区別は `codex` skill が所有します。
 
@@ -286,11 +283,16 @@ Claude Code 側は `openai-codex` marketplace の `codex` プラグインを通�
 プラグインセットアップスクリプト（`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`）はプラグインが存在しない場合にのみインストールします：install ループはプラグイン名の一致だけで skip し、バージョン比較を行いません。したがって `ref` pin の編集だけでは、インストール済みプラグインは決して収束しません — これは既知のギャップです（スクリプトへの reconcile 実装は意図的に先送り）。収束は手動で、アカウント（`CLAUDE_CONFIG_DIR`）ごとに 1 回実行します：
 
 ```bash
+# デフォルトアカウント (~/.claude)
 claude plugin marketplace update openai-codex
 claude plugin update codex@openai-codex
+
+# ワークアカウント (~/.claude-r06)
+CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace update openai-codex
+CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin update codex@openai-codex
 ```
 
-反映には、その後 Claude Code の再起動が必要です（`claude plugin update` 自身が "restart required to apply" と報告します）。
+反映には、その後 Claude Code の再起動が必要です（`claude plugin update` 自身が "restart required to apply" と報告します）。将来 ref を bump する際の注意点：marketplace 登録はソース ref の独自コピー（ランタイムの `known_marketplaces.json`）を保持し、`marketplace update` はその保存済み登録から pull します — したがって `settings.json` の pin を変更した後は、登録済み ref を確認し、遅れている場合は marketplace を再登録（`claude plugin marketplace rm` + `add`）してください。
 
 ### codex:codex-rescue — 手動レスキュー専用
 

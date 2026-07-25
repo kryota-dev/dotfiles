@@ -108,12 +108,9 @@ This file is deployed as `$CODEX_HOME/shared.config.toml` (mode 0600, via chezmo
 
 `home/.chezmoitemplates/codex-agent-config.toml` is the config body, included by both `dot_codex/private_agent.config.toml.tmpl` and `dot_codex-r06/private_agent.config.toml.tmpl` and deployed as `$CODEX_HOME/agent.config.toml` (mode 0600) to both accounts. It is the named `agent` profile selected with `--profile agent` — the non-interactive posture skills use when Codex acts as an implementation or CI-fix worker.
 
-Like `shared`, it includes the model pin from `codex-model-pin.toml`; the permission keys are what set the two profiles apart (rendered, comments elided):
+Like `shared`, it includes the model pin from `codex-model-pin.toml` (values live there and are not restated here); the permission keys are what set the two profiles apart:
 
 ```toml
-personality = "pragmatic"
-model = "gpt-5.6-terra"
-model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 approval_policy = "never"
 web_search = "cached"
@@ -125,7 +122,7 @@ multi_agent = true
 network_access = false
 ```
 
-- `sandbox_mode = "workspace-write"` — Codex may edit files inside the workspace. Protected paths stay read-only recursively (`.git`, `.agents`, `.codex`), so Codex cannot stage, commit, or otherwise write git state: the parent Claude session reviews the diff and commits.
+- `sandbox_mode = "workspace-write"` — Codex may edit files inside the workspace. Protected paths stay read-only recursively (`.git`, `.agents`, `.codex`) — an enforcement the Codex CLI itself provides, not something this profile declares — so Codex cannot stage, commit, or otherwise write git state: the parent Claude session reviews the diff and commits.
 - `approval_policy = "never"` — required for non-interactive `codex exec` runs, which have no human available to answer approval prompts.
 - `web_search = "cached"` and `network_access = false` — no live network by default. A call site that genuinely needs network access opts in per invocation (`-c sandbox_workspace_write.network_access=true`). The opt-in boundary is a policy control, not a technical one — `-c` overrides take precedence over profile values; the `codex` skill owns that distinction.
 
@@ -286,11 +283,16 @@ The Claude Code side reaches Codex through the `codex` plugin from the `openai-c
 The plugin setup script (`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`) installs a plugin only when it is absent: its install loop skips on a plugin-name match alone, with no version comparison. Editing the `ref` pin therefore never converges an already-installed plugin — a known gap (implementing reconciliation in the script is deliberately deferred). Convergence is manual, run once per account (`CLAUDE_CONFIG_DIR`):
 
 ```bash
+# default account (~/.claude)
 claude plugin marketplace update openai-codex
 claude plugin update codex@openai-codex
+
+# work account (~/.claude-r06)
+CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace update openai-codex
+CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin update codex@openai-codex
 ```
 
-A Claude Code restart is required afterwards for the updated plugin to take effect (`claude plugin update` itself reports "restart required to apply").
+A Claude Code restart is required afterwards for the updated plugin to take effect (`claude plugin update` itself reports "restart required to apply"). One caveat for a future ref bump: the marketplace registration keeps its own copy of the source ref (in the runtime's `known_marketplaces.json`), and `marketplace update` pulls from that stored registration — so after changing the `settings.json` pin, verify the registered ref and re-register the marketplace (`claude plugin marketplace rm` + `add`) if it lags.
 
 ### codex:codex-rescue — manual rescue only
 
