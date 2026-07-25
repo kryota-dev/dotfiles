@@ -18,7 +18,7 @@
     "MAX_THINKING_TOKENS": "127999",
     "ECC_GOVERNANCE_CAPTURE": "1",
     "ECC_HOOK_PROFILE": "strict",
-    "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete,pre:edit-write:gateguard-fact-force",
+    "ECC_DISABLED_HOOKS": "post:bash:command-log-audit,post:bash:command-log-cost,post:bash:build-complete,pre:edit-write:gateguard-fact-force,stop:desktop-notify",
     "ECC_QUALITY_GATE_FIX": "true",
     "GATEGUARD_BASH_EXTRA_DESTRUCTIVE": "\\b(?:chezmoi\\s+(?:destroy|forget|purge)\\b|terraform\\s+(?:destroy|state\\s+rm|workspace\\s+delete|force-unlock)\\b|terraform\\s+apply\\s+(?:[^&|;]*\\s)?-{1,2}auto-approve\\b|kubectl\\s+delete\\b|helm\\s+(?:uninstall|delete)\\b|docker\\s+(?:system\\s+prune|volume\\s+(?:rm|prune)|image\\s+prune|container\\s+prune|network\\s+prune)\\b|docker\\s+(?:rm|rmi)\\b(?=[^&|;]*\\s(?:--force\\b|-[a-zA-Z]*f\\b))|brew\\s+(?:uninstall|autoremove|untap)\\b|mas\\s+uninstall\\b|mise\\s+(?:uninstall|implode|prune)\\b|aqua\\s+(?:rm|prune)\\b|gh\\s+(?:repo\\s+delete|release\\s+delete|secret\\s+(?:delete|remove)|cache\\s+delete|run\\s+delete)\\b|aws\\s+s3\\s+r[mb]\\b|aws\\s+(?:ec2\\s+terminate-instances|iam\\s+delete-|dynamodb\\s+delete-table|rds\\s+delete-)|aws\\s+\\S+\\s+delete-|gcloud\\s+(?:\\S+\\s+){1,5}delete\\b|supabase\\s+db\\s+reset\\b|supabase\\s+projects\\s+delete\\b|pnpm\\s+(?:purge|store\\s+prune)\\b|npm\\s+(?:unpublish|publish)\\b|yarn\\s+(?:unpublish|publish)\\b|defaults\\s+delete\\b|git\\s+filter-(?:repo|branch)\\b)"
   },
@@ -396,6 +396,20 @@
         "id": "post:mcp-health-check"
       }
     ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ntfy-notify.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Publish every Claude Code notification to the self-hosted ntfy channel (#337). The matcher is omitted deliberately: per the hooks reference that runs the hook for all notification types, and the notification_type -> priority mapping lives in one case block inside ntfy-notify.sh rather than being split across matcher groups that can drift apart. Permission prompts / agent-needs-input / elicitation dialogs / idle prompts publish at priority 4, agent completion at 3, and the remaining types at 1 (recorded in history, silent on the device).",
+        "id": "notification:ntfy-notify"
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
@@ -433,7 +447,7 @@
             "timeout": 10
           }
         ],
-        "description": "Send desktop notification (macOS/WSL) with task summary when Claude responds",
+        "description": "DISABLED via env.ECC_DISABLED_HOOKS (#337): replaced by stop:ntfy-notify below. ECC's hook only ever saw last_assistant_message, so it could not attribute a notification to its session/repo/account and kept no history. The wiring is kept (same treatment as pre:edit-write:gateguard-fact-force, #280) so re-enabling is a one-token edit; the ECC runtime is a SHA-pinned chezmoi external and must never be edited in place.",
         "id": "stop:desktop-notify"
       },
       {
@@ -460,6 +474,49 @@
         ],
         "description": "At Stop, aggregate console.log warnings across git-modified JS/TS files (excluding tests/scripts) (D5, pairs with post:edit:console-warn). Sync (fast grep) so warnings surface.",
         "id": "stop:check-console-log"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ntfy-notify.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Publish the turn-end event to the self-hosted ntfy channel at priority 3 (#337). Replaces ECC's stop:desktop-notify above: same trigger, but the message carries repo/branch/account attribution and lands in a 7-day server-side history. Uses last_assistant_message rather than reading transcript_path, per the hooks reference.",
+        "id": "stop:ntfy-notify"
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ntfy-notify.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Publish a failed turn to the self-hosted ntfy channel at priority 5 (#337). StopFailure has no decision control and exists for notification/logging, which is exactly this hook's purpose — a turn that died is the one event worth interrupting for.",
+        "id": "stop-failure:ntfy-notify"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/ntfy-notify.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record session termination in the ntfy history at priority 1 (#337) — visible in the app and to the poll/since API, but silent on the device, and suppressed entirely from the local osascript fallback so a stopped server cannot turn lifecycle bookkeeping into desktop popups.",
+        "id": "session-end:ntfy-notify"
       }
     ]
   },
