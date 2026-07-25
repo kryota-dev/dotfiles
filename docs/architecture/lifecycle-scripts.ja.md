@@ -42,7 +42,8 @@ flowchart TD
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS のみ\n(repo 管理 LaunchAgent の launchctl bootstrap\nCI ではスキップ)"]
-        J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
+        J2 --> J3["31 setup-ntfy\nrun_onchange · macOS + [ntfy].enabled\n(docker compose up -d + tailscale serve\nDocker 停止時は fail-soft)"]
+        J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
         K --> L["50 set-login-shell\nrun_once · Linux のみ\n(chsh -s zsh, sudo 失敗時は graceful)"]
         L --> M["90 other-apps\nrun_once · macOS のみ\n(Logi Options+ / Google IME ダウンロードプロンプト)\n(非 TTY は即時スキップ)"]
     end
@@ -79,10 +80,13 @@ flowchart TD
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` **と** `dot_config/ntfy/private_server.yml.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | 自分自身のソースファイル（任意の編集で再トリガー） |
 
 `20-macos-defaults` は `joinPath` による自己ハッシュを使用しており、スクリプト自体を編集するだけで全 `defaults write` が再適用されます。
+
+`31-setup-ntfy` はハッシュを **2 つ** 埋め込み、うち 1 つは `private_` テンプレートを対象にしています。これが安全なのは `include` が生のソーステキストを返すだけでテンプレートを評価しないためで、`dot_config/ntfy/private_server.yml.tmpl` のハッシュ化は 1Password に到達しません（＝vault アイテムを持たないマシンでもスクリプトがレンダリングできる）。また、OS だけでなく `.chezmoidata.toml` のフラグでもゲートされる唯一のライフサイクルスクリプトです（[通知チャネル](notifications.ja.md) を参照）。
 
 `17-setup-claude-plugins` はハッシュを使わずに同じ結果を得ています。`include | fromJson` で
 `dot_claude/settings.json` を読み、`enabledPlugins` と `extraKnownMarketplaces` だけを JSON として
@@ -110,6 +114,7 @@ quoted heredoc の中に埋め込みます。これにより単一ソースを�
 | `18-setup-agent-browser` | 両対応 | `{{ if linux }}` で `--with-deps` を追加 |
 | `20-macos-defaults` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `30-register-launchd-agents` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
+| `31-setup-ntfy` | **macOS のみ、かつ opt-in** | 本文が `{{ if and darwin .ntfy.enabled }}` 内。`.chezmoidata.toml` で ntfy チャネルを有効化するまで **完全に空** にレンダリング |
 | `40-setup-sheldon` | 両対応 | OS ガードなし |
 | `50-set-login-shell` | **Linux のみ** | 本文全体が `{{ if linux }}` 内。macOS ではほぼ空にレンダリング |
 | `90-other-apps` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |

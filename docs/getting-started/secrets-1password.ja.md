@@ -106,6 +106,36 @@ macOS で `chezmoi apply` を実行する前に:
 
 ---
 
+## opt-in の Vault アイテム
+
+このアイテムは上記の件数に **含まれず**、既定のマシンではチェックもされません。
+`home/.chezmoidata.toml` で `[ntfy].enabled = true` にしてセルフホスト通知チャネルを
+有効化したときにのみ必要になります。チャネルが無効な間は `.chezmoiignore` がテンプレートを
+まるごとスキップするため、誰もこの値を読みません。
+
+### `Dotfiles - ntfy`
+
+| 属性 | 値 |
+|-----|---|
+| Vault | `kryota.dev` |
+| アイテムタイトル | `Dotfiles - ntfy` |
+| フィールド参照 | `base_url`, `topic`, `token` |
+| レンダリング先 | `~/.config/ntfy/server.yml` と `~/.config/ntfy/notify-env` |
+| ファイルモード | `0600`（`private_` プレフィックスによる） |
+| 必要になる条件 | `[ntfy].enabled = true` |
+
+| フィールド | 値 |
+|----------|---|
+| `base_url` | ノードの MagicDNS URL `https://<node>.<tailnet>.ts.net`。マシンを特定できる情報であり、本リポジトリは public のため Vault に置きます。 |
+| `topic` | `[A-Za-z0-9_-]` の 1〜64 文字。iOS 中継はこの SHA256 をキーにするため、推測されにくいサフィックスを付けます。 |
+| `token` | 1 回限りのブートストラップで `ntfy token add` が発行する `tk_…` の publish トークン。 |
+
+`run_once_after_11` はこの 3 フィールドを `ITEMS` 配列ではなくフラグでガードした別ブロックで
+検証します。チャネルを有効化していないマシンにとって、上記の件数表示が正しいままになるためです。
+ブートストラップ手順の全体は [通知チャネル](../architecture/notifications.ja.md) を参照してください。
+
+---
+
 ## アイテムが欠落またはリネームされた場合の影響
 
 | 欠落アイテム | 即時の失敗 | 下流への影響 |

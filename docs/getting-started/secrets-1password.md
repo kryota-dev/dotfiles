@@ -106,6 +106,37 @@ Store the client/employer identifier pattern as a `name1|name2|...` alternation 
 
 ---
 
+## Opt-in vault item
+
+This item is **not** part of the count above and is not checked on a default machine. It is
+required only once the self-hosted notification channel is switched on with
+`[ntfy].enabled = true` in `home/.chezmoidata.toml`; while the channel is off,
+`.chezmoiignore` skips the templates entirely and nothing reads it.
+
+### `Dotfiles - ntfy`
+
+| Attribute | Value |
+|-----------|-------|
+| Vault | `kryota.dev` |
+| Item title | `Dotfiles - ntfy` |
+| Field references | `base_url`, `topic`, `token` |
+| Rendered to | `~/.config/ntfy/server.yml` and `~/.config/ntfy/notify-env` |
+| File mode | `0600` (via `private_` prefix) |
+| Required when | `[ntfy].enabled = true` |
+
+| Field | Value |
+|-------|-------|
+| `base_url` | The node's MagicDNS URL, `https://<node>.<tailnet>.ts.net`. Kept in the vault because it identifies the machine and this repository is public. |
+| `topic` | 1–64 characters of `[A-Za-z0-9_-]`. Give it an unguessable suffix — its SHA256 is what the iOS relay keys on. |
+| `token` | The `tk_…` publish token minted by `ntfy token add` during the one-time bootstrap. |
+
+`run_once_after_11` validates these three fields in a separate, flag-guarded block rather
+than in the `ITEMS` array, so the documented count above stays honest for a machine that
+has not enabled the channel. Full bootstrap procedure:
+[notification channel](../architecture/notifications.md).
+
+---
+
 ## What breaks when an item is missing or renamed
 
 | Missing item | Immediate failure | Downstream impact |

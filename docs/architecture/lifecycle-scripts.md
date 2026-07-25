@@ -42,7 +42,8 @@ flowchart TD
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
-        J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
+        J2 --> J3["31 setup-ntfy\nrun_onchange · macOS + [ntfy].enabled\n(docker compose up -d + tailscale serve;\nfail-soft on a stopped Docker daemon)"]
+        J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
         K --> L["50 set-login-shell\nrun_once · Linux only\n(chsh -s zsh, graceful on sudo fail)"]
         L --> M["90 other-apps\nrun_once · macOS only\n(Logi Options+ / Google IME download prompts)\n(non-TTY short-circuits immediately)"]
     end
@@ -79,10 +80,17 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` **and** `dot_config/ntfy/private_server.yml.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
 `20-macos-defaults` uses a `joinPath` self-hash — editing the script itself is enough to re-apply all macOS `defaults write` calls.
+
+`31-setup-ntfy` embeds **two** hashes, one of which covers a `private_` template. That is safe
+because `include` returns the raw source text and never evaluates it: hashing
+`dot_config/ntfy/private_server.yml.tmpl` does not reach 1Password, so the script renders on a
+machine that has no vault item. It is also the only lifecycle script gated on a
+`.chezmoidata.toml` flag rather than only on the OS — see [notifications](notifications.md).
 
 `17-setup-claude-plugins` reaches the same result without a hash: it reads
 `dot_claude/settings.json` with `include | fromJson` and embeds just the `enabledPlugins` and
@@ -111,6 +119,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | `18-setup-agent-browser` | dual | `{{ if linux }}` adds `--with-deps` |
 | `20-macos-defaults` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `30-register-launchd-agents` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
+| `31-setup-ntfy` | **macOS only, and opt-in** | Body inside `{{ if and darwin .ntfy.enabled }}`; renders **empty** unless the ntfy channel has been enabled in `.chezmoidata.toml` |
 | `40-setup-sheldon` | both | No OS guard |
 | `50-set-login-shell` | **Linux only** | Entire body inside `{{ if linux }}`; renders near-empty on macOS |
 | `90-other-apps` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |

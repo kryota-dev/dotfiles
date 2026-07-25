@@ -74,7 +74,7 @@ canonical with Japanese (`*.ja.md`) mirrors. `docs/` is the single home for the 
 engine, the lifecycle apply timeline, the lint/CI internals, and the AI-agent layer; this
 file stays short and points there.
 
-- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md)
+- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md) · [notification channel](docs/architecture/notifications.md)
 - **AI agents:** [overview](docs/agents/overview.md) · [account isolation](docs/agents/account-isolation.md) · [Claude Code](docs/agents/claude-code.md) · [Codex](docs/agents/codex.md) · [skill provenance](docs/agents/skills-provenance.md)
 - **Contributing:** [local dev & the make contract](docs/contributing/local-dev.md) · [CI & tests](docs/contributing/ci-and-tests.md) · [worktrees & env](docs/contributing/worktrees-and-env.md)
 - **Explanation:** [design rationale](docs/explanation/design-rationale.md) · [secrets & isolation](docs/explanation/secrets-and-isolation.md)
