@@ -66,6 +66,17 @@ Sonnet 5 は指示に literal に従い（特に低い effort レベルでは顕
 - **fork は例外**: fork は常に親モデル（Fable）を継承する。コンテキスト継承の価値が
   委譲コストを上回るときだけ選ぶ。
 
+### effort 軸（frontmatter でのみ pin 可能）
+
+- **finding 生成系 subagent（`cc-code-review` / `cc-security-review` / 各 specialist-reviewer /
+  `renovate-analyzer` / `adversarial-verifier`）は effort を frontmatter で pin 済み**
+  （review 系 = `high`、一次検出層と反証層 = `xhigh`）。Agent tool の呼び出しパラメータには
+  `model` はあるが `effort` は無いため、effort は agent 定義でのみ固定できる。低 effort の
+  セッションでもこれらの subagent は pin された effort で動く。
+- **Fable セッション（このセッション）は §4 model/effort contract の全行を常に満たす**
+  （monotonic: Fable > Opus > Sonnet > Haiku）。`model-fitness-check` ゲートは Fable に
+  対して switch 提案を出さない。委譲既定（`model: sonnet`）はこの effort pin 導入後も不変。
+
 `CLAUDE_CODE_SUBAGENT_MODEL` は起動側で意図的に**未設定**にしてある（この env var は
 per-invocation `model` param・agent frontmatter より最優先で全 subagent を固定するため、
 上記の「難タスクだけ fable に escalate」経路が失われる）。この構成を尊重すること。

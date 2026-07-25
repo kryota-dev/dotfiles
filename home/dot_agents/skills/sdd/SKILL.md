@@ -32,6 +32,8 @@ Phase 0: 準備 → Phase 1: 要件定義 → Phase 2: 設計 → Phase 3: タ�
 
 ## Phase 0: 準備
 
+**実装フェーズ（Phase 4）に入る前に `/model-fitness-check` を起動する**（§4 model/effort contract の SSOT ゲート）。`sdd` の Phase 1–3 spec 執筆、および large / PRD 審議相当の作業はいずれも **floor 行**に該当し、満たさなければ blocking で提案・停止する。**要求される具体的な model / effort 値はここに書かない**（テーブルは `/model-fitness-check` が唯一の SSOT）。
+
 ### 0-1. 引数の解析
 
 `$ARGUMENTS` を解析:
@@ -131,6 +133,7 @@ mkdir -p .spec-workflow/specs/{spec-name}
 ```
 Agent:
   subagent_type: "Explore"
+  model: "haiku"   # retrieval 型（steering docs / CLAUDE.md の verbatim 抽出）は Haiku で十分
   description: "Steering docs・規約調査"
   prompt: |
     以下を調査して報告:
@@ -147,6 +150,7 @@ Agent:
 ```
 Agent:
   subagent_type: "Explore"
+  model: "sonnet"   # pattern-recognition 型（既存構造・パターンの一般化）。見落としが下流の requirements/design に波及するため Sonnet
   description: "コードベース構造分析"
   prompt: |
     プロジェクトの構造を分析して報告:
@@ -193,6 +197,7 @@ Agent:
 ```
 Agent:
   subagent_type: "Explore"
+  model: "sonnet"   # pattern-recognition 型（再利用可能コンポーネント発見）。reuse-first 原則が効くよう false negative を避ける
   description: "既存コード分析"
   prompt: |
     .spec-workflow/specs/{spec-name}/requirements.md を読み、要件に関連する以下を調査:
@@ -272,6 +277,8 @@ Leader 自身が `.spec-workflow/specs/{spec-name}/tasks.md` を作成。
 requirements.md, design.md, tasks.md を精読し、全体像を把握。
 
 ### 4-2. タスク順次実装
+
+**実装の委譲方針**: 複数ファイル横断・context 継続が要るタスクは Leader が実装する（context continuity）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスクへの依存記載なし・並行実行中の他タスクと共有状態を持たない）は、Sonnet worker（`model: sonnet`）または Codex worker（`codex exec --profile agent`、workspace-write。**親が diff レビュー後に commit** — `.git` は Codex から read-only）に委譲してよい。既定は Leader / Sonnet worker、cross-model diversity が欲しいときに Codex。
 
 tasks.md の各タスクを順番に実装:
 
@@ -641,7 +648,7 @@ notify
 7. **レビュー指摘の考察**: 全ての指摘に機械的に対応するのではなく、対応の必要性を考察し判断する
 8. **議論による合意形成**: 対応不要と判断した場合は根拠を示してレビューエージェントと議論し、合意を形成する
 9. **承認されるまで繰り返す**: 全レビューエージェントの APPROVE が得られるまで修正→再レビューのサイクルを繰り返す
-10. **コスト最適化**: Leader = Opus（inherit）、調査 = Haiku（Explore 型）、レビュー = Sonnet
+10. **コスト最適化 / model・effort tier**: Leader = Opus 5（inherit。cldf 系は Fable 5）。effort は §4 contract の floor（orchestration = high、PRD 審議 / large = xhigh）。**調査はタスク形状別**: retrieval 型（steering docs 転記）= Haiku、pattern-recognition 型（コードベース構造・再利用パターン分析）= Sonnet（Explore に `model` を明示 pin）。レビュー = Sonnet（frontmatter で effort pin 済み）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスク非依存・並行タスクと共有状態なし）は Sonnet worker or Codex worker（`codex exec --profile agent`、workspace-write、**親が commit**）に委譲してよい。Codex は `--profile agent`（bash）経由のみ — plugin の `codex:codex-rescue` は skill から起動しない（`--profile`/`CODEX_HOME` を通さずアカウント分離を破るため）。
 11. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 7 の完了時のみ。例外は Git 操作エラー時（`notify` + `AskUserQuestion` で待機）
 12. **フォアグラウンド実行**: レビューエージェントは MCP ツールや対話が必要なため、フォアグラウンドで実行
 13. **gitignore 対象ファイルへのアクセス**: `.spec-workflow/` 配下のファイル（テンプレート・Steering docs 等）は gitignore されている可能性がある。Glob/Grep は ripgrep ベースで gitignore を尊重するため検出できない。必ず Bash `ls` + Read ツールで直接アクセスすること

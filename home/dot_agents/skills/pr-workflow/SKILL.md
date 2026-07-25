@@ -20,7 +20,7 @@ user-invocable: true
 
 **委譲は「起動」であって「再実装」ではない（手ロール代替の禁止）**: Phase 5〜7 の各ステップは、指定された skill（`/monitor-ci` / `/multi-review` / `/review-resolve-loop`）を **必ず実際に起動する**。「自分でやった方が速い」「重複が少ない」「指摘は自明」等の最適化判断で**同等処理を手ロール（inline の Bash / Agent）で代替してはならない**。オーバーライドは「skill を起動したうえで付加する」ものであり、起動そのものを省く理由にはならない。委譲先 skill は各々が固有の網羅性（例: `/review-resolve-loop` は review thread / review body / **CI marker Issue comment** の 3 経路を体系的に拾う）を持ち、手ロールはその経路網羅を欠いて指摘を取りこぼす。orchestrator の役割は分類・GATE・統合判断であって、委譲先の仕事の肩代わりではない。
 
-**model-tier（task #28）**: 分類・設計・統合判断は **Opus（Leader）**。機械的実装は **Sonnet 委任**（small tier の general-purpose 起動）、cross-model diversity は **codex**（multi-review）。
+**model-tier（task #28 の拡張）**: 分類・設計・統合判断は **Leader**（session model）。機械的実装・CI ログ triage・fact-check は **worker 委譲**（Sonnet / Haiku）。**cross-model diversity は codex** — multi-review のレビュー leg に加え、**small tier の実装と Phase 5 の CI 修正でも Codex worker（`--profile agent`）を選べる**。要求 model/effort の契約（§4）は `/model-fitness-check` が唯一の SSOT であり、本 skill は値を再掲せず Phase 0 でそれを起動する。
 
 **マージは user**: 設計決定（task #21 原案の「merge 自動実行」を上書き）として、本 skill は**絶対に自動マージしない**。GATE 3 は merge-ready の handoff であり、merge は user の明示操作。
 
@@ -34,6 +34,8 @@ user-invocable: true
 | `--strict` | off | GATE 2 を auto-proceed から承認待ちに戻す escape hatch（GATE 1・3 は常に user 承認） |
 
 ## Phase 0: Classify（分類）
+
+**分類直後・実装フェーズ前に `/model-fitness-check` を起動する**（§4 model/effort contract の SSOT ゲート）。orchestration（分類・GATE・統合）と large tier / PRD 審議 / adversarial verification は **floor 行**に該当し、満たさなければ blocking で提案・停止する。trivial/small は **cost hint 行**で non-blocking の一行 FYI に留まる。**要求される具体的な model / effort 値はここに書かない**（テーブルは `/model-fitness-check` が唯一の SSOT。値を再掲すると Codex pin と同じ drift を再演する）。
 
 **size tier の判定軸**（text だけで決めず、次を評価。`--size` で override）:
 
@@ -76,7 +78,7 @@ Phase 0 の分類直後、**tier に関わらず必ず `/wtp` でワークツリ
 | tier | path |
 |------|------|
 | `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr` |
-| `small` | **general-purpose サブエージェント（`model: sonnet`）**に inline prompt で委任（named worker は使わない）。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。→ `/commit` → `/create-pr` |
+| `small` | **worker に委任（二択）**: (a) general-purpose サブエージェント（`model: sonnet`）に inline prompt で委任、または (b) 実装の cross-model diversity が欲しい／Claude が行き詰まったときは **Codex worker**（`codex exec --profile agent`、workspace-write。**親が commit**）。既定は (a)。自己完結タスク（少数ファイル・所有境界内・契約変更なし = small tier 定義そのもの）が Codex 委譲の条件。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。→ `/commit` → `/create-pr` |
 | `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を `AskUserQuestion` で 1 回確認。承認 1 回で自律性を最大限維持）→ `/sdd`（完全自律実行）。**`/sdd` は内部で自前に commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
 | `large` | **intent gate（enforced）**: `/sdd` の前に `/grill-me --mode=auto`（自律審議＋最終 PRD を user が 1 回承認）を pr-workflow から auto-invoke する（`--mode=auto` が「対話型だから auto-invoke しない」を解消。auto でも security/data-migration/contract は grill-me が強制 user エスカレート）→ `/sdd`（完全自律実行）。 |
 
@@ -111,9 +113,10 @@ CI 監視を `/review-resolve-loop` に内包させず、**独立したステッ
 **CI fail 時のフロー**（retry budget は pr-workflow 側で管理。最大 3 回）:
 
 1. 失敗 job のログを取得（`gh run view {run_id} --log-failed`）
-2. 原因分析 → コード修正 → commit → push
-3. 再度 `/monitor-ci` で full pass を確認
-4. 3 回 fail → user へエスカレート
+2. **ログ triage を worker に委譲**（inline で親が読まない）: Haiku（`model: haiku`）の一次分類 worker にログを渡し、原因カテゴリ（flaky / lint / regression 等）と要約診断だけを返させる。診断が非自明なら Sonnet（`model: sonnet`）に escalate する。**ログ全文ではなく要約診断のみを親が受け取る**（高価な親 context にログを常駐させない）。
+3. 原因分析 → コード修正 → commit → push。修正方針が明確な場合は Codex worker（`codex exec --profile agent`、workspace-write。親が `gh run view --log-failed` でログを取得して渡す — Codex sandbox に gh 認証は届かない）に修正を委譲してよい。**commit は親が行う**（`.git` は Codex から read-only）。
+4. 再度 `/monitor-ci` で full pass を確認
+5. 3 回 fail → user へエスカレート
 
 CI green → Phase 6 へ。
 
@@ -136,7 +139,7 @@ CI green 確認後、`/multi-review` を起動する。
 
 ### adversarial 強化（large tier）
 
-`/multi-review` 完了後、**adversarial verify protocol**（独立 reviewer 視点で MUST を反証し、過半が反証→棄却）を inline で 1 ラウンド追加する（外部 skill ではなく手順）。
+`/multi-review` 完了後、**adversarial verify protocol** を 1 ラウンド追加する。各 MUST に対し、**`adversarial-verifier` サブエージェントを 3 並列 spawn**（Agent tool、`subagent_type: adversarial-verifier`）し、それぞれに距離のあるフレーミング（correctness / security / does-it-reproduce 等）で反証させる。過半が反証（`REFUTED`）→ 棄却。**effort は Agent tool の per-call パラメータで渡せず frontmatter でのみ固定できる**ため、`adversarial-verifier`（`model: sonnet` + `effort: xhigh`）を使う（finding を出した文脈がそのまま反証もする自己強化バイアスを断つ）。finding を出した親の inline 反証で代替しない。
 
 - **recall sink 化を防ぐ（#224）**: 棄却は **一次ソースで根拠づけられた反証が過半** のときのみ。反証自体が不確実（裏取りできない）なら finding を **棄却せず残し user に届ける**（coverage 優先）。
 - **棄却ログ（可監査化）**: 棄却した MUST は、**要約 + 棄却理由（一次ソース根拠）** を統合サマリー/PR の「棄却した指摘」節に必ず記録する。黙って落とさない。
@@ -214,3 +217,4 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 - **ワークツリー作業は必須**（Phase 0.5）。全 tier で `/wtp` を使い、main worktree を直接汚さない。standard/large の `/sdd` には新規ワークツリー作成を抑止するオーバーライドを渡す。
 - **マージは user**（GATE 3 を通しても自動マージしない）。
 - **CI first**: CI green を確認してからレビューを実施する（Phase 5 → Phase 6 の順）。CI が落ちている状態でのレビューは無駄になる可能性が高い。
+- **Codex は `--profile agent`（bash `codex exec`）経由でのみ起動する**。plugin の `codex:codex-rescue` は skill orchestration からは**起動しない**（`--profile` を通さず `CODEX_HOME` も伝播しないため、model pin 適用外・アカウント分離を破る。ad-hoc な手動 rescue 専用）。
