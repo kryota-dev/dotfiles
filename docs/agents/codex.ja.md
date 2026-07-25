@@ -14,12 +14,15 @@
 - [2 アカウントモデル](#2-アカウントモデル)
 - [hooks.json — PreToolUse ゲートガード](#hooksjson--pretooluse-ゲートガード)
 - [shared.config.toml — shared プロファイル](#sharedconfigtoml--shared-プロファイル)
+- [agent.config.toml — agent プロファイル](#agentconfigtoml--agent-プロファイル)
 - [テンプレート SSOT — アカウントドリフト防止](#テンプレート-ssot--アカウントドリフト防止)
 - [--profile shared の仕組み](#--profile-shared-の仕組み)
   - [cdx / cdx-r06 エイリアス](#cdx--cdx-r06-エイリアス)
   - [素の codex は SSOT 設定をスキップする](#素の-codex-は-ssot-設定をスキップする)
+- [管理外ベース設定とプロジェクト trust](#管理外ベース設定とプロジェクト-trust)
 - [ゲートガード](#ゲートガード)
 - [共有ルールとスキルレイヤー](#共有ルールとスキルレイヤー)
+- [Claude Code codex プラグイン — pin と収束](#claude-code-codex-プラグイン--pin-と収束)
 - [関連ドキュメント](#関連ドキュメント)
 
 ---
@@ -35,7 +38,7 @@
 | `home/dot_codex/symlink_AGENTS.md.tmpl` | `~/.codex/AGENTS.md -> ~/AGENTS.md` | `~/.codex-r06/AGENTS.md -> ~/AGENTS.md` |
 | `home/dot_codex/symlink_skills.tmpl` | `~/.codex/skills -> ~/.agents/skills` | `~/.codex-r06/skills -> ~/.agents/skills` |
 
-加えて `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml`（0600）があり、これはスキルが使う非対話 workspace-write プロファイルです（後述の `agent` プロファイルの注記を参照）。`home/dot_codex-r06/` には同じファイル群が含まれています；テンプレート本体は同じ `home/.chezmoitemplates/` ソースを指す同一の 1 行です。
+加えて `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml`（0600）があり、これはスキルが使う非対話 workspace-write プロファイルです（[agent.config.toml — agent プロファイル](#agentconfigtoml--agent-プロファイル) を参照）。`home/dot_codex-r06/` には同じファイル群が含まれています；テンプレート本体は同じ `home/.chezmoitemplates/` ソースを指す同一の 1 行です。
 
 ---
 
@@ -101,6 +104,37 @@ multi_agent = true
 
 ---
 
+## agent.config.toml — agent プロファイル
+
+`home/.chezmoitemplates/codex-agent-config.toml` が設定本体で、`dot_codex/private_agent.config.toml.tmpl` と `dot_codex-r06/private_agent.config.toml.tmpl` の両方からインクルードされ、両アカウントに `$CODEX_HOME/agent.config.toml`（mode 0600）としてデプロイされます。`--profile agent` で選択される named `agent` プロファイルであり、Codex が実装ワーカーや CI 修正ワーカーとして動くときにスキルが使う非対話ポスチャです。
+
+`shared` と同様に `codex-model-pin.toml` から model pin をインクルードします。2 つのプロファイルを分けるのは permission キーです（レンダリング結果、コメント省略）：
+
+```toml
+personality = "pragmatic"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+web_search = "cached"
+
+[features]
+multi_agent = true
+
+[sandbox_workspace_write]
+network_access = false
+```
+
+- `sandbox_mode = "workspace-write"` — Codex はワークスペース内のファイルを編集できます。保護パス（`.git`、`.agents`、`.codex`）は再帰的に read-only のままのため、Codex は git 状態を stage・commit・その他の書き込みできません。親の Claude セッションが diff をレビューしてコミットします。
+- `approval_policy = "never"` — 承認プロンプトに応答できる人間がいない非対話 `codex exec` 実行に必要です。
+- `web_search = "cached"` と `network_access = false` — デフォルトではライブネットワークなし。本当にネットワークアクセスが必要な呼び出し側だけが、呼び出しごとにオプトインします（`-c sandbox_workspace_write.network_access=true`）。このオプトイン境界はポリシー統制であり技術統制ではありません — `-c` オーバーライドはプロファイル値より優先されます。この区別は `codex` skill が所有します。
+
+このプロファイルは自己完結です：その permission ポスチャは、管理外のベース `~/.codex/config.toml` のどのキーにも依存しません。
+
+使い分け：実装と CI 修正タスクは `--profile agent` で実行し、レビュータスクは `--profile shared --sandbox read-only`（推奨は `codex exec review` 経由）に留めます。完全な呼び出し契約 — fail-closed なワークツリーガード、禁止フラグ、diff レビューをホスト側検証より先に行う順序 — は `codex` skill（`home/dot_agents/skills/codex/SKILL.md`）が所有しており、このページでは意図的に再掲しません。
+
+---
+
 ## テンプレート SSOT — アカウントドリフト防止
 
 `dot_codex/` と `dot_codex-r06/` にはそれぞれ薄い 1 行テンプレートファイルが含まれています：
@@ -111,6 +145,9 @@ multi_agent = true
 
 # dot_codex/private_shared.config.toml.tmpl (および dot_codex-r06/private_shared.config.toml.tmpl)
 {{ includeTemplate "codex-shared-config.toml" . }}
+
+# dot_codex/private_agent.config.toml.tmpl (および dot_codex-r06/private_agent.config.toml.tmpl)
+{{ includeTemplate "codex-agent-config.toml" . }}
 ```
 
 実際の本体は `home/.chezmoitemplates/` にのみ存在します。両方のアカウントディレクトリが同じテンプレートを参照するため、ドリフトは構造的に不可能です — テンプレートを編集すると次の `chezmoi apply` で両アカウントがアトミックに更新されます。
@@ -138,6 +175,24 @@ cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ### 素の codex は SSOT 設定をスキップする
 
 エイリアスなしの直接 `codex` 呼び出しは `shared.config.toml` を**ロードしません**。`--profile shared` フラグが適用する唯一のメカニズムです。これは意図的なもの（Codex ではプロファイルはオプトイン）ですが、`codex` を直接呼び出すスクリプト、CI、またはエディタ統合では気づきにくい落とし穴です。
+
+---
+
+## 管理外ベース設定とプロジェクト trust
+
+### ~/.codex/config.toml は意図的に管理外
+
+ベースの `$CODEX_HOME/config.toml` は Codex CLI 自身が書き込むファイルであり、意図的に — かつ恒久的に — chezmoi 管理**外**です。理由は 3 つ：
+
+- CLI がランタイムでこのファイルを書き換える（プロジェクト trust 決定、モデル移行通知）ため、chezmoi 管理下では `apply` のたびに衝突します。
+- `chezmoi apply` がユーザー承認済みの `[projects.*] trust_level` エントリを戻してしまいます。
+- コミットすると無関係なプロジェクトの絶対パスが public リポジトリに漏れます。
+
+コストは、既知の許容されたドリフト源が残ることです：ベース設定は SSOT pin とは独立に古くなる model 設定の独自コピーを持ちます。プロファイルベースの呼び出し（`--profile shared` / `--profile agent`）はその上にレイヤーされるため影響を受けません。素の `codex` 実行は管理外ベース設定だけで解決されます（[素の codex は SSOT 設定をスキップする](#素の-codex-は-ssot-設定をスキップする) を参照）。
+
+### プロジェクト trust ポリシー
+
+本リポジトリは、どの Codex 設定においても `trust_level = "trusted"` で `[projects.*]` に決して追加しません。untrusted-by-default の状態は load-bearing です：Codex は untrusted プロジェクトの project-local `.codex/` 設定レイヤーを読み込まないため、これが、悪意ある PR ブランチが自身の権限を広げる `.codex/` 設定を持ち込むことへの防御になります。
 
 ---
 
@@ -219,6 +274,31 @@ graph LR
 ```
 
 プロベナンス分類（curated / external / system / evolved / unmanaged）とスキルの追加方法については、[スキルプロベナンス](skills-provenance.ja.md) を参照してください。
+
+---
+
+## Claude Code codex プラグイン — pin と収束
+
+Claude Code 側は `openai-codex` marketplace の `codex` プラグインを通じて Codex に到達します。バージョン pin は `home/dot_claude/settings.json` の `extraKnownMarketplaces.openai-codex.source.ref` にあります — このキーが SSOT であり、このページではバージョン文字列を意図的に再掲しません。
+
+### インストール済みバージョンの収束
+
+プラグインセットアップスクリプト（`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`）はプラグインが存在しない場合にのみインストールします：install ループはプラグイン名の一致だけで skip し、バージョン比較を行いません。したがって `ref` pin の編集だけでは、インストール済みプラグインは決して収束しません — これは既知のギャップです（スクリプトへの reconcile 実装は意図的に先送り）。収束は手動で、アカウント（`CLAUDE_CONFIG_DIR`）ごとに 1 回実行します：
+
+```bash
+claude plugin marketplace update openai-codex
+claude plugin update codex@openai-codex
+```
+
+反映には、その後 Claude Code の再起動が必要です（`claude plugin update` 自身が "restart required to apply" と報告します）。
+
+### codex:codex-rescue — 手動レスキュー専用
+
+プラグインの `codex:codex-rescue` サブエージェントは、skill orchestration（`pr-workflow` / `sdd` / `multi-review`）からは決して呼び出されません。人間が直接ループに入る ad-hoc な手動レスキュー用途にのみ残されています。これは第二の、統制外の permission path であり、既知のギャップがあります：
+
+- `--profile` を渡さないため、SSOT プロファイルではなく管理外ベース設定に対して解決されます。
+- `CODEX_HOME` を伝播しないため、`cld-r06` セッションから呼び出しても個人の `~/.codex` アカウントに作用します — アカウント分離のリークです。
+- デフォルトで write 可能な実行になり、`approval_policy: "never"` が付きます。
 
 ---
 

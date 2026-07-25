@@ -14,12 +14,15 @@ This document covers the OpenAI Codex CLI harness configuration deployed by this
 - [Two-account model](#two-account-model)
 - [hooks.json — PreToolUse gateguard](#hooksjson--pretooluse-gateguard)
 - [shared.config.toml — the shared profile](#sharedconfigtoml--the-shared-profile)
+- [agent.config.toml — the agent profile](#agentconfigtoml--the-agent-profile)
 - [Template SSOT — preventing account drift](#template-ssot--preventing-account-drift)
 - [--profile shared mechanism](#--profile-shared-mechanism)
   - [cdx / cdx-r06 aliases](#cdx--cdx-r06-aliases)
   - [Bare codex skips the SSOT config](#bare-codex-skips-the-ssot-config)
+- [The unmanaged base config and project trust](#the-unmanaged-base-config-and-project-trust)
 - [Gateguard](#gateguard)
 - [Shared rule and skill layers](#shared-rule-and-skill-layers)
+- [Claude Code codex plugin — pin and convergence](#claude-code-codex-plugin--pin-and-convergence)
 - [See also](#see-also)
 
 ---
@@ -35,7 +38,7 @@ Each `CODEX_HOME` receives an identical file set. Both are rendered from the sam
 | `home/dot_codex/symlink_AGENTS.md.tmpl` | `~/.codex/AGENTS.md -> ~/AGENTS.md` | `~/.codex-r06/AGENTS.md -> ~/AGENTS.md` |
 | `home/dot_codex/symlink_skills.tmpl` | `~/.codex/skills -> ~/.agents/skills` | `~/.codex-r06/skills -> ~/.agents/skills` |
 
-There is also `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml` (0600), the non-interactive workspace-write profile used by skills (see the `agent` profile note below). `home/dot_codex-r06/` contains the same files; their template bodies are identical one-liners pointing to the same `home/.chezmoitemplates/` sources.
+There is also `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml` (0600), the non-interactive workspace-write profile used by skills (see [agent.config.toml — the agent profile](#agentconfigtoml--the-agent-profile)). `home/dot_codex-r06/` contains the same files; their template bodies are identical one-liners pointing to the same `home/.chezmoitemplates/` sources.
 
 ---
 
@@ -101,6 +104,37 @@ This file is deployed as `$CODEX_HOME/shared.config.toml` (mode 0600, via chezmo
 
 ---
 
+## agent.config.toml — the agent profile
+
+`home/.chezmoitemplates/codex-agent-config.toml` is the config body, included by both `dot_codex/private_agent.config.toml.tmpl` and `dot_codex-r06/private_agent.config.toml.tmpl` and deployed as `$CODEX_HOME/agent.config.toml` (mode 0600) to both accounts. It is the named `agent` profile selected with `--profile agent` — the non-interactive posture skills use when Codex acts as an implementation or CI-fix worker.
+
+Like `shared`, it includes the model pin from `codex-model-pin.toml`; the permission keys are what set the two profiles apart (rendered, comments elided):
+
+```toml
+personality = "pragmatic"
+model = "gpt-5.6-terra"
+model_reasoning_effort = "xhigh"
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+web_search = "cached"
+
+[features]
+multi_agent = true
+
+[sandbox_workspace_write]
+network_access = false
+```
+
+- `sandbox_mode = "workspace-write"` — Codex may edit files inside the workspace. Protected paths stay read-only recursively (`.git`, `.agents`, `.codex`), so Codex cannot stage, commit, or otherwise write git state: the parent Claude session reviews the diff and commits.
+- `approval_policy = "never"` — required for non-interactive `codex exec` runs, which have no human available to answer approval prompts.
+- `web_search = "cached"` and `network_access = false` — no live network by default. A call site that genuinely needs network access opts in per invocation (`-c sandbox_workspace_write.network_access=true`). The opt-in boundary is a policy control, not a technical one — `-c` overrides take precedence over profile values; the `codex` skill owns that distinction.
+
+The profile is self-contained: its permission posture does not depend on any key in the unmanaged base `~/.codex/config.toml`.
+
+Division of use: implementation and CI-fix tasks run `--profile agent`; review tasks stay on `--profile shared --sandbox read-only` (preferably via `codex exec review`). The full invocation contract — the fail-closed worktree guard, the prohibited flags, and the diff-review-before-host-verification ordering — is owned by the `codex` skill (`home/dot_agents/skills/codex/SKILL.md`); this page deliberately does not restate it.
+
+---
+
 ## Template SSOT — preventing account drift
 
 `dot_codex/` and `dot_codex-r06/` each contain thin one-liner template files:
@@ -111,6 +145,9 @@ This file is deployed as `$CODEX_HOME/shared.config.toml` (mode 0600, via chezmo
 
 # dot_codex/private_shared.config.toml.tmpl (and dot_codex-r06/private_shared.config.toml.tmpl)
 {{ includeTemplate "codex-shared-config.toml" . }}
+
+# dot_codex/private_agent.config.toml.tmpl (and dot_codex-r06/private_agent.config.toml.tmpl)
+{{ includeTemplate "codex-agent-config.toml" . }}
 ```
 
 The real bodies live exclusively in `home/.chezmoitemplates/`. Because both account directories reference the same template, they cannot diverge — editing the template changes both accounts atomically on the next `chezmoi apply`.
@@ -138,6 +175,24 @@ cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ### Bare codex skips the SSOT config
 
 A direct `codex` invocation — without the aliases — does **not** load `shared.config.toml`. The `--profile shared` flag is the only mechanism that applies it. This is intentional (profiles are opt-in in Codex), but easy to trip over in scripts, CI, or editor integrations that invoke `codex` directly.
+
+---
+
+## The unmanaged base config and project trust
+
+### ~/.codex/config.toml is intentionally unmanaged
+
+The base `$CODEX_HOME/config.toml` is written by the Codex CLI itself and is deliberately — and permanently — **not** chezmoi-managed. Three reasons:
+
+- The CLI rewrites the file at runtime (project trust decisions, model-migration notices), so chezmoi would fight it on every `apply`.
+- `chezmoi apply` would revert user-approved `[projects.*] trust_level` entries.
+- Committing it would leak absolute paths of unrelated projects into a public repository.
+
+The cost is a known, accepted drift source: the base config carries its own copy of model settings that ages independently of the SSOT pin. Profile-based invocations (`--profile shared` / `--profile agent`) layer over it and are unaffected; a bare `codex` run resolves against the unmanaged base config alone (see [Bare codex skips the SSOT config](#bare-codex-skips-the-ssot-config)).
+
+### Project trust policy
+
+This repository is never added to `[projects.*]` with `trust_level = "trusted"` in any Codex config. The untrusted-by-default status is load-bearing: Codex skips project-local `.codex/` config layers for untrusted projects, which is the defense against a malicious PR branch carrying a `.codex/` config that would otherwise widen its own permissions.
 
 ---
 
@@ -219,6 +274,31 @@ graph LR
 ```
 
 For the provenance taxonomy (curated / external / system / evolved / unmanaged) and how skills are added, see [Skills provenance](skills-provenance.md).
+
+---
+
+## Claude Code codex plugin — pin and convergence
+
+The Claude Code side reaches Codex through the `codex` plugin from the `openai-codex` marketplace. Its version pin lives in `home/dot_claude/settings.json` under `extraKnownMarketplaces.openai-codex.source.ref` — that key is the SSOT; this page intentionally does not restate the version string.
+
+### Converging the installed version
+
+The plugin setup script (`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`) installs a plugin only when it is absent: its install loop skips on a plugin-name match alone, with no version comparison. Editing the `ref` pin therefore never converges an already-installed plugin — a known gap (implementing reconciliation in the script is deliberately deferred). Convergence is manual, run once per account (`CLAUDE_CONFIG_DIR`):
+
+```bash
+claude plugin marketplace update openai-codex
+claude plugin update codex@openai-codex
+```
+
+A Claude Code restart is required afterwards for the updated plugin to take effect (`claude plugin update` itself reports "restart required to apply").
+
+### codex:codex-rescue — manual rescue only
+
+The plugin's `codex:codex-rescue` subagent is never invoked by skill orchestration (`pr-workflow` / `sdd` / `multi-review`); it stays available for ad-hoc manual rescue, where a human is directly in the loop. It is a second, ungoverned permission path with known gaps:
+
+- It does not pass `--profile`, so it resolves against the unmanaged base config rather than the SSOT profiles.
+- It does not propagate `CODEX_HOME`, so invoked from a `cld-r06` session it acts on the personal `~/.codex` account — an account-isolation leak.
+- It defaults to write-capable runs with `approval_policy: "never"`.
 
 ---
 
