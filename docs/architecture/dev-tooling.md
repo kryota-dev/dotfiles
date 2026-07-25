@@ -20,7 +20,7 @@ The block contains three categories of entries (examples; see `config.toml` for 
 
 - **Runtime languages** pinned to exact versions (e.g. `node`, `python`, `ruby`, `go`, `deno`, `rust`).
 - **Registry-resolvable CLI tools** using a bare key (e.g. `gh`, `gitleaks`, `shellcheck`, `starship`, `tmux`).
-- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`, `"npm:happy"`).
+- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`).
 
 ### `[settings]` block
 

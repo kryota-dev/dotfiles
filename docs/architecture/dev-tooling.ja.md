@@ -20,7 +20,7 @@
 
 - **ランタイム言語** — 正確なバージョンにピン（例: `node`、`python`、`ruby`、`go`、`deno`、`rust`）
 - **レジストリ解決可能な CLI ツール** — ベアキーを使用（例: `gh`、`gitleaks`、`shellcheck`、`starship`、`tmux`）
-- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`、`"npm:happy"`）
+- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`）
 
 ### `[settings]` ブロック
 

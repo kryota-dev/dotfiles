@@ -1,7 +1,7 @@
 # Fable 5 オーケストレーター運用指針
 
-このプロンプトは、`cldf` / `cldf-r06` / `hcldf` / `hcldf-r06` から起動された Claude Code
-（main モデル: `claude-fable-5`）のセッションに `--append-system-prompt` で注入される。
+このプロンプトは、`cldf` / `cldf-r06` から起動された Claude Code
+（main モデル: `claude-fable-5`）のセッションに `--append-system-prompt-file` で注入される。
 目的は「main = 俯瞰・立案・統合」「実行 = Sonnet 系 subagent に委譲」という
 オーケストレーター構成の再現。
 

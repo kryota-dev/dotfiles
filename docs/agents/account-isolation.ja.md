@@ -35,25 +35,17 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 |---|---|---|---|
 | `cld` | Claude Code | 個人 | デフォルトアカウントの環境セットで `claude` を実行 |
 | `cld-r06` | Claude Code | 業務（r06） | r06 環境セットで `claude` を実行 |
-| `hcld` | Claude Code（happy ラップ） | 個人 | デフォルトアカウントの環境で `happy claude` を実行 |
-| `hcld-r06` | Claude Code（happy ラップ） | 業務（r06） | r06 環境で `happy claude` を実行 |
 | `claude-config` | Claude Code | 個人 | ECC config-protection + gateguard-fact-force ゲートを無効化；意図的な設定編集用 |
 | `cldf` | Claude Code | 個人 | `claude --model claude-fable-5` を [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで実行 — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
 | `cldf-r06` | Claude Code | 業務（r06） | r06 アカウントでの `cldf` |
-| `hcldf` | Claude Code（happy ラップ） | 個人 | happy ラッパー経由の `cldf` |
-| `hcldf-r06` | Claude Code（happy ラップ） | 業務（r06） | r06 アカウントでの happy ラッパー経由の `cldf` |
 | `cdx` | Codex CLI | 個人 | `codex --profile shared`（デフォルト `~/.codex`）を実行 |
 | `cdx-r06` | Codex CLI | 業務（r06） | `CODEX_HOME=$HOME/.codex-r06 codex --profile shared` を実行 |
-| `hcdx` | Codex CLI（happy ラップ） | 個人 | `happy codex --profile shared` を実行 |
-| `hcdx-r06` | Codex CLI（happy ラップ） | 業務（r06） | `CODEX_HOME=$HOME/.codex-r06 happy codex --profile shared` を実行 |
-
-`happy` 自身の状態（`~/.happy`、つまり `HAPPY_HOME_DIR` のデフォルト）はアカウント間で意図的に**共有**されます — 1 つのスマートフォンペアリングで全アカウントを制御します。アカウントごとに分離されるのは内側の claude/codex 環境のみです。
 
 ---
 
 ## Fable 5 オーケストレーター（`cldf` 系）
 
-`cldf` / `cldf-r06` / `hcldf` / `hcldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `_claude_with_home`（`cld` 系と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
+`cldf` / `cldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `_claude_with_home`（`cld` 系と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
 
 - main モデルをフル ID `--model claude-fable-5`（`fable` エイリアスではない）で pin する。委譲プロンプトの Sonnet 5 世代前提と main モデル世代が silently ずれないようにするためで、モデル世代交代時にはプロンプトとセットで意識的に更新する。
 - `home/dot_claude/fable-orchestrator-prompt.md`（デプロイ先: `~/.claude/fable-orchestrator-prompt.md`）を、readable なときのみ `--append-system-prompt-file <path>` で指定する。渡すのは **path** で、CLI 側が process 起動時にファイルを読む — プロンプトが伸びても argv には載らない。ファイル不在時（`chezmoi apply` 前 / 手動削除後）でもセッションは正常起動し、オーケストレーター誘導だけが効かない。
