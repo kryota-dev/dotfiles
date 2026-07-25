@@ -15,9 +15,13 @@
 # `agent-browser skills get <name>` (version-matched, never stale), so vendoring the
 # static SKILL.md is redundant. Only the discovery stub (dot_agents/skills/agent-browser)
 # stays managed; these previously-deployed copies are removed.
+# All five skills left the source tree together, but only the first three were listed
+# here at the time, so agentcore and vercel-sandbox lingered as unmanaged runtime dirs.
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood
+.agents/skills/agentcore
+.agents/skills/vercel-sandbox
 
 # agent-browser discovery stub's own references/ and templates/. These were a frozen
 # copy of pre-0.32 vendored content, never linked from SKILL.md and already stale (e.g.

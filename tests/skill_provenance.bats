@@ -41,7 +41,7 @@ _skill_is_external() {
   # The specialized skills are loaded at runtime, not vendored (would go stale), and
   # their previously-deployed copies must be removed via .chezmoiremove.
   local s
-  for s in electron slack dogfood; do
+  for s in electron slack dogfood agentcore vercel-sandbox; do
     [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
       echo "agent-browser skill '$s' should be CLI-served, not vendored in source"
       false
