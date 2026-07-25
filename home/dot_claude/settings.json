@@ -109,8 +109,8 @@
       "Read(**/*credentials*)",
       "Read(**/*secret*)",
 
-      "Write(**/.env*)",
-      "Write(**/secrets/**)",
+      "Edit(**/.env*)",
+      "Edit(**/secrets/**)",
 
       "Bash(env:*)",
       "Bash(printenv:*)",
