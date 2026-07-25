@@ -1,0 +1,10 @@
+{{ includeTemplate "codex-model-pin.toml" . -}}
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+web_search = "cached"
+
+[features]
+multi_agent = true
+
+[sandbox_workspace_write]
+network_access = false

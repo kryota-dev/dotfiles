@@ -344,6 +344,13 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/private_shared.config.toml.tmpl" ]
 }
 
+@test "codex model pin and agent profile sources exist" {
+  [ -f "${HOME_DIR}/.chezmoitemplates/codex-model-pin.toml" ]
+  [ -f "${HOME_DIR}/.chezmoitemplates/codex-agent-config.toml" ]
+  [ -f "${HOME_DIR}/dot_codex/private_agent.config.toml.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex-r06/private_agent.config.toml.tmpl" ]
+}
+
 @test "claude-r06 work profile symlinks exist" {
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_CLAUDE.md.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_skills.tmpl" ]
