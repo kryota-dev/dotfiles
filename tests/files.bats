@@ -412,16 +412,21 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_ecc-hook.sh" ]
 }
 
-@test "settings.json suppresses AI attribution (Claude Code + happy) so no signatures leak" {
+@test "settings.json blanks the commit/PR attribution byline" {
   local s="${HOME_DIR}/dot_claude/settings.json"
   [ -f "$s" ]
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
-  # `attribution.commit`/`.pr` empty → Claude Code's own "Generated with…" + Co-Authored-By
-  # trailer is suppressed. `includeCoAuthoredBy: false` is ALSO required: happy-cli reads only
-  # this key from $CLAUDE_CONFIG_DIR/settings.json (not attribution, not project settings.local)
-  # and defaults to true when absent — dropping it re-enables happy's "via [Happy]" commit
-  # signature injection. Both keys must stay present; this guards against that regression.
-  jq -e '.includeCoAuthoredBy == false' "$s" >/dev/null
+  # Empty `commit`/`pr` strings hide Claude Code's own "Generated with…" line and the
+  # Co-Authored-By trailer. Both must stay empty strings, not null/absent: an absent
+  # `attribution` falls back to the default byline. The older `includeCoAuthoredBy` key is
+  # DEPRECATED in the Claude Code settings schema ("Use 'attribution' instead") and takes
+  # effect only when `attribution` is absent, so asserting on `attribution` alone pins the
+  # key that is actually load-bearing.
+  # Scope note: this covers the byline, and only the byline. It is not a claim that every
+  # attribution channel is closed. `attribution.sessionUrl` is deliberately left at its
+  # default (true), so web/Remote Control sessions still append a Claude-Session trailer —
+  # that is wanted, not an oversight, and is why this test does not assert on it. Anything
+  # else reading this file (a third-party wrapper, say) may honour different keys entirely.
   jq -e '.attribution.commit == "" and .attribution.pr == ""' "$s" >/dev/null
 }
 
@@ -880,14 +885,59 @@ FAKE_CLAUDE
   [ ! -e "${HOME_DIR}/dot_config/dmux" ]
   [ ! -e "${HOME_DIR}/dot_config/zsh/dmux.zsh" ]
   [ ! -e "${HOME_DIR}/dot_config/zsh/private_dmux-secrets.zsh.tmpl" ]
-  run grep -F '"npm:dmux"' "${HOME_DIR}/dot_config/mise/config.toml"
-  [ "$status" -ne 0 ]
-  run grep -F 'dmux-helpers' "${HOME_DIR}/dot_config/sheldon/plugins.toml"
-  [ "$status" -ne 0 ]
+  # Same fail-open trap the happy guard below documents: grep exits 2 on a missing file, so
+  # assert existence first and require exactly 1 rather than merely non-zero.
+  [ -f "${HOME_DIR}/dot_config/mise/config.toml" ]
+  [ -f "${HOME_DIR}/dot_config/sheldon/plugins.toml" ]
+  run grep -Ei 'dmux' "${HOME_DIR}/dot_config/mise/config.toml"
+  [ "$status" -eq 1 ]
+  run grep -Ei 'dmux' "${HOME_DIR}/dot_config/sheldon/plugins.toml"
+  [ "$status" -eq 1 ]
   # Deployed leftovers must stay declared for cleanup on every machine.
   grep -qFx '.config/dmux' "${HOME_DIR}/.chezmoiremove"
   grep -qFx '.agents/skills/dmux-workflows' "${HOME_DIR}/.chezmoiremove"
   grep -qFx '.dmux-r06' "${HOME_DIR}/.chezmoiremove"
+}
+
+@test "happy provisioning is retired (guard against reintroduction)" {
+  # happy (slopus/happy) was removed entirely (#331). Unlike dmux, it never owned files of
+  # its own — it lived as lines inside shared ones — so this guards the host files instead
+  # of asserting that paths are absent.
+  local cz="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  local cx="${HOME_DIR}/dot_config/zsh/codex.zsh"
+  local mc="${HOME_DIR}/dot_config/mise/config.toml"
+  local st="${HOME_DIR}/dot_claude/settings.json"
+  local cr="${HOME_DIR}/.chezmoiremove"
+  # grep exits 2 (not 1) when the file is missing, so a bare `status -ne 0` would pass
+  # vacuously if any of these were renamed away. Assert existence first, then require
+  # exactly 1 (matched nothing) rather than "non-zero".
+  local f
+  for f in "$cz" "$cx" "$mc" "$st" "$cr"; do [ -f "$f" ]; done
+
+  run grep -Ei 'happy|hcld' "$cz"
+  [ "$status" -eq 1 ]
+  run grep -Ei 'happy|hcdx' "$cx"
+  [ "$status" -eq 1 ]
+  # Substring rather than the exact `"npm:happy"` spelling: TOML also accepts literal-string
+  # keys ('npm:happy' = ...), which an exact match would wave through. config.toml holds no
+  # "happy" substring at all today, so the broader pattern cannot false-positive.
+  run grep -Ei 'happy' "$mc"
+  [ "$status" -eq 1 ]
+  # includeCoAuthoredBy is DEPRECATED in the Claude Code settings schema and survived only
+  # because happy-cli read that one key. For Claude Code itself, attribution.commit/.pr now
+  # carry the commit/PR byline suppression (asserted by the attribution test above); the
+  # third key, sessionUrl, is deliberately left at its default.
+  run grep -F 'includeCoAuthoredBy' "$st"
+  [ "$status" -eq 1 ]
+  # Deliberately the inverse of the dmux guard above: ~/.happy must NOT be declared in
+  # .chezmoiremove. Entries there are standing per-apply deletions, and ~/.happy holds phone
+  # pairing and E2E key material rather than dmux's regenerable socket dir — a lingering
+  # entry would wipe the keys with no warning if happy were ever reinstalled. The manual
+  # cleanup procedure that replaces it is recorded in .chezmoiremove itself.
+  # Match `.happy`, `.happy/` and `.happy/<subpath>`: an exact-line -Fx would miss the
+  # latter two and let a real key-material registration slip past this guard.
+  run grep -E '^[[:space:]]*\.happy(/|$)' "$cr"
+  [ "$status" -eq 1 ]
 }
 
 @test "mcp setup registers all servers as user scope for every account config dir" {

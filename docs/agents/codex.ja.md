@@ -123,7 +123,7 @@ multi_agent = true
 
 `shared.config.toml` は named Codex CLI プロファイルです。Codex が `--profile shared` で呼び出された場合にのみ、Codex の動的に書き込まれる `config.toml` の上にレイヤーとして適用されます。このフラグなしでは SSOT 設定はサイレントに無視されます。
 
-`--profile shared` を自動的に注入するメカニズムが 2 つあります：
+`--profile shared` を自動的に注入するメカニズムは 1 つだけです：
 
 ### cdx / cdx-r06 エイリアス
 
@@ -134,12 +134,6 @@ multi_agent = true
 cdx      → codex --profile shared "$@"                              # CODEX_HOME 未設定 → Codex は ~/.codex をデフォルト使用
 cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 ```
-
-`hcdx` と `hcdx-r06` は phone-control コンテキスト用のバリアントです（happy ラッパー経由）。
-ただし `happy codex` は `codex app-server` 経由で Codex を **headless** 起動し、ローカル端末は
-read-only ビューア（"Codex Agent Messages / Waiting for messages…"）で対話プロンプトを持ちません。
-セッション操作は Happy モバイル/Web アプリ側から行います。ローカルで対話的に Codex を使う場合は
-`cdx` / `cdx-r06` を使用してください（フル TUI をローカル起動する `happy claude` とは非対称です）。
 
 ### 素の codex は SSOT 設定をスキップする
 

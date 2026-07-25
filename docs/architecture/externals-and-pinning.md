@@ -179,7 +179,14 @@ Removing a file from the chezmoi source tree (via `git rm`) does **not** remove 
 1. Remove from source: `git rm home/path/to/file` (or remove the name from `.ecc.skills`).
 2. Add the `$HOME`-relative destination path to `home/.chezmoiremove`.
 
-An excerpt of `home/.chezmoiremove` — read the file itself for the full list, which also covers the retired dmux layer, the 2026-07-06 stocktake, and a case-rename cleanup:
+> **Exception — runtime dirs holding unregenerable key material.** Do *not* register a path
+> whose contents include pairing or end-to-end encryption keys. An entry here is a standing
+> declaration, not a one-off cleanup: if the tool is ever reinstalled, every subsequent apply
+> deletes the keys again with no warning. Retire those by hand instead, and record the ordered
+> procedure as a comment in `home/.chezmoiremove` so it stays next to the decision. Precedent:
+> `~/.happy` (#331) — deliberately absent, with `tests/files.bats` asserting it stays absent.
+
+An excerpt of `home/.chezmoiremove` — read the file itself for the full list, which also covers the retired dmux layer, the happy retirement note and its manual runbook, the 2026-07-06 stocktake, and a case-rename cleanup:
 
 ```
 # Orphaned SDD agents

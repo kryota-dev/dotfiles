@@ -1,8 +1,8 @@
 # Claude Code account isolation.
 # Each account gets its own config dir plus ECC/CLV2/gateguard state dirs, so cld and
 # cld-r06 never share sessions, governance state.db, instincts, or hook caches.
-# The command to run is passed after the home dir ("claude ..." or "happy claude ..."),
-# so the happy wrapper inherits the exact same per-account environment.
+# The command to run is passed after the home dir rather than hard-coded, so the helper
+# stays agnostic about what it launches while still pinning the per-account environment.
 
 # MCP API keys (exa, firecrawl) rendered from 1Password into a 0600 file. Sourced (not
 # exported) so the keys stay out of the general shell environment; _claude_with_home re-exports
@@ -41,13 +41,6 @@ _claude_with_home() {
 alias cld='_claude_with_home "$HOME/.claude" claude'
 alias cld-r06='_claude_with_home "$HOME/.claude-r06" claude'
 
-# happy (slopus/happy) variants: run Claude Code through the happy wrapper for phone
-# control, keeping the same per-account isolation. happy spawns claude inheriting this
-# env (so CLAUDE_CONFIG_DIR etc. still pick the account); happy's own state (~/.happy,
-# i.e. HAPPY_HOME_DIR default) is intentionally shared across accounts (one pairing).
-alias hcld='_claude_with_home "$HOME/.claude" happy claude'
-alias hcld-r06='_claude_with_home "$HOME/.claude-r06" happy claude'
-
 # Dedicated session for intentional config edits on the DEFAULT account (~/.claude): routes
 # through _claude_with_home (so ECC state stays isolated to ~/.claude) and disables the ECC
 # config-protection / gateguard-fact-force gates so Claude can edit settings.json / biome.json /
@@ -73,15 +66,10 @@ alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-wri
 # The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
 # (content) so the prompt body stays out of argv — the CLI reads the file at process start,
 # avoiding argv-length and control-char concerns as the prompt grows.
-# Exception (hcldf/hcldf-r06): the happy (slopus/happy) wrapper always injects its own
-# --append-system-prompt, and Claude Code >= 2.1.185 refuses to mix --append-system-prompt
-# with --append-system-prompt-file ("Cannot use both ... Please use only one."), which aborted
-# the happy variants at launch. So when routing through happy ($1 == happy) the prompt is
-# inlined via --append-system-prompt instead — repeating the same flag is allowed (observed on
-# claude 2.1.205), so ours coexists with happy's. The prompt is small (~6 KB) and static, so the
-# argv cost is moot; note that inlining exposes the body in argv (readable by same-user
-# processes), so keep fable-orchestrator-prompt.md secret-free — revert to the file form if
-# happy ever honors --append-system-prompt-file.
+# The two flags are mutually exclusive: Claude Code >= 2.1.185 aborts with "Cannot use both
+# ... Please use only one." So a wrapper that injects its own --append-system-prompt cannot
+# simply be layered on top of this helper — it would have to inline the prompt instead. The
+# retired phone-control wrapper needed exactly that separate code path (#331).
 _claude_fable() {
   local home_dir="$1"
   shift
@@ -91,18 +79,12 @@ _claude_fable() {
   local prompt_file="$HOME/.claude/fable-orchestrator-prompt.md"
   local -a fable_flags=(--model claude-fable-5)
   if [[ -r "$prompt_file" ]]; then
-    if [[ "$1" == happy ]]; then
-      fable_flags+=(--append-system-prompt "$(<"$prompt_file")")
-    else
-      fable_flags+=(--append-system-prompt-file "$prompt_file")
-    fi
+    fable_flags+=(--append-system-prompt-file "$prompt_file")
   fi
   _claude_with_home "$home_dir" "$@" "${fable_flags[@]}"
 }
 alias cldf='_claude_fable "$HOME/.claude" claude'
 alias cldf-r06='_claude_fable "$HOME/.claude-r06" claude'
-alias hcldf='_claude_fable "$HOME/.claude" happy claude'
-alias hcldf-r06='_claude_fable "$HOME/.claude-r06" happy claude'
 
 # ecc-* CLIs (PR-C, #4/#5): inspect the per-account ECC governance state.db that the
 # governance-capture fork writes. Account is selected by ECC_AGENT_DATA_HOME; the reader

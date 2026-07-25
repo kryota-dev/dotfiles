@@ -29,31 +29,23 @@ The r06 Claude config directory (`~/.claude-r06`) contains only symlinks pointin
 
 ## Alias matrix
 
-These are the user-facing entry points. Each alias corresponds to one cell in the 2 × 2 harness × account matrix.
+These are the user-facing entry points. The base is a 2 × 2 harness × account matrix (Claude Code / Codex × personal / work), plus purpose-specific variants layered on the Claude Code side.
 
 | Alias | Harness | Account | Effect |
 |---|---|---|---|
 | `cld` | Claude Code | Personal | Runs `claude` with default-account env set |
 | `cld-r06` | Claude Code | Work (r06) | Runs `claude` with r06 env set |
-| `hcld` | Claude Code (happy-wrapped) | Personal | Runs `happy claude` with default-account env |
-| `hcld-r06` | Claude Code (happy-wrapped) | Work (r06) | Runs `happy claude` with r06 env |
 | `claude-config` | Claude Code | Personal | Disables ECC config-protection + gateguard-fact-force gates; for intentional config edits |
 | `cldf` | Claude Code | Personal | Runs `claude --model claude-fable-5` with the [Fable 5 orchestrator prompt](#fable-5-orchestrator-cldf-family) — main session runs on Fable 5, delegates execution to Sonnet subagents |
 | `cldf-r06` | Claude Code | Work (r06) | `cldf` on the r06 account |
-| `hcldf` | Claude Code (happy-wrapped) | Personal | `cldf` through the happy wrapper |
-| `hcldf-r06` | Claude Code (happy-wrapped) | Work (r06) | `cldf` on the r06 account through the happy wrapper |
 | `cdx` | Codex CLI | Personal | Runs `codex --profile shared` (default `~/.codex`) |
 | `cdx-r06` | Codex CLI | Work (r06) | Runs `CODEX_HOME=$HOME/.codex-r06 codex --profile shared` |
-| `hcdx` | Codex CLI (happy-wrapped) | Personal | Runs `happy codex --profile shared` |
-| `hcdx-r06` | Codex CLI (happy-wrapped) | Work (r06) | Runs `CODEX_HOME=$HOME/.codex-r06 happy codex --profile shared` |
-
-`happy`'s own state (`~/.happy`, i.e. `HAPPY_HOME_DIR` default) is intentionally **shared** across accounts — one phone pairing controls all accounts. Only the inner claude/codex environment is per-account.
 
 ---
 
 ## Fable 5 orchestrator (`cldf` family)
 
-The `cldf` / `cldf-r06` / `hcldf` / `hcldf-r06` aliases start Claude Code in an **orchestrator configuration**: the main session runs on `claude-fable-5` for overview / planning / synthesis, and task execution is steered into Sonnet subagents. They wrap `_claude_with_home` (same account-isolation environment as `cld` family) with a thin `_claude_fable` helper that:
+The `cldf` / `cldf-r06` aliases start Claude Code in an **orchestrator configuration**: the main session runs on `claude-fable-5` for overview / planning / synthesis, and task execution is steered into Sonnet subagents. They wrap `_claude_with_home` (same account-isolation environment as `cld` family) with a thin `_claude_fable` helper that:
 
 - pins the main model to the full ID `--model claude-fable-5` (not the `fable` alias, so the delegation prompt's Sonnet-5-era guidance and the main model generation never silently drift apart), and
 - points at `home/dot_claude/fable-orchestrator-prompt.md` (deployed to `~/.claude/fable-orchestrator-prompt.md`) via `--append-system-prompt-file <path>` when the file is readable. The path (not the content) is passed to the CLI, which reads the file at process start — this keeps the prompt body out of argv even as the prompt grows. When the file is absent (before `chezmoi apply` or after manual removal) the session still starts, just without the orchestrator prompt.
