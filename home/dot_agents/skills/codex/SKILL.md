@@ -44,7 +44,7 @@ if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME
 
 ## 実行コマンド
 
-レビュー目的では **read-only sandbox** で十分。`--sandbox read-only` を明示する。書き込みが必要な用途のときのみ `--sandbox workspace-write` を明示する。
+レビュー目的では **read-only sandbox** で十分。`--sandbox read-only` を明示する。ワークスペース内への書き込みが必要な用途のときのみ `--sandbox workspace-write` を明示する。
 
 ### 推奨形式: stdin から prompt を渡し、結果のみをファイルに出力する
 
