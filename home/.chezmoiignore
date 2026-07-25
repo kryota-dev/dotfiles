@@ -18,7 +18,9 @@
 .claude/teams
 .claude/todos
 
-# ECC runtime state (hooks, governance state.db, continuous-learning, gateguard)
+# ECC runtime state (hooks, governance state.db, continuous-learning, gateguard).
+# The ecc-homunculus entries cover state left behind by the pre-#336 layout only: live CLV2
+# state now sits at ~/.local/share/ecc-homunculus-<slug>, outside chezmoi's target tree.
 .claude/ecc
 .claude/ecc-homunculus
 .claude/.gateguard

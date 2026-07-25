@@ -13,7 +13,9 @@
 # This is local at-rest data under each homunculus dir; nothing leaves the machine.
 #
 # Homunculus dirs (all that apply): the cld / cld-r06 wrappers point CLV2_HOMUNCULUS_DIR at
-# "<account>/ecc-homunculus"; bare `claude` (no wrapper, env unset) falls back to
+# "~/.local/share/ecc-homunculus-<slug>" — outside the account config dir, because Claude Code
+# treats every path under that dir as a sensitive file and the headless observer has nobody to
+# approve the instinct write (#336); bare `claude` (no wrapper, env unset) falls back to
 # $XDG_DATA_HOME/ecc-homunculus or ~/.local/share/ecc-homunculus. Idempotent.
 set -euo pipefail
 
@@ -36,6 +38,11 @@ enable_config='{"version":"2.1","observer":{"enabled":true,"run_interval_minutes
 _enable_in() {
   local dir="$1"
   mkdir -p "$dir"
+  # 700 on the state dir: observations.jsonl records tool input/output, and unlike the old
+  # location under the Claude config dir this now lives in ~/.local/share, which other tools
+  # share. Applied on every run so an existing dir is healed instead of left at the umask
+  # default.
+  chmod 700 "$dir"
   local cfg="${dir}/config.json"
   if [ -f "$cfg" ]; then
     # Preserve any existing fields; only force observer.enabled=true. mktemp in the target
@@ -54,10 +61,22 @@ _enable_in() {
   echo "[clv2-observer] observer enabled in ${cfg}" >&2
 }
 
-# Wrapper accounts: enable under each account config dir that exists.
+# Wrapper accounts: enable in the homunculus dir belonging to each account config dir that
+# exists. The config dir still selects WHICH accounts are in use; only the state location moved
+# out of it. The slug mapping mirrors _claude_with_home in dot_config/zsh/claude.zsh — the two
+# must stay in sync or the observer would be enabled in a dir no session ever reads.
 for account in "${HOME}/.claude" "${HOME}/.claude-r06"; do
   if [ -d "$account" ]; then
-    _enable_in "${account}/ecc-homunculus"
+    # Derive the slug from the basename only, in the same three branches as the zsh helper, so
+    # the two cannot disagree on a name neither of them was written for (a path-based strip
+    # here would also leak a trailing slash into the slug).
+    account_dir_name="${account##*/}"
+    case "$account_dir_name" in
+      .claude) slug=default ;;
+      .claude-*) slug="${account_dir_name#.claude-}" ;;
+      *) slug="${account_dir_name#.}" ;;
+    esac
+    _enable_in "${HOME}/.local/share/ecc-homunculus-${slug}"
   fi
 done
 

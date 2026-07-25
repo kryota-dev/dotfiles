@@ -113,9 +113,12 @@ log "start: claude -p /morning-brief (model=$CLAUDE_MODEL, max-turns=$MAX_TURNS)
 # #257), minus the MCP web-search keys — the brief does not need them and the
 # MCP servers tolerate missing keys. Headless launch + watchdog mirror the
 # CLV2 observer-loop.sh pattern.
+# CLV2_HOMUNCULUS_DIR carries the "default" slug that _claude_with_home derives for
+# ~/.claude, and deliberately sits outside the config dir: Claude Code treats every path
+# under it as a sensitive file, which no headless session can approve a write to (#336).
 CLAUDE_CONFIG_DIR="$HOME/.claude" \
   ECC_AGENT_DATA_HOME="$HOME/.claude" \
-  CLV2_HOMUNCULUS_DIR="$HOME/.claude/ecc-homunculus" \
+  CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-default" \
   ECC_MCP_HEALTH_STATE_PATH="$HOME/.claude/mcp-health-cache.json" \
   GATEGUARD_STATE_DIR="$HOME/.claude/.gateguard" \
   ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
