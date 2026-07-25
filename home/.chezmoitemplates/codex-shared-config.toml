@@ -1,6 +1,5 @@
-personality = "pragmatic"
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-
+{{ includeTemplate "codex-model-pin.toml" . -}}
+# [features] is intentionally duplicated with codex-agent-config.toml (profile parity).
+# Not extracted into a fragment: a single one-line key does not justify the indirection (YAGNI).
 [features]
 multi_agent = true

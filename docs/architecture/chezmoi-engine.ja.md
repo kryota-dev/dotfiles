@@ -102,7 +102,9 @@ macOS がプライマリターゲットです。Linux サポートは CI をグ�
 |-------------|--------------|------|
 | `coding-standards.md` | `AGENTS.md.tmpl` | ハウスコーディング標準（日本語）。一度作成し `~/AGENTS.md` に埋め込む。`~/.claude/CLAUDE.md` は `@~/AGENTS.md` インポート（chezmoi の `includeTemplate` ではなく Claude Code のファイル参照機能）経由で間接的に取り込む |
 | `codex-hooks.json` | `dot_codex/hooks.json.tmpl`、`dot_codex-r06/hooks.json.tmpl` | 実際の Codex `PreToolUse` フック本体。`{{ .chezmoi.homeDir }}` を参照 |
-| `codex-shared-config.toml` | `dot_codex/private_shared.config.toml.tmpl`、`dot_codex-r06/private_shared.config.toml.tmpl` | 共有 Codex プロファイル設定。personality、model、推論努力度、`multi_agent` フラグ |
+| `codex-model-pin.toml` | `codex-shared-config.toml`、`codex-agent-config.toml` | Codex の model／effort ピンのスカラー（`personality`、`model`、`model_reasoning_effort`）。両プロファイルからインクルードされる single source of truth |
+| `codex-shared-config.toml` | `dot_codex/private_shared.config.toml.tmpl`、`dot_codex-r06/private_shared.config.toml.tmpl` | 共有 Codex プロファイル設定。`codex-model-pin.toml` と `[features]` テーブルをインクルード |
+| `codex-agent-config.toml` | `dot_codex/private_agent.config.toml.tmpl`、`dot_codex-r06/private_agent.config.toml.tmpl` | スキル用の非対話 `agent` プロファイル。`codex-model-pin.toml` と `sandbox_mode`／`approval_policy`／`web_search`／`[sandbox_workspace_write]` をインクルード |
 
 `dot_codex/` と `dot_codex-r06/` ディレクトリは構造的に同一の薄いラッパーで、`includeTemplate` 呼び出しのみを含みます。実際の設定本体は `.chezmoitemplates/` に存在するため、2 つのアカウントが乖離することはありません。
 

@@ -35,7 +35,7 @@
 | `home/dot_codex/symlink_AGENTS.md.tmpl` | `~/.codex/AGENTS.md -> ~/AGENTS.md` | `~/.codex-r06/AGENTS.md -> ~/AGENTS.md` |
 | `home/dot_codex/symlink_skills.tmpl` | `~/.codex/skills -> ~/.agents/skills` | `~/.codex-r06/skills -> ~/.agents/skills` |
 
-`home/dot_codex-r06/` には同じ 4 つのファイルが含まれています；テンプレート本体は同じ `home/.chezmoitemplates/` ソースを指す同一の 1 行です。
+加えて `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml`（0600）があり、これはスキルが使う非対話 workspace-write プロファイルです（後述の `agent` プロファイルの注記を参照）。`home/dot_codex-r06/` には同じファイル群が含まれています；テンプレート本体は同じ `home/.chezmoitemplates/` ソースを指す同一の 1 行です。
 
 ---
 
@@ -86,11 +86,11 @@ cdx-r06  → CODEX_HOME=~/.codex-r06 codex --profile shared "$@"    (ワーク /
 
 `home/.chezmoitemplates/codex-shared-config.toml` が実際の設定本体で、`dot_codex/private_shared.config.toml.tmpl` と `dot_codex-r06/private_shared.config.toml.tmpl` の両方からインクルードされます。
 
-レンダリングされた `shared.config.toml` の内容：
+model／effort のスカラーは共有フラグメント `home/.chezmoitemplates/codex-model-pin.toml`（single source of truth）にあり、`shared` と `agent` の両プロファイルからインクルードされます。レンダリングされた `shared.config.toml` の内容（model 値は pin に追従。`codex-model-pin.toml` を参照）：
 
 ```toml
 personality = "pragmatic"
-model = "gpt-5.5"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "xhigh"
 
 [features]

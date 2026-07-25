@@ -344,6 +344,38 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_codex/private_shared.config.toml.tmpl" ]
 }
 
+@test "codex model pin and agent profile sources exist" {
+  [ -f "${HOME_DIR}/.chezmoitemplates/codex-model-pin.toml" ]
+  [ -f "${HOME_DIR}/.chezmoitemplates/codex-agent-config.toml" ]
+  [ -f "${HOME_DIR}/dot_codex/private_agent.config.toml.tmpl" ]
+  [ -f "${HOME_DIR}/dot_codex-r06/private_agent.config.toml.tmpl" ]
+}
+
+# Rendered-target checks: verify the composed profiles actually produce the intended
+# permission posture, not just that the sources exist. The agent profile must carry
+# workspace-write/approval-never/network-off; the shared profile (used by interactive
+# cdx/cdx-r06) must NOT carry any permission keys, or interactive sessions would silently
+# gain write access.
+@test "codex agent profile renders the workspace-write permission posture" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  local rendered
+  rendered="$(chezmoi cat "${HOME}/.codex/agent.config.toml" --source "${HOME_DIR}" 2>/dev/null)"
+  grep -qx 'sandbox_mode = "workspace-write"' <<<"$rendered"
+  grep -qx 'approval_policy = "never"' <<<"$rendered"
+  grep -qx 'web_search = "cached"' <<<"$rendered"
+  grep -qx 'network_access = false' <<<"$rendered"
+}
+
+@test "codex shared profile does not leak permission keys to interactive sessions" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  local rendered
+  rendered="$(chezmoi cat "${HOME}/.codex/shared.config.toml" --source "${HOME_DIR}" 2>/dev/null)"
+  grep -qx 'model_reasoning_effort = "xhigh"' <<<"$rendered"
+  # The shared profile must stay permission-free (AC-004).
+  run grep -Eq '^(sandbox_mode|approval_policy|network_access|web_search)[[:space:]]*=' <<<"$rendered"
+  [ "$status" -ne 0 ]
+}
+
 @test "claude-r06 work profile symlinks exist" {
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_CLAUDE.md.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude-r06/symlink_skills.tmpl" ]

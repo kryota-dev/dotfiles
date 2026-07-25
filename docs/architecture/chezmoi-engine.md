@@ -102,7 +102,9 @@ The trailing `.` passes the current data context (all template variables) to the
 |----------|-------------|---------|
 | `coding-standards.md` | `AGENTS.md.tmpl` | House coding standards (Japanese), authored once. Embedded into `~/AGENTS.md`; `~/.claude/CLAUDE.md` picks it up transitively via its `@~/AGENTS.md` import (a Claude Code file reference, not a chezmoi `includeTemplate`) |
 | `codex-hooks.json` | `dot_codex/hooks.json.tmpl`, `dot_codex-r06/hooks.json.tmpl` | Actual Codex `PreToolUse` hook body; references `{{ .chezmoi.homeDir }}` |
-| `codex-shared-config.toml` | `dot_codex/private_shared.config.toml.tmpl`, `dot_codex-r06/private_shared.config.toml.tmpl` | Shared Codex profile config; personality, model, reasoning effort, `multi_agent` flag |
+| `codex-model-pin.toml` | `codex-shared-config.toml`, `codex-agent-config.toml` | Codex model/effort pin scalars (`personality`, `model`, `model_reasoning_effort`), the single source of truth included by both profiles |
+| `codex-shared-config.toml` | `dot_codex/private_shared.config.toml.tmpl`, `dot_codex-r06/private_shared.config.toml.tmpl` | Shared Codex profile config; includes `codex-model-pin.toml` plus the `[features]` table |
+| `codex-agent-config.toml` | `dot_codex/private_agent.config.toml.tmpl`, `dot_codex-r06/private_agent.config.toml.tmpl` | Non-interactive `agent` profile for skills; includes `codex-model-pin.toml` plus `sandbox_mode`/`approval_policy`/`web_search`/`[sandbox_workspace_write]` |
 
 The `dot_codex/` and `dot_codex-r06/` directories are structurally identical thin wrappers around `includeTemplate` calls. The real config bodies live in `.chezmoitemplates/` so the two accounts cannot drift.
 
