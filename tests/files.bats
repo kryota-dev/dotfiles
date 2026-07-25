@@ -212,6 +212,65 @@ load helpers/setup
   done
 }
 
+@test "adversarial-verifier agent exists with a pinned refutation tier" {
+  local agent="${HOME_DIR}/dot_claude/agents/adversarial-verifier.md"
+  [ -f "$agent" ]
+  grep -q "^name: adversarial-verifier$" "$agent"
+  grep -q "^model: sonnet$" "$agent"
+  # The Agent tool cannot pass effort per call, so xhigh has to live in frontmatter.
+  grep -q "^effort: xhigh$" "$agent"
+}
+
+@test "every agent definition pins both model and effort" {
+  # Sweeps the whole directory rather than a hardcoded roster, so a newly added agent is
+  # covered automatically. `model:` accepts aliases only — switching an agent to a literal
+  # slug (the pinning philosophy settings.json uses) would need this pattern widened.
+  local agent name
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+    [ -e "$agent" ] || continue
+    name="$(basename "$agent")"
+    grep -qE '^model: (sonnet|opus|haiku|fable)$' "$agent" || {
+      echo "${name}: model is unpinned (inherit or missing) — Opus sessions would run it at top tier"
+      false
+    }
+    grep -qE '^effort: (low|medium|high|xhigh|max)$' "$agent" || {
+      echo "${name}: effort is unpinned — a low-effort session would silently degrade its output"
+      false
+    }
+  done
+}
+
+@test "every agent definition forbids write and execution via Bash" {
+  # Reviewer agents read diffs that are, by definition, unverified input. `permissions.allow`
+  # pre-approves npm/npx/vitest/docker, so the technical layer lets a runner through — this
+  # prompt-level constraint is the only control, and it must not be missing from any agent.
+  local agent name
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+    [ -e "$agent" ] || continue
+    name="$(basename "$agent")"
+    # Agents without Bash cannot execute anything, so the constraint is moot for them.
+    grep -qE '^tools:.*\bBash\b' "$agent" || continue
+    grep -q '読み取り専用' "$agent" || {
+      echo "${name}: no read-only Bash constraint — the agent could execute repo code under review"
+      false
+    }
+  done
+}
+
+@test "model-fitness-check skill exists as the model/effort contract SSOT" {
+  local skill="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
+  [ -f "$skill" ]
+  grep -q "^name: model-fitness-check$" "$skill"
+  # The three orchestration skills must call it instead of restating the table.
+  local caller
+  for caller in pr-workflow sdd multi-review; do
+    grep -q 'model-fitness-check' "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+      echo "${caller}/SKILL.md does not invoke model-fitness-check"
+      false
+    }
+  done
+}
+
 @test "reviewer agents steer to a valid gh pr diff filter idiom" {
   # gh pr diff has no include pathspec (only --exclude / --name-only), so every
   # reviewer agent must reference --name-only rather than the unsupported
@@ -474,6 +533,21 @@ load helpers/setup
       and ($ids | index("post:bash:command-log-cost")) != null
       and ($ids | index("post:bash:build-complete")) != null
   ' "$s" >/dev/null
+}
+
+@test "settings.json pins the session effort level" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The model pin is covered by docs_facts (it is cross-checked against the FACT marker),
+  # but effortLevel has no doc counterpart — without this it could vanish unnoticed and
+  # every session would silently drop to the default effort.
+  local effort
+  effort="$(jq -r '.effortLevel' "$s")"
+  [ "$effort" = "xhigh" ] || {
+    echo "settings.json .effortLevel is '${effort}' but the declared session default is xhigh"
+    false
+  }
 }
 
 @test "settings.json declares codex and claude-code-setup as enabled plugins" {

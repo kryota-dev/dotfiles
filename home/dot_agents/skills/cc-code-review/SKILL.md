@@ -57,7 +57,7 @@ Agent(
 ## 注意事項
 
 ### コスト管理
-- エージェントはメインセッションのモデルを継承（`model: inherit`）。コストを抑えたい場合は Agent 呼び出し時に `model: "sonnet"` を指定できる。
+- エージェントは frontmatter で `model: sonnet` + `effort: xhigh` に固定（SSOT はエージェント定義 `~/.claude/agents/cc-code-review.md`）。**呼び出し元セッションの model を継承しない**ため、standalone 起動でも sonnet で動く。security-critical な変更や large tier のレビューで品質を上げたい場合は、Agent 呼び出し時に `model: "opus"` を明示指定して引き上げる（opt-in）。
 
 ### エラーハンドリング
 - 差分が空: エージェントがその旨を報告

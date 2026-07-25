@@ -115,6 +115,14 @@ workspace-write 実行は **linked worktree 内でのみ**行う（main worktree
 
 - `danger-full-access` / `--yolo` / `--dangerously-bypass-approvals-and-sandbox` は **skill から一切使用しない**。必要に見える状況が生じたらフラグで回避せず、作業を止めて user にエスカレートする。
 - `workspace-write` でも `<writable_root>/.git` / `.agents` / `.codex` は再帰的に read-only（Codex は commit / push / skill 定義変更ができない）。これは意図した設計であり、`--add-dir` 等で回避しない。コミットは親（Claude）が gitleaks hook + commit signing の通る経路で行う。
+- **plugin の `codex:codex-rescue` は skill / orchestration から一切起動しない**。`--profile` を通さず `CODEX_HOME` も伝播しないため **アカウント分離（個人 `~/.codex` / 業務 `~/.codex-r06`）が破れ**、さらに既定が write + `approval_policy: never` で本 skill の sandbox 契約の外に出る。skill からの Codex 起動は本 skill が定義する bash `codex exec --profile shared|agent` 経路のみとする。`codex-rescue` は user による ad-hoc な手動 rescue 専用。
+
+### 委任範囲の制約
+
+`codex exec` は **Bash 経由の外部プロセス**であり、Claude 側の `permissions.deny`（`Read(**/.env*)` / `Read(**/id_*)` / `Bash(env:*)` 等）は**一切適用されない**。加えて workspace-write は full-disk read を保持する（下記「残余リスク」）。したがって:
+
+- **secret / 認証情報に触れうるタスクは Codex に委譲しない**（親または Sonnet worker で実装する）。
+- 委譲するのは **self-contained なコード変更**に限り、委任プロンプトに対象ファイルを列挙して範囲を明示する。
 
 ### 実行順序契約（親の責務）
 

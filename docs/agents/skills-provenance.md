@@ -64,9 +64,9 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (<!-- FACT:curated-skill-count -->45<!-- /FACT --> skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->46<!-- /FACT --> skills)
 
-The 45 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 46 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (13 skills)
 
@@ -74,11 +74,11 @@ Core day-to-day development cycle automation, plus the parallel-dev triad (`repo
 
 `commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `delete-merged-branches`
 
-### Code review and multi-agent orchestration (6 skills)
+### Code review and multi-agent orchestration (7 skills)
 
-Review pipelines that spawn subagents or coordinate multiple reviewers.
+Review pipelines that spawn subagents or coordinate multiple reviewers, plus the shared model/effort gate they all call before implementation.
 
-`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`
+`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`
 
 ### Planning and spec-driven development (5 skills)
 

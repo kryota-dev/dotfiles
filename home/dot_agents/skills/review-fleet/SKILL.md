@@ -99,7 +99,7 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
 | owner/repo-b | #456 | B | 同上（`--arch` 推奨） | 大規模diff |
 | owner/repo-c | #789 | C（除外） | - | WIP ラベルあり |
 
-- **コスト警告を必ず明示する**: `multi-review` は Opus ベースのレビュアー（cc-code-review / cc-security-review、`model: inherit`）を含むため、総コストは **PR 件数 × reviewer 構成**で積み上がる。計画表の直後にこの旨を一文で明記する。
+- **コスト警告を必ず明示する**: `multi-review` の常設 reviewer（cc-code-review / cc-security-review）は frontmatter で `model: sonnet` + `effort: xhigh` に固定されているが、総コストは **PR 件数 × reviewer 構成**で積み上がる。計画表の直後にこの旨を一文で明記する。security-critical / large tier の PR では呼び出し側の判断で `model: "opus"` に引き上げられるため、その分のコスト増も見込む。
 - reviewer 構成は `multi-review` の動的 specialist roster（言語/ドメイン検出）を踏襲し、diff の変更ファイルから自動検出したものを表示する。
 - **B 分類 PR に `--arch` を付けるかは Phase 3 の追加質問で確定する**（B が 0 件のときはこの質問を省略）。B が 1 件以上あれば下記の 2 問目を提示する。
 

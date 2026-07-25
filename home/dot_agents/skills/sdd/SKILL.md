@@ -32,6 +32,8 @@ Phase 0: 準備 → Phase 1: 要件定義 → Phase 2: 設計 → Phase 3: タ�
 
 ## Phase 0: 準備
 
+**Phase 0 冒頭で（遅くとも Phase 1 の spec 執筆より前に）`/model-fitness-check orchestration` を起動する**（§4 model/effort contract の SSOT ゲート。large / PRD 審議相当なら `large` を渡す）。**行種別も要求される model / effort 値もここに書かない**（テーブルと行種別判定はいずれも `/model-fitness-check` が唯一の SSOT）。
+
 ### 0-1. 引数の解析
 
 `$ARGUMENTS` を解析:
@@ -131,6 +133,7 @@ mkdir -p .spec-workflow/specs/{spec-name}
 ```
 Agent:
   subagent_type: "Explore"
+  model: "haiku"   # retrieval 型（steering docs / CLAUDE.md の verbatim 抽出）は Haiku で十分
   description: "Steering docs・規約調査"
   prompt: |
     以下を調査して報告:
@@ -147,6 +150,7 @@ Agent:
 ```
 Agent:
   subagent_type: "Explore"
+  model: "sonnet"   # pattern-recognition 型（既存構造・パターンの一般化）。見落としが下流の requirements/design に波及するため Sonnet
   description: "コードベース構造分析"
   prompt: |
     プロジェクトの構造を分析して報告:
@@ -193,6 +197,7 @@ Agent:
 ```
 Agent:
   subagent_type: "Explore"
+  model: "sonnet"   # pattern-recognition 型（再利用可能コンポーネント発見）。reuse-first 原則が効くよう false negative を避ける
   description: "既存コード分析"
   prompt: |
     .spec-workflow/specs/{spec-name}/requirements.md を読み、要件に関連する以下を調査:
@@ -273,6 +278,13 @@ requirements.md, design.md, tasks.md を精読し、全体像を把握。
 
 ### 4-2. タスク順次実装
 
+**実装の委譲方針**: 複数ファイル横断・context 継続が要るタスクは Leader が実装する（context continuity）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスクへの依存記載なし・並行実行中の他タスクと共有状態を持たない）は、Sonnet worker（`model: sonnet`）または Codex worker（`codex exec --profile agent`、workspace-write）に委譲してよい。既定は Leader / Sonnet worker、cross-model diversity が欲しいときに Codex。
+
+**Codex worker の前提条件と契約**:
+
+- **linked worktree 内でのみ委譲する**。0-4 で「現在の場所で作業」を選んだ／`wtp` にフォールバックした結果 **main worktree にいる場合は Codex 委譲を選択肢から外す**（Leader or Sonnet worker に限定）。判定は `codex/SKILL.md` の fail-closed worktree ガードをそのまま前置して機械的に行い、abort したら委譲を諦める（回避しない）。
+- **呼び出し形・`CODEX_HOME` prelude・worktree ガード・実行順序契約・委任範囲の制約は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が唯一の SSOT**。ここに再掲せず必ずそれに従う。特に **`git -C <worktree> diff` の全体レビュー → ホスト側の検証コマンド（lint / test / build）→ commit** の順序を守り、**diff レビュー前にテスト・lint・ビルドを一切実行しない**（Codex が書いたテスト・Makefile・設定は sandbox 外で走るため）。commit は親が行う（`.git` は Codex から read-only）。
+
 tasks.md の各タスクを順番に実装:
 
 1. tasks.md のステータスを `[ ]` → `[-]` に更新（Edit ツール使用）
@@ -283,6 +295,8 @@ tasks.md の各タスクを順番に実装:
 6. 次のタスクへ
 
 ### 4-3. 品質チェック
+
+**前提（Codex 委譲がある場合は必須）**: 4-2 で Codex worker に委譲したタスクが 1 つでもある場合、本節のコマンドを実行する**前に** `git -C <worktree> diff` の全体を必ずレビューする。品質チェックはホスト（sandbox 外）で実行されるため、レビュー前の実行は任意コード実行に到達しうる（`codex/SKILL.md`「実行順序契約」）。
 
 全タスク完了後:
 
@@ -635,13 +649,13 @@ notify
 1. **完全自律実行**: ユーザー確認は Phase 0-4 のワークツリー戦略の選択（`AskUserQuestion`）のみ。それ以降は Phase 7 まで承認フローを挟まず一切止まらずに実行する
 2. **MCP ツール不使用**: spec-workflow MCP のツール（approvals, spec-status, log-implementation 等）は一切使用しない
 3. **sleep / polling 禁止**: `sleep` コマンドや `while` ループでの待機は**絶対に使わない**。チームメイトからのメッセージは自動配信される
-4. **Leader = 司令塔 + 作業者**: ドキュメント作成・コード実装は Leader 自身が行う。調査のみサブエージェントに委任
+4. **Leader = 司令塔 + 作業者**: ドキュメント作成と、複数ファイル横断・context 継続が要るコード実装は Leader 自身が行う。調査、および 4-2 の**自己完結タスク**はサブエージェント / Codex worker に委任してよい（判定基準は 4-2）
 5. **動的レビューチーム**: タスク内容に応じてレビューエージェントの数・ロールを動的に決定する。固定ではない
 6. **レビューエージェントの自発的シャットダウン禁止**: リーダーからの明示的な shutdown_request がない限り、レビューエージェントは自らシャットダウンしてはいけない
 7. **レビュー指摘の考察**: 全ての指摘に機械的に対応するのではなく、対応の必要性を考察し判断する
 8. **議論による合意形成**: 対応不要と判断した場合は根拠を示してレビューエージェントと議論し、合意を形成する
 9. **承認されるまで繰り返す**: 全レビューエージェントの APPROVE が得られるまで修正→再レビューのサイクルを繰り返す
-10. **コスト最適化**: Leader = Opus（inherit）、調査 = Haiku（Explore 型）、レビュー = Sonnet
+10. **コスト最適化 / model・effort tier**: Leader = セッション model（要求水準は `/model-fitness-check` が SSOT。Phase 0 で起動済み。値をここに再掲しない）。**調査はタスク形状別**: retrieval 型（steering docs 転記）= Haiku、pattern-recognition 型（コードベース構造・再利用パターン分析）= Sonnet（Explore に `model` を明示 pin）。レビュー = Sonnet（tier は各エージェント定義の frontmatter が SSOT）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスク非依存・並行タスクと共有状態なし）は Sonnet worker or Codex worker に委譲してよい（前提条件・契約は 4-2 を参照。Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT）。
 11. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 7 の完了時のみ。例外は Git 操作エラー時（`notify` + `AskUserQuestion` で待機）
 12. **フォアグラウンド実行**: レビューエージェントは MCP ツールや対話が必要なため、フォアグラウンドで実行
 13. **gitignore 対象ファイルへのアクセス**: `.spec-workflow/` 配下のファイル（テンプレート・Steering docs 等）は gitignore されている可能性がある。Glob/Grep は ripgrep ベースで gitignore を尊重するため検出できない。必ず Bash `ls` + Read ツールで直接アクセスすること
