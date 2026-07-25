@@ -48,7 +48,7 @@ zoxide = "0.10.0"
 # are installed separately and paired at runtime.
 "npm:happy" = "1.2.0"
 pandoc = "3.10.1"
-typst = "0.15.0"
+typst = "0.15.1"
 
 [settings]
 # Pin precompiled CPython to a flavor that ships lib/; latest mise otherwise
