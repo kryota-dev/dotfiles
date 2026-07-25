@@ -212,6 +212,44 @@ load helpers/setup
   done
 }
 
+@test "adversarial-verifier agent exists with a pinned refutation tier" {
+  local agent="${HOME_DIR}/dot_claude/agents/adversarial-verifier.md"
+  [ -f "$agent" ]
+  grep -q "^name: adversarial-verifier$" "$agent"
+  grep -q "^model: sonnet$" "$agent"
+  # The Agent tool cannot pass effort per call, so xhigh has to live in frontmatter.
+  grep -q "^effort: xhigh$" "$agent"
+}
+
+@test "every finding-generating agent pins both model and effort" {
+  local agent name
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+    name="$(basename "$agent")"
+    grep -qE '^model: (sonnet|opus|haiku|fable)$' "$agent" || {
+      echo "${name}: model is unpinned (inherit or missing) — Opus sessions would run it at top tier"
+      false
+    }
+    grep -qE '^effort: (low|medium|high|xhigh|max)$' "$agent" || {
+      echo "${name}: effort is unpinned — a low-effort session would silently degrade its output"
+      false
+    }
+  done
+}
+
+@test "model-fitness-check skill exists as the model/effort contract SSOT" {
+  local skill="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
+  [ -f "$skill" ]
+  grep -q "^name: model-fitness-check$" "$skill"
+  # The three orchestration skills must call it instead of restating the table.
+  local caller
+  for caller in pr-workflow sdd multi-review; do
+    grep -q 'model-fitness-check' "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+      echo "${caller}/SKILL.md does not invoke model-fitness-check"
+      false
+    }
+  done
+}
+
 @test "reviewer agents steer to a valid gh pr diff filter idiom" {
   # gh pr diff has no include pathspec (only --exclude / --name-only), so every
   # reviewer agent must reference --name-only rather than the unsupported
@@ -469,6 +507,21 @@ load helpers/setup
       and ($ids | index("post:bash:command-log-cost")) != null
       and ($ids | index("post:bash:build-complete")) != null
   ' "$s" >/dev/null
+}
+
+@test "settings.json pins the session effort level" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The model pin is covered by docs_facts (it is cross-checked against the FACT marker),
+  # but effortLevel has no doc counterpart — without this it could vanish unnoticed and
+  # every session would silently drop to the default effort.
+  local effort
+  effort="$(jq -r '.effortLevel' "$s")"
+  [ "$effort" = "xhigh" ] || {
+    echo "settings.json .effortLevel is '${effort}' but the declared session default is xhigh"
+    false
+  }
 }
 
 @test "settings.json declares codex and claude-code-setup as enabled plugins" {

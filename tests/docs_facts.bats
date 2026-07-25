@@ -117,6 +117,32 @@ load helpers/setup
   }
 }
 
+# The markers above hold numbers, so they share a digit-only extractor. The model pin is a
+# string, so it needs its own comparison: pull the value between the marker tags verbatim.
+@test "docs_facts: every <!-- FACT:claude-model-pin --> marker matches settings.json .model" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local actual
+  actual="$(jq -r '.model' "${HOME_DIR}/dot_claude/settings.json")"
+  [ -n "$actual" ] && [ "$actual" != "null" ] || {
+    echo "sanity: settings.json has no .model — the pin moved or the file changed shape"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:claude-model-pin is '$val' but settings.json pins '$actual'"
+        false
+      }
+    done < <(grep -oE 'FACT:claude-model-pin -->[^<]+' "$f" | sed 's/.*-->//; s/[[:space:]]*$//')
+  done < <(grep -rlF 'FACT:claude-model-pin' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:claude-model-pin markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
+
 @test "docs_facts: every <!-- FACT:onepassword-vault-item-count --> marker matches the ITEMS array in validate-1password" {
   # SSOT: the ITEMS=(...) array in home/run_once_after_11-validate-1password.sh.tmpl.
   # _onepassword_item_list (helpers/setup.bash) parses it; this test ensures the docs
