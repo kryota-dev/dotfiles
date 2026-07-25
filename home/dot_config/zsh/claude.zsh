@@ -45,6 +45,9 @@ _claude_with_home() {
   # ECC_OBSERVER_MAX_TURNS pins the ceiling at the upstream cap rather than the auto-scaled
   # floor of 20, which cut the Read -> dedup-check -> Write pass off mid-write; the 300s
   # watchdog above is what actually bounds a cycle.
+  # Supported account dirs are ~/.claude and ~/.claude-<suffix>; the last branch only exists so an
+  # unexpected name still yields a usable dir name. Do not name an account dir ".claude-default":
+  # its slug would collide with ~/.claude's and silently merge two accounts' observations.
   local account_dir_name="${home_dir:t}"
   local homunculus_slug
   case "$account_dir_name" in

@@ -74,7 +74,7 @@ _claude_with_home() {
   case "$account_dir_name" in
     .claude) homunculus_slug=default ;;
     .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
-    *) homunculus_slug="$account_dir_name" ;;
+    *) homunculus_slug="${account_dir_name#.}" ;;
   esac
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \

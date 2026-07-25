@@ -72,7 +72,7 @@ lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を Gi
 
 `_claude_with_home` ヘルパーとアカウントごとのラッパーのふるまいリグレッションガードです。最小限の `zsh -f` 環境（rc ファイルなし）で `claude.zsh` をソースし、基礎となる関数を直接駆動します。主な確認事項：
 
-- `_claude_with_home` が指定したホームディレクトリ配下に複数の環境変数を設定し、指定したコマンドを実行する。テストが確認するのは `CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`GATEGUARD_STATE_DIR` の 3 つです（`_claude_with_home` は実行時に `CLV2_HOMUNCULUS_DIR` と `ECC_MCP_HEALTH_STATE_PATH` も設定しますが、bats テストはそれらを確認しません）。
+- `_claude_with_home` が指定したホームディレクトリ配下に複数の環境変数を設定し、指定したコマンドを実行する。テストが確認するのは `CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`GATEGUARD_STATE_DIR` の 3 つです。`CLV2_HOMUNCULUS_DIR` は別のテストが両アカウント分の値を pin し、config dir 配下に解決されないことを確認します（#336）。`ECC_MCP_HEALTH_STATE_PATH` は実行時に設定されますが確認対象外です。
 - MCP API キー（`EXA_API_KEY`、`FIRECRAWL_API_KEY`）がサブプロセス環境にエクスポートされるが、親シェルにはエクスポートされない。
 
 ### `tests/skill_provenance.bats`

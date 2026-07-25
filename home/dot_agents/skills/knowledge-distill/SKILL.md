@@ -96,7 +96,10 @@ instinct 蓄積数 < `--min-instincts` の場合、**縮退レポート**を出�
 - cluster 候補を取得する（instinct 3 件未満は exit 1 になるため、その場合はこの経路を skip）:
 
 ```bash
-python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
+# $H を明示的に渡す: CLV2_HOMUNCULUS_DIR 未設定のまま呼ぶと、CLI は upstream の fallback
+# （$XDG_DATA_HOME/ecc-homunculus か ~/.local/share/ecc-homunculus）を解決し、Phase 0 で診断した
+# ストアとは別の場所を見てしまう（診断と evolve が食い違う）。
+CLV2_HOMUNCULUS_DIR="$H" python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
 # 出力の「## SKILL CANDIDATES」節（trigger / 構成 instinct ID / avg confidence）を候補として読む
 ```
 

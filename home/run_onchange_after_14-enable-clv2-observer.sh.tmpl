@@ -10,7 +10,9 @@
 #
 # Privacy note: with the observer on, observe.sh records tool input/output to a local
 # observations.jsonl (secret redaction + truncation are upstream observe.sh's responsibility).
-# This is local at-rest data under each homunculus dir; nothing leaves the machine.
+# That recording step is local at-rest data under each homunculus dir, but the analysis step is
+# not: the observer feeds batches of it to `claude --model haiku --print`, so observations do
+# reach the API. The homunculus dir is created 0700 below for that reason.
 #
 # Homunculus dirs (all that apply): the cld / cld-r06 wrappers point CLV2_HOMUNCULUS_DIR at
 # "~/.local/share/ecc-homunculus-<slug>" — outside the account config dir, because Claude Code

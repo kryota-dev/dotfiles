@@ -152,18 +152,30 @@ load helpers/setup
   # repeating the literal, so the two can only ever drift together.
   command -v zsh >/dev/null || skip "zsh not available"
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
-  local expected
-  expected=$(zsh -fc "
+  local vals
+  vals=$(zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
-    claude() { print -r -- \"\$CLV2_HOMUNCULUS_DIR\"; }
+    claude() { print -r -- \"\$CLV2_HOMUNCULUS_DIR|\$OBSERVER_ACTIVE_HOURS_START|\$OBSERVER_ACTIVE_HOURS_END|\$ECC_OBSERVER_MAX_TURNS\"; }
     _claude_with_home \"\$HOME/.claude\"
   ")
-  [ -n "$expected" ]
+  [ -n "$vals" ]
+  local dir start end turns
+  dir=$(printf '%s' "$vals" | cut -d'|' -f1)
+  start=$(printf '%s' "$vals" | cut -d'|' -f2)
+  end=$(printf '%s' "$vals" | cut -d'|' -f3)
+  turns=$(printf '%s' "$vals" | cut -d'|' -f4)
   # The wrapper keeps $HOME unexpanded, so compare on the $HOME-relative tail.
-  grep -qF "CLV2_HOMUNCULUS_DIR=\"\$HOME${expected#"$BATS_TEST_TMPDIR"}\"" "$wrapper"
+  grep -qF "CLV2_HOMUNCULUS_DIR=\"\$HOME${dir#"$BATS_TEST_TMPDIR"}\"" "$wrapper"
   run grep -qF '.claude/ecc-homunculus' "$wrapper"
   [ "$status" -ne 0 ]
+  # The observer knobs have to be mirrored too, not just the storage path: this session
+  # lazy-starts an observer that inherits its environment for the whole process lifetime, so a
+  # wrapper missing these would run the brief's observer on the upstream clock gate and turn
+  # floor. Derived from the helper as well, so changing a default in claude.zsh forces it here.
+  grep -qF "OBSERVER_ACTIVE_HOURS_START=\"\${OBSERVER_ACTIVE_HOURS_START:-${start}}\"" "$wrapper"
+  grep -qF "OBSERVER_ACTIVE_HOURS_END=\"\${OBSERVER_ACTIVE_HOURS_END:-${end}}\"" "$wrapper"
+  grep -qF "ECC_OBSERVER_MAX_TURNS=\"\${ECC_OBSERVER_MAX_TURNS:-${turns}}\"" "$wrapper"
 }
 
 @test "morning-radar wrapper does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
