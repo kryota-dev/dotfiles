@@ -153,7 +153,7 @@ Deleting a file from the chezmoi source tree does **not** remove an already-depl
 1. `git rm` the source file (or remove it from an external list), **and**
 2. Add the destination path to `.chezmoiremove`.
 
-Current entries: four orphaned `sdd-*` agent files and three `agent-browser` specialized skills (`electron`, `slack`, `dogfood`) whose deployed copies are force-removed because the CLI now serves them at runtime.
+Current entries span several unrelated retirement waves, added over time as things were retired: orphaned `sdd-*` agent files; the `agent-browser` specialized skills that moved to CLI-served-at-runtime, plus the discovery stub's own frozen `references/`/`templates/` copies; the retired dmux provisioning layer; the skills dropped in the 2026-07-06 curated-inventory stocktake; and a case-rename cleanup for `github-projects/skill.md`. Read `home/.chezmoiremove` itself for the exact, current list — counts are deliberately not repeated here so this paragraph can't drift out of sync with it.
 
 ---
 

@@ -123,18 +123,26 @@
 
 ## `agent-browser` ディスカバリースタブパターン
 
-`agent-browser` は**ディスカバリースタブのみ**として curated されています（`home/dot_agents/skills/agent-browser/SKILL.md`）。その特化スキル（electron、slack、dogfood）はこのリポジトリには**ベンダリングされていません**。すぐに陳腐化するため、代わりに agent-browser CLI がランタイムで提供します。
+`agent-browser` は**ディスカバリースタブのみ**として curated されています：ソースツリーに含まれるのは `home/dot_agents/skills/agent-browser/SKILL.md` 1 ファイルだけです。`references/` も `templates/` もベンダリングされていません — どちらもソースから削除済みです（何ともリンクされていない、0.32 より前のコンテンツを凍結した既に陳腐化したコピーだったため）。その特化スキル（electron、slack、dogfood、agentcore、vercel-sandbox）も同様に**ベンダリングされていません**。すぐに陳腐化するため、代わりに agent-browser CLI がランタイムで提供します。
 
 ```
 agent-browser skills get <name>
 ```
 
-以前デプロイされた特化スキルのコピーは `home/.chezmoiremove` で強制削除されます。
+以前デプロイされたコピーは `home/.chezmoiremove` で 2 グループに分けて強制削除されます。
 
 ```
+# CLI がランタイムで提供するようになった特化スキル。
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood
+.agents/skills/agentcore
+.agents/skills/vercel-sandbox
+
+# スタブ自身の references/ と templates/ — ランタイム提供する CLI 以前の凍結コピーで、
+# SKILL.md からリンクされたことは一度もない。
+.agents/skills/agent-browser/references
+.agents/skills/agent-browser/templates
 ```
 
 chezmoi ソースからファイルを削除しても既にデプロイされたコピーは削除されません。`.chezmoiremove` が、`chezmoi apply` のたびにそれらのパスが存在しないことを保証するよう chezmoi に指示します。
@@ -147,7 +155,7 @@ chezmoi ソースからファイルを削除しても既にデプロイされた
 
 **決定論的なソース側アサーション**（違反時は CI を必ず失敗させる）：
 
-- `agent-browser` がディスカバリースタブのみをベンダリングしており、`electron`/`slack`/`dogfood` がソースに存在せず `.chezmoiremove` に記載されている。
+- `agent-browser` がディスカバリースタブのみをベンダリングしている：5 つの特化スキル（`electron`/`slack`/`dogfood`/`agentcore`/`vercel-sandbox`）がソースに存在せず `.chezmoiremove` に記載されていること、ソースディレクトリに `SKILL.md` 以外の commit された内容がないこと、`.chezmoiremove` にスタブ自身の削除済み `references/`・`templates/` の削除ターゲットも含まれていること。
 - ソース内のすべての curated スキルディレクトリが空でない（深さ ≤ 2 に少なくとも 1 つの通常ファイルを含む）。
 - `.chezmoiexternal.toml` が少なくとも 1 つの `[".agents/skills/..."]` external エントリを宣言し、`[ecc].commit` に紐付けられた ECC range ブロックを含む。
 - どのスキル名も curated ソースツリーと external 宣言の両方に同時に現れない（重複禁止ルール）。

@@ -41,13 +41,38 @@ _skill_is_external() {
   # The specialized skills are loaded at runtime, not vendored (would go stale), and
   # their previously-deployed copies must be removed via .chezmoiremove.
   local s
-  for s in electron slack dogfood; do
+  for s in electron slack dogfood agentcore vercel-sandbox; do
     [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
       echo "agent-browser skill '$s' should be CLI-served, not vendored in source"
       false
     }
     grep -qFx ".agents/skills/${s}" "${HOME_DIR}/.chezmoiremove" || {
       echo ".chezmoiremove is missing the runtime removal target for '$s'"
+      false
+    }
+  done
+
+  # The commit content itself must be nothing but SKILL.md: no frozen references/
+  # or templates/ copies left behind (they'd go stale and contradict the stub-only
+  # policy, e.g. references/commands.md documenting a `find` action the daemon
+  # never supported). Checked via `git ls-files` rather than `find` on disk: Finder
+  # can drop .DS_Store / AppleDouble (._*) files into this dir on macOS, and those are
+  # gitignored (never committed) but would still make a `find`-based check false-positive.
+  local leftover
+  leftover="$(git -C "${REPO_ROOT}" ls-files 'home/dot_agents/skills/agent-browser/' \
+    | grep -vx 'home/dot_agents/skills/agent-browser/SKILL.md' || true)"
+  [ -z "$leftover" ] || {
+    echo "agent-browser source dir has non-SKILL.md content:"
+    echo "$leftover"
+    false
+  }
+
+  # The deployed copies of the removed references/ and templates/ dirs must be
+  # cleaned up on apply, or they'd linger on machines that already have them.
+  local removed
+  for removed in references templates; do
+    grep -qFx ".agents/skills/agent-browser/${removed}" "${HOME_DIR}/.chezmoiremove" || {
+      echo ".chezmoiremove is missing the runtime removal target for agent-browser/${removed}"
       false
     }
   done
@@ -73,15 +98,10 @@ _skill_is_external() {
 @test "skill provenance: every curated skill has an uppercase SKILL.md with valid frontmatter" {
   # Regression test for #254: lowercase skill.md + missing frontmatter made the skill
   # invisible to Claude Code skill discovery. This test catches both problems in source.
-  #
-  # Exclusions (mirroring the "non-empty" test above):
-  #   - agent-browser: only the discovery stub is vendored; the specialized skills are
-  #     CLI-served at runtime (agent-browser skills get <name>) and are not curated.
   local dir name skill_files
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
-    [ "$name" = "agent-browser" ] && continue
 
     # 1. Exactly one uppercase SKILL.md must exist (no skill.md lowercase accepted).
     skill_files="$(find "$dir" -maxdepth 1 -name 'SKILL.md' -type f | wc -l | tr -d ' ')"

@@ -179,7 +179,7 @@ chezmoi ソースツリーからファイルを削除（`git rm`）しても、`
 1. ソースから削除: `git rm home/path/to/file`（または `.ecc.skills` から名前を削除）。
 2. `$HOME` 相対のデスティネーションパスを `home/.chezmoiremove` に追加する。
 
-現在の `.chezmoiremove` エントリ:
+`home/.chezmoiremove` の抜粋 — 完全な一覧はファイル自体を参照してください（廃止された dmux レイヤー、2026-07-06 の棚卸し、ケースリネームのクリーンアップも含まれます）:
 
 ```
 # オーファン化した SDD エージェント
@@ -192,6 +192,12 @@ chezmoi ソースツリーからファイルを削除（`git rm`）しても、`
 .agents/skills/electron
 .agents/skills/slack
 .agents/skills/dogfood
+.agents/skills/agentcore
+.agents/skills/vercel-sandbox
+
+# agent-browser ディスカバリースタブ自身の凍結された references/・templates/ コピー
+.agents/skills/agent-browser/references
+.agents/skills/agent-browser/templates
 ```
 
-`agent-browser` の専用スキルはこのパターンの具体例です。以前は静的ファイルとしてベンダリングされていましたが、バージョンマッチしたコピーを実行時にサービスする CLI に置き換えられました。静的コピーをソースから削除し、**かつ**デスティネーションパスを `.chezmoiremove` に追加することで、次の `chezmoi apply` で確実に削除されます。
+`agent-browser` の専用スキルはこのパターンの具体例です。以前は静的ファイルとしてベンダリングされていましたが、バージョンマッチしたコピーを実行時にサービスする CLI に置き換えられました。静的コピーをソースから削除し、**かつ**デスティネーションパスを `.chezmoiremove` に追加することで、次の `chezmoi apply` で確実に削除されます。スタブ自身の `references/`・`templates/` も、どこからもリンクされていない 0.32 より前のコンテンツの凍結済みコピーだと判明した時点で、同じ 2 ステップの削除を経ています。
