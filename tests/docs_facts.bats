@@ -239,3 +239,54 @@ load helpers/setup
   done < <(find "${DOCS_DIR}" -name '*.md')
   [ "$missing" -eq 0 ]
 }
+
+# Assert every <!-- FACT:$1 --> marker in docs/ equals $2. Shared by the ntfy checks below
+# so each one stays a two-line test instead of a copy of the walk.
+_assert_fact_marker() {
+  local name="$1" expected="$2"
+  local found=0 f val
+  [ -n "$expected" ] || {
+    echo "sanity: could not extract a value for FACT:${name} — the extractor broke"
+    false
+  }
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$expected" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:${name} is $val but the source says $expected"
+        false
+      }
+    done < <(grep -oE "FACT:${name}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF "FACT:${name}" "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:${name} markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
+
+@test "docs_facts: the ntfy loopback port marker matches the compose port publish" {
+  # SSOT: the `127.0.0.1:<port>:80` publish in compose.yaml.tmpl. files.bats separately
+  # keeps that literal in lockstep with the tailscale serve target in the setup script.
+  local actual
+  actual="$(grep -oE '127\.0\.0\.1:[0-9]+:80' "${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl" |
+    head -n1 | cut -d: -f2)"
+  _assert_fact_marker 'ntfy-loopback-port' "$actual"
+}
+
+@test "docs_facts: the ntfy cache-duration marker matches the server config" {
+  # SSOT: cache-duration in private_server.yml.tmpl. The docs describe a 7-day history, so
+  # a silent drop back toward ntfy's 12h default must not go unnoticed.
+  local actual
+  actual="$(grep -oE '^cache-duration: "[0-9]+h"' "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl" |
+    grep -oE '[0-9]+')"
+  _assert_fact_marker 'ntfy-cache-duration-hours' "$actual"
+}
+
+@test "docs_facts: the ntfy summary-length marker matches the hook constant" {
+  # SSOT: SUMMARY_MAX_CHARS in the publisher hook. This is the number that bounds how much
+  # assistant text leaves the machine, so the docs must not understate it.
+  local actual
+  actual="$(grep -oE '^readonly SUMMARY_MAX_CHARS=[0-9]+' "${HOME_DIR}/dot_claude/executable_ntfy-notify.sh" |
+    grep -oE '[0-9]+$')"
+  _assert_fact_marker 'ntfy-summary-max-chars' "$actual"
+}

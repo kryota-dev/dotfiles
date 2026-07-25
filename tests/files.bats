@@ -1606,3 +1606,202 @@ _gate_decision() {
   grep -q 'instinct-cli.py' "$sk"
   grep -q 'clv2-session-notify' "$sk"
 }
+
+# --- Self-hosted ntfy notification channel (#337) ---------------------------------------
+
+@test "ntfy: chezmoi source files exist" {
+  [ -f "${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl" ]
+  [ -f "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl" ]
+  [ -f "${HOME_DIR}/dot_config/ntfy/private_notify-env.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_ntfy-notify.sh" ]
+  [ -f "${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl" ]
+}
+
+@test "ntfy: the channel ships disabled behind a .chezmoidata flag that .chezmoiignore honours" {
+  local data="${HOME_DIR}/.chezmoidata.toml" ignore="${HOME_DIR}/.chezmoiignore"
+  # Shipping enabled would break `chezmoi apply` on any machine without the vault item,
+  # because onepasswordRead hard-fails. The ignore entry is what stops chezmoi from even
+  # evaluating those templates, which is also why neither CI job needs a new exclusion.
+  grep -qE '^\[ntfy\]$' "$data"
+  grep -qE '^\s*enabled = false$' "$data"
+  grep -qF '{{ if not .ntfy.enabled }}' "$ignore"
+  grep -qE '^\.config/ntfy$' "$ignore"
+}
+
+@test "ntfy: the container image is pinned to an exact patch tag, never latest or a floating major" {
+  local data="${HOME_DIR}/.chezmoidata.toml"
+  local image
+  image="$(grep -E '^\s*image = ' "$data" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')"
+  [[ "$image" == binwiederhier/ntfy:v* ]]
+  # v2 and v2.26 are floating; only vX.Y.Z is a real pin.
+  [[ "$image" =~ :v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+@test "ntfy: the container publishes on loopback only" {
+  local compose="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  # `tailscale serve` is the only ingress. A 0.0.0.0 bind would expose the server on every
+  # local network; binding the tailnet address directly would put a 100.x literal in a
+  # public repo and give up the per-node certificate.
+  grep -qE '^\s*- "127\.0\.0\.1:[0-9]+:80"$' "$compose"
+  run grep -qE '^\s*- "(0\.0\.0\.0|100\.|\*)' "$compose"
+  [ "$status" -ne 0 ]
+}
+
+@test "ntfy: the compose port and the tailscale serve target stay in lockstep" {
+  # The port is a literal on both sides because `make lint` strips every line containing a
+  # chezmoi action before shellcheck, so a template variable would vanish from the linted
+  # script. This test is what keeps the two literals honest.
+  local compose="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  local script="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  local compose_port serve_port
+  compose_port="$(grep -oE '127\.0\.0\.1:[0-9]+:80' "$compose" | head -n1 | cut -d: -f2)"
+  serve_port="$(grep -oE 'http://127\.0\.0\.1:[0-9]+' "$script" | head -n1 | cut -d: -f3)"
+  [ -n "$compose_port" ]
+  [ -n "$serve_port" ]
+  [ "$compose_port" = "$serve_port" ]
+}
+
+@test "ntfy: the server config keeps its security and retention invariants" {
+  local cfg="${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
+  # No anonymous access to anything, behind the tailnet perimeter.
+  grep -qE '^auth-default-access: "deny-all"$' "$cfg"
+  grep -qE '^auth-file:' "$cfg"
+  # tailscale serve terminates TLS and proxies, so the real client IP arrives in a header.
+  grep -qE '^behind-proxy: true$' "$cfg"
+  # Persistent history: the 12h in-memory default cannot satisfy "review it later".
+  grep -qE '^cache-file:' "$cfg"
+  grep -qE '^cache-duration: "168h"$' "$cfg"
+  # iOS instant delivery relay (approved 2026-07-26).
+  grep -qE '^upstream-base-url: "https://ntfy\.sh"$' "$cfg"
+  # base-url identifies the machine, so it must come from 1Password, never a literal.
+  grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base_url"' "$cfg"
+  run grep -qE '^base-url: "http' "$cfg"
+  [ "$status" -ne 0 ]
+}
+
+@test "ntfy: the hook env file is 1Password-backed and single-quoted" {
+  local env_tmpl="${HOME_DIR}/dot_config/ntfy/private_notify-env.tmpl"
+  local key
+  for key in base_url topic token; do
+    grep -qF "onepasswordRead \"op://kryota.dev/Dotfiles - ntfy/${key}\"" "$env_tmpl"
+  done
+  # squote, not quote: a token containing $ or a backtick must not be able to expand or
+  # substitute when the hook sources this file.
+  [ "$(grep -c 'squote }}$' "$env_tmpl")" -eq 3 ]
+}
+
+@test "ntfy: no tailnet identifier, private address, or token is committed" {
+  # This repository is public. The MagicDNS host, the CGNAT address and the publish token
+  # are the three things that would identify or unlock the machine.
+  local hits root_md
+  # Top-level markdown (README / AGENTS / CLAUDE) is listed explicitly: it sits outside
+  # every directory scanned below, so without this a hostname pasted into README.md would
+  # go unnoticed.
+  root_md="$(find "${REPO_ROOT}" -maxdepth 1 -name '*.md' | tr '\n' ' ')"
+  # The MagicDNS suffix is matched loosely (`<name>.ts.net`) rather than only the default
+  # `tailXXXXXX` shape, so a tailnet with a custom name is caught too. Documentation
+  # placeholders like `<node>.<tailnet>.ts.net` still do not match: the character before
+  # `.ts.net` is `>`, which is outside the class.
+  # shellcheck disable=SC2086
+  hits="$(grep -rInE \
+    -e '[a-z0-9-]+\.ts\.net' \
+    -e '(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)' \
+    -e '\btk_[A-Za-z0-9]{10,}\b' \
+    "${HOME_DIR}" "${DOCS_DIR}" "${REPO_ROOT}/tests" "${REPO_ROOT}/.claude" $root_md 2>/dev/null || true)"
+  [ -z "$hits" ] || {
+    echo "committed identifier leak:"
+    echo "$hits"
+    false
+  }
+}
+
+@test "ntfy: settings.json wires all four hook events asynchronously" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  jq -e '
+    [.hooks | to_entries[]
+     | select(.value | type == "array")
+     | .value[]
+     | select((.id // "") | endswith("ntfy-notify"))
+     | select(.hooks[0].command == "$HOME/.claude/ntfy-notify.sh" and .hooks[0].async == true)
+     | .id]
+    | sort == ["notification:ntfy-notify","session-end:ntfy-notify","stop-failure:ntfy-notify","stop:ntfy-notify"]
+  ' "$s" >/dev/null
+}
+
+@test "ntfy: the Notification hook omits its matcher so every notification type fires it" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # Per the hooks reference, omitting the matcher runs the hook for all notification
+  # types. The notification_type -> priority mapping lives in one case block inside
+  # ntfy-notify.sh instead of being split across matcher groups that can drift apart.
+  jq -e '.hooks.Notification | length == 1 and (.[0] | has("matcher") | not)' "$s" >/dev/null
+}
+
+@test "ntfy: ECC's desktop-notify is disabled by flag, with its wiring deliberately kept" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # The ECC hook runtime is a SHA-pinned chezmoi external re-extracted on every refresh, so
+  # editing or deleting desktop-notify.js in place would simply be undone. The flag is the
+  # only durable control point. The block stays wired (same treatment as #280) so
+  # re-enabling is a one-token edit.
+  jq -e '
+    (.env.ECC_DISABLED_HOOKS | split(",") | index("stop:desktop-notify")) != null
+    and ([.hooks.Stop[] | select(.id == "stop:desktop-notify")] | length == 1)
+  ' "$s" >/dev/null
+}
+
+@test "ntfy: the setup script embeds both content hashes, guards CI, and never hard-fails on Docker" {
+  local script="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  # Re-registration is keyed to the rendered content of both files (embedded-hash trick).
+  grep -Fq 'compose hash: {{ include "dot_config/ntfy/compose.yaml.tmpl" | sha256sum }}' "$script"
+  grep -Fq 'server config hash: {{ include "dot_config/ntfy/private_server.yml.tmpl" | sha256sum }}' "$script"
+  # ...and to the RESOLVED image tag. `include` returns raw template source, so it sees the
+  # literal `.ntfy.image` placeholder and is blind to a Renovate bump of the pin: without
+  # this line both hashes stay byte-identical across an image upgrade and the container is
+  # never recreated. Verified by rendering the script before and after a bump.
+  grep -Fq 'ntfy image: {{ .ntfy.image }}' "$script"
+  # Only rendered while the channel is enabled, and skipped outright in CI.
+  grep -Fq '{{ if and (eq .chezmoi.os "darwin") .ntfy.enabled -}}' "$script"
+  grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
+  # Docker Desktop's running state is user-controlled, so an unreachable daemon must warn
+  # rather than break every unrelated `chezmoi apply`.
+  grep -Fq 'docker info >/dev/null 2>&1' "$script"
+  run grep -nE 'docker (info|compose).*(\|\| exit 1|&& exit 1)' "$script"
+  [ "$status" -ne 0 ]
+}
+
+@test "ntfy: the vault item is validated outside the ITEMS array so the documented count stays honest" {
+  local script="${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+  # _onepassword_item_list() parses ITEMS=(...) to drive FACT:onepassword-vault-item-count.
+  # The ntfy fields are only required once [ntfy].enabled is true, so they live in their
+  # own guarded block; putting them in ITEMS would inflate the documented count for every
+  # machine that has not enabled the channel.
+  grep -Fq '{{ if .ntfy.enabled -}}' "$script"
+  grep -Fq 'NTFY_ITEMS=(' "$script"
+  run _onepassword_item_list
+  [[ "$output" != *"Dotfiles - ntfy"* ]]
+}
+
+@test "ntfy: the container image pin is tracked by a Renovate custom manager" {
+  local rc="${REPO_ROOT}/.github/renovate.json5"
+  [ -f "$rc" ]
+  # Every pin in home/.chezmoidata.toml is tracked by an explicit customManagers entry.
+  # An inline `# renovate:` comment does not substitute for one: that convention is honoured
+  # by specific built-in managers, not for an arbitrary TOML file, so a pin without an entry
+  # here silently never gets a bump PR.
+  grep -Fq 'binwiederhier/ntfy' "$rc"
+  grep -Fq "datasourceTemplate: 'docker'" "$rc"
+}
+
+@test "ntfy: the local fallback covers non-macOS and is locale-independent" {
+  local hook="${HOME_DIR}/dot_claude/executable_ntfy-notify.sh"
+  # The ECC hook this replaces notified on macOS *and* WSL. osascript alone would make the
+  # fallback a silent no-op everywhere else, and the fallback is the only path left when the
+  # server is unreachable.
+  grep -Fq 'notify-send' "$hook"
+  # BSD tr/sed abort with "illegal byte sequence" on input invalid in the current locale,
+  # and hook payloads and branch names are arbitrary bytes. Every byte filter runs under C:
+  # two in applescript_safe (tr, sed) and three in tag_safe (tr, tr, sed).
+  [ "$(grep -o 'LC_ALL=C' "$hook" | grep -c .)" -ge 5 ]
+}
