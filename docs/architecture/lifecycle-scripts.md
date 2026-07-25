@@ -38,7 +38,7 @@ flowchart TD
         E --> F["13 setup-mcp\nrun_onchange\n(registers 4 user-scope MCP servers\nvia mise exec -- claude)"]
         F --> G["14 enable-clv2-observer\nrun_onchange\n(sets observer.enabled=true\nin per-account homunculus config.json)"]
         G --> H["16 migrate-claude-binary\nrun_once\n(symlink ~/.local/bin/claude\n-> mise installs/claude/latest)"]
-        H --> H2["17 setup-claude-plugins\nrun_onchange\n(registers marketplaces + installs plugins\ndeclared in dot_claude/settings.json)"]
+        H --> H2["17 setup-claude-plugins\nrun_onchange\n(registers marketplaces + installs plugins\ndeclared in dot_claude/settings.json,\nconverging pinned ones onto their ref)"]
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]

@@ -280,19 +280,27 @@ Claude Code 側は `openai-codex` marketplace の `codex` プラグインを通�
 
 ### インストール済みバージョンの収束
 
-プラグインセットアップスクリプト（`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`）はプラグインが存在しない場合にのみインストールします：install ループはプラグイン名の一致だけで skip し、バージョン比較を行いません。したがって `ref` pin の編集だけでは、インストール済みプラグインは決して収束しません — これは既知のギャップです（スクリプトへの reconcile 実装は意図的に先送り）。収束は手動で、アカウント（`CLAUDE_CONFIG_DIR`）ごとに 1 回実行します：
+プラグインセットアップスクリプト（`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`）が apply 時に両アカウントを pin へ収束させるため、`ref` を編集して `chezmoi apply` を実行すれば手順は完結します。この編集自体が再実行のトリガーでもあります：スクリプトが埋め込む宣言が変わり、それに伴って `run_onchange` のキーも変わるためです。
+
+アカウント（`CLAUDE_CONFIG_DIR`）ごとに、`ref` を宣言している marketplace それぞれについて、スクリプトはランタイムが宣言とは独立に保持している次の 2 つを比較します：
+
+- **登録内容。** `known_marketplaces.json` はランタイム自身が持つソースのコピー（ref を含む）を保持します。宣言と一致しなくなった場合、marketplace を登録解除し、宣言された ref で再登録します。`claude plugin marketplace update` では不十分です：保存済みの登録から pull するため、古い ref を追ってしまいます。
+- **インストール済みバージョン。** marketplace clone がそのプラグインに対して提供するバージョン（pin された ref で checkout された `.claude-plugin/marketplace.json` の値）と、`claude plugin list` が報告するバージョンを比較します。不一致なら `claude plugin update` を実行し、その結果は終了コードを信用せずインストール済みバージョンを読み直して検証します — CLI が成功を報告しながらプラグインを以前のリビジョンに残す挙動が観測されているためです。
+
+更新されたプラグインの反映には Claude Code の再起動が必要です。何かを収束させた場合、スクリプトはその旨を 1 回出力します（`claude plugin update` 自身も "restart required to apply" と報告します）。
+
+`ref` を宣言していない marketplace — CLI に同梱される claude-plugins-official — は、不在ならインストールされますが更新はされません：収束先となる宣言済みリビジョンが存在しないためです。
+
+収束の失敗は警告にとどまり、apply は成功のままです（警告には対象アカウントとバージョンが含まれます）。ここで失敗させると chezmoi が毎回の apply でスクリプトを再実行することになり、しかも原因（ref を無視する CLI、読み取れない marketplace clone）はリトライでは解決しません。ただし警告されたプラグインを後から拾う仕組みもありません：`run_onchange` のキーはスクリプトのレンダリング後の本文なので、宣言が変わらない限り再実行されません — 警告が唯一の行動のきっかけです。次の 2 つは従来どおり致命的で、chezmoi が次回 apply で再試行します：*install* の失敗と、marketplace を登録解除した後の再登録の失敗（放置すると、宣言しているはずの marketplace が無いアカウントが残るため）。手動の fallback はスクリプトの動作をなぞるもので、アカウントごとに 1 回実行します：
 
 ```bash
-# デフォルトアカウント (~/.claude)
-claude plugin marketplace update openai-codex
+# デフォルトアカウント (~/.claude)。<pinned ref> は settings.json の値
+claude plugin marketplace rm openai-codex
+claude plugin marketplace add openai/codex-plugin-cc#<pinned ref>
 claude plugin update codex@openai-codex
 
-# ワークアカウント (~/.claude-r06)
-CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace update openai-codex
-CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin update codex@openai-codex
+# ワークアカウント: 同じ 3 コマンドを CLAUDE_CONFIG_DIR=~/.claude-r06 付きで実行
 ```
-
-反映には、その後 Claude Code の再起動が必要です（`claude plugin update` 自身が "restart required to apply" と報告します）。将来 ref を bump する際の注意点：marketplace 登録はソース ref の独自コピー（ランタイムの `known_marketplaces.json`）を保持し、`marketplace update` はその保存済み登録から pull します — したがって `settings.json` の pin を変更した後は、登録済み ref を確認し、遅れている場合は marketplace を再登録（`claude plugin marketplace rm` + `add`）してください。
 
 ### codex:codex-rescue — 手動レスキュー専用
 

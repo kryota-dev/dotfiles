@@ -88,7 +88,9 @@
 
 このギャップを埋めるのが `run_onchange_after_17-setup-claude-plugins.sh.tmpl` です。settings.json から
 レンダリングした宣言を JSON として埋め込み（＝宣言の単一ソースを保つ）、不足している marketplace の
-登録とプラグインのインストールをアカウントごとに実行します。
+登録とプラグインのインストールをアカウントごとに実行します。`ref` で pin された marketplace は以降の実行でも
+pin に追従させます（pin を bump したときの挙動は
+[Codex ハーネス](codex.ja.md#claude-code-codex-プラグイン--pin-と収束) を参照）。
 
 marketplace は `chezmoi apply` が無人でインストールする実行コードなので、可変な既定ブランチを追ってはいけません。
 この pin には落とし穴が 2 つあります。宣言した `ref` は **CLI 引数に含めない限り無視される**ため、スクリプトは

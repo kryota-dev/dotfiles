@@ -89,7 +89,9 @@ chezmoiignored and therefore empty on a new machine.
 
 `run_onchange_after_17-setup-claude-plugins.sh.tmpl` closes that gap. It embeds the declaration as
 JSON rendered out of settings.json — so the declaration keeps a single source of truth — then
-registers the marketplaces and installs the plugins that are missing, once per account.
+registers the marketplaces and installs the plugins that are missing, once per account. A marketplace
+pinned to a `ref` is also held to it on later runs — see
+[Codex harness](codex.md#claude-code-codex-plugin--pin-and-convergence) for what a pin bump does.
 
 A marketplace is executable code that `chezmoi apply` installs unattended, so it must not track a
 moving default branch. The pin has two sharp edges. A declared `ref` is **ignored** unless it is also
