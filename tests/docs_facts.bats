@@ -120,11 +120,13 @@ load helpers/setup
 # The markers above hold numbers, so they share a digit-only extractor. The model pin is a
 # string, so it needs its own comparison: pull the value between the marker tags verbatim.
 @test "docs_facts: every <!-- FACT:claude-model-pin --> marker matches settings.json .model" {
-  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  # grep/sed rather than jq: the header above promises this suite stays dependency-free, and
+  # CI's bats job installs only bats/shellcheck/zsh. A `skip` here would silently leave the
+  # marker unguarded on any host without jq.
   local actual
-  actual="$(jq -r '.model' "${HOME_DIR}/dot_claude/settings.json")"
-  [ -n "$actual" ] && [ "$actual" != "null" ] || {
-    echo "sanity: settings.json has no .model — the pin moved or the file changed shape"
+  actual="$(grep -oE '"model"[[:space:]]*:[[:space:]]*"[^"]+"' "${HOME_DIR}/dot_claude/settings.json" | tail -1 | sed 's/.*:[[:space:]]*"//; s/"$//')"
+  [ -n "$actual" ] || {
+    echo "sanity: settings.json has no \"model\" key — the pin moved or the file changed shape"
     false
   }
   local found=0 f val
@@ -135,10 +137,33 @@ load helpers/setup
         echo "${f#"${REPO_ROOT}/"}: FACT:claude-model-pin is '$val' but settings.json pins '$actual'"
         false
       }
-    done < <(grep -oE 'FACT:claude-model-pin -->[^<]+' "$f" | sed 's/.*-->//; s/[[:space:]]*$//')
+    done < <(grep -oE 'FACT:claude-model-pin -->[^<]+' "$f" | sed 's/.*-->//; s/^[[:space:]]*//; s/[[:space:]]*$//')
   done < <(grep -rlF 'FACT:claude-model-pin' "${DOCS_DIR}")
   [ "$found" = 1 ] || {
     echo "no FACT:claude-model-pin markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
+
+@test "docs_facts: every <!-- FACT:claude-agent-count --> marker matches the agent definition count" {
+  local actual
+  actual="$(find "${HOME_DIR}/dot_claude/agents" -maxdepth 1 -name '*.md' | grep -c .)"
+  [ "$actual" -ge 5 ] || {
+    echo "sanity: agent definition count resolved to $actual (<5) — the layout likely moved"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:claude-agent-count is $val but home/dot_claude/agents has $actual definitions"
+        false
+      }
+    done < <(grep -oE 'FACT:claude-agent-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:claude-agent-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:claude-agent-count markers found under ${DOCS_DIR} — add them or drop this test"
     false
   }
 }

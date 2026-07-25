@@ -60,6 +60,7 @@
 | 設定 | 値 | 備考 |
 |---|---|---|
 | `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | 1 M コンテキストのピン固定モデル（`home/dot_claude/settings.json` と同期） |
+| `effortLevel` | `xhigh` | 永続化される推論 effort。`/effort` でセッション単位に上書き可能 |
 | `language` | `Japanese` | 会話出力はすべて日本語 |
 | `alwaysThinkingEnabled` | `false` | 拡張思考はタスク単位でオプトイン |
 | `cleanupPeriodDays` | `20` | 20 日より古いセッションを自動削除 |
@@ -423,19 +424,24 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 
 ## レビューサブエージェント
 
-7 つのサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
+<!-- FACT:claude-agent-count -->10<!-- /FACT --> 個のサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
 
-| エージェント | 用途 |
-|---|---|
-| `cc-code-review.md` | 汎用コードレビュー ([MUST]/[SHOULD]/[NITS]/[GOOD] 形式) |
-| `cc-security-review.md` | OWASP フォーカスのセキュリティレビュー |
-| `typescript-reviewer.md` | TypeScript 特化レビュー (モデル: sonnet) |
-| `python-reviewer.md` | Python 特化レビュー (モデル: sonnet) |
-| `react-reviewer.md` | React/フロントエンドレビュー (モデル: sonnet) |
-| `database-reviewer.md` | データベーススキーマとクエリレビュー (モデル: sonnet) |
-| `renovate-analyzer.md` | Renovate 依存関係更新分析 |
+すべてのエージェントは frontmatter で `model` と `effort` の両方をピン固定しており、呼び出し元セッションのモデルを継承しません（standalone 起動でもピン固定された tier で動作します）。これらの値の SSOT は frontmatter であり、下表は説明用です。
 
-`multi-review` スキルは検出されたファイルタイプに基づいて言語/ドメインレビュアーを動的にスポーンします。
+| エージェント | 用途 | Tier |
+|---|---|---|
+| `cc-code-review.md` | 汎用コードレビュー ([MUST]/[SHOULD]/[NITS]/[GOOD] 形式) | sonnet / xhigh |
+| `cc-security-review.md` | OWASP フォーカスのセキュリティレビュー | sonnet / xhigh |
+| `adversarial-verifier.md` | レビュー指摘を独立視点で反証（large tier の反証ラウンド） | sonnet / xhigh |
+| `architecture-reviewer.md` | リポジトリ全体の集約視点 — 単一 diff では見えない重複・設計 drift | sonnet / high |
+| `typescript-reviewer.md` | TypeScript 特化レビュー | sonnet / high |
+| `python-reviewer.md` | Python 特化レビュー | sonnet / high |
+| `react-reviewer.md` | React/フロントエンドレビュー | sonnet / high |
+| `database-reviewer.md` | データベーススキーマとクエリレビュー | sonnet / high |
+| `renovate-analyzer.md` | Renovate 依存関係更新分析 | sonnet / high |
+| `fact-check-worker.md` | 1 件の指摘を一次ソースで裏取り（read-only、書き込み・実行なし） | sonnet / high |
+
+`multi-review` スキルは検出されたファイルタイプに基づいて言語/ドメインレビュアーを動的にスポーンします。`architecture-reviewer` は `--arch` または pr-workflow の large tier のときのみ、`adversarial-verifier` と `fact-check-worker` は PR 単位ではなく指摘単位でスポーンされます。
 
 ---
 

@@ -221,9 +221,13 @@ load helpers/setup
   grep -q "^effort: xhigh$" "$agent"
 }
 
-@test "every finding-generating agent pins both model and effort" {
+@test "every agent definition pins both model and effort" {
+  # Sweeps the whole directory rather than a hardcoded roster, so a newly added agent is
+  # covered automatically. `model:` accepts aliases only — switching an agent to a literal
+  # slug (the pinning philosophy settings.json uses) would need this pattern widened.
   local agent name
   for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+    [ -e "$agent" ] || continue
     name="$(basename "$agent")"
     grep -qE '^model: (sonnet|opus|haiku|fable)$' "$agent" || {
       echo "${name}: model is unpinned (inherit or missing) — Opus sessions would run it at top tier"
@@ -231,6 +235,23 @@ load helpers/setup
     }
     grep -qE '^effort: (low|medium|high|xhigh|max)$' "$agent" || {
       echo "${name}: effort is unpinned — a low-effort session would silently degrade its output"
+      false
+    }
+  done
+}
+
+@test "every agent definition forbids write and execution via Bash" {
+  # Reviewer agents read diffs that are, by definition, unverified input. `permissions.allow`
+  # pre-approves npm/npx/vitest/docker, so the technical layer lets a runner through — this
+  # prompt-level constraint is the only control, and it must not be missing from any agent.
+  local agent name
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+    [ -e "$agent" ] || continue
+    name="$(basename "$agent")"
+    # Agents without Bash cannot execute anything, so the constraint is moot for them.
+    grep -qE '^tools:.*\bBash\b' "$agent" || continue
+    grep -q '読み取り専用' "$agent" || {
+      echo "${name}: no read-only Bash constraint — the agent could execute repo code under review"
       false
     }
   done

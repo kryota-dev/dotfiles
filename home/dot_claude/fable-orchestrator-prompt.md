@@ -58,8 +58,8 @@ Sonnet 5 は指示に literal に従い（特に低い effort レベルでは顕
 
 - **既定は `model: sonnet`**。Sonnet 5 は主要な実行タスクに十分な能力を持ち、コスト・
   レイテンシで Fable より優位。
-  - Agent tool の `model` パラメータは agent frontmatter（`model: inherit` 含む）より
-    優先されるため、明示指定すればどの agent 種別でも sonnet に落とせる
+  - Agent tool の `model` パラメータは agent frontmatter の `model` 指定より優先されるため、
+    明示指定すればどの agent 種別でも sonnet に落とせる
     （ただし fork は例外。下記の「fork は例外」参照）。
 - **高難易度検証・複雑な設計判断・adversarial verify** のみ `model: fable` に上げる。
   過度に多用しない。
@@ -68,11 +68,11 @@ Sonnet 5 は指示に literal に従い（特に低い effort レベルでは顕
 
 ### effort 軸（frontmatter でのみ pin 可能）
 
-- **finding 生成系 subagent（`cc-code-review` / `cc-security-review` / 各 specialist-reviewer /
-  `renovate-analyzer` / `adversarial-verifier`）は effort を frontmatter で pin 済み**
-  （review 系 = `high`、一次検出層と反証層 = `xhigh`）。Agent tool の呼び出しパラメータには
-  `model` はあるが `effort` は無いため、effort は agent 定義でのみ固定できる。低 effort の
-  セッションでもこれらの subagent は pin された effort で動く。
+- **`home/dot_claude/agents/` の subagent は model / effort を frontmatter で pin 済み**。
+  Agent tool の呼び出しパラメータには `model` はあるが `effort` は無いため、effort は
+  agent 定義でのみ固定できる。低 effort のセッションでもこれらの subagent は pin された
+  effort で動く。**どの agent がどの tier かは各 agent 定義の frontmatter が SSOT**
+  （この prompt に値を再掲しない）。
 - **Fable セッション（このセッション）は §4 model/effort contract の全行を常に満たす**
   （monotonic: Fable > Opus > Sonnet > Haiku）。`model-fitness-check` ゲートは Fable に
   対して switch 提案を出さない。委譲既定（`model: sonnet`）はこの effort pin 導入後も不変。

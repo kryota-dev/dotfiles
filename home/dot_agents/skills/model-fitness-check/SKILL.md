@@ -1,20 +1,22 @@
 ---
 name: model-fitness-check
 description: |
-  現在のセッションの model / effort が、実行しようとしている作業の §4 contract を満たすかを検出し、満たさなければ実装フェーズに入る前に停止する共有ゲート。skill はセッションの model / effort を変更できない（`/model` `/effort` は user のみ）ため、「検出 → 提案 → 停止」を担う。
-  `pr-workflow` / `sdd` / `multi-review` が各 entry（実装フェーズ前）から呼ぶ。contract テーブルはこの skill が唯一の SSOT。
+  現在のセッションの model / effort が、実行しようとしている作業の §4 contract を満たすかを検出し、満たさなければ実装・レビュー実行に入る前に停止する共有ゲート。skill はセッションの model / effort を変更できない（`/model` `/effort` は user のみ）ため、「検出 → 提案 → 停止」を担う。
+  `pr-workflow` / `sdd` / `multi-review` が各 entry から呼ぶ。contract テーブルはこの skill が唯一の SSOT。
 argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 ---
 
 # model-fitness-check
 
-セッションの model / effort が作業の要求水準（§4 contract）を満たすかを検査し、満たさない場合は**実装に入る前に停止**して user に切り替えを提案する共有ゲート。
+セッションの model / effort が作業の要求水準（§4 contract）を満たすかを検査し、満たさない場合は**実装・レビュー実行に入る前に停止**して user に切り替えを提案する共有ゲート。
 
 ## SSOT としての位置づけ
 
 **§4 contract テーブルはこの skill が唯一の SSOT**。`pr-workflow` / `sdd` / `multi-review` はこのテーブルを複製せず、各 entry から本 skill を 1 行で呼ぶだけにする（複製すると Codex pin が 3 箇所で drift した失敗を Claude 側で再演することになる）。
 
 ## §4 contract（Model/effort テーブル）
+
+テーブルが規定するのは**セッション自身**の model / effort であり、**委譲先 worker の tier は各 agent 定義の frontmatter が SSOT**（例: adversarial verification 行は「その作業を主導するセッション」に Opus 5 @ xhigh を要求するのであって、`adversarial-verifier` agent が Opus であるべきという意味ではない）。
 
 | 作業 | Model | Effort | 行種別 |
 |------|-------|--------|--------|
@@ -33,7 +35,8 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 ## model の検出
 
 1. **主経路**: セッションの system-prompt に埋め込まれた model identity（自己申告。「You are powered by ...」等）を読む。
-2. **副経路（cross-check）**: `~/.claude/settings.json` の `model` を Read で読む。これは `/model` によるセッション内変更を反映しない可能性があるため、**主経路と乖離したら silent に解決せず surface する**（どちらが有効かを user に提示して確認）。
+   **主経路が Fable と解決したら、この時点で silent pass し副経路の cross-check も行わない**。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
+2. **副経路（cross-check）**: **主経路が Fable 以外のときのみ実行する**。`~/.claude/settings.json` の `model` を Read で読む（`cld-r06` セッションでも同じパスでよい —— `~/.claude-r06/settings.json` は `~/.claude/settings.json` への symlink であり、両アカウントは 1 つの settings.json を共有する。chezmoi source: `dot_claude-r06/symlink_settings.json.tmpl`）。これは `/model` によるセッション内変更を反映しない可能性があるため、**主経路と乖離したら silent に解決せず surface する**（どちらが有効かを user に提示して確認）。
 
 ### 正規化ルール
 
@@ -67,8 +70,12 @@ model 検出が主経路・副経路とも失敗した場合、**silent skip せ
 
 ## 呼び出し規約
 
-- `pr-workflow`: Phase 0（分類直後、実装フェーズ前）
-- `sdd`: Phase 0（準備、実装フェーズ前）
-- `multi-review`: Phase 1 の前（`multi-review` に Phase 0 は無い）
+**行種別は引数で受け取る**（`/model-fitness-check <tier>`）。判定は行種別ごとに分岐するため、呼び出し側の散文ではなく引数で確定させる。
 
-各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルを再掲しない**。
+- `pr-workflow`: Phase 0 冒頭 —— `/model-fitness-check <tier>`（Phase 0 の分類結果をそのまま渡す）
+- `sdd`: Phase 0 冒頭 —— `/model-fitness-check orchestration`（large 相当なら `large`）
+- `multi-review`: Phase 1 の前 —— `/model-fitness-check orchestration`（`multi-review` に Phase 0 は無い）
+
+各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
+
+**idempotency（多重起動の抑制）**: `pr-workflow` → `sdd` → `multi-review` と連鎖すると 1 実行で最大 3 回同じ判定が走る。**同一セッションで一度 pass した行、および明示的に continue-anyway を選んだ行については再提示しない**（前回の判断を再利用する）。model / effort が変更された形跡があるときのみ再評価する。

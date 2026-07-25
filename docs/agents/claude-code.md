@@ -60,6 +60,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | Setting | Value | Notes |
 |---|---|---|
 | `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | Pinned model with 1 M context (kept in sync with `home/dot_claude/settings.json`) |
+| `effortLevel` | `xhigh` | Persisted reasoning effort; `/effort` overrides it for one session |
 | `language` | `Japanese` | All conversational output in Japanese |
 | `alwaysThinkingEnabled` | `false` | Extended thinking opt-in is per-task |
 | `cleanupPeriodDays` | `20` | Auto-prune sessions older than 20 days |
@@ -425,19 +426,24 @@ Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headl
 
 ## Review subagents
 
-Seven subagent definition files live in `home/dot_claude/agents/` and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
+<!-- FACT:claude-agent-count -->10<!-- /FACT --> subagent definition files live in `home/dot_claude/agents/` and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
 
-| Agent | Focus |
-|---|---|
-| `cc-code-review.md` | General code review ([MUST]/[SHOULD]/[NITS]/[GOOD] format) |
-| `cc-security-review.md` | OWASP-focused security review |
-| `typescript-reviewer.md` | TypeScript-specific review (model: sonnet) |
-| `python-reviewer.md` | Python-specific review (model: sonnet) |
-| `react-reviewer.md` | React/frontend review (model: sonnet) |
-| `database-reviewer.md` | Database schema and query review (model: sonnet) |
-| `renovate-analyzer.md` | Renovate dependency-update analysis |
+Every agent pins both `model` and `effort` in its frontmatter — nothing inherits the caller's session model, so a standalone invocation runs at the pinned tier too. The frontmatter is the single source of truth for these values; the table below is descriptive.
 
-The `multi-review` skill dynamically spawns the language/domain reviewers based on detected file types.
+| Agent | Focus | Tier |
+|---|---|---|
+| `cc-code-review.md` | General code review ([MUST]/[SHOULD]/[NITS]/[GOOD] format) | sonnet / xhigh |
+| `cc-security-review.md` | OWASP-focused security review | sonnet / xhigh |
+| `adversarial-verifier.md` | Refutes review findings from an independent angle (large-tier adversarial round) | sonnet / xhigh |
+| `architecture-reviewer.md` | Aggregate repo/architecture view — duplication and design drift a single diff cannot show | sonnet / high |
+| `typescript-reviewer.md` | TypeScript-specific review | sonnet / high |
+| `python-reviewer.md` | Python-specific review | sonnet / high |
+| `react-reviewer.md` | React/frontend review | sonnet / high |
+| `database-reviewer.md` | Database schema and query review | sonnet / high |
+| `renovate-analyzer.md` | Renovate dependency-update analysis | sonnet / high |
+| `fact-check-worker.md` | Verifies one finding against primary sources (read-only, no write/exec) | sonnet / high |
+
+The `multi-review` skill dynamically spawns the language/domain reviewers based on detected file types. `architecture-reviewer` is gated behind `--arch` or the pr-workflow large tier; `adversarial-verifier` and `fact-check-worker` are spawned per finding rather than per PR.
 
 ---
 
