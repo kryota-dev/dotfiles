@@ -184,5 +184,6 @@ ghq_user = "kryota-dev"
   # support a macOS server, so the official Linux image under Docker Desktop is the supported
   # way to self-host on this machine. Pinned to an exact patch tag rather than `latest` or
   # `v2`, matching the repo's pin-don't-float convention for externals.
-  # renovate: datasource=docker depName=binwiederhier/ntfy
+  # Tracked by the customManager in .github/renovate.json5, which also pins it out of
+  # the repo-wide patch-automerge lane (third-party executable code).
   image = "binwiederhier/ntfy:v2.26.3"

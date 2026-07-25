@@ -27,11 +27,37 @@ services:
       # asserts the prefix.
       - "127.0.0.1:2586:80"
     volumes:
-      # Read-only: the server never rewrites its own config.
-      - "{{ .chezmoi.homeDir }}/.config/ntfy/server.yml:/etc/ntfy/server.yml:ro"
+      # Long syntax with create_host_path: false, and this is a security control, not
+      # style. With the short syntax Docker silently creates a missing bind source as an
+      # empty DIRECTORY: ntfy would then find no config file, fall back to its built-in
+      # defaults — where auth-default-access is "read-write" and no auth-file is set — and
+      # `tailscale serve` would keep publishing it. That turns a missing file into an
+      # anonymous read-write ntfy exposed to the whole tailnet. Failing to start is the
+      # only acceptable behaviour here.
+      - type: bind
+        source: "{{ .chezmoi.homeDir }}/.config/ntfy/server.yml"
+        target: /etc/ntfy/server.yml
+        # The server never rewrites its own config.
+        read_only: true
+        bind:
+          create_host_path: false
       # Message cache (cache.db) and auth database (user.db). Kept on the host so history
-      # and credentials survive image upgrades and `docker compose down`.
-      - "{{ .chezmoi.homeDir }}/.local/state/ntfy:/var/lib/ntfy"
+      # and credentials survive image upgrades and `docker compose down`. The setup script
+      # creates this directory (0700) before the container starts.
+      - type: bind
+        source: "{{ .chezmoi.homeDir }}/.local/state/ntfy"
+        target: /var/lib/ntfy
+        bind:
+          create_host_path: false
+    # Baseline hardening. Deliberately NOT dropping all capabilities or setting `user:`:
+    # the server listens on port 80 inside the container, so dropping CAP_NET_BIND_SERVICE
+    # would stop it binding, and a uid override interacts with Docker Desktop's bind-mount
+    # ownership mapping in ways that cannot be verified without running it. Revisit
+    # together, not piecemeal.
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
     environment:
       # Affects log timestamps only — ntfy stores message times as Unix epochs. Matches
       # the JST assumption already baked into the morning-radar LaunchAgent.

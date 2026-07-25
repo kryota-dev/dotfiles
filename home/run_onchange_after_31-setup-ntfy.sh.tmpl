@@ -24,6 +24,7 @@
 set -euo pipefail
 
 COMPOSE_FILE="$HOME/.config/ntfy/compose.yaml"
+SERVER_CONFIG="$HOME/.config/ntfy/server.yml"
 STATE_DIR="$HOME/.local/state/ntfy"
 # Must stay in lockstep with the loopback publish in dot_config/ntfy/compose.yaml.tmpl.
 # The port is a literal on both sides rather than a .chezmoidata.toml value because
@@ -40,10 +41,18 @@ if [ -n "${CI:-}" ]; then
   exit 0
 fi
 
-# Something chezmoi itself controls: a missing compose file means the apply is broken, so
-# fail loudly and let chezmoi retry on the next run (lifecycle convention).
+# Things chezmoi itself controls: a missing compose file or server config means the apply
+# is broken, so fail loudly and let chezmoi retry on the next run (lifecycle convention).
+# The server config check is a security guard, not just a sanity one — see the
+# create_host_path note in compose.yaml.tmpl. Starting the container without it would give
+# an anonymous read-write ntfy on the tailnet.
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "[ntfy] $COMPOSE_FILE is missing — the .config/ntfy target did not render." >&2
+  exit 1
+fi
+if [ ! -f "$SERVER_CONFIG" ]; then
+  echo "[ntfy] $SERVER_CONFIG is missing; refusing to start the server." >&2
+  echo "[ntfy] Without it ntfy falls back to anonymous read-write access." >&2
   exit 1
 fi
 
@@ -57,14 +66,30 @@ chmod 700 "$STATE_DIR"
 # happened to be closed, so this deliberately deviates from the "fail so chezmoi retries"
 # lifecycle convention: warn instead, and let the notify hook fall back to a local
 # notification until the daemon is back.
+#
+# Exiting 0 here has a consequence worth stating: chezmoi records a run_onchange script as
+# executed once it succeeds, and re-runs it only when the rendered body changes. So a later
+# `chezmoi apply` will NOT retry this — it will not invoke the script at all. The remedy
+# printed below is therefore the direct command, not "run chezmoi apply again", which would
+# silently do nothing. (Measured: a run_onchange script that exits 0 ran exactly once
+# across three applies.)
 if ! command -v docker >/dev/null 2>&1; then
   echo "[ntfy] docker not found; skipping. Install Docker Desktop (Brewfile: docker-desktop)." >&2
 elif ! docker info >/dev/null 2>&1; then
   echo "[ntfy] Docker daemon unreachable; skipping container reconciliation." >&2
-  echo "[ntfy] Start Docker Desktop, then re-run 'chezmoi apply' to converge." >&2
+  echo "[ntfy] Start Docker Desktop, then converge manually — a later 'chezmoi apply' will" >&2
+  echo "[ntfy] not re-run this script unless its content changes:" >&2
+  echo "[ntfy]   docker compose --file $COMPOSE_FILE up --detach --force-recreate" >&2
+  echo "[ntfy]   tailscale serve --bg --https=443 $SERVE_TARGET" >&2
 else
+  # --force-recreate is required, not defensive: `docker compose up --detach` only
+  # recreates a container when the SERVICE DEFINITION changes. Editing the contents of a
+  # bind-mounted file is invisible to it, and ntfy reads server.yml once at startup — so
+  # a cache-duration or ACL change would render to disk and never take effect. This
+  # script only runs when something actually changed (run_onchange), so unconditionally
+  # recreating here costs nothing.
   echo "[ntfy] reconciling container..."
-  docker compose --file "$COMPOSE_FILE" up --detach
+  docker compose --file "$COMPOSE_FILE" up --detach --force-recreate
 fi
 
 # `tailscale serve` is the only ingress: the container is bound to loopback, and serve
@@ -73,6 +98,22 @@ fi
 if ! command -v tailscale >/dev/null 2>&1; then
   echo "[ntfy] tailscale not found; the channel stays unreachable from the tailnet." >&2
   exit 0
+fi
+
+# Serve is tailnet-only; Funnel publishes to the public internet, which this design
+# rejects outright. The idempotency check below only looks for a proxy to this target and
+# would read a Funnel entry as "already published", so assert Funnel is off separately.
+#
+# The check is structural, NOT a grep for our target: `tailscale funnel status` and
+# `tailscale serve status` print the SAME config, distinguished only by a "(tailnet only)"
+# / "(Funnel on)" annotation (measured). Matching the target there would therefore trip on
+# the very state this script creates and fail every subsequent apply. AllowFunnel is null
+# when Funnel is off (measured) and a map of enabled host:port entries when it is on.
+if [ -x /usr/bin/jq ] && tailscale serve status --json 2>/dev/null |
+  /usr/bin/jq -e '(.AllowFunnel // {}) | to_entries | map(select(.value)) | length > 0' >/dev/null 2>&1; then
+  echo "[ntfy] REFUSING: Funnel (public internet) is enabled on this node." >&2
+  echo "[ntfy] Turn it off first: tailscale funnel --https=443 off" >&2
+  exit 1
 fi
 
 if tailscale serve status 2>/dev/null | grep -qF "$SERVE_TARGET"; then
@@ -85,6 +126,8 @@ if ! tailscale serve --bg --https=443 "$SERVE_TARGET"; then
   echo "[ntfy] 'tailscale serve' failed; the channel is not reachable from the tailnet." >&2
   echo "[ntfy] If this was a permissions error, grant the CLI operator access once with:" >&2
   echo "[ntfy]   sudo tailscale set --operator=${USER:-$(id -un)}" >&2
+  echo "[ntfy] then publish manually — as above, a later 'chezmoi apply' will not retry:" >&2
+  echo "[ntfy]   tailscale serve --bg --https=443 $SERVE_TARGET" >&2
   exit 0
 fi
 

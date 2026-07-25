@@ -10,10 +10,22 @@
 # because Claude Code itself expands those placeholders.
 #
 # Values are single-quoted (squote, not quote) so the shell treats them as literals: a
-# token containing $ or a backtick cannot trigger expansion or command substitution when
+# value containing $ or a backtick cannot trigger expansion or command substitution when
 # the hook sources this file.
 #
+# `squote` does NOT escape an embedded single quote, though — it emits '<value>' verbatim,
+# so a value containing ' closes the quoting and the remainder is sourced as shell code
+# (measured: `a'; touch /tmp/x; 'b` renders to a line that runs touch). Since this file is
+# sourced, that would promote a vault value into executable code. Guard it here and fail
+# the apply instead, which is the only place the bad value can still be caught cheaply.
+#
 # Only rendered while [ntfy].enabled is true in .chezmoidata.toml — see .chezmoiignore.
-NTFY_BASE_URL={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base_url" | trim | squote }}
-NTFY_TOPIC={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/topic" | trim | squote }}
-NTFY_TOKEN={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/token" | trim | squote }}
+{{- $baseURL := onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base_url" | trim }}
+{{- $topic := onepasswordRead "op://kryota.dev/Dotfiles - ntfy/topic" | trim }}
+{{- $token := onepasswordRead "op://kryota.dev/Dotfiles - ntfy/token" | trim }}
+{{- if or (contains "'" $baseURL) (contains "'" $topic) (contains "'" $token) }}
+{{-   fail "a 'Dotfiles - ntfy' field contains a single quote; squote cannot escape it and the value would be sourced as shell code" }}
+{{- end }}
+NTFY_BASE_URL={{ $baseURL | squote }}
+NTFY_TOPIC={{ $topic | squote }}
+NTFY_TOKEN={{ $token | squote }}

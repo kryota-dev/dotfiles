@@ -134,6 +134,15 @@
       automerge: false,
     },
     {
+      // The ntfy container is third-party executable code running a tailnet-facing service
+      // with write access to its own auth and message databases — strictly more privileged
+      // than the markdown skill archives below. The repo-wide `patch: { automerge: true }`
+      // lane would otherwise pull a compromised or retagged image straight onto this
+      // machine with no human in the loop, so pin it out of automerge like ECC.
+      matchDepNames: ['binwiederhier/ntfy'],
+      automerge: false,
+    },
+    {
       // Third-party skill archives (drawio, supabase). Content is markdown-only today
       // (no shell/JS/Python payload), so supply-chain risk is limited to prompt-injected
       // instructions — but the digest datasource means Renovate produces `digest` PRs

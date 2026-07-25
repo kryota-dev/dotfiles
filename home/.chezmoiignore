@@ -127,7 +127,10 @@ Library/
 #
 # NOTE: this file is itself a template, so a chezmoi action written inside one of these
 # comment lines would be executed. Keep the comments action-free.
-{{ if not .ntfy.enabled }}
+# The OS half matters as much as the flag: the reconcile script and the 1Password
+# validation are both macOS-only, so on Linux an enabled channel would scatter 0600 secret
+# files that nothing validates and nothing reconciles.
+{{ if or (ne .chezmoi.os "darwin") (not .ntfy.enabled) }}
 .config/ntfy
 .config/ntfy/**
 {{ end }}
