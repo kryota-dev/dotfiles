@@ -136,7 +136,7 @@ _claude_with_home() {
   local home_dir="$1"; shift
   CLAUDE_CONFIG_DIR="$home_dir" \          # account isolation
     ECC_AGENT_DATA_HOME="$home_dir" \      # account isolation
-    CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \   # account isolation
+    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-<slug>" \   # account isolation, outside the config dir (#336)
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \       # account isolation
     EXA_API_KEY="${EXA_API_KEY:-}" \       # secret scoping

@@ -18,12 +18,14 @@
 |---|---|---|
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | `~/.claude-r06` |
 | `ECC_AGENT_DATA_HOME` | `~/.claude` | `~/.claude-r06` |
-| `CLV2_HOMUNCULUS_DIR` | `~/.claude/ecc-homunculus` | `~/.claude-r06/ecc-homunculus` |
+| `CLV2_HOMUNCULUS_DIR` | `~/.local/share/ecc-homunculus-default` | `~/.local/share/ecc-homunculus-r06` |
 | `ECC_MCP_HEALTH_STATE_PATH` | `~/.claude/mcp-health-cache.json` | `~/.claude-r06/mcp-health-cache.json` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 | `CODEX_HOME` | （デフォルト — `~/.codex`） | `~/.codex-r06` |
 
 r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべての設定アーティファクト（settings、agents、commands、skills）が `~/.claude` を指すシンボリックリンクのみが含まれます。アカウント間で異なるのは、これらの環境変数がツールに書き込むよう指示するランタイム状態のみです。
+
+`CLV2_HOMUNCULUS_DIR` だけは `~/.claude` / `~/.claude-r06` の外、`~/.local/share/` 配下に完全に置かれています。Claude Code は config dir 配下のすべてのパスを sensitive file として扱い Write に対話承認を要求しますが、CLV2 の解析セッションは headless（`claude --model haiku --print`）で動くためその承認を得ることができず、instinct の書き込みがすべて失敗していました（issue #336）。他のアカウント別変数（`CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`ECC_MCP_HEALTH_STATE_PATH`、`GATEGUARD_STATE_DIR`）が config dir 配下のままなのは、それらが Claude Code の Write ツールを経由せず node / shell コードから直接書き込まれるため、このゲートに引っかからないからです。
 
 ---
 
@@ -67,9 +69,16 @@ _claude_with_home() {
   local home_dir="$1"
   shift
   (($#)) || set -- claude
+  local account_dir_name="${home_dir:t}"
+  local homunculus_slug
+  case "$account_dir_name" in
+    .claude) homunculus_slug=default ;;
+    .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
+    *) homunculus_slug="$account_dir_name" ;;
+  esac
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
-    CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
+    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
     EXA_API_KEY="${EXA_API_KEY:-}" \

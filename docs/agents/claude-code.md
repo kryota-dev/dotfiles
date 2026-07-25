@@ -460,10 +460,12 @@ Config is one SSOT; runtime state is isolated by the environment variables set i
 |---|---|---|
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | `~/.claude-r06` |
 | `ECC_AGENT_DATA_HOME` | `~/.claude` | `~/.claude-r06` |
-| `CLV2_HOMUNCULUS_DIR` | `~/.claude/ecc-homunculus` | `~/.claude-r06/ecc-homunculus` |
+| `CLV2_HOMUNCULUS_DIR` | `~/.local/share/ecc-homunculus-default` | `~/.local/share/ecc-homunculus-r06` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 
 Sessions, the governance `state.db`, instincts, bash-command logs, and caches are naturally isolated because each piece of runtime code resolves its paths from these environment variables.
+
+`CLV2_HOMUNCULUS_DIR` is the one entry that deliberately sits *outside* the config dir, encoding the account as a path suffix instead. Claude Code classifies every path under the config dir as a sensitive file and asks for interactive approval before a write, while the CLV2 analysis pass runs headless (`claude --model haiku --print`) with nobody to approve it — so no instinct write ever succeeded while this pointed at `<account>/ecc-homunculus`. The observer spent its turn budget negotiating permission, died at "Reached max turns", and produced exactly zero instincts (#336). The other three variables stay under the config dir because the code that writes them (node hooks, shell scripts) writes directly rather than through Claude Code's Write tool, so the sensitive-file gate never applies to them.
 
 A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these variables unset and falls back to `~/.claude` and `$XDG_DATA_HOME/ecc-homunculus` — a different state location than the aliases use.
 
@@ -482,8 +484,10 @@ A bare `claude` invocation (without the `cld`/`cld-r06` alias) leaves these vari
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | Fixed to `~/.agents/skills/ecc`; skips ECC's plugin fallback scan |
 | `CLAUDE_CONFIG_DIR` | `cld`/`cld-r06` alias | Selects which `~/.claude*` directory Claude Code uses |
 | `ECC_AGENT_DATA_HOME` | `cld`/`cld-r06` alias | Governs where ECC (and the hook forks) write state |
-| `CLV2_HOMUNCULUS_DIR` | `cld`/`cld-r06` alias | Homunculus data directory for CLV2 instincts/clusters |
+| `CLV2_HOMUNCULUS_DIR` | `cld`/`cld-r06` alias | Homunculus data directory for CLV2 instincts/clusters. Sits at `~/.local/share/ecc-homunculus-<account-slug>`, outside the config dir, so a headless instinct write is not blocked by the sensitive-file gate (#336) |
 | `ECC_OBSERVER_TIMEOUT_SECONDS` | `cld`/`cld-r06` alias | Default 300; raises the CLV2 observer watchdog so the Haiku analysis pass can finish instead of dying at 120s (#256). The `:-` form keeps an explicit override winning |
+| `OBSERVER_ACTIVE_HOURS_START` / `OBSERVER_ACTIVE_HOURS_END` | `cld`/`cld-r06` alias | Both default to `0`, which disables the CLV2 session-guardian clock gate (upstream default 800-2300). Sessions here routinely run past midnight, so that gate skipped analysis cycles wholesale; the guardian's cooldown and idle gates still throttle them (#336) |
+| `ECC_OBSERVER_MAX_TURNS` | `cld`/`cld-r06` alias | Default 100 (the upstream cap) rather than the auto-scaled floor of 20, which cut the Read → dedup-check → Write pass off mid-write. The watchdog above, not the turn ceiling, is what bounds a cycle (#336) |
 
 ---
 

@@ -151,7 +151,7 @@ Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリ�
 
 ### 14 — enable-clv2-observer (`run_onchange`、after)
 
-各アカウントの `ecc-homunculus/config.json` に `observer.enabled = true` を `jq` のアトミックマージ（一時ファイルへ書き込み後 `mv`）で設定します。chezmoi 管理の CLV2 スキルディレクトリではなく、per-account のランタイム状態ディレクトリに書き込むことで、external の 168時間リフレッシュサイクルをまたいでフラグが保持されます。PATH の `jq` を優先し、`mise exec -- jq` にフォールバックし、どちらも利用できない場合は非 0 で終了（chezmoi がリトライ）します。
+各アカウントの `~/.local/share/ecc-homunculus-<slug>/config.json`（`<slug>` は `~/.claude` なら `default`、それ以外は `.claude-` 以降のサフィックス）に `observer.enabled = true` を `jq` のアトミックマージ（一時ファイルへ書き込み後 `mv`）で設定します。chezmoi 管理の CLV2 スキルディレクトリではなく、per-account のランタイム状態ディレクトリに書き込むことで、external の 168時間リフレッシュサイクルをまたいでフラグが保持されます。PATH の `jq` を優先し、`mise exec -- jq` にフォールバックし、どちらも利用できない場合は非 0 で終了（chezmoi がリトライ）します。
 
 ### 16 — migrate-claude-binary (`run_once`、after)
 
