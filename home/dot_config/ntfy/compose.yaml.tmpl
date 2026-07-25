@@ -1,0 +1,38 @@
+# Self-hosted ntfy notification server (kryota-dev/dotfiles#337).
+#
+# Rendered to ~/.config/ntfy/compose.yaml and reconciled by
+# run_onchange_after_31-setup-ntfy.sh.tmpl via `docker compose up --detach`.
+#
+# Why Docker rather than a native binary: upstream ntfy states "Only the ntfy CLI is
+# supported on macOS. ntfy server is currently not supported", and homebrew-core builds
+# the macOS formula with `-tags noserver`, so `ntfy serve` does not exist in the Brewfile
+# binary at all. The official Linux image under Docker Desktop is the supported route.
+#
+# Why no launchd unit: `restart: unless-stopped` plus Docker Desktop's own start-at-login
+# already supervise this container. A LaunchAgent would be a second supervisor racing the
+# first, and the repo's plist conventions (RunAtLoad deliberately absent) were written for
+# a billed Claude run, not for a daemon.
+services:
+  ntfy:
+    image: {{ .ntfy.image }}
+    container_name: ntfy
+    command: ["serve"]
+    restart: unless-stopped
+    ports:
+      # Loopback ONLY. `tailscale serve` is the sole ingress: it proxies the tailnet to
+      # this port over TLS. Binding to 0.0.0.0 would expose the server on every local
+      # network, and binding to the tailnet address directly would put a 100.x literal in
+      # a public repository and give up the free per-node certificate. Changing the
+      # left-hand side away from 127.0.0.1 is a security regression; tests/files.bats
+      # asserts the prefix.
+      - "127.0.0.1:2586:80"
+    volumes:
+      # Read-only: the server never rewrites its own config.
+      - "{{ .chezmoi.homeDir }}/.config/ntfy/server.yml:/etc/ntfy/server.yml:ro"
+      # Message cache (cache.db) and auth database (user.db). Kept on the host so history
+      # and credentials survive image upgrades and `docker compose down`.
+      - "{{ .chezmoi.homeDir }}/.local/state/ntfy:/var/lib/ntfy"
+    environment:
+      # Affects log timestamps only — ntfy stores message times as Unix epochs. Matches
+      # the JST assumption already baked into the morning-radar LaunchAgent.
+      TZ: "Asia/Tokyo"

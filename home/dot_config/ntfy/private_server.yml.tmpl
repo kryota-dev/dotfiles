@@ -1,0 +1,38 @@
+# ntfy server configuration (kryota-dev/dotfiles#337), rendered from 1Password at
+# `chezmoi apply` and deployed at mode 0600. Mounted read-only into the container at
+# /etc/ntfy/server.yml by ~/.config/ntfy/compose.yaml.
+#
+# Only rendered while [ntfy].enabled is true in .chezmoidata.toml — see .chezmoiignore.
+
+# The node's MagicDNS name (https://<host>.<tailnet>.ts.net). Read from 1Password rather
+# than committed: this repository is public and the tailnet hostname identifies the
+# machine. It must match what the phone apps subscribe to, because the iOS poll-request
+# flow keys its upstream Firebase topic on the SHA256 of the full topic URL.
+base-url: {{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base_url" | trim | quote }}
+
+# Inside the container. The host-side loopback publish lives in compose.yaml.
+listen-http: ":80"
+
+# `tailscale serve` terminates TLS and proxies, so ntfy's direct peer is always the proxy.
+# Without this every request looks like one visitor and the per-visitor rate limits would
+# apply to the whole tailnet at once.
+behind-proxy: true
+
+# Persistent, restart-surviving history. ntfy's 12h default is far too short for "review
+# what happened while I was away"; 7 days is sized for that. Subscribers retrieve it with
+# the `poll=1` and `since=` parameters, filtered by the tags the hook publishes.
+cache-file: "/var/lib/ntfy/cache.db"
+cache-duration: "168h"
+
+# Second layer behind the tailnet perimeter: no anonymous access to anything. The single
+# publisher/subscriber user is granted read-write on exactly one topic by the one-time
+# `ntfy access` bootstrap documented in docs/architecture/notifications.md.
+auth-file: "/var/lib/ntfy/user.db"
+auth-default-access: "deny-all"
+
+# iOS instant delivery. A self-hosted server cannot reach APNs, so ntfy forwards a poll
+# request upstream carrying ONLY the message ID and the SHA256 of the topic URL — never
+# the title, body, tags or any attribution, all of which stay inside the tailnet. The
+# device then fetches the real message from this server. Without this, upstream documents
+# iOS delivery as taking "up to hours". Approved 2026-07-26 (PRD Resolved Decisions #3).
+upstream-base-url: "https://ntfy.sh"

@@ -1,0 +1,92 @@
+{{ if and (eq .chezmoi.os "darwin") .ntfy.enabled -}}
+#!/bin/bash
+# Reconcile the self-hosted ntfy container and its tailnet publication (kryota-dev/dotfiles#337).
+#
+# Only rendered while [ntfy].enabled is true in .chezmoidata.toml, so a machine that has not
+# been bootstrapped never sees this script at all.
+#
+# Re-runs whenever the compose file or the server config changes (embedded hashes below),
+# the same trick run_onchange_after_30-register-launchd-agents uses. Both hashes are taken
+# over the RAW template source via `include`, which does not evaluate the template — so
+# rendering this script never reaches 1Password.
+#
+# That also means the hashes are blind to .chezmoidata.toml: `include` sees the literal
+# `.ntfy.image` placeholder, not its value, so a Renovate bump of the image pin would leave
+# both hashes byte-identical and this script would never re-run — the container would stay
+# on the old image forever. The evaluated image line below closes that hole by putting the
+# resolved value into the script body itself.
+# compose hash: {{ include "dot_config/ntfy/compose.yaml.tmpl" | sha256sum }}
+# server config hash: {{ include "dot_config/ntfy/private_server.yml.tmpl" | sha256sum }}
+# ntfy image: {{ .ntfy.image }}
+#
+# No LaunchAgent is registered: `restart: unless-stopped` plus Docker Desktop's own
+# start-at-login already supervise the container, and a second supervisor would race it.
+set -euo pipefail
+
+COMPOSE_FILE="$HOME/.config/ntfy/compose.yaml"
+STATE_DIR="$HOME/.local/state/ntfy"
+# Must stay in lockstep with the loopback publish in dot_config/ntfy/compose.yaml.tmpl.
+# The port is a literal on both sides rather than a .chezmoidata.toml value because
+# `make lint` strips every line containing a chezmoi action before running shellcheck, so
+# a template variable on a functional line would vanish from the linted script.
+# tests/files.bats asserts the two literals match.
+SERVE_TARGET="http://127.0.0.1:2586"
+
+# CI runners have neither Docker Desktop nor a tailnet. This script is not even rendered
+# in CI today (the flag is false), but skip explicitly so flipping the flag can never hang
+# a workflow.
+if [ -n "${CI:-}" ]; then
+  echo "[ntfy] CI detected; skipping container and tailnet reconciliation."
+  exit 0
+fi
+
+# Something chezmoi itself controls: a missing compose file means the apply is broken, so
+# fail loudly and let chezmoi retry on the next run (lifecycle convention).
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "[ntfy] $COMPOSE_FILE is missing — the .config/ntfy target did not render." >&2
+  exit 1
+fi
+
+# Message cache and auth database. Created up front so the bind mount cannot materialise
+# as a directory this user does not own.
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+
+# Docker Desktop's running state is user-controlled and outside chezmoi's convergence
+# model. Hard-failing here would break every unrelated `chezmoi apply` whenever Docker
+# happened to be closed, so this deliberately deviates from the "fail so chezmoi retries"
+# lifecycle convention: warn instead, and let the notify hook fall back to a local
+# notification until the daemon is back.
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[ntfy] docker not found; skipping. Install Docker Desktop (Brewfile: docker-desktop)." >&2
+elif ! docker info >/dev/null 2>&1; then
+  echo "[ntfy] Docker daemon unreachable; skipping container reconciliation." >&2
+  echo "[ntfy] Start Docker Desktop, then re-run 'chezmoi apply' to converge." >&2
+else
+  echo "[ntfy] reconciling container..."
+  docker compose --file "$COMPOSE_FILE" up --detach
+fi
+
+# `tailscale serve` is the only ingress: the container is bound to loopback, and serve
+# fronts it with the node's tailnet certificate. Idempotent — re-running with the same
+# target is a no-op, so the reconcile is safe on every apply.
+if ! command -v tailscale >/dev/null 2>&1; then
+  echo "[ntfy] tailscale not found; the channel stays unreachable from the tailnet." >&2
+  exit 0
+fi
+
+if tailscale serve status 2>/dev/null | grep -qF "$SERVE_TARGET"; then
+  echo "[ntfy] tailscale serve already publishes ${SERVE_TARGET}."
+  exit 0
+fi
+
+echo "[ntfy] publishing ${SERVE_TARGET} to the tailnet..."
+if ! tailscale serve --bg --https=443 "$SERVE_TARGET"; then
+  echo "[ntfy] 'tailscale serve' failed; the channel is not reachable from the tailnet." >&2
+  echo "[ntfy] If this was a permissions error, grant the CLI operator access once with:" >&2
+  echo "[ntfy]   sudo tailscale set --operator=${USER:-$(id -un)}" >&2
+  exit 0
+fi
+
+echo "[ntfy] tailnet publication configured."
+{{ end -}}

@@ -1,0 +1,19 @@
+# Runtime configuration for ~/.claude/ntfy-notify.sh (kryota-dev/dotfiles#337), rendered
+# from 1Password at `chezmoi apply` and deployed at mode 0600.
+#
+# The hook sources this file directly instead of reading the values from its environment.
+# That keeps the publish token out of the Claude Code process environment — and therefore
+# out of every tool subprocess it spawns — and makes the hook work regardless of how the
+# session was launched, with no dependency on the cld / cld-r06 wrapper re-exporting
+# anything. It is the deliberate counterpart to how the MCP keys are handled in
+# dot_config/zsh/private_claude-secrets.zsh.tmpl, where the wrapper re-export IS needed
+# because Claude Code itself expands those placeholders.
+#
+# Values are single-quoted (squote, not quote) so the shell treats them as literals: a
+# token containing $ or a backtick cannot trigger expansion or command substitution when
+# the hook sources this file.
+#
+# Only rendered while [ntfy].enabled is true in .chezmoidata.toml — see .chezmoiignore.
+NTFY_BASE_URL={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base_url" | trim | squote }}
+NTFY_TOPIC={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/topic" | trim | squote }}
+NTFY_TOKEN={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/token" | trim | squote }}

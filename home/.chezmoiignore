@@ -116,3 +116,18 @@
 {{ if ne .chezmoi.os "darwin" }}
 Library/
 {{ end }}
+
+# Self-hosted ntfy channel (#337): the server config and the hook's env file are rendered
+# from the "Dotfiles - ntfy" 1Password item, which only exists once the channel has been
+# bootstrapped. Ignoring the target also prevents chezmoi from EVALUATING those templates
+# (measured against a deliberately-failing template: ignored applies cleanly, un-ignored
+# aborts the apply), so onepasswordRead is never reached on a machine — or a CI runner —
+# that has no such item. That is what lets this ship disabled without adding entries to
+# either CI job's "Exclude CI-incompatible files" step.
+#
+# NOTE: this file is itself a template, so a chezmoi action written inside one of these
+# comment lines would be executed. Keep the comments action-free.
+{{ if not .ntfy.enabled }}
+.config/ntfy
+.config/ntfy/**
+{{ end }}

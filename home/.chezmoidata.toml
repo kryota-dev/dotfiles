@@ -162,3 +162,27 @@ ghq_user = "kryota-dev"
     "verification-loop",
     "vite-patterns",
   ]
+
+[ntfy]
+  # Self-hosted ntfy notification channel (kryota-dev/dotfiles#337). The server runs as a
+  # Docker container bound to loopback and is published to the tailnet by `tailscale serve`;
+  # Claude Code hooks publish to it through ~/.claude/ntfy-notify.sh.
+  #
+  # Shipped DISABLED because the channel needs a one-time manual bootstrap that chezmoi
+  # cannot perform: create the "Dotfiles - ntfy" 1Password item, then create the ntfy user,
+  # ACL and token inside the container (see docs/architecture/notifications.md). While this
+  # is false, .chezmoiignore skips the whole .config/ntfy target, and skipping a target also
+  # stops chezmoi from evaluating its template — so `onepasswordRead` is never called on a
+  # machine (or CI runner) without the vault item and `chezmoi apply` still converges.
+  # Flip to true only after the bootstrap.
+  #
+  # The hook wiring itself is deliberately NOT gated: settings.json is a plain file, not a
+  # template, so the hooks stay wired and simply take their local-osascript fallback path
+  # until the channel exists — which is what the ECC hook they replace did anyway.
+  enabled = false
+  # The macOS Homebrew build of ntfy is client-only (`-tags noserver`) and upstream does not
+  # support a macOS server, so the official Linux image under Docker Desktop is the supported
+  # way to self-host on this machine. Pinned to an exact patch tag rather than `latest` or
+  # `v2`, matching the repo's pin-don't-float convention for externals.
+  # renovate: datasource=docker depName=binwiederhier/ntfy
+  image = "binwiederhier/ntfy:v2.26.3"

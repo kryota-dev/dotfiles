@@ -90,6 +90,22 @@
       extractVersionTemplate: '^v(?<version>.+)$',
     },
     {
+      // Self-hosted ntfy server image (#337). The container is the only supported way to run
+      // an ntfy server on macOS, and it is pinned to an exact patch tag rather than `latest`
+      // or the floating `v2` / `v2.26` tags. An inline `# renovate:` comment would not be
+      // enough: that convention is honoured by specific built-in managers, not for an
+      // arbitrary TOML file, so the pin needs an explicit entry like every other one here.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        'image\\s*=\\s*"binwiederhier/ntfy:(?<currentValue>v\\d+\\.\\d+\\.\\d+)"',
+      ],
+      depNameTemplate: 'binwiederhier/ntfy',
+      datasourceTemplate: 'docker',
+    },
+    {
       // ECC ships executable hook code, so it is pinned to an immutable commit digest (not a
       // moveable tag). github-tags tracks release tags and updates both the version and the
       // commit digest in [ecc]; the packageRule below keeps ECC out of automerge.
