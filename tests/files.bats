@@ -1624,7 +1624,10 @@ _gate_decision() {
   # evaluating those templates, which is also why neither CI job needs a new exclusion.
   grep -qE '^\[ntfy\]$' "$data"
   grep -qE '^\s*enabled = false$' "$data"
-  grep -qF '{{ if not .ntfy.enabled }}' "$ignore"
+  # The guard covers both the flag and the OS: the reconcile script and the 1Password
+  # validation are macOS-only, so an enabled channel on Linux would deploy secret files
+  # that nothing validates or reconciles.
+  grep -qF '{{ if or (ne .chezmoi.os "darwin") (not .ntfy.enabled) }}' "$ignore"
   grep -qE '^\.config/ntfy$' "$ignore"
 }
 
@@ -1642,9 +1645,58 @@ _gate_decision() {
   # `tailscale serve` is the only ingress. A 0.0.0.0 bind would expose the server on every
   # local network; binding the tailnet address directly would put a 100.x literal in a
   # public repo and give up the per-node certificate.
-  grep -qE '^\s*- "127\.0\.0\.1:[0-9]+:80"$' "$compose"
-  run grep -qE '^\s*- "(0\.0\.0\.0|100\.|\*)' "$compose"
+  # EVERY published port must be loopback-bound, not merely "at least one of them".
+  # A second entry like `- "2586:80"` binds all interfaces and would have slipped past a
+  # presence-only check.
+  # awk with POSIX classes, not sed with \s: BSD sed does not understand \s and the range
+  # silently matched nothing, which made this assertion vacuous.
+  local total loopback
+  total="$(awk '/^[[:space:]]*ports:/ {inb=1; next} inb && /^[[:space:]]*[a-z_]+:/ {inb=0} inb && /^[[:space:]]*- / {n++} END {print n+0}' "$compose")"
+  loopback="$(awk '/^[[:space:]]*ports:/ {inb=1; next} inb && /^[[:space:]]*[a-z_]+:/ {inb=0} inb && /^[[:space:]]*- "127\.0\.0\.1:[0-9]+:[0-9]+"$/ {n++} END {print n+0}' "$compose")"
+  [ "$total" -ge 1 ]
+  [ "$total" -eq "$loopback" ]
+}
+
+@test "ntfy: the container fails closed when its config file is missing" {
+  local compose="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  local script="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  # Docker's short bind syntax creates a missing source as an empty DIRECTORY. ntfy would
+  # then start on its built-in defaults — auth-default-access "read-write", no auth-file —
+  # while tailscale serve keeps publishing it: an anonymous read-write server on the
+  # tailnet. Long syntax with create_host_path: false makes that a startup failure instead.
+  [ "$(grep -c 'create_host_path: false' "$compose")" -ge 2 ]
+  run grep -qE '^\s*- "[^"]*:/etc/ntfy/server\.yml' "$compose"
   [ "$status" -ne 0 ]
+  # Second layer: the reconcile script refuses to start the server without its config.
+  grep -Fq 'SERVER_CONFIG=' "$script"
+  grep -Fq 'refusing to start the server' "$script"
+}
+
+@test "ntfy: the reconcile recreates the container and refuses a Funnel publication" {
+  local script="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  # `docker compose up -d` only recreates on a SERVICE DEFINITION change; editing the
+  # contents of a bind-mounted config is invisible to it, and ntfy reads server.yml once at
+  # startup. Without --force-recreate a retention or ACL change would never take effect.
+  grep -Fq 'up --detach --force-recreate' "$script"
+  # Funnel publishes to the public internet, which this design rejects. The serve
+  # idempotency check alone would read a Funnel entry as "already published".
+  #
+  # The guard must be STRUCTURAL. `tailscale funnel status` and `tailscale serve status`
+  # print the same config, distinguished only by a "(tailnet only)" / "(Funnel on)"
+  # annotation (measured), so grepping the target there trips on the very state this
+  # script creates and fails every subsequent apply. Assert the AllowFunnel check and the
+  # absence of a target-matching funnel grep.
+  grep -Fq 'AllowFunnel' "$script"
+  run grep -qE 'tailscale funnel status[^|]*\|[^|]*grep -qF "\$SERVE_TARGET"' "$script"
+  [ "$status" -ne 0 ]
+}
+
+@test "ntfy: the container image is kept out of the repo-wide patch-automerge lane" {
+  local rc="${REPO_ROOT}/.github/renovate.json5"
+  # renovate.json5 sets `patch: { automerge: true }` globally and carves out third-party
+  # executable code (ECC, skill archives). A tailnet-facing container with write access to
+  # its own auth database belongs in that carve-out, not on the automerge lane.
+  grep -A3 "matchDepNames: \['binwiederhier/ntfy'\]" "$rc" | grep -Fq 'automerge: false'
 }
 
 @test "ntfy: the compose port and the tailscale serve target stay in lockstep" {
@@ -1685,29 +1737,45 @@ _gate_decision() {
   for key in base_url topic token; do
     grep -qF "onepasswordRead \"op://kryota.dev/Dotfiles - ntfy/${key}\"" "$env_tmpl"
   done
-  # squote, not quote: a token containing $ or a backtick must not be able to expand or
-  # substitute when the hook sources this file.
+  # squote, not quote: a value containing $ or a backtick must not be able to expand or
+  # substitute when the hook sources this file. squote does NOT cover an embedded single
+  # quote, though — it emits '<value>' verbatim, so a quote closes the quoting and the rest
+  # of the line is sourced as shell code (measured). Since this file is sourced, that would
+  # promote a vault value into executable code, so a fail-closed render-time guard covers
+  # the class squote cannot.
   [ "$(grep -c 'squote }}$' "$env_tmpl")" -eq 3 ]
+  grep -Fq 'fail "a ' "$env_tmpl"
+  grep -Fq 'contains "' "$env_tmpl"
 }
 
 @test "ntfy: no tailnet identifier, private address, or token is committed" {
-  # This repository is public. The MagicDNS host, the CGNAT address and the publish token
-  # are the three things that would identify or unlock the machine.
-  local hits root_md
-  # Top-level markdown (README / AGENTS / CLAUDE) is listed explicitly: it sits outside
-  # every directory scanned below, so without this a hostname pasted into README.md would
-  # go unnoticed.
-  root_md="$(find "${REPO_ROOT}" -maxdepth 1 -name '*.md' | tr '\n' ' ')"
+  # This repository is public. The MagicDNS host, the CGNAT address, a publish token and a
+  # tailnet auth key are the things that would identify or unlock the machine. The ntfy
+  # TOPIC is deliberately out of scope — it is a free-form string with no distinguishing
+  # shape, so no regex can catch it; it is protected by living in 1Password instead.
+  command -v git >/dev/null 2>&1 || skip "git unavailable"
+  local hits scanned
+  # Scope is every TRACKED file, not a hand-listed set of directories: an allowlist silently
+  # stops covering whatever is added next (.github/, scripts/, .agents/ were all outside the
+  # earlier list). `-i` matters because the patterns are lower-case but hostnames are not.
+  scanned="$(git -C "$REPO_ROOT" ls-files | grep -c .)"
+  # Positive control: with the walk stubbed out by a bad path, an empty `hits` reads as a
+  # pass. Assert the scan actually covered the repo before trusting its silence.
+  [ "$scanned" -gt 100 ] || {
+    echo "sanity: the scan covered only $scanned tracked files — the walk broke"
+    false
+  }
   # The MagicDNS suffix is matched loosely (`<name>.ts.net`) rather than only the default
   # `tailXXXXXX` shape, so a tailnet with a custom name is caught too. Documentation
   # placeholders like `<node>.<tailnet>.ts.net` still do not match: the character before
   # `.ts.net` is `>`, which is outside the class.
-  # shellcheck disable=SC2086
-  hits="$(grep -rInE \
-    -e '[a-z0-9-]+\.ts\.net' \
-    -e '(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)' \
-    -e '\btk_[A-Za-z0-9]{10,}\b' \
-    "${HOME_DIR}" "${DOCS_DIR}" "${REPO_ROOT}/tests" "${REPO_ROOT}/.claude" $root_md 2>/dev/null || true)"
+  hits="$(git -C "$REPO_ROOT" ls-files -z |
+    xargs -0 grep -InEi \
+      -e '[a-z0-9-]+\.ts\.net' \
+      -e '(^|[^0-9.])100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}([^0-9.]|$)' \
+      -e '\btk_[A-Za-z0-9]{10,}\b' \
+      -e '\btskey-(auth|api|client)-[A-Za-z0-9]' \
+    || true)"
   [ -z "$hits" ] || {
     echo "committed identifier leak:"
     echo "$hits"
@@ -1723,7 +1791,7 @@ _gate_decision() {
      | select(.value | type == "array")
      | .value[]
      | select((.id // "") | endswith("ntfy-notify"))
-     | select(.hooks[0].command == "$HOME/.claude/ntfy-notify.sh" and .hooks[0].async == true)
+     | select(any(.hooks[]; .command == "$HOME/.claude/ntfy-notify.sh" and .async == true))
      | .id]
     | sort == ["notification:ntfy-notify","session-end:ntfy-notify","stop-failure:ntfy-notify","stop:ntfy-notify"]
   ' "$s" >/dev/null
@@ -1767,6 +1835,12 @@ _gate_decision() {
   # Docker Desktop's running state is user-controlled, so an unreachable daemon must warn
   # rather than break every unrelated `chezmoi apply`.
   grep -Fq 'docker info >/dev/null 2>&1' "$script"
+  # chezmoi marks a run_onchange script done once it exits 0 and only re-runs it when the
+  # rendered body changes, so telling the user to re-run `chezmoi apply` would be advice
+  # that silently does nothing. The remedy must be the direct command instead.
+  grep -Fq 'docker compose --file $COMPOSE_FILE up --detach' "$script"
+  run grep -qE "re-run '?chezmoi apply'? to converge" "$script"
+  [ "$status" -ne 0 ]
   run grep -nE 'docker (info|compose).*(\|\| exit 1|&& exit 1)' "$script"
   [ "$status" -ne 0 ]
 }
@@ -1801,7 +1875,15 @@ _gate_decision() {
   # server is unreachable.
   grep -Fq 'notify-send' "$hook"
   # BSD tr/sed abort with "illegal byte sequence" on input invalid in the current locale,
-  # and hook payloads and branch names are arbitrary bytes. Every byte filter runs under C:
-  # two in applescript_safe (tr, sed) and three in tag_safe (tr, tr, sed).
-  [ "$(grep -o 'LC_ALL=C' "$hook" | grep -c .)" -ge 5 ]
+  # and branch names are arbitrary bytes. Count occurrences on the tag_safe pipeline itself,
+  # not anywhere in the file: a file-wide count includes the explanatory comment and would
+  # stay green after one of the three filters lost its prefix.
+  local tagline
+  tagline="$(grep -E "^\s*printf '%s' \"\\\$1\" \| LC_ALL=C tr -c " "$hook")"
+  [ -n "$tagline" ]
+  [ "$(printf '%s' "$tagline" | grep -o 'LC_ALL=C' | grep -c .)" -eq 3 ]
+  # The osascript call must pass text as argv, never interpolate it into the script source.
+  grep -Fq 'on run argv' "$hook"
+  run grep -Fq 'display notification \\"' "$hook"
+  [ "$status" -ne 0 ]
 }

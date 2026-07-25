@@ -262,6 +262,16 @@ _assert_fact_marker() {
     echo "no FACT:${name} markers found under ${DOCS_DIR} — add them or drop this test"
     false
   }
+  # A single surviving marker is not enough: EN is canonical and JA is a mirror, so a
+  # marker silently dropped from one side would leave the other side still passing while
+  # the two docs disagree.
+  local en ja
+  en="$(grep -lF "FACT:${name}" "${DOCS_DIR}/architecture/notifications.md" 2>/dev/null || true)"
+  ja="$(grep -lF "FACT:${name}" "${DOCS_DIR}/architecture/notifications.ja.md" 2>/dev/null || true)"
+  [ -n "$en" ] && [ -n "$ja" ] || {
+    echo "FACT:${name} must appear in BOTH notifications.md and notifications.ja.md"
+    false
+  }
 }
 
 @test "docs_facts: the ntfy loopback port marker matches the compose port publish" {
