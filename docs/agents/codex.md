@@ -35,7 +35,7 @@ Each `CODEX_HOME` receives an identical file set. Both are rendered from the sam
 | `home/dot_codex/symlink_AGENTS.md.tmpl` | `~/.codex/AGENTS.md -> ~/AGENTS.md` | `~/.codex-r06/AGENTS.md -> ~/AGENTS.md` |
 | `home/dot_codex/symlink_skills.tmpl` | `~/.codex/skills -> ~/.agents/skills` | `~/.codex-r06/skills -> ~/.agents/skills` |
 
-`home/dot_codex-r06/` contains the same four files; their template bodies are identical one-liners pointing to the same `home/.chezmoitemplates/` sources.
+There is also `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agent.config.toml` (0600), the non-interactive workspace-write profile used by skills (see the `agent` profile note below). `home/dot_codex-r06/` contains the same files; their template bodies are identical one-liners pointing to the same `home/.chezmoitemplates/` sources.
 
 ---
 
@@ -86,11 +86,11 @@ The home directory is interpolated from `{{ .chezmoi.homeDir }}` at apply time. 
 
 `home/.chezmoitemplates/codex-shared-config.toml` is the actual config body, included by both `dot_codex/private_shared.config.toml.tmpl` and `dot_codex-r06/private_shared.config.toml.tmpl`.
 
-The rendered `shared.config.toml` contains:
+The model/effort scalars live in a shared fragment `home/.chezmoitemplates/codex-model-pin.toml` (the single source of truth), included by both `shared` and the `agent` profile. The rendered `shared.config.toml` contains (model value tracks the pin; see `codex-model-pin.toml`):
 
 ```toml
 personality = "pragmatic"
-model = "gpt-5.5"
+model = "gpt-5.6-terra"
 model_reasoning_effort = "xhigh"
 
 [features]

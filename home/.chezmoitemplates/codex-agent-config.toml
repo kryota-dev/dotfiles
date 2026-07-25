@@ -3,6 +3,8 @@ sandbox_mode = "workspace-write"
 approval_policy = "never"
 web_search = "cached"
 
+# [features] is intentionally duplicated with codex-shared-config.toml (profile parity).
+# Not extracted into a fragment: a single one-line key does not justify the indirection (YAGNI).
 [features]
 multi_agent = true
 
