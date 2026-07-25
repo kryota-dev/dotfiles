@@ -126,7 +126,7 @@ required only once the self-hosted notification channel is switched on with
 
 | Field | Value |
 |-------|-------|
-| `base_url` | The node's MagicDNS URL, `https://<node>.<tailnet>.ts.net`. Kept in the vault because it identifies the machine and this repository is public. |
+| `base_url` | The node's MagicDNS URL, `https://<node>.<tailnet>.ts.net`. Must be `https://` (the hook treats anything else as unconfigured, because the bearer token travels in a header) and must have **no trailing slash**. Kept in the vault because it identifies the machine and this repository is public. |
 | `topic` | 1–64 characters of `[A-Za-z0-9_-]`. Give it an unguessable suffix — its SHA256 is what the iOS relay keys on. |
 | `token` | The `tk_…` publish token minted by `ntfy token add` during the one-time bootstrap. |
 

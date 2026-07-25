@@ -80,13 +80,13 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
-| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` **and** `dot_config/ntfy/private_server.yml.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl`, `dot_config/ntfy/private_server.yml.tmpl`, **and** the resolved `[ntfy].image` value from `.chezmoidata.toml` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
 `20-macos-defaults` uses a `joinPath` self-hash — editing the script itself is enough to re-apply all macOS `defaults write` calls.
 
-`31-setup-ntfy` embeds **two** hashes, one of which covers a `private_` template. That is safe
+`31-setup-ntfy` embeds **two** hashes plus one resolved value, so it has three re-run triggers. That is safe
 because `include` returns the raw source text and never evaluates it: hashing
 `dot_config/ntfy/private_server.yml.tmpl` does not reach 1Password, so the script renders on a
 machine that has no vault item. It is also the only lifecycle script gated on a

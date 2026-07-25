@@ -126,7 +126,7 @@ macOS で `chezmoi apply` を実行する前に:
 
 | フィールド | 値 |
 |----------|---|
-| `base_url` | ノードの MagicDNS URL `https://<node>.<tailnet>.ts.net`。マシンを特定できる情報であり、本リポジトリは public のため Vault に置きます。 |
+| `base_url` | ノードの MagicDNS URL `https://<node>.<tailnet>.ts.net`。**`https://` 必須**（ベアラトークンをヘッダで送るため、それ以外はフックが未設定として扱う）かつ**末尾スラッシュなし**。マシンを特定できる情報であり、本リポジトリは public のため Vault に置きます。 |
 | `topic` | `[A-Za-z0-9_-]` の 1〜64 文字。iOS 中継はこの SHA256 をキーにするため、推測されにくいサフィックスを付けます。 |
 | `token` | 1 回限りのブートストラップで `ntfy token add` が発行する `tk_…` の publish トークン。 |
 

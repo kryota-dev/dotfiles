@@ -9,8 +9,11 @@ only locally, kept no history, and could not say which session, repo or account 
 notification came from.
 
 The channel ships **disabled**. It needs a one-time manual bootstrap that chezmoi cannot
-perform; until then the hooks fall back to a local desktop notification, which is exactly
-what the hook they replaced did.
+perform; until then the hooks fall back to a local desktop notification for turn-end
+events only — matching what the Stop-only hook they replace covered. Falling back for
+every attention-tier event in that state would have made removing a Stop-only hook a
+severalfold *increase* in desktop popups on every machine, since disabled is the state
+this lands in.
 
 ---
 
@@ -105,7 +108,10 @@ Every message carries:
 The repository name comes from git's **common dir**, not `--show-toplevel`: worktrees here
 are named after their branch, so the toplevel basename would report `feat/337-x` as the
 repository. Tag components are reduced to `[A-Za-z0-9_-]` so a branch name containing a
-slash or comma cannot split the tag list.
+slash or comma cannot split the tag list. That reduction is byte-oriented, so two branches
+whose names differ only in non-ASCII characters collapse to the same tag — filter history
+by `repo-` and `evt-` rather than relying on `branch-` for such branches. The **title**
+always carries the branch verbatim.
 
 The summary reduction skips leading Markdown structure before testing for emptiness, so a
 rule, a code fence or an empty bullet falls through to the next line and `## Done` arrives
@@ -120,11 +126,13 @@ this channel can block or fail a session.
 
 | Failure | Behaviour |
 |---|---|
-| Channel not bootstrapped (no `~/.config/ntfy/notify-env`) | Local `osascript` notification if priority ≥ 3 |
-| `jq` or `curl` unavailable | Generic local notification |
-| Docker Desktop stopped, server unreachable, non-2xx, timeout | Local notification if priority ≥ 3 |
+| Channel not bootstrapped (no `~/.config/ntfy/notify-env`) | Local notification for `Stop` / `StopFailure` only |
+| `base_url` is not `https://` | Treated as unconfigured — the bearer token must not travel in plaintext. Same behaviour as above, with no diagnostic |
+| `jq` unavailable | Every event is classified at the default priority, so all of them take the fallback |
+| `curl` unavailable | Priorities are still correct, so min-priority events stay silent |
+| Docker Desktop stopped, server unreachable, non-2xx (including 3xx), timeout | Local notification if priority ≥ 3 |
 | Malformed or empty hook payload | Treated as empty; generic summary; still published |
-| Non-git `cwd`, detached HEAD, unset `CLAUDE_CONFIG_DIR` | Literal placeholders, never an empty field |
+| Non-git `cwd`, detached HEAD, unset `CLAUDE_CONFIG_DIR`, unset `HOME` | Literal placeholders, never an empty field or a crash |
 
 The priority ≥ 3 threshold is load-bearing. Min-priority lifecycle events exist for the
 server-side history; if they fell back to desktop popups, retiring the Stop-only ECC hook
@@ -139,10 +147,17 @@ The local fallback uses `osascript` on macOS and `notify-send` elsewhere. The ho
 **not** carried over, so on WSL a notification is lost when the server is unreachable. The
 primary ntfy path works there normally, so this only affects the offline case.
 
-The AppleScript fallback strips backslashes and replaces `"` with a curly quote before
-embedding text in `display notification "…"`. AppleScript string literals have no
-backslash-escape syntax, so an unescaped quote from an assistant message would otherwise
-break the generated script outright.
+The fallback passes the message and title to `osascript` as **argv**, using the same
+`on run argv` form `morning-radar.sh` already uses in this repo, so assistant text never
+enters the AppleScript source. That removes the injection surface and, just as importantly,
+removes the need to escape: AppleScript string literals have no backslash-escape syntax, so
+an interpolating implementation has to delete backslashes and rewrite quotes, silently
+mangling any path or code fragment in the notification.
+
+**`chezmoi apply` does not retry the setup script.** chezmoi marks a `run_onchange` script
+done once it exits 0 and re-runs it only when the rendered body changes — so after starting
+Docker Desktop, another apply will not invoke it at all. The script prints the direct
+commands instead; they are also in [Operations](#operations) below.
 
 ---
 
@@ -173,6 +188,20 @@ ingress), ntfy's own `auth-default-access: deny-all` plus a per-topic ACL, and a
   this user could read it from `ps`. This is accepted rather than fixed: any process that
   can read our argv runs as the same user and can therefore read the `0600` env file
   directly, so no privilege boundary is crossed and no additional party gains access.
+- **Notifications are a channel *into* your attention, not only out of it.** The body is
+  model-generated text, so a prompt-injected reply can put phishing wording — or, on
+  clients that auto-link, a URL — under a trusted `repo/branch · account` title. Only
+  `message` is model-influenced: `click`, `actions`, `attach` and `icon` are fixed by the
+  publisher, so a notification can say anything but cannot *do* anything.
+- **The enable flag is one-way.** Setting `[ntfy].enabled` back to `false` stops chezmoi
+  managing the channel; it does not stop the container, withdraw the tailnet publication,
+  or delete anything already written — **including `~/.config/ntfy/notify-env`, which holds
+  the publish token**. Tear down explicitly if that is what you want; the commands are in
+  [Operations](#operations).
+- **Changing the vault item does not restart the server.** The reconcile script re-runs on
+  a change to the compose file, the server-config *template*, or the image pin — not on a
+  change to a value inside 1Password, which alters the rendered file without altering the
+  script. After editing `base_url` or `topic`, converge by hand (see Operations).
 
 ## The enable flag
 
@@ -242,6 +271,11 @@ maintains its own connection and is unaffected either way.
 ## Operations
 
 ```bash
+# Converge by hand after Docker Desktop was closed during an apply — `chezmoi apply`
+# will not re-run the setup script unless its content changed.
+docker compose --file ~/.config/ntfy/compose.yaml up --detach
+tailscale serve --bg --https=443 http://127.0.0.1:2586
+
 # Container state and logs
 docker compose --file ~/.config/ntfy/compose.yaml ps
 docker compose --file ~/.config/ntfy/compose.yaml logs --tail 50
@@ -252,6 +286,10 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 # What is published to the tailnet
 tailscale serve status
+
+# Tear down (the enable flag alone does none of this)
+docker compose --file ~/.config/ntfy/compose.yaml down
+tailscale serve --https=443 off
 ```
 
 Reconciliation lives in `run_onchange_after_31-setup-ntfy`, described in
@@ -260,6 +298,20 @@ server config changes, warns instead of failing when the Docker daemon is unreac
 is a no-op in CI.
 
 ---
+
+## How this sits alongside the other notification paths
+
+Five independent notification surfaces now exist on this machine. They are deliberately not
+merged — each has a different trigger and audience — but knowing the full set matters before
+adding a sixth.
+
+| Surface | Trigger | Destination | Relationship to this channel |
+|---|---|---|---|
+| **ntfy channel** (this page) | Claude Code `Notification` / `Stop` / `StopFailure` / `SessionEnd` | Any tailnet device, plus a 7-day queryable history | The primary path; replaced ECC's `stop:desktop-notify` |
+| `clv2-session-notify.sh` | `SessionStart`, throttled to once per 7 days | Local `osascript` | Orthogonal: nudges a `/evolve` pass, not session activity |
+| `morning-radar.sh` | launchd, weekday mornings | Local `osascript` | Orthogonal: reports on the scheduled brief. Its argv-passing `osascript` form is the pattern this channel's fallback adopted |
+| `agentPushNotifEnabled` (settings.json) | Claude Code internal | Claude mobile app | Overlapping trigger, but no attribution and no server-side history — see PRD alternative 15 |
+| `notify` zsh alias | Manual, in a shell | Local chime only | Out of scope here |
 
 ## Related
 
