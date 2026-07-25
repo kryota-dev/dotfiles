@@ -51,6 +51,28 @@ _skill_is_external() {
       false
     }
   done
+
+  # The source dir itself must contain nothing but SKILL.md: no frozen references/
+  # or templates/ copies left behind (they'd go stale and contradict the stub-only
+  # policy, e.g. references/commands.md documenting a `find` action the daemon
+  # never supported).
+  local leftover
+  leftover="$(find "${HOME_DIR}/dot_agents/skills/agent-browser" -mindepth 1 -not -name 'SKILL.md')"
+  [ -z "$leftover" ] || {
+    echo "agent-browser source dir has non-SKILL.md content:"
+    echo "$leftover"
+    false
+  }
+
+  # The deployed copies of the removed references/ and templates/ dirs must be
+  # cleaned up on apply, or they'd linger on machines that already have them.
+  local removed
+  for removed in references templates; do
+    grep -qFx ".agents/skills/agent-browser/${removed}" "${HOME_DIR}/.chezmoiremove" || {
+      echo ".chezmoiremove is missing the runtime removal target for agent-browser/${removed}"
+      false
+    }
+  done
 }
 
 @test "skill provenance: every curated skill dir in source is non-empty" {
@@ -73,15 +95,10 @@ _skill_is_external() {
 @test "skill provenance: every curated skill has an uppercase SKILL.md with valid frontmatter" {
   # Regression test for #254: lowercase skill.md + missing frontmatter made the skill
   # invisible to Claude Code skill discovery. This test catches both problems in source.
-  #
-  # Exclusions (mirroring the "non-empty" test above):
-  #   - agent-browser: only the discovery stub is vendored; the specialized skills are
-  #     CLI-served at runtime (agent-browser skills get <name>) and are not curated.
   local dir name skill_files
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
     [ -d "$dir" ] || continue
     name="$(basename "$dir")"
-    [ "$name" = "agent-browser" ] && continue
 
     # 1. Exactly one uppercase SKILL.md must exist (no skill.md lowercase accepted).
     skill_files="$(find "$dir" -maxdepth 1 -name 'SKILL.md' -type f | wc -l | tr -d ' ')"
