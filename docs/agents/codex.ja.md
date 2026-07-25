@@ -14,6 +14,10 @@
 - [2 アカウントモデル](#2-アカウントモデル)
 - [hooks.json — PreToolUse ゲートガード](#hooksjson--pretooluse-ゲートガード)
 - [shared.config.toml — shared プロファイル](#sharedconfigtoml--shared-プロファイル)
+- [agent.config.toml — agent プロファイル](#agentconfigtoml--agent-プロファイル)
+- [管理外のベース設定](#管理外のベース設定)
+- [プロジェクト trust と project-local .codex/](#プロジェクト-trust-と-project-local-codex)
+- [codex-rescue は orchestration の入口ではない](#codex-rescue-は-orchestration-の入口ではない)
 - [テンプレート SSOT — アカウントドリフト防止](#テンプレート-ssot--アカウントドリフト防止)
 - [--profile shared の仕組み](#--profile-shared-の仕組み)
   - [cdx / cdx-r06 エイリアス](#cdx--cdx-r06-エイリアス)
@@ -98,6 +102,84 @@ multi_agent = true
 ```
 
 このファイルは `$CODEX_HOME/shared.config.toml` としてデプロイされます（mode 0600、chezmoi の `private_` プレフィックスによる）。`--profile shared` でロードされる named `shared` プロファイルです。
+
+---
+
+## agent.config.toml — agent プロファイル
+
+`shared` は sandbox / approval のキーを持たないため、呼び出し側が渡した姿勢をそのまま継承します。実質的に read-only のレビュー用プロファイルです。ワークスペースへの**書き込み**を伴う委任には、代わりに 2 つ目のプロファイル `agent` を使います。実体は `home/.chezmoitemplates/codex-agent-config.toml` で、`shared` と同じ 1 行テンプレート対を通じて `$CODEX_HOME/agent.config.toml`（0600）にデプロイされます。
+
+```toml
+personality = "pragmatic"          # codex-model-pin.toml 由来（shared プロファイルと共有）
+model = "gpt-5.6-terra"
+model_reasoning_effort = "xhigh"
+
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+web_search = "cached"
+
+[features]
+multi_agent = true
+
+[sandbox_workspace_write]
+network_access = false
+```
+
+2 つのプロファイルは model/effort フラグメントを共有するため、pin の変更は両方に同時に効きます。異なるのは permission 姿勢です。`agent` は非対話の姿勢（`approval_policy = "never"`）と、作業が成立する範囲で最も狭い書き込みスコープを組み合わせ、network を持ちません。
+
+`workspace-write` の内側でも `<writable_root>/.git` / `.agents` / `.codex` は再帰的に read-only のままです。これは意図した設計で、Codex は commit / push / skill 定義の変更ができず、それらは親が担って gitleaks hook と commit signing を通り続けます。**linked worktree で実機確認済み**（`.git` がディレクトリではなく gitdir ポインタの*ファイル*になる、挙動が変わりうるケース）: `.git/probe-marker` / `.agents/probe-marker` / `.codex/probe-marker` への書き込みはいずれも BLOCKED となり、同じディレクトリ内の通常パスへの書き込みは成功しました。
+
+このプロファイルを*どう呼び出すか*の SSOT は `home/dot_agents/skills/codex/SKILL.md` です（`CODEX_HOME` prelude、fail-closed の worktree ガード、親の実行順序契約（commit の前ではなく**ホストコマンドを走らせる前**に diff をレビューする）、委任範囲の制約）。呼び出し側は再掲せずそれを参照します。
+
+---
+
+## 管理外のベース設定
+
+`$CODEX_HOME/config.toml` は chezmoi の**管理下にありません**。model 移行通知・TUI の状態・プロジェクト trust エントリなどを Codex 自身が書き込むため、このリポジトリは CLI と所有権を争わず意図的に放置しています。
+
+知っておくべき帰結: このファイルは独自の `model` キーを持ち、そして drift します。執筆時点で `~/.codex/config.toml` は `model = "gpt-5.5"` を保持する一方、管理下の pin は `gpt-5.6-terra` です。プロファイルはベース設定の*上に*重なるため、両者は同時に成立します。
+
+| 呼び出し | 実効 model |
+|---|---|
+| `cdx` / `cdx-r06` / `--profile shared\|agent` を伴う全経路 | 管理下の pin |
+| プロファイル無しの素の `codex` | ベース設定の値（現在は `gpt-5.5`） |
+
+つまり pin はこのリポジトリが制御する全経路で有効であり、drift はプロファイルを迂回する呼び出しからのみ表面化します。これは [素の codex は SSOT 設定をスキップする](#素の-codex-は-ssot-設定をスキップする) と同じ失敗モードで、エイリアスが存在する理由がもう 1 つ増えたことになります。
+
+---
+
+## プロジェクト trust と project-local .codex/
+
+Codex は各プロジェクトを trusted / untrusted に分類し、管理外ベース設定の `[projects."<path>"] trust_level = "trusted"` に記録します。untrusted なプロジェクトは project-local の `.codex/` レイヤーをスキップするため、trust はセキュリティ上の意味を持ちます。**リポジトリの内側に置かれた設定**が実行に影響できるかどうかの境界だからです。
+
+当初の意図は、このリポジトリを恒久的に untrusted に保ち、敵対的な `.codex/config.toml` を積んだブランチが効力を持たないようにすることでした。**実測の結果、`agent` プロファイルを使う限りこの目標は達成不能であることが判明しました。** 直接検証した 3 つの発見:
+
+1. **`agent` プロファイルが trust を書き戻す。** `codex exec --profile agent` を 1 回実行するだけで、`$CODEX_HOME/config.toml` に当該プロジェクトの `trust_level = "trusted"` が追加されます。エントリを削除しても次の実行までしか保ちません。`--profile shared --sandbox read-only` では**発生しない**ため、レビュー専用の leg は trust に触れません。`-c approval_policy=never` の override はトリガーではなく、プロファイル単体で十分です。
+2. **trust は `--cd` ではなく main worktree に解決される。** `--cd <linked worktree>` で実行したところ、追加されたのは*main* worktree のパス（`git rev-parse --git-common-dir` の親）でした。使い捨てブランチの worktree で作業しても、**リポジトリ全体**（他の全 worktree を含む）が trusted になります。
+3. **trusted なプロジェクトの project-local `.codex/config.toml` は管理下プロファイルを上書きする。** `.codex/config.toml` を仕込んだ状態で、`model` の上書き（`gpt-5.6-terra` → `gpt-5.5`）と `sandbox_mode` の上書き（`workspace-write` → `read-only`）が成立しました。同じテストで `approval_policy` は上書き**できず**、プロファイル側の値が勝ちました。
+
+`sandbox_mode` の上書きは**安全な方向（sandbox を狭める側）でのみ**検証しています。昇格方向が possible かは意図的に未検証です。上書き機構が `sandbox_mode` に届くこと自体が発見であり、仕込んだ config に実際の昇格を許すテストは走らせる価値がありません。昇格は「否定された」のではなく「未証明だが蓋然性はある」として扱ってください。
+
+**実務上の意味。** 「never trusted」はここでは不変条件になりえないため、不変条件として主張しません。実際に成立している防御は、trust に依存しないものです。
+
+- fail-closed の worktree ガード（main worktree への書き込みを構造的に防ぐ）
+- sandbox 内で `.git` / `.agents` / `.codex` が read-only のままであること（上記で検証済み）
+- 親がホストコマンドを走らせる前に diff 全体をレビューすること
+- **委譲前に想定外の `.codex/` ディレクトリが無いか確認すること** —— このリポジトリは `.codex/` を一切同梱しないため、作業ツリーに存在すればブランチが持ち込んだことを意味し、それは委譲ではなく停止のシグナルです
+
+このリポジトリは trust エントリを追加しませんし、手動で追加すべきでもありません。現れるエントリは CLI 自身の記録です。
+
+---
+
+## codex-rescue は orchestration の入口ではない
+
+`codex@openai-codex` プラグインは `codex-rescue` エージェントを同梱しています。skill はこれを起動しません。`pr-workflow` / `sdd` / `multi-review` からの Codex 呼び出しは、すべて Bash 経由の `codex exec --profile shared|agent` を通ります。理由は codex skill の「禁止事項」に 1 箇所だけ記録されています。
+
+- `--profile` を通さないため、管理下の model/effort pin と permission 姿勢が適用されない
+- `CODEX_HOME` を伝播しないため、業務アカウントのセッションが個人アカウントに対して動く —— このハーネスが維持しようとしているアカウント分離そのものが破れる
+- 既定が write + `approval_policy: never` で、上記の sandbox 契約の外に出る
+
+ad-hoc な手動 rescue には引き続き利用できます。それは十分な文脈のもとで user が下す判断であり、自動化された判断ではありません。
 
 ---
 

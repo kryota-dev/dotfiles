@@ -90,6 +90,28 @@
 レンダリングした宣言を JSON として埋め込み（＝宣言の単一ソースを保つ）、不足している marketplace の
 登録とプラグインのインストールをアカウントごとに実行します。
 
+**既知のギャップ: このスクリプトはインストールはするが、バージョンの照合をしない。** 2 つの判定は
+いずれも存在チェックのみです。marketplace は名前が登録済みならそのまま放置され、プラグインは
+`if printf '%s\n' "$installed" | grep -qxF "$plugin"; then continue; fi` によって**どのバージョンで
+あれ**インストール済みならスキップされます。インストール済みバージョンと pin された `ref` を比較せず、
+`claude plugin marketplace update` も `claude plugin update` も一度も呼びません。したがって drift は
+サイレントに発生し、無期限に residual し得ます。実際、pin を `v1.0.4` から `v1.0.6` に上げても個人
+アカウントは 1.0.4 のままでした —— スクリプト自身の冪等性ショートサーキットがそれを隠し、使われない
+orphaned な 1.0.6 キャッシュディレクトリが有効な 1.0.4 の隣に残っていました。照合が実装されるまでは、
+`CLAUDE_CONFIG_DIR` ごとに手動で収束させます。
+
+```bash
+claude plugin marketplace update openai-codex && claude plugin update codex@openai-codex
+```
+
+終了コードを信用せず、事後に検証してください（CLI は宣言された `ref` を経路によっては無視することが
+知られているため）。marketplace clone が pin されたタグを describe すること
+（`git -C "$CLAUDE_CONFIG_DIR/plugins/marketplaces/openai-codex" describe --tags`）、`claude plugin list`
+が新しいバージョンを報告すること、`$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json` に記録された
+`gitCommitSha` がタグのコミットと一致することの 3 点です。orphaned キャッシュ状態からの復旧に手動
+クリーンアップは不要です —— update が既存ディレクトリを採用し、`.orphaned_at` マーカーは今しがた
+置き換えられた側のバージョンに移動します。
+
 marketplace は `chezmoi apply` が無人でインストールする実行コードなので、可変な既定ブランチを追ってはいけません。
 この pin には落とし穴が 2 つあります。宣言した `ref` は **CLI 引数に含めない限り無視される**ため、スクリプトは
 `<repo>#<ref>` を渡します。また ref は `git clone --branch` に届くので、**コミット SHA は使えません** —

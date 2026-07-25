@@ -91,6 +91,28 @@ chezmoiignored and therefore empty on a new machine.
 JSON rendered out of settings.json — so the declaration keeps a single source of truth — then
 registers the marketplaces and installs the plugins that are missing, once per account.
 
+**Known gap: the script installs, but never reconciles versions.** Both of its checks are
+presence-only — a marketplace already registered under the name is left alone, and
+`if printf '%s\n' "$installed" | grep -qxF "$plugin"; then continue; fi` skips any plugin that is
+installed at *any* version. It never compares the installed version against the pinned `ref` and
+never calls `claude plugin marketplace update` or `claude plugin update`. Drift is therefore silent
+and can persist indefinitely: bumping the pin from `v1.0.4` to `v1.0.6` left the personal account
+running 1.0.4 — the script's own idempotency short-circuit hid it, and an orphaned 1.0.6 cache
+directory sat unused alongside the active 1.0.4 one. Until reconciliation is implemented, converge an
+account by hand, once per `CLAUDE_CONFIG_DIR`:
+
+```bash
+claude plugin marketplace update openai-codex && claude plugin update codex@openai-codex
+```
+
+Verify afterwards rather than trusting the exit code, because the CLI is known to ignore a declared
+`ref` on some paths: the marketplace clone should still describe as the pinned tag
+(`git -C "$CLAUDE_CONFIG_DIR/plugins/marketplaces/openai-codex" describe --tags`), `claude plugin
+list` should report the new version, and the `gitCommitSha` recorded in
+`$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json` should match the tag's commit. Recovery from the
+orphaned-cache state needs no manual cleanup — the update adopts the existing directory and the
+`.orphaned_at` marker moves to the version that was just superseded.
+
 A marketplace is executable code that `chezmoi apply` installs unattended, so it must not track a
 moving default branch. The pin has two sharp edges. A declared `ref` is **ignored** unless it is also
 part of the CLI argument, so the script passes `<repo>#<ref>`; and the ref reaches `git clone
