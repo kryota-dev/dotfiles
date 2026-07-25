@@ -26,10 +26,15 @@ CLAUDE_MODEL="sonnet"
 # review-thread queries) cannot distinguish queries from mutations at the
 # prefix level; the prompt additionally forbids all writes. git is limited to
 # plain read verbs (no `git -C`, so other repos' history comes from session
-# summaries instead). Skill is scoped to the morning-brief handoff chain.
-# Everything else (Edit, WebFetch/WebSearch, Agent, mcp tools, other Bash
-# commands) stays auto-denied in print mode.
-ALLOWED_TOOLS="Bash(gh search:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api graphql:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(git show:*),Bash(git branch:*),Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Glob,Grep,Skill(morning-brief),Skill(repo-radar),Skill(gmail-triage),Write(~/dotfiles/.kryota-dev/morning-brief/**)"
+# summaries instead). Skill is scoped to the morning-brief handoff chain. File
+# edits are confined to the brief output dir and spelled as an Edit(path) rule:
+# since Claude Code v2.1.210 the file permission checks match only Edit(path)
+# and Read(path), and one Edit rule covers every file-editing tool (Write and
+# NotebookEdit included). The Write(path) form it replaced was accepted but
+# never matched, so it granted nothing while warning at every startup.
+# Everything else (edits outside that dir, WebFetch/WebSearch, Agent, mcp
+# tools, other Bash commands) stays auto-denied in print mode.
+ALLOWED_TOOLS="Bash(gh search:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api graphql:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(git show:*),Bash(git branch:*),Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Glob,Grep,Skill(morning-brief),Skill(repo-radar),Skill(gmail-triage),Edit(~/dotfiles/.kryota-dev/morning-brief/**)"
 
 notify_user() {
   # Argv-passing keeps claude-derived text out of the AppleScript source
