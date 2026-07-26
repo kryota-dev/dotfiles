@@ -11,11 +11,13 @@ tailnet 上のデバイスから subscribe されます（kryota-dev/dotfiles#33
 `.claude/prds/337-ntfy-tailscale.prd.md` にあります。
 
 **スコープの境界**: このページが扱うのは Claude Code の `Notification`/`Stop` フックから
-ntfy への経路のみです。リポジトリには、本システムが意図的に手を付けていない独立した
-ローカル限定の通知経路が他に3つあります: `clv2-session-notify.sh`（SessionStart、
-instinct クラスターのレビュー促し）、`morning-radar.sh`（launchd、osascript による
-朝ブリーフ）、`notify` zsh エイリアス（可聴チャイム。本システムの wrapper も失敗時の
-アラート音として再利用しています）。
+ntfy への経路に加え、平日朝ブリーフの配信（#361）です。本システムが意図的に手を付けて
+いない独立したローカル限定の通知経路が他に2つあります: `clv2-session-notify.sh`
+（SessionStart、instinct クラスターのレビュー促し）と `notify` zsh エイリアス（可聴チャイム。
+本システムの wrapper も失敗時のアラート音として再利用しています）。`morning-radar.sh`
+（launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、現在は ntfy へ
+publish し、ブリーフページを tailnet 経由で serve します —— 下記
+[朝ブリーフの配信](#朝ブリーフの配信-361)を参照。
 
 ## アーキテクチャ
 
@@ -66,6 +68,7 @@ phones/tablets on the tailnet (username/password login)
 |-------|--------|----------|------------------------|
 | `claude-attention` | permission_prompt, idle_prompt, agent_needs_input | high (4) | sound/vibrate on |
 | `claude-done` | agent_completed, Stop | default (3) | silent delivery |
+| `claude-brief` | weekday morning brief (morning-radar, #361) | default (3) | mute optional |
 | `claude-test` | manual smoke tests | — | mute after testing |
 
 帰属情報（repo、branch、account `default`/`r06`、8文字のセッション id、イベント種別）はタイトルと
@@ -74,6 +77,43 @@ phones/tablets on the tailnet (username/password login)
 名前スクラブであり、**secret/PII 検出器ではありません** — 切り詰めが主たる防御手段です）。
 許容済み残存リスク（#337 PRD）: プロンプトインジェクションを受けたアシスタントメッセージが
 200 文字の窓内に短い secret 断片を含む可能性は残ります — 汎用 secret 検出は明示的にスコープ外です。
+
+## 朝ブリーフの配信 (#361)
+
+平日の `morning-radar.sh` wrapper（launchd `dev.kryota.morning-radar`、#257）は、以前は
+ローカル `osascript` 通知でブリーフを知らせていましたが、この通知は文書へリンクできず、
+モバイルにも届きませんでした。現在は本システムと同じ tailnet-only の境界で配信します ——
+**ブリーフ内容が tailnet 外へ出ることはありません**（Artifact/claude.ai 経路は検討のうえ却下。
+`.claude/prds/361-brief-url-ntfy.prd.md` の決定ログ参照）:
+
+- **serve マウント**: `ntfy_assert_brief_serve`（`~/.config/ntfy/lib.sh` 内。
+  `run_onchange_after_31-setup-ntfy` と `ntfy-setup` の両方が検証）が、ブリーフディレクトリ
+  （`~/dotfiles/.kryota-dev/morning-brief/`）を静的ファイルとして serve する 2 つ目の
+  `tailscale serve --bg --set-path /brief` ハンドラを追加します。`tailscale serve` のパス
+  ハンドラは加算的かつ独立なので、`/brief` はルート `/` → ntfy proxy と共存し、どちらの
+  再検証も相手を上書きしません。tailnet-only を維持 —— `funnel` は使いません。
+- **URL**: tailnet のベース URL（`https://<magicdns>/brief`）はプロビジョニング時に導出され、
+  `~/.config/ntfy/notify-env` に `NTFY_BRIEF_BASE_URL` として書き出されます。wrapper が
+  `/<date>.html` を付加します。ブリーフの markdown はこの HTML へ wrapper がレンダリングします
+  （利用可能なら pandoc、なければ self-contained でモバイル可読な `<pre>` フォールバック）——
+  headless の claude セッションには `Artifact` ツールを**付与しません**。
+- **通知**: 成功時、wrapper は 1 行の `HEADLINE` を `claude-brief` トピックへ、ページ URL を
+  ntfy の `click` アクションとして publish します。エラー経路（claude 不在 / timeout /
+  非 0 exit / ブリーフファイル欠落）は `claude-attention` へ高 priority・リンクなしで publish
+  します。publisher トークンは `curl -K` config file 経由で渡され（argv には出ません）、
+  `ntfy-notify.sh` と同じ扱いです。
+- **fail-open / 縮退**: publish の失敗は log に残すだけで、実行や同日 stamp を中断しません。
+  HTML レンダリングやベース URL が利用できない場合でも、通知は `HEADLINE` を届けます（click なし）。
+
+Smoke test（オンデマンドでブリーフを実行し、tailnet ページと通知を確認）:
+
+```bash
+~/.claude/morning-radar.sh --force          # 課金される実行 1 回。claude-brief へ publish
+# tailnet デバイスから、表示された URL を開く（または）:
+BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')"
+curl -sI "$BASE/brief/$(date +%F).html" | head -1   # 期待: HTTP/… 200
+tailscale funnel status                              # 期待: 何も serve していない（tailnet-only）
+```
 
 ## セットアップ手順（初回のみ）
 
@@ -112,7 +152,7 @@ phones/tablets on the tailnet (username/password login)
    docker compose exec ntfy ntfy user add publisher     # publisher, write-only
    NTFY_PASSWORD='<choose-a-strong-password>' \
      docker compose exec -T -e NTFY_PASSWORD ntfy ntfy user add subscriber   # devices, read-only
-   for t in claude-attention claude-done claude-test; do
+   for t in claude-attention claude-done claude-brief claude-test; do
      docker compose exec ntfy ntfy access publisher "$t" write-only
      docker compose exec ntfy ntfy access subscriber "$t" read-only
    done
@@ -128,7 +168,8 @@ phones/tablets on the tailnet (username/password login)
 4. **デバイスの subscribe** — ntfy アプリ（iOS/Android）→ *別のサーバーを使う* → サーバー URL
    （`ntfy-setup` が表示します。または `tailscale status --json | jq -r .Self.DNSName` で
    自分で導出し、末尾のドットを除去して `https://` を前置します）→ username `subscriber` と
-   `Dotfiles - ntfy` 1Password アイテムのパスワードでログイン → 2 つのトピックを購読します。
+   `Dotfiles - ntfy` 1Password アイテムのパスワードでログイン → トピック（`claude-attention`、
+   `claude-done`、および平日ブリーフ用の `claude-brief`）を購読します。
 
 ## Smoke test
 
