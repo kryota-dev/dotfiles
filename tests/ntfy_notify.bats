@@ -66,6 +66,8 @@ run_wrapper() {
   payload="$(cat "${STUB_DIR}/curl_stdin")"
   [ "$(printf '%s' "$payload" | jq -r '.topic')" = "claude-attention" ]
   [ "$(printf '%s' "$payload" | jq -r '.priority')" = "4" ]
+  # Bodies are published as Markdown so the ntfy web app renders them (#361).
+  [ "$(printf '%s' "$payload" | jq -r '.markdown')" = "true" ]
   [[ "$(printf '%s' "$payload" | jq -r '.title')" == *"permission_prompt"* ]]
   # Attribution (requirement 1.2): account in title and tags; cwd=/tmp is not a
   # git repo so repo/branch fall back to "-", which must also land in the tags.

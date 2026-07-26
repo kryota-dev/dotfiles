@@ -165,8 +165,13 @@ load helpers/setup
   grep -q -- '--model' "$wrapper"
   # Personal-account isolation must stay explicit (R2.1).
   grep -q 'CLAUDE_CONFIG_DIR' "$wrapper"
-  # AppleScript injection guard: notification text passes via argv (R3.3).
-  grep -q 'on run argv' "$wrapper"
+  # Delivery migrated osascript -> ntfy (#361): no osascript path may remain
+  # (AC-002), and the publisher token must never reach curl argv (AC-006; it
+  # travels via a `curl -K` config file, as ntfy-notify.sh does).
+  run grep -qE 'osascript|display notification' "$wrapper"
+  [ "$status" -ne 0 ]
+  run grep -E -- '(-H|--header)["'"'"'[:space:]]*"?Authorization' "$wrapper"
+  [ "$status" -ne 0 ]
 }
 
 @test "morning-radar delegates account env to the claude wrapper instead of hand-copying it (#336, #345)" {
@@ -2001,6 +2006,38 @@ _gate_decision() {
   grep -qF 'ntfy_user_created' "$l"
 }
 
+@test "ntfy provisions the morning-brief page delivery (#361)" {
+  local l="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
+  local c="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  local r="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  # Dedicated brief topic + sidecar port are SSOT-declared.
+  grep -qF 'topic_brief = "claude-brief"' "${HOME_DIR}/.chezmoidata.toml"
+  grep -qF 'brief_port = ' "${HOME_DIR}/.chezmoidata.toml"
+  grep -qF '{{ .ntfy.topic_brief }}' "$l"
+  grep -qF 'ntfy_topic_brief' "$l"
+  grep -qF 'NTFY_TOPIC_BRIEF' "$l"
+  # Delivery is a rendered HTML page served by a loopback nginx sidecar fronted
+  # by a tailscale PORT proxy on a dedicated HTTPS port (macOS cannot serve
+  # files/directories directly). The click opens NTFY_BRIEF_BASE_URL/<date>.html.
+  grep -qE 'image: nginx:[0-9.]+-alpine@sha256:[a-f0-9]{64}' "$c"
+  grep -qF '127.0.0.1:{{ .ntfy.brief_port }}:80' "$c"
+  grep -qF 'ntfy_assert_brief_serve' "$l"
+  grep -qF 'serve --bg --https' "$l"
+  ! grep -qE '^[^#]*serve.*--set-path' "$l"
+  grep -qF 'NTFY_BRIEF_BASE_URL' "$l"
+  # Both setup entry points assert the front so it self-heals on apply/ntfy-setup.
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
+  # Existing installs (token already present) still get the new notify-env keys
+  # without reissuing the token (migration on upgrade).
+  grep -qF 'ntfy_write_notify_env "$existing"' "$l"
+  # The brief page escapes raw HTML from untrusted brief content (pandoc
+  # markdown-raw_html; a <script> in a GitHub title must not execute on the page).
+  grep -qF 'markdown-raw_html' "$r"
+  # Existing hook-notification bodies render as Markdown in the web app (#361).
+  grep -qF 'markdown: true' "${HOME_DIR}/dot_claude/executable_ntfy-notify.sh"
+}
+
 @test "ntfy-setup: deploys under ~/.local/bin, sources the lib, prompts before rotating, rotates" {
   local n="${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
   [ -f "$n" ]
@@ -2115,6 +2152,9 @@ _gate_decision() {
     <"${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl" >/dev/null
   chezmoi execute-template --source "${HOME_DIR}" \
     <"${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl" >/dev/null
+  # compose carries the brief_port template var (#361); render it too.
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl" >/dev/null
 }
 
 @test "install.sh points at ntfy-setup on darwin only, and never provisions at bootstrap" {

@@ -42,3 +42,19 @@ services:
       # Runtime state (auth user.db, message cache.db) lives outside the
       # chezmoi target tree, same principle as the CLV2 homunculus move.
       - "{{ .chezmoi.homeDir }}/Library/Application Support/ntfy:/var/lib/ntfy"
+  brief-page:
+    # Static file server for the morning brief (kryota-dev/dotfiles#361). On
+    # macOS the standalone/App Tailscale variant can `tailscale serve` ports but
+    # NOT local files/directories, so the brief dir is served by this loopback
+    # nginx and fronted by `tailscale serve --https=8443` (a PORT proxy, which
+    # does work on macOS). Read-only mount; loopback-only (never all interfaces).
+    # Image tag pinned literally for the Renovate regex manager, same as ntfy.
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:{{ .ntfy.brief_port }}:80"
+    volumes:
+      # The dated <YYYY-MM-DD>.html pages morning-radar renders. Read-only: the
+      # server never writes. nginx serves files by name; autoindex is off by
+      # default, so `/` is 403 and only the exact brief URL resolves.
+      - "{{ .chezmoi.homeDir }}/dotfiles/.kryota-dev/morning-brief:/usr/share/nginx/html:ro"

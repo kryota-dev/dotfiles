@@ -181,6 +181,9 @@ main() {
     body="$(truncate_body "$(scrub_body "$body")")"
   fi
 
+  # markdown:true renders the body as Markdown in the ntfy web app (#361); the
+  # mobile apps still show raw text. Bodies here are short/plain, so this is a
+  # no-op for them and a nicety on the web.
   payload="$(jq -n \
     --arg topic "$topic" \
     --arg title "$title" \
@@ -192,7 +195,7 @@ main() {
     --arg sid "$sid" \
     --argjson priority "$priority" \
     '{topic: $topic, title: $title, message: $message, priority: $priority,
-      tags: [$emoji, $event, $repo, $account, $sid]}')"
+      markdown: true, tags: [$emoji, $event, $repo, $account, $sid]}')"
 
   # Token travels via a 0600 curl config file, never argv.
   umask 077

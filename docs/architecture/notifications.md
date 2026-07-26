@@ -8,12 +8,15 @@ subscribed from tailnet devices (kryota-dev/dotfiles#337). This replaces the ECC
 persistent, remotely subscribable notifications. The finalized decision record lives
 in `.claude/prds/337-ntfy-tailscale.prd.md`.
 
-**Scope boundary**: this page covers only the Claude Code `Notification`/`Stop`
-hook → ntfy path. The repo has three other, independent local-only notification
-paths that this system deliberately does not touch: `clv2-session-notify.sh`
-(SessionStart, instinct-cluster review nudge), `morning-radar.sh` (launchd,
-osascript morning brief), and the `notify` zsh alias (audible chime, also reused
-by this system's wrapper as its failure alert sound).
+**Scope boundary**: this page covers the Claude Code `Notification`/`Stop`
+hook → ntfy path plus the weekday morning-brief delivery (#361). Two other
+independent local-only notification paths are deliberately left untouched:
+`clv2-session-notify.sh` (SessionStart, instinct-cluster review nudge) and the
+`notify` zsh alias (audible chime, also reused by this system's wrapper as its
+failure alert sound). `morning-radar.sh` (launchd, weekday brief) used to notify
+via local `osascript`; it now renders the brief to a tailnet HTML page and sends
+an ntfy notification that links to it —
+see [Morning-brief delivery](#morning-brief-delivery-361) below.
 
 ## Architecture
 
@@ -65,6 +68,7 @@ phones/tablets on the tailnet (username/password login)
 |-------|--------|----------|------------------------|
 | `claude-attention` | permission_prompt, idle_prompt, agent_needs_input | high (4) | sound/vibrate on |
 | `claude-done` | agent_completed, Stop | default (3) | silent delivery |
+| `claude-brief` | weekday morning brief (morning-radar, #361) | default (3) | mute optional |
 | `claude-test` | manual smoke tests | — | mute after testing |
 
 Attribution (repo, branch, account `default`/`r06`, 8-char session id, event type)
@@ -74,6 +78,56 @@ chars and scrubbed with the client-identifier pattern from
 detector; truncation is the primary defense). Accepted residual risk (#337 PRD): a
 prompt-injected assistant message could still surface short secret fragments within
 the 200-char window — general secret detection is explicitly out of scope.
+
+## Morning-brief delivery (#361)
+
+The weekday `morning-radar.sh` wrapper (launchd `dev.kryota.morning-radar`, #257)
+used to announce the brief with a local `osascript` notification that could not
+carry the document and never reached mobile. It now renders the brief to a
+mobile-readable HTML page and sends an ntfy notification whose **click opens that
+page** over the tailnet — **no brief content ever leaves the tailnet**. Two
+alternatives were rejected (see the `.claude/prds/361-brief-url-ntfy.prd.md`
+decision log): an Artifact/claude.ai page (moves brief content to a third party),
+and delivering the brief as an ntfy **message** (the ntfy iOS/Android apps do not
+render Markdown — only the web app does — so the brief would show as raw Markdown
+on mobile). A browser renders the served HTML page natively.
+
+- **Rendering**: `render_brief_html` writes `~/dotfiles/.kryota-dev/morning-brief/
+  <date>.html` with pandoc (`-f markdown-raw_html`, which **escapes any raw HTML**
+  in the untrusted brief content — a `<script>` from a GitHub title cannot execute
+  on the page — while keeping GFM tables), or a self-contained mobile-readable
+  `<pre>` fallback. The headless claude session is **not** granted the `Artifact` tool.
+- **Serving**: a loopback **nginx sidecar** (the `brief-page` service in
+  `compose.yaml`) serves the brief dir on `ntfy_brief_port`, fronted on the tailnet
+  by `tailscale serve --https 8443` — a **port proxy**, because the macOS
+  standalone/App Tailscale variant can proxy ports but **cannot serve files or
+  directories**. A dedicated HTTPS port keeps it independent of the ntfy root (443).
+  Tailnet-only — never `funnel`. `NTFY_BRIEF_BASE_URL` (`https://<magicdns>:8443`)
+  is derived at provision time and written to notify-env; the wrapper appends
+  `/<date>.html`.
+- **Notification**: on success the wrapper publishes to `claude-brief` with the
+  `HEADLINE` and the page URL as the ntfy `click`; error paths (claude missing /
+  timeout / non-zero exit / brief file missing) publish to `claude-attention` at
+  high priority. The publisher token travels via a `curl -K` config file (never
+  argv), sourced in a subshell; the env file must be owner-only (0600/0400) or
+  delivery fails open (same guard as `ntfy-notify.sh`).
+- **Fail-open / degradation**: any publish failure is logged and never aborts the
+  run or the same-day stamp (written on brief success, before delivery); if the
+  render or the base URL is unavailable, the notification still carries the
+  `HEADLINE` (no link).
+
+Existing topics (`claude-attention`/`claude-done`) also now publish with
+`markdown: true`, so their bodies render in the ntfy web app.
+
+Smoke test (publish the current brief on demand):
+
+```bash
+~/.claude/morning-radar.sh --force   # one billed run; notifies claude-brief with a link
+# On a tailnet device, open the notification's link (or):
+BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8443"
+curl -sI "$BASE/$(date +%F).html" | head -1   # expect: HTTP/… 200
+tailscale funnel status                        # expect: nothing served (tailnet-only)
+```
 
 ## Setup runbook (one-time)
 
@@ -115,7 +169,7 @@ hand.
    docker compose exec ntfy ntfy user add publisher     # publisher, write-only
    NTFY_PASSWORD='<choose-a-strong-password>' \
      docker compose exec -T -e NTFY_PASSWORD ntfy ntfy user add subscriber   # devices, read-only
-   for t in claude-attention claude-done claude-test; do
+   for t in claude-attention claude-done claude-brief claude-test; do
      docker compose exec ntfy ntfy access publisher "$t" write-only
      docker compose exec ntfy ntfy access subscriber "$t" read-only
    done
@@ -131,7 +185,9 @@ hand.
    server URL (`ntfy-setup` prints it; or derive it yourself with
    `tailscale status --json | jq -r .Self.DNSName`, strip the trailing dot,
    prepend `https://`) → log in with username `subscriber` and the password from
-   the `Dotfiles - ntfy` 1Password item → subscribe to the two topics.
+   the `Dotfiles - ntfy` 1Password item → subscribe to the topics
+   (`claude-attention`, `claude-done`, and — for the weekday brief —
+   `claude-brief`).
 
 ## Smoke test
 

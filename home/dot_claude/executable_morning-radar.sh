@@ -1,22 +1,31 @@
 #!/bin/bash
-# Weekday-morning radar wrapper (kryota-dev/dotfiles#257).
+# Weekday-morning radar wrapper (kryota-dev/dotfiles#257, delivery #361).
 # Launched by the dev.kryota.morning-radar LaunchAgent on weekday mornings.
 # Runs /morning-brief headless (degraded mode) on the personal Claude Code
-# account, saves the brief to a dated file, and hands the result off as a
-# macOS notification. Detection + notify only: no downstream skill dispatch.
+# account, saves the brief to a dated file, renders a mobile-readable HTML page,
+# and sends an ntfy notification whose click opens that page over the tailnet
+# (#361). The page is served by a loopback nginx sidecar fronted by
+# `tailscale serve --https` (a port proxy — macOS cannot serve files directly);
+# a mobile browser renders the HTML natively (the ntfy apps do not render
+# Markdown). Detection + notify only: no downstream skill dispatch. Delivery is
+# tailnet-only — the page never leaves the tailnet, no Artifact/claude.ai path.
+#
+# Source-safe: side effects live in main(), guarded by the BASH_SOURCE check at
+# the end, so tests can source this file and exercise ntfy_publish without
+# launching claude.
 set -euo pipefail
 
-# launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
-# mise-managed binaries, and gh resolve. ~/.local/launchers is first so `claude` hits the
-# per-account wrapper (#345); the mise shims dir follows so gh/jq resolve headless, the same
-# hand-built-PATH approach statusline.sh uses for its own headless launchd/hook context.
-export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
 LABEL="dev.kryota.morning-radar"
-LOG_FILE="$HOME/Library/Logs/${LABEL}.log"
+LOG_FILE="${MORNING_RADAR_LOG_FILE:-$HOME/Library/Logs/${LABEL}.log}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/morning-radar"
 BRIEF_DIR="$HOME/dotfiles/.kryota-dev/morning-brief"
-TIMEOUT_SECONDS=600
+# Publisher credentials + brief topic, written 0600 by ~/.config/ntfy/lib.sh
+# (#337/#357/#361). Overridable for tests. Sourced only inside a subshell so the
+# token never enters this script's (or claude's) environment.
+ENV_FILE="${MORNING_RADAR_NTFY_ENV_FILE:-$HOME/.config/ntfy/notify-env}"
+# Overridable only so the bats main() integration tests can shorten the watchdog
+# (its backgrounded sleep would otherwise outlive the run); 600s in production.
+TIMEOUT_SECONDS="${MORNING_RADAR_TIMEOUT_SECONDS:-600}"
 MAX_TURNS=50
 # Pinned model keeps the pre-approved weekday recurring cost predictable even
 # when the account's default model changes.
@@ -33,149 +42,278 @@ CLAUDE_MODEL="sonnet"
 # since Claude Code v2.1.210 the file permission checks match only Edit(path)
 # and Read(path), and one Edit rule covers every file-editing tool (Write and
 # NotebookEdit included). The Write(path) form it replaced was accepted but
-# never matched, so it granted nothing while warning at every startup.
+# never matched, so it granted nothing while warning at every startup. Note:
+# Artifact is deliberately NOT granted — brief delivery is tailnet-only (#361),
+# so the brief is published to the self-hosted ntfy server, not to claude.ai.
 # Everything else (edits outside that dir, WebFetch/WebSearch, Agent, mcp
 # tools, other Bash commands) stays auto-denied in print mode.
 ALLOWED_TOOLS="Bash(gh search:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api graphql:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(git show:*),Bash(git branch:*),Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Glob,Grep,Skill(morning-brief),Skill(repo-radar),Skill(gmail-triage),Edit(~/dotfiles/.kryota-dev/morning-brief/**)"
 
-notify_user() {
-  # Argv-passing keeps claude-derived text out of the AppleScript source
-  # (no string interpolation -> no AppleScript injection). Notification
-  # failures never fail the run (same tolerance as clv2-session-notify.sh).
-  osascript \
-    -e 'on run argv' \
-    -e 'display notification (item 1 of argv) with title (item 2 of argv) sound name "Glass"' \
-    -e 'end run' \
-    -- "$1" "$2" >/dev/null 2>&1 || true
-}
-
 log() {
-  printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG_FILE"
+  printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG_FILE" 2>/dev/null || true
 }
 
-[ "$(uname)" = "Darwin" ] || exit 0
+# Publish a Markdown ntfy notification. Fail-open: a broken/absent ntfy
+# provisioning is a silent no-op and no failure ever aborts the run.
+#   ntfy_publish <kind> <priority> <title> <message>
+#   kind: brief -> NTFY_TOPIC_BRIEF (success)   attention -> NTFY_TOPIC_ATTENTION (errors)
+# The env file is sourced inside a subshell so NTFY_TOKEN never lands in this
+# script's environment (and thus never in the claude subprocess); the token
+# reaches curl only through a 0600 `curl -K` config file, never argv/stdout/
+# trace (mirrors home/dot_claude/executable_ntfy-notify.sh; bats asserts this).
+# The env file must be owner-only (0600/0400) — sourcing it is code execution,
+# so a group/other-accessible file fails open (same guard as ntfy-notify.sh).
+ntfy_publish() {
+  local kind="$1" priority="$2" title="$3" message="$4" click="${5:-}"
+  local env_mode
+  [ -f "$ENV_FILE" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  [ -O "$ENV_FILE" ] || return 0
+  if stat --version >/dev/null 2>&1; then
+    env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  else
+    env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
+  fi
+  case "$env_mode" in 600 | 400) ;; *) return 0 ;; esac
+  (
+    umask 077
+    # shellcheck source=/dev/null
+    . "$ENV_FILE" 2>/dev/null || exit 0
+    { [ -n "${NTFY_URL:-}" ] && [ -n "${NTFY_TOKEN:-}" ]; } || exit 0
+    case "$kind" in
+      brief)
+        topic="${NTFY_TOPIC_BRIEF:-}"
+        emoji="newspaper"
+        ;;
+      attention)
+        topic="${NTFY_TOPIC_ATTENTION:-}"
+        emoji="rotating_light"
+        ;;
+      *) exit 0 ;;
+    esac
+    [ -n "$topic" ] || exit 0
+    # click (when present) opens the rendered brief page on the tailnet; omit it
+    # when unavailable so a broken link is never sent (graceful degradation).
+    if [ -n "$click" ]; then
+      payload="$(jq -n --arg topic "$topic" --arg title "$title" \
+        --arg message "$message" --arg emoji "$emoji" --arg click "$click" \
+        --argjson priority "$priority" \
+        '{topic: $topic, title: $title, message: $message, priority: $priority,
+          click: $click, tags: [$emoji, "morning-radar"]}')" || exit 0
+    else
+      payload="$(jq -n --arg topic "$topic" --arg title "$title" \
+        --arg message "$message" --arg emoji "$emoji" \
+        --argjson priority "$priority" \
+        '{topic: $topic, title: $title, message: $message, priority: $priority,
+          tags: [$emoji, "morning-radar"]}')" || exit 0
+    fi
+    curl_cfg="$(mktemp "${TMPDIR:-/tmp}/morning-radar-ntfy.XXXXXX")" || exit 0
+    # EXIT alone misses signal deaths (the watchdog may kill us); cover the
+    # catchable signals so the token file never lingers.
+    trap 'rm -f "$curl_cfg"' EXIT INT TERM HUP
+    printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" >"$curl_cfg"
+    if ! printf '%s' "$payload" | curl -fs -K "$curl_cfg" --max-time 5 \
+      -o /dev/null -d @- "$NTFY_URL" 2>/dev/null; then
+      log "ntfy publish failed: kind=${kind} topic=${topic} url=${NTFY_URL}"
+    fi
+  ) || true
+}
 
-mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR" "$BRIEF_DIR"
+# Error notification helper: high-priority attention topic, no link.
+notify_error() {
+  ntfy_publish attention 5 "Morning Radar" "$1"
+}
 
-# Run claude with the dotfiles repo as cwd (project trust + local context);
-# direct invocations then behave identically to launchd's WorkingDirectory.
-cd "$HOME/dotfiles"
+# Render the brief markdown as a mobile-readable HTML page at $2. Prefer pandoc;
+# `-f markdown-raw_html` escapes any raw HTML in the brief (GitHub issue titles
+# etc. are untrusted) while keeping GFM pipe tables, so a `<script>` in brief
+# content cannot execute on the served page. On pandoc absence/failure, fall
+# back to a self-contained shell that shows the markdown verbatim in a wrapping
+# <pre>, HTML-escaping & < >. Returns non-zero if no page could be produced.
+render_brief_html() {
+  local md="$1" html="$2" title="$3"
+  [ -s "$md" ] || return 1
+  if command -v pandoc >/dev/null 2>&1 &&
+    pandoc -s -f markdown-raw_html -t html --metadata title="$title" \
+      --metadata lang=ja -o "$html" "$md" 2>>"$LOG_FILE"; then
+    return 0
+  fi
+  {
+    printf '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+    printf '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    printf '<meta name="color-scheme" content="light dark">'
+    printf '<title>%s</title>' "$title"
+    printf '<style>body{margin:0;padding:1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#1a1a1a;background:#fff}@media(prefers-color-scheme:dark){body{color:#e6e6e6;background:#111}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style>'
+    printf '</head><body><pre>'
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$md"
+    printf '</pre></body></html>'
+  } >"$html" 2>/dev/null || return 1
+  return 0
+}
 
-# Rotate the log once it exceeds 1 MiB (daily appends stay small).
-if [ -f "$LOG_FILE" ] && [ "$(stat -f%z "$LOG_FILE")" -gt 1048576 ]; then
-  mv "$LOG_FILE" "${LOG_FILE}.old"
-fi
+# Build the tailnet click URL for the given date, or empty when the brief base
+# URL was not provisioned (MagicDNS underivable). Sourced in a subshell so only
+# the (non-secret) base URL is read out — the token never enters this env.
+ntfy_brief_url() {
+  local today="$1" base
+  [ -f "$ENV_FILE" ] || return 0
+  [ -O "$ENV_FILE" ] || return 0
+  base="$(
+    # shellcheck source=/dev/null
+    . "$ENV_FILE" 2>/dev/null || true
+    printf '%s' "${NTFY_BRIEF_BASE_URL:-}"
+  )"
+  [ -n "$base" ] || return 0
+  printf '%s/%s.html' "$base" "$today"
+}
 
-# Same-day guard: launchd coalesces missed fires on wake, and kickstart can
-# re-fire manually; one billed run per day is the approved budget (#257).
-# --force bypasses for smoke tests and deliberate manual reruns.
-TODAY="$(date +%F)"
-if [ "${1:-}" != "--force" ] && [ -f "$STATE_DIR/last-run" ] &&
-  [ "$(cat "$STATE_DIR/last-run")" = "$TODAY" ]; then
-  log "skip: already ran today ($TODAY)"
-  exit 0
-fi
+main() {
+  # launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
+  # mise-managed binaries (gh/jq), and curl resolve. ~/.local/launchers is first so `claude`
+  # hits the per-account wrapper (#345); the mise shims dir follows, the same hand-built-PATH
+  # approach statusline.sh uses for its own headless launchd/hook context.
+  export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-if ! command -v claude >/dev/null 2>&1; then
-  log "error: claude not found on PATH"
-  notify_user "Morning radar failed: claude not found on PATH — log: $LOG_FILE" "Morning Radar"
-  exit 1
-fi
+  [ "$(uname)" = "Darwin" ] || exit 0
 
-BRIEF_FILE="$BRIEF_DIR/$TODAY.md"
-# Prompt is Japanese to match the skill-steering language policy (the brief
-# itself is a Japanese artifact). Output contract mirrors the 運用メモ section
-# of morning-brief SKILL.md — keep the two in sync.
-PROMPT=$(
-  cat <<EOF
+  mkdir -p "$(dirname "$LOG_FILE")" "$STATE_DIR" "$BRIEF_DIR"
+
+  # Run claude with the dotfiles repo as cwd (project trust + local context);
+  # direct invocations then behave identically to launchd's WorkingDirectory.
+  cd "$HOME/dotfiles"
+
+  # Rotate the log once it exceeds 1 MiB (daily appends stay small).
+  if [ -f "$LOG_FILE" ] && [ "$(stat -f%z "$LOG_FILE")" -gt 1048576 ]; then
+    mv "$LOG_FILE" "${LOG_FILE}.old"
+  fi
+
+  # Same-day guard: launchd coalesces missed fires on wake, and kickstart can
+  # re-fire manually; one billed run per day is the approved budget (#257).
+  # --force bypasses for smoke tests and deliberate manual reruns.
+  TODAY="$(date +%F)"
+  if [ "${1:-}" != "--force" ] && [ -f "$STATE_DIR/last-run" ] &&
+    [ "$(cat "$STATE_DIR/last-run")" = "$TODAY" ]; then
+    log "skip: already ran today ($TODAY)"
+    exit 0
+  fi
+
+  if ! command -v claude >/dev/null 2>&1; then
+    log "error: claude not found on PATH"
+    notify_error "Morning radar failed: claude not found on PATH — log: $LOG_FILE"
+    exit 1
+  fi
+
+  BRIEF_FILE="$BRIEF_DIR/$TODAY.md"
+  # Prompt is Japanese to match the skill-steering language policy (the brief
+  # itself is a Japanese artifact). Output contract mirrors the 運用メモ section
+  # of morning-brief SKILL.md — keep the two in sync.
+  PROMPT=$(
+    cat <<EOF
 /morning-brief を headless の縮退モード前提で実行してください。
 - Gmail / Calendar の MCP コネクタが使えない場合は、該当セクションに「取得失敗（headless 実行）」と明記して続行する（SKILL.md の縮退挙動）。
 - --post は使わない。GitHub への書き込み・下流 skill（issue-fleet / renovate-sweep / review-fleet）の起動は一切しない。
 - ブリーフ全文を $BRIEF_FILE に Write で保存する。同日ファイルが既に存在する場合（--force 再実行時）も、Read してから全文を上書き保存する。
 - 最終応答は「HEADLINE: <P1 n件 / 要対応 m件 / 定点観測 k件>」形式の 1 行のみとする。
 EOF
-)
+  )
 
-STDOUT_FILE="$(mktemp -t morning-radar)"
-trap 'rm -f "$STDOUT_FILE"' EXIT
+  STDOUT_FILE="$(mktemp -t morning-radar)"
+  trap 'rm -f "$STDOUT_FILE"' EXIT
 
-CLAUDE_ARGS=(--model "$CLAUDE_MODEL" --max-turns "$MAX_TURNS")
-# Let the brief read other repos' session summaries under the ghq root.
-if [ -d "$HOME/ghq" ]; then
-  CLAUDE_ARGS+=(--add-dir "$HOME/ghq")
-fi
-# --allowedTools is variadic and would swallow a trailing positional prompt,
-# so it stays a single comma-joined value and the prompt binds to -p below.
-CLAUDE_ARGS+=(--allowedTools "$ALLOWED_TOOLS")
-
-log "start: claude -p /morning-brief (model=$CLAUDE_MODEL, max-turns=$MAX_TURNS)"
-
-# Launch through the claude wrapper (~/.local/launchers/claude, first on PATH above). It injects
-# the personal account's isolation env — CLAUDE_CONFIG_DIR/ECC_AGENT_DATA_HOME, the
-# CLV2_HOMUNCULUS_DIR that deliberately sits outside the config dir (Claude Code treats paths under
-# it as sensitive files that no headless session can approve a write to, #336), and the observer
-# knobs (clock gate off, turn ceiling 100 — the lazy-started PreToolUse observer inherits this env
-# for its whole lifetime). That injection used to be hand-copied here and could drift (#345); now
-# there is one source. Setting CLAUDE_CONFIG_DIR explicitly pins the personal account (the wrapper
-# keeps an explicit value via its fill-gaps rule). Exporting empty EXA/FIRECRAWL keys opts out of
-# web search — the wrapper's `+x` guard then skips sourcing the MCP-keys file — since the brief
-# does not need them and the MCP servers tolerate missing keys.
-CLAUDE_CONFIG_DIR="$HOME/.claude" \
-  EXA_API_KEY="" \
-  FIRECRAWL_API_KEY="" \
-  claude "${CLAUDE_ARGS[@]}" -p "$PROMPT" >"$STDOUT_FILE" 2>>"$LOG_FILE" &
-CLAUDE_PID=$!
-
-# Watchdog: TERM after TIMEOUT_SECONDS, KILL 10s later (runaway-billing
-# guard on top of --max-turns).
-(
-  sleep "$TIMEOUT_SECONDS"
-  if kill -0 "$CLAUDE_PID" 2>/dev/null; then
-    kill "$CLAUDE_PID" 2>/dev/null || true
-    sleep 10
-    kill -9 "$CLAUDE_PID" 2>/dev/null || true
+  CLAUDE_ARGS=(--model "$CLAUDE_MODEL" --max-turns "$MAX_TURNS")
+  # Let the brief read other repos' session summaries under the ghq root.
+  if [ -d "$HOME/ghq" ]; then
+    CLAUDE_ARGS+=(--add-dir "$HOME/ghq")
   fi
-) &
-WATCHDOG_PID=$!
+  # --allowedTools is variadic and would swallow a trailing positional prompt,
+  # so it stays a single comma-joined value and the prompt binds to -p below.
+  CLAUDE_ARGS+=(--allowedTools "$ALLOWED_TOOLS")
 
-STATUS=0
-wait "$CLAUDE_PID" || STATUS=$?
-kill "$WATCHDOG_PID" 2>/dev/null || true
+  log "start: claude -p /morning-brief (model=$CLAUDE_MODEL, max-turns=$MAX_TURNS)"
 
-cat "$STDOUT_FILE" >>"$LOG_FILE"
+  # Launch through the claude wrapper (~/.local/launchers/claude, first on PATH above). It injects
+  # the personal account's isolation env — CLAUDE_CONFIG_DIR/ECC_AGENT_DATA_HOME, the
+  # CLV2_HOMUNCULUS_DIR that deliberately sits outside the config dir (Claude Code treats paths under
+  # it as sensitive files that no headless session can approve a write to, #336), and the observer
+  # knobs (clock gate off, turn ceiling 100 — the lazy-started PreToolUse observer inherits this env
+  # for its whole lifetime). That injection used to be hand-copied here and could drift (#345); now
+  # there is one source. Setting CLAUDE_CONFIG_DIR explicitly pins the personal account (the wrapper
+  # keeps an explicit value via its fill-gaps rule). Exporting empty EXA/FIRECRAWL keys opts out of
+  # web search — the wrapper's `+x` guard then skips sourcing the MCP-keys file — since the brief
+  # does not need them and the MCP servers tolerate missing keys.
+  CLAUDE_CONFIG_DIR="$HOME/.claude" \
+    EXA_API_KEY="" \
+    FIRECRAWL_API_KEY="" \
+    claude "${CLAUDE_ARGS[@]}" -p "$PROMPT" >"$STDOUT_FILE" 2>>"$LOG_FILE" &
+  CLAUDE_PID=$!
 
-if [ "$STATUS" -ne 0 ]; then
-  # 143 = SIGTERM, 137 = SIGKILL: treat both as the watchdog timeout.
-  if [ "$STATUS" -eq 143 ] || [ "$STATUS" -eq 137 ]; then
-    log "error: claude timed out after ${TIMEOUT_SECONDS}s (exit $STATUS)"
-    notify_user "Morning radar timed out (${TIMEOUT_SECONDS}s) — log: $LOG_FILE" "Morning Radar"
+  # Watchdog: TERM after TIMEOUT_SECONDS, KILL 10s later (runaway-billing
+  # guard on top of --max-turns).
+  (
+    sleep "$TIMEOUT_SECONDS"
+    if kill -0 "$CLAUDE_PID" 2>/dev/null; then
+      kill "$CLAUDE_PID" 2>/dev/null || true
+      sleep 10
+      kill -9 "$CLAUDE_PID" 2>/dev/null || true
+    fi
+  ) &
+  WATCHDOG_PID=$!
+
+  STATUS=0
+  wait "$CLAUDE_PID" || STATUS=$?
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+
+  cat "$STDOUT_FILE" >>"$LOG_FILE"
+
+  if [ "$STATUS" -ne 0 ]; then
+    # 143 = SIGTERM, 137 = SIGKILL: treat both as the watchdog timeout.
+    if [ "$STATUS" -eq 143 ] || [ "$STATUS" -eq 137 ]; then
+      log "error: claude timed out after ${TIMEOUT_SECONDS}s (exit $STATUS)"
+      notify_error "Morning radar timed out (${TIMEOUT_SECONDS}s) — log: $LOG_FILE"
+    else
+      log "error: claude exited $STATUS"
+      notify_error "Morning radar failed (exit $STATUS) — log: $LOG_FILE"
+    fi
+    exit 1
+  fi
+
+  # Trailing `|| true` keeps a missing HEADLINE line from aborting the script
+  # here: grep exits 1 on no match, which pipefail + set -e would turn into a
+  # script-level exit, skipping the fallback and the notification below.
+  HEADLINE="$(grep -E '^HEADLINE:' "$STDOUT_FILE" | tail -1 | sed 's/^HEADLINE:[[:space:]]*//' || true)"
+  if [ -z "$HEADLINE" ]; then
+    HEADLINE="brief generated (no headline)"
+  fi
+
+  # Verify the brief before stamping the day done: a missing/empty file means the
+  # run broke its output contract, so treat it as a failure (notify + exit 1) and
+  # leave the stamp absent so the day stays retryable.
+  if [ ! -s "$BRIEF_FILE" ]; then
+    log "error: brief file missing or empty at $BRIEF_FILE"
+    notify_error "Morning radar failed: brief file missing — log: $LOG_FILE"
+    exit 1
+  fi
+
+  # Written only on success: a failed run leaves the stamp absent so the same
+  # day can be retried manually (the approved budget is one successful run/day).
+  printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
+
+  # Render the mobile page and build the tailnet click URL. If either is
+  # unavailable, the notification still carries the HEADLINE (no link).
+  # publish is fail-open, so a delivery failure never affects the stamp above.
+  click=""
+  if render_brief_html "$BRIEF_FILE" "$BRIEF_DIR/$TODAY.html" "Morning brief — $TODAY"; then
+    click="$(ntfy_brief_url "$TODAY")"
+    [ -n "$click" ] || log "warn: brief base URL unavailable; notifying without a link"
   else
-    log "error: claude exited $STATUS"
-    notify_user "Morning radar failed (exit $STATUS) — log: $LOG_FILE" "Morning Radar"
+    log "warn: brief HTML render failed; notifying without a link"
   fi
-  exit 1
+
+  log "done: $HEADLINE"
+  ntfy_publish brief 3 "Morning brief" "$HEADLINE" "$click"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-
-# Trailing `|| true` keeps a missing HEADLINE line from aborting the script
-# here: grep exits 1 on no match, which pipefail + set -e would turn into a
-# script-level exit, skipping the fallback and the notification below.
-HEADLINE="$(grep -E '^HEADLINE:' "$STDOUT_FILE" | tail -1 | sed 's/^HEADLINE:[[:space:]]*//' || true)"
-if [ -z "$HEADLINE" ]; then
-  HEADLINE="brief generated (no headline)"
-fi
-
-# Verify the brief before stamping the day done: a missing/empty file means the
-# run broke its output contract, so treat it as a failure (notify + exit 1) and
-# leave the stamp absent so the day stays retryable.
-if [ ! -s "$BRIEF_FILE" ]; then
-  log "error: brief file missing or empty at $BRIEF_FILE"
-  notify_user "Morning radar failed: brief file missing — log: $LOG_FILE" "Morning Radar"
-  exit 1
-fi
-
-# Written only on success: a failed run leaves the stamp absent so the same
-# day can be retried manually (the approved budget is one successful run/day).
-printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
-
-log "done: $HEADLINE"
-notify_user "$HEADLINE — $BRIEF_FILE" "Morning Radar"
