@@ -1,4 +1,4 @@
-.PHONY: all help lint fmt test test-bats benchmark dump-brewfile sync-ghq-completion
+.PHONY: all help lint fmt test test-bats benchmark sync-ghq-completion
 
 # Default target — show help (avoid accidental mutation of $HOME via apply)
 all: help
@@ -56,12 +56,6 @@ benchmark:
 # ========================================
 # Utilities
 # ========================================
-
-## Dump current brew packages to Brewfile
-dump-brewfile:
-	@rm -f home/dot_Brewfile
-	@brew bundle dump --file home/dot_Brewfile
-	@echo "Brewfile updated at home/dot_Brewfile"
 
 ## Sync vendored _ghq completion from the mise-pinned upstream ghq version
 sync-ghq-completion:

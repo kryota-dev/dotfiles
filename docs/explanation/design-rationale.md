@@ -124,7 +124,7 @@ See [dev-tooling.md](../architecture/dev-tooling.md) for the `.brewfile-linux-ex
 
 **Why:** `chezmoi apply` mutates `$HOME`. It writes, moves, and potentially removes files in the home directory of the user running it. A `make apply` target — especially one that could be triggered accidentally by a contributor running `make` to explore the project — represents an unacceptable risk of unintended home-directory mutation. Requiring the explicit `chezmoi apply` invocation forces intent.
 
-The `make help` default also serves as documentation: contributors can discover the available targets without reading the Makefile. The targets that exist (`lint`, `test`, `benchmark`, `dump-brewfile`, `sync-ghq-completion`) are all read-only or scoped to the repo tree, not the home directory.
+The `make help` default also serves as documentation: contributors can discover the available targets without reading the Makefile. The targets that exist (`lint`, `test`, `benchmark`, `sync-ghq-completion`) are all read-only or scoped to the repo tree, not the home directory.
 
 See [local-dev.md](../contributing/local-dev.md) for the full `make` target table.
 

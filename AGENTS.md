@@ -60,9 +60,6 @@ make fmt
 # Benchmark zsh startup
 make benchmark
 
-# Update Brewfile
-make dump-brewfile
-
 # Sync vendored _ghq completion from the mise-pinned ghq version
 make sync-ghq-completion
 ```

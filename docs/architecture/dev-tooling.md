@@ -48,7 +48,9 @@ ruby.compile = false
 
 ### `dot_Brewfile`
 
-`home/dot_Brewfile` is a standard Homebrew bundle file: taps, formula, cask, mas (App Store), vscode extension, and go entries. It is **plain text — not a `.tmpl` file**. This is intentional: `make dump-brewfile` runs `brew bundle dump`, which rewrites the file in place. A template would be clobbered or would prevent regeneration.
+`home/dot_Brewfile` is a standard Homebrew bundle file: taps, formula, cask, mas (App Store), vscode extension, and go entries. It is **plain text — not a `.tmpl` file**. This is intentional: `brew bundle dump` rewrites the file in place, and a template would be clobbered or would prevent regeneration.
+
+The Brewfile is kept in sync automatically by a `brew` PATH-shim wrapper (`home/dot_local/launchers/executable_brew`, deployed to `~/.local/launchers/brew` — the launcher dir prepended ahead of the real brew on `PATH` by #358). After a package-set-mutating subcommand (`install`, `uninstall`, `reinstall`, `tap`, `untap`), the wrapper runs `brew bundle dump --force` against `$(chezmoi source-path)/dot_Brewfile`, so the tracked Brewfile no longer drifts after ad-hoc `brew install` / `brew uninstall`. It preserves the real brew's exit code and skips the dump (with a stderr note) when chezmoi is not installed. Homebrew has no post-install hook (Homebrew/brew#2202), so this shim — not a `make` target — is the sync mechanism. An absolute-path invocation (`/opt/homebrew/bin/brew`) bypasses the shim (accepted limitation), and `run_onchange_before_10-brew-bundle` runs `brew bundle` (not a mutating subcommand), so it never triggers a dump.
 
 Constraints:
 - Do not add `brew "chezmoi"` to the Brewfile. chezmoi itself is installed via the standalone `curl get.chezmoi.io` bootstrap (PR #22); adding it to the Brewfile would conflict with the mise-managed version.

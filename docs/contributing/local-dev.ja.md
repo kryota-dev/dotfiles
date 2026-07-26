@@ -20,7 +20,6 @@
 | `test` | `lint` の後に `test-bats` |
 | `test-bats` | `bats tests/*.bats` |
 | `benchmark` | `scripts/benchmark.sh`（コールドスタート + 10 回平均） |
-| `dump-brewfile` | `rm home/dot_Brewfile && brew bundle dump --file home/dot_Brewfile` |
 | `sync-ghq-completion` | mise でピンした ghq バージョンに対応する `_ghq` をアップストリームから取得してベンダリング |
 
 ### `make apply` が存在しない理由

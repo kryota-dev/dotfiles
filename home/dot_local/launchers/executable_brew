@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# PATH-shim wrapper for `brew` that keeps the chezmoi-managed Brewfile in sync. After a
+# package-set-mutating subcommand (install/uninstall/reinstall/tap/untap) it regenerates the
+# chezmoi source dot_Brewfile via `brew bundle dump`, so the tracked Brewfile no longer drifts
+# after ad-hoc `brew install` / `brew uninstall` the way it did when only `make dump-brewfile`
+# refreshed it.
+#
+# Homebrew has no post-install/post-uninstall hook (Homebrew/brew#2202, open since 2017). A shell
+# function would only cover interactive shells; being a real file ahead of the real brew on PATH
+# (~/.local/launchers, prepended in .zprofile/.zshrc), this wrapper fires from any shell that
+# resolves through that dir, following the launcher PATH-wrapper pattern from #358.
+#
+# Unlike the claude/codex launchers, this wrapper does NOT exec: it runs the real brew as a child so
+# it can observe the exit code and dump afterwards. It never masks the real brew's exit code.
+#
+# Known limitation (accepted): an absolute-path invocation (/opt/homebrew/bin/brew) bypasses the
+# shim, so its mutations are not auto-dumped. run_onchange_before_10-brew-bundle runs `brew bundle`
+# (not a mutating subcommand), so it never triggers a dump — no recursion.
+set -eu
+
+# Subcommands that change the installed package set and so warrant a Brewfile refresh. `remove` and
+# `rm` are aliases of `uninstall` (see `brew help uninstall`), so they must trigger too — otherwise
+# `brew rm foo` would drift the Brewfile, the very problem this wrapper fixes. install/reinstall/
+# tap/untap have no aliases.
+is_dump_trigger() {
+  case "$1" in
+    install | uninstall | remove | rm | reinstall | tap | untap) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The subcommand is the first non-option argument (global flags like `--verbose` may precede it).
+# This is a heuristic, not brew's full dispatcher: a query form whose first non-option token happens
+# to be a trigger word (e.g. `brew --prefix install`, where `install` is a formula name) runs one
+# extra, harmless dump — the dump faithfully reflects the unchanged package set. Accepted limitation.
+subcommand=""
+for arg in "$@"; do
+  case "$arg" in
+    -*) continue ;;
+    *)
+      subcommand="$arg"
+      break
+      ;;
+  esac
+done
+
+# Resolve the real brew WITHOUT going through PATH (which would re-resolve this wrapper).
+# BREW_LAUNCHER_BIN overrides the resolver for tests. HOMEBREW_PREFIX is exported into every shell
+# by `brew shellenv`, so later code could repoint it at an attacker-controlled dir; trust it only
+# when it names a standard prefix (allowlist), then fall back to the standard install prefixes for
+# Apple Silicon, Intel, and Linuxbrew. Fail loudly rather than silently do nothing.
+real="${BREW_LAUNCHER_BIN:-}"
+if [ -z "$real" ]; then
+  case "${HOMEBREW_PREFIX:-}" in
+    /opt/homebrew | /usr/local | /home/linuxbrew/.linuxbrew) prefix_cand="$HOMEBREW_PREFIX/bin/brew" ;;
+    *) prefix_cand="" ;;
+  esac
+  for cand in \
+    "$prefix_cand" \
+    /opt/homebrew/bin/brew \
+    /usr/local/bin/brew \
+    /home/linuxbrew/.linuxbrew/bin/brew; do
+    if [ -n "$cand" ] && [ -x "$cand" ]; then
+      real="$cand"
+      break
+    fi
+  done
+fi
+if [ -z "$real" ] || [ ! -x "$real" ]; then
+  echo "brew launcher: could not resolve the real brew binary." >&2
+  echo "  Set BREW_LAUNCHER_BIN or ensure brew is installed under a standard prefix." >&2
+  exit 127
+fi
+
+# Run the real brew, preserving its exit code for the caller (works under set -e).
+status=0
+"$real" "$@" || status=$?
+
+# After a package-set-mutating subcommand, refresh the chezmoi source Brewfile so it tracks the
+# ad-hoc change. Resolve the target via `chezmoi source-path` (cwd-independent). Every failure path
+# only warns and still falls through to `exit "$status"`, so the caller always sees the real brew's
+# original exit code (AC3). The guarded `if source_path="$(...)"` matters: an unguarded assignment
+# would abort here under `set -e` on a chezmoi failure and mask that exit code.
+if is_dump_trigger "$subcommand"; then
+  if ! command -v chezmoi >/dev/null 2>&1; then
+    echo "brew launcher: chezmoi not found; skipped Brewfile refresh." >&2
+  elif ! source_path="$(chezmoi source-path)"; then
+    echo "brew launcher: 'chezmoi source-path' failed; Brewfile not refreshed." >&2
+  else
+    brewfile="$source_path/dot_Brewfile"
+    # Neutralize the subtractive HOMEBREW_BUNDLE_DUMP_NO_* vars so a stray env setting cannot make
+    # the automatic --force dump overwrite the tracked Brewfile with a whole category missing.
+    # Capture the dump's own stderr so a failure reports its cause, not just a generic line.
+    if ! dump_err="$(env \
+      -u HOMEBREW_BUNDLE_DUMP_NO_BREW -u HOMEBREW_BUNDLE_DUMP_NO_CASK -u HOMEBREW_BUNDLE_DUMP_NO_TAP \
+      -u HOMEBREW_BUNDLE_DUMP_NO_MAS -u HOMEBREW_BUNDLE_DUMP_NO_VSCODE \
+      "$real" bundle dump --force --file="$brewfile" 2>&1 >/dev/null)"; then
+      echo "brew launcher: 'brew bundle dump' failed; $brewfile not refreshed." >&2
+      if [ -n "$dump_err" ]; then printf '%s\n' "$dump_err" >&2; fi
+    fi
+  fi
+fi
+
+exit "$status"

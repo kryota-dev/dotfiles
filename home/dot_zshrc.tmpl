@@ -12,9 +12,9 @@ export SAVEHIST=100000
 export PATH="$HOME/.local/bin:$PATH"
 
 # Per-account agent launchers (~/.local/launchers): the claude/codex wrappers plus the
-# cld/cld-r06/cdx/cdx-r06 symlinks. Kept on PATH so the wrappers resolve from any shell; the
-# precmd hook below re-asserts this dir ahead of mise's per-tool dirs, which mise re-prepends on
-# every prompt via hook-env (#345).
+# cld/cld-r06/cdx/cdx-r06 symlinks, and the brew auto-dump shim (#360). Kept on PATH so the wrappers
+# resolve from any shell; the precmd hook below re-asserts this dir ahead of mise's per-tool dirs,
+# which mise re-prepends on every prompt via hook-env (#345).
 case ":$PATH:" in
   *":$HOME/.local/launchers:"*) ;;
   *) export PATH="$HOME/.local/launchers:$PATH" ;;
