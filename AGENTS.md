@@ -12,7 +12,7 @@ The chezmoi source directory is `home/` (configured via `.chezmoiroot`).
 Written artifacts in this repository follow one of two rules:
 
 **English required:**
-- Documentation and markdown files
+- Documentation and markdown files under `docs/` and repo-root reference files (e.g. `README.md`) — the agent-facing Markdown files listed below are the exception
 
 **Japanese required:**
 - Commit messages — Conventional Commits with an English `type(scope):` prefix and a Japanese subject/body, e.g. `feat(ntfy): 認証を自動プロビジョニングする` (matches the existing `commit` / `sdd` skill defaults)
