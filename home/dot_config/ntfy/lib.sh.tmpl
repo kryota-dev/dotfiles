@@ -21,6 +21,7 @@
 ntfy_port="{{ .ntfy.port }}"
 ntfy_topic_attention="{{ .ntfy.topic_attention }}"
 ntfy_topic_done="{{ .ntfy.topic_done }}"
+ntfy_topic_brief="{{ .ntfy.topic_brief }}"
 
 ntfy_compose_cfg="$HOME/.config/ntfy/compose.yaml"
 ntfy_env_file="$HOME/.config/ntfy/notify-env"
@@ -36,6 +37,15 @@ ntfy_pub_user="publisher"
 ntfy_sub_user="subscriber"
 # Placeholder marker the 1Password bootstrap password carries until provisioned.
 ntfy_placeholder="REPLACE_ME"
+
+# Morning-brief delivery (kryota-dev/dotfiles#361). The brief dir is fronted on
+# the tailnet by a second `tailscale serve` mount at ntfy_brief_serve_path, so
+# the morning-radar notification's click can open the day's page. The path is
+# duplicated in home/dot_claude/executable_morning-radar.sh (which only READS the
+# resulting URL from notify-env) — keep the two in sync. Tailnet-only: never
+# funnel (same boundary as the ntfy front).
+ntfy_brief_dir="$HOME/dotfiles/.kryota-dev/morning-brief"
+ntfy_brief_serve_path="/brief"
 
 ntfy_log() { echo "[ntfy] $*"; }
 ntfy_warn() { echo "[ntfy] $*" >&2; }
@@ -133,6 +143,22 @@ ntfy_assert_serve() {
   "$b" serve --bg "${ntfy_serve_target:-}"
 }
 
+# Assert the tailnet static front for the morning brief (#361). A second serve
+# mount at ntfy_brief_serve_path serves the brief dir directly; tailscale serve
+# handlers are additive and independent per (port, path), so this coexists with
+# the root ntfy proxy asserted above and neither re-assert clobbers the other.
+# Serving a directory needs it to exist first. NEVER funnel (tailnet-only).
+ntfy_assert_brief_serve() {
+  local b
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || {
+    ntfy_warn "tailscale CLI not found; cannot assert the brief serve mount."
+    return 1
+  }
+  mkdir -p "${ntfy_brief_dir:-}" 2>/dev/null || true
+  "$b" serve --bg --set-path "${ntfy_brief_serve_path:-}" "${ntfy_brief_dir:-}"
+}
+
 ntfy_exec() {
   docker compose -f "$ntfy_compose_cfg" exec -T ntfy ntfy "$@"
 }
@@ -193,7 +219,7 @@ ntfy_ensure_user_with_password() {
 # smoke-test topic.
 ntfy_grant_acl() {
   local u="$1" perm="$2" t
-  for t in "${ntfy_topic_attention:-}" "${ntfy_topic_done:-}" "$ntfy_smoke_topic"; do
+  for t in "${ntfy_topic_attention:-}" "${ntfy_topic_done:-}" "${ntfy_topic_brief:-}" "$ntfy_smoke_topic"; do
     ntfy_exec access "$u" "$t" "$perm" >/dev/null 2>&1 || true
   done
 }
@@ -207,6 +233,13 @@ ntfy_issue_token() {
 # Write notify-env 0600 via umask; the token reaches the file only through the
 # heredoc (never echoed or traced). Reuses the exact format the wrapper sources.
 ntfy_write_notify_env() {
+  # Derive the tailnet base URL for the brief page (#361). Empty when MagicDNS is
+  # not derivable at provision time — morning-radar then degrades to a headline-
+  # only notification (no click). This is human-facing, not a secret.
+  local brief_base dns
+  dns="$(ntfy_magicdns || true)"
+  brief_base=""
+  [ -n "$dns" ] && brief_base="https://${dns}${ntfy_brief_serve_path:-}"
   (
     umask 077
     cat >"$ntfy_env_file" <<EOF
@@ -221,6 +254,11 @@ NTFY_URL='${ntfy_serve_target}'
 NTFY_TOKEN='$1'
 NTFY_TOPIC_ATTENTION='${ntfy_topic_attention}'
 NTFY_TOPIC_DONE='${ntfy_topic_done}'
+NTFY_TOPIC_BRIEF='${ntfy_topic_brief}'
+# Tailnet base URL for the morning-brief page (#361). The click URL the
+# morning-radar wrapper publishes is this value + /<date>.html. Empty when
+# MagicDNS was not derivable at provision time (wrapper degrades to headline-only).
+NTFY_BRIEF_BASE_URL='${brief_base}'
 EOF
   )
 }

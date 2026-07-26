@@ -179,3 +179,7 @@ ghq_user = "kryota-dev"
   # intentionally not declared here.
   topic_attention = "claude-attention"
   topic_done = "claude-done"
+  # Weekday morning-brief delivery (kryota-dev/dotfiles#361). Distinct from the
+  # agent-completed stream so the daily brief can be muted/subscribed on its own;
+  # the notification's click opens the brief page served on the tailnet.
+  topic_brief = "claude-brief"
