@@ -39,16 +39,21 @@ MIN_INSTINCTS="${KNOWLEDGE_DISTILL_RADAR_MIN_INSTINCTS:-10}"
 HOMUNCULUS_DIR="${CLV2_HOMUNCULUS_DIR:-$HOME/.local/share/ecc-homunculus-default}"
 # Least-privilege allowlist (read-mostly design, #368): the skill's Phase 0/2
 # diagnostics run as individual read-only commands (ls/cat/date/jq/grep/find/
-# head/tail/wc/ghq list) plus the instinct-cli.py evolve invocation. Because
-# CLV2_HOMUNCULUS_DIR is already exported into this process's environment (via
-# the claude launcher below), the headless prompt tells claude to reference it
-# directly rather than re-deriving it with a `H="${CLV2_HOMUNCULUS_DIR:-...}"`
-# assignment -- each diagnostic command then starts with its own binary name,
-# which is what the prefix-matched allow rules below actually match. Writes
-# are confined to this wrapper's own report dir (knowledge-distill never
-# applies its own proposals). Artifact is deliberately NOT granted (no page
-# delivery for this radar, unlike morning-radar's brief page).
-ALLOWED_TOOLS="Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(grep:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ghq list:*),Bash(python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py:*),Read,Glob,Grep,Skill(knowledge-distill),Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)"
+# head/tail/wc/printf/ghq list) plus the instinct-cli.py evolve invocation.
+# printf is required for Phase 0's mandatory ECC_OBSERVER_TIMEOUT_SECONDS
+# check. instinct-cli.py is scoped to the `evolve` subcommand only -- the CLI
+# also has `import`/`promote`/`prune`, which mutate or delete instinct state,
+# so a bare script-path wildcard would violate the read-mostly design (#388
+# review). Because CLV2_HOMUNCULUS_DIR is already exported into this
+# process's environment (via the claude launcher below), the headless prompt
+# tells claude to reference it directly rather than re-deriving it with a
+# `H="${CLV2_HOMUNCULUS_DIR:-...}"` assignment -- each diagnostic command then
+# starts with its own binary name, which is what the prefix-matched allow
+# rules below actually match. Writes are confined to this wrapper's own
+# report dir (knowledge-distill never applies its own proposals). Artifact is
+# deliberately NOT granted (no page delivery for this radar, unlike
+# morning-radar's brief page).
+ALLOWED_TOOLS="Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(grep:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(printf:*),Bash(ghq list:*),Bash(python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve:*),Read,Glob,Grep,Skill(knowledge-distill),Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG_FILE" 2>/dev/null || true
@@ -166,7 +171,7 @@ main() {
 /knowledge-distill --week=this --min-instincts=${MIN_INSTINCTS} を headless 実行してください。
 - --dry-run は使わない。レポート全文を Write で ${REPORT_FILE} に保存する（同週ファイルが既に存在する場合、--force 再実行時は Read してから全文を上書き保存する）。
 - CLV2_HOMUNCULUS_DIR は既にこのプロセスの環境に export 済みです。SKILL.md の \`H="\${CLV2_HOMUNCULUS_DIR:-...}"\` という変数代入は行わず、\$CLV2_HOMUNCULUS_DIR を直接参照してください。
-- Phase 0 の各診断コマンド（jq/ls/grep/find/head/tail/wc/date 等）は 1 コマンド = 1 回の Bash 呼び出しとし、複数コマンドをセミコロンや && で連結しないでください。
+- Phase 0 の各診断コマンド（jq/ls/grep/find/head/tail/wc/date 等）は 1 コマンド = 1 回の Bash 呼び出しとし、複数コマンドをセミコロンや && で連結しないでください。Phase 2 の instinct-cli.py evolve 呼び出しも同様に、\`CLV2_HOMUNCULUS_DIR="\$H"\` のような prefix を付けず \`python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve\` を単独のコマンドとして実行してください（\$CLV2_HOMUNCULUS_DIR は既に export 済みのため prefix は不要です）。
 - 昇華提案（evolved skill化・curated skill改修・memory追加・ルール化）はレポートへの提示のみとし、一切適用しない。
 - 最終応答は「HEADLINE: <一行要約>」形式の1行のみとする（例: "HEADLINE: 縮退終了（instinct 3件、閾値未満）" または "HEADLINE: 昇華提案 4件 / instinct 12件"）。
 EOF

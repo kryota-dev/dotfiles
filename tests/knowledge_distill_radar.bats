@@ -76,6 +76,21 @@ run_fn() {
   [[ "$allowed_tools_line" != *'Artifact'* ]]
 }
 
+@test "allowlist pins the individual read-only Bash prefixes and excludes write commands" {
+  local allowed_tools_line
+  allowed_tools_line="$(grep '^ALLOWED_TOOLS=' "$WRAPPER")"
+  for prefix in 'Bash(ls:*)' 'Bash(cat:*)' 'Bash(date:*)' 'Bash(jq:*)' 'Bash(grep:*)' \
+    'Bash(find:*)' 'Bash(head:*)' 'Bash(tail:*)' 'Bash(wc:*)' 'Bash(printf:*)' 'Bash(ghq list:*)'; do
+    [[ "$allowed_tools_line" == *"$prefix"* ]]
+  done
+  # instinct-cli.py must be scoped to the read-only `evolve` subcommand, not a
+  # bare script-path wildcard (the CLI also has import/promote/prune, which
+  # mutate or delete instinct state).
+  [[ "$allowed_tools_line" == *'instinct-cli.py evolve:*'* ]]
+  run grep -qE 'Bash\((rm|mv|cp|dd|truncate|shred)([[:space:]:]|$)' <<<"$allowed_tools_line"
+  [ "$status" -ne 0 ]
+}
+
 @test "token hygiene: no -H/--header Authorization, no set -x, token via -K" {
   run grep -E -- '(-H|--header)["'"'"'[:space:]]*"?Authorization' "$WRAPPER"
   [ "$status" -ne 0 ]
@@ -86,9 +101,12 @@ run_fn() {
 @test "does not hand-copy per-account isolation env (delegates to the claude launcher, #336/#345)" {
   # Unlike morning-radar, this wrapper DOES legitimately reference the
   # ecc-homunculus-default fallback path (HOMUNCULUS_DIR, matching SKILL.md's
-  # own Phase 0 fallback) for its independent precheck -- only a literal
-  # re-assignment of the isolation env vars themselves is forbidden.
-  run grep -qE 'CLV2_HOMUNCULUS_DIR=|ECC_AGENT_DATA_HOME=|GATEGUARD_STATE_DIR=|ECC_MCP_HEALTH_STATE_PATH=' "$WRAPPER"
+  # own Phase 0 fallback) for its independent precheck, and its PROMPT text
+  # quotes SKILL.md's `CLV2_HOMUNCULUS_DIR="$H"` anti-pattern to tell claude
+  # NOT to replicate it -- only a line-start (real shell) re-assignment of the
+  # isolation env vars themselves is forbidden, so the check is anchored to
+  # `^` to ignore prose that merely mentions the var name mid-line.
+  run grep -qE '^CLV2_HOMUNCULUS_DIR=|^ECC_AGENT_DATA_HOME=|^GATEGUARD_STATE_DIR=|^ECC_MCP_HEALTH_STATE_PATH=' "$WRAPPER"
   [ "$status" -ne 0 ]
   grep -qF '$HOME/.local/launchers:' "$WRAPPER"
   grep -qF 'CLAUDE_CONFIG_DIR="$HOME/.claude"' "$WRAPPER"
@@ -104,6 +122,7 @@ run_fn() {
   [ "$(jq -r .message <"${STUB_DIR}/curl_stdin")" = "HEADLINE: 昇華提案 4件" ]
   [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "3" ]
   [ "$(jq -r 'has("click")' <"${STUB_DIR}/curl_stdin")" = "false" ]
+  [ "$(jq -r '.tags | join(",")' <"${STUB_DIR}/curl_stdin")" = "microscope,knowledge-distill" ]
 }
 
 @test "notify_error publishes priority 5 to claude-attention" {
@@ -143,6 +162,7 @@ run_fn() {
 }
 
 @test "same-week guard skips a second run within the same ISO week" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local tmp
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -223,6 +243,37 @@ EOF
   [[ "$message" == *"3/10"* ]]
 }
 
+@test "main(): instincts dir does not exist yet (zero accumulated) -> dry, does not abort under pipefail" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-no-instincts-dir"
+  # Deliberately do NOT create .local/share/ecc-homunculus-default/instincts/personal:
+  # this is the exact "zero instincts accumulated" case the precheck's `|| true`
+  # guard exists to handle (find on a nonexistent dir exits non-zero under pipefail).
+  mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+report="$(printf '%s' "$*" | grep -oE '[^ ]+\.kryota-dev/knowledge-distill/[^ ]+\.md' | head -1)"
+mkdir -p "$(dirname "$report")"
+printf '# Knowledge Distill (degraded)\n\ninstinct 蓄積なし。\n' >"$report"
+echo "HEADLINE: 縮退終了"
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
+  cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
+  chmod 600 "${home}/.config/ntfy/notify-env"
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+    NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
+    KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
+    bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
+  [ "$status" -eq 0 ]
+  [ -f "${home}/state/knowledge-distill-radar/last-run" ]
+  local message
+  message="$(jq -r .message <"${STUB_DIR}/curl_stdin")"
+  [[ "$message" == *"縮退"* ]]
+  [[ "$message" == *"0/10"* ]]
+}
+
 @test "main(): a failed run notifies attention priority 5 and leaves no stamp" {
   [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-fail"
@@ -239,6 +290,30 @@ EOF
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
   [ "$status" -eq 1 ]
   [ ! -f "${home}/state/knowledge-distill-radar/last-run" ]
+  [ "$(jq -r .topic <"${STUB_DIR}/curl_stdin")" = "claude-attention" ]
+  [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "5" ]
+}
+
+@test "main(): claude exits 0 but writes no report file -> treated as failure, no stamp" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-no-report"
+  mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
+  # Exits 0 and prints a HEADLINE, but never writes the report file -- this is
+  # the output-contract violation design.md Error Scenario 3 describes, distinct
+  # from the claude-exit-1 path covered by the test above.
+  printf '%s\n' '#!/bin/bash' 'echo "HEADLINE: ok"' >"${home}/.local/launchers/claude"
+  chmod +x "${home}/.local/launchers/claude"
+  cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
+  cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
+  chmod 600 "${home}/.config/ntfy/notify-env"
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+    NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
+    KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
+    bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
+  [ "$status" -eq 1 ]
+  [ ! -f "${home}/state/knowledge-distill-radar/last-run" ]
+  grep -qF 'report file missing' "${home}/radar.log"
   [ "$(jq -r .topic <"${STUB_DIR}/curl_stdin")" = "claude-attention" ]
   [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "5" ]
 }
