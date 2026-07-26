@@ -123,5 +123,9 @@ CLV2_HOMUNCULUS_DIR="$H" python3 ~/.agents/skills/continuous-learning-v2/scripts
 
 ## 運用メモ
 
-- 推奨リズム: 週 1 回（金曜夕方 or 月曜朝）。morning-brief / worklog と同じ朝ルーチンに組み込める。
-- 定期自動実行（cron）は本 skill の範囲外。載せる場合は課金を伴うため、ユーザーの明示承認で別途設定する。
+- 週次自動実行: `dev.kryota.knowledge-distill` launchd エージェント（金曜 18:00 JST、
+  `home/dot_claude/executable_knowledge-distill-radar.sh`）が headless で本 skill を起動し、
+  CLV2 パイプラインの健全性（instinct 蓄積数）を独立に precheck した上でレポート要約を
+  ntfy（`claude-attention`）へ通知する（kryota-dev/dotfiles#368、2026-07-26 承認）。
+  詳細は `docs/architecture/notifications.md` の「Weekly knowledge-distill delivery」節を参照。
+  手動実行（`--week=last` での過去週再確認等）も引き続き可能。
