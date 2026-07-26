@@ -178,6 +178,8 @@ _skill_is_external() {
 @test "skill provenance: retired unmanaged skills are absent from source" {
   # Removed as unmanaged in Phase 3-6; none should be curated back in by mistake.
   # Extended 2026-07-06 stocktake: 8 outright retirements + 3 merges into kin skills.
+  # Extended 2026-07-27 stocktake (#369): cleanup-plan retired (62-line wrapper over a
+  # single `> <plan-file>` redirect with no non-obvious logic; unreferenced and unused).
   # (drawio, supabase, and supabase-postgres-best-practices moved to external in
   # .chezmoiexternal.toml, not deleted, so they are covered by the "no skill is
   # both curated and external" guard above and are not repeated here.)
@@ -186,7 +188,7 @@ _skill_is_external() {
     agentcore vercel-sandbox patch-remote-control find-skills \
     self-evaluate ghostwrite-comment spec serena drawio-skill-cli \
     copilot-agent-task open-pr-files vitest-error-analysis \
-    fetch-pr-comments save-session wtp-workspace; do
+    fetch-pr-comments save-session wtp-workspace cleanup-plan; do
     [ ! -e "${HOME_DIR}/dot_agents/skills/${s}" ] || {
       echo "unmanaged skill leaked into source: $s"
       false
