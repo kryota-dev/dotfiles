@@ -2,7 +2,7 @@
 
 > 🌐 English (canonical): [notifications.md](notifications.md)
 
-Claude Code のセッションは、注意を要するイベントをこの Mac 上で動く セルフホスト
+Claude Code のセッションは、注意を要するイベントをこの Mac 上で動くセルフホスト
 [ntfy](https://ntfy.sh) サーバへ publish し、tailnet 上の全デバイスから受け取れます。
 これは ECC の `stop:desktop-notify` フックを置き換えたものです。旧フックは `Stop` でしか
 発火せず、ローカル限定で、履歴を持たず、どのセッション・リポジトリ・アカウント由来かを
@@ -10,9 +10,8 @@ Claude Code のセッションは、注意を要するイベントをこの Mac 
 
 このチャネルは **無効の状態で配布** されます。chezmoi では実行できない 1 回限りの手動
 ブートストラップが必要なためで、それまではフックは**ターン終了イベントに限り**ローカル通知へ
-フォールバックします（＝置き換え対象の Stop 専用フックと同等）。この状態で attention 層の
-イベントまでフォールバックさせると、Stop 専用フックの廃止が全マシンでデスクトップ通知の
-**数倍の増加**になってしまいます。無効こそが、この機能がマージされた直後の状態だからです。
+フォールバックします（＝置き換え対象の Stop 専用フックと同等）。フォールバックをここまで
+狭めている理由は[失敗時の挙動](#失敗時の挙動)に記載しています。
 
 ---
 
@@ -101,7 +100,7 @@ topic は 1 つで全イベントを運びます。ntfy は優先度別の通知
 |---|---|
 | **title** | `<repo>/<branch> · <account>`（account は `CLAUDE_CONFIG_DIR` から解決した `cld` / `r06`） |
 | **tags** | emoji タグ 1 つ、加えて `evt-…` / `repo-…` / `branch-…` / `acct-…` / `sid-…`（session id 先頭 8 文字） |
-| **message** | 実質的な本文の 1 行目を 200 コードポイントで切り詰めたもの |
+| **message** | 実質的な本文の 1 行目を、ピン留めした要約長で切り詰めたもの |
 
 リポジトリ名は `--show-toplevel` ではなく git の **common dir** から取ります。この環境の
 ワークツリーはブランチ名で命名されるため、toplevel の basename だとリポジトリ名が
@@ -131,25 +130,26 @@ topic は 1 つで全イベントを運びます。ntfy は優先度別の通知
 | 不正または空の hook ペイロード | 空として扱い、汎用要約で publish は継続 |
 | git 外の `cwd` / detached HEAD / `CLAUDE_CONFIG_DIR` 未設定 / `HOME` 未設定 | 空フィールドやクラッシュではなくリテラルの代替値 |
 
-priority ≥ 3 のしきい値は load-bearing です。最低優先度のライフサイクルイベントはサーバ側
-履歴のために存在しており、これらまでデスクトップ通知にフォールバックすると、`Stop` のみの
-ECC フックを廃止したことが**ローカル通知量の増加**になってしまいます。
+2 つのフォールバックゲート — 未ブートストラップ時のターン終了限定と、設定済み時の
+priority ≥ 3 — はどちらも load-bearing です。最低優先度のライフサイクルイベントはサーバ側
+履歴のために存在しており、これら（未ブートストラップのマシンでは attention 層のイベント
+全部）までデスクトップ通知にフォールバックすると、`Stop` のみの ECC フックを廃止したことが
+**ローカル通知量の増加**になってしまいます。
 
 **Docker Desktop が起動していない間、その期間の履歴は記録されません。** ローカル通知は
 引き続き出ます。ライフサイクルスクリプトから Docker Desktop を強制起動する案は、侵襲的すぎる
 として却下しました。
 
 ローカルフォールバックは macOS では `osascript`、それ以外では `notify-send` を使います。
-置き換え対象の ECC `stop:desktop-notify` は PowerShell BurntToast 経由で WSL もカバーして
-いましたが、その経路は**引き継いでいません**。したがって WSL ではサーバ到達不可時に通知が
-失われます。主経路である ntfy publish は WSL でも通常どおり動くため、影響はオフライン時のみです。
+置き換え対象の ECC フックは PowerShell BurntToast 経由で WSL もカバーしていましたが、その
+経路は**引き継いでいません**。WSL ではサーバ到達不可時に通知が失われます（主経路の ntfy
+publish 自体は WSL でも通常どおり動きます）。
 
-フォールバックはメッセージとタイトルを `osascript` に **argv として** 渡します。本リポジトリの
-`morning-radar.sh` が既に使っている `on run argv` の形と同じで、アシスタントのテキストが
-AppleScript のソースに入りません。これにより注入面が消え、同じくらい重要な点として
-**エスケープが不要になります**。AppleScript の文字列リテラルにはバックスラッシュエスケープ
-構文が無いため、補間する実装はバックスラッシュ除去と引用符の書き換えを強いられ、通知に
-含まれるパスやコード片を黙って壊してしまいます。
+フォールバックはメッセージとタイトルを `osascript` に **argv として** 渡します
+（本リポジトリの `morning-radar.sh` が既に使っている `on run argv` の形）。アシスタントの
+テキストが AppleScript のソースに入らないため、注入面と**エスケープの必要**が同時に消えます。
+AppleScript の文字列リテラルにはバックスラッシュエスケープ構文が無いため、補間する実装は
+バックスラッシュ除去と引用符の書き換えを強いられ、パスやコード片を黙って壊してしまいます。
 
 **`chezmoi apply` はセットアップスクリプトを再試行しません。** chezmoi は `run_onchange`
 スクリプトが exit 0 した時点で実行済みとして記録し、レンダリング後の本文が変わったときだけ
@@ -166,13 +166,12 @@ ntfy 自身の `auth-default-access: deny-all` + topic 単位 ACL、そして 1P
 レンダリングされる `0600` のトークン。**それでも覆えない範囲**を明示しておきます。
 
 - **アシスタントの応答テキストはマシンの外へ出ます。** 上表でピン留めした長さまで
-  （ターンの最初の散文行）が publish され、購読中の全デバイスに配信され、サーバの
-  SQLite キャッシュに保持期間中残ります。このテキストに対する secret スキャンはありません。
-  ターンの締めくくりに認証情報が出力されていた場合、その断片は tailnet 上を流れ、保持期間中
-  残存します。tailnet の外へは出ません（上流中継は本文を運びません）が、**通知履歴は
-  それを生んだセッションと同程度に機微**として扱ってください。自動 redaction は検討のうえ
-  意図的に見送りました。部分的なパターン照合は、実際には保証できないものを保証したかのように
-  見せてしまうためです。
+  （ターンの最初の散文行）が購読中の全デバイスへ配信され、サーバの SQLite キャッシュに
+  保持期間中残ります。secret スキャンは無く、ターン末尾に認証情報が出力されていれば、
+  その断片は tailnet 上を流れて残存します。tailnet の外へは出ません（上流中継は本文を
+  運びません — 後述の iOS 節参照）が、**通知履歴はそれを生んだセッションと同程度に機微**
+  として扱ってください。自動 redaction は意図的に見送りました。部分的なパターン照合は、
+  保証できないものを保証したかのように見せてしまうためです。
 - **ループバック束縛はローカル隔離ではありません。** `127.0.0.1:2586` が防ぐのは
   *ネットワーク越し*の到達だけで、この Mac 上の他プロセスが `tailscale serve` を迂回して
   直接接続することは防ぎません。`behind-proxy: true` により ntfy は `X-Forwarded-For` を
@@ -204,11 +203,10 @@ ntfy 自身の `auth-default-access: deny-all` + topic 単位 ACL、そして 1P
 `home/.chezmoidata.toml` に `[ntfy].enabled` があり、false の間は `home/.chezmoiignore` が
 `.config/ntfy` ターゲット全体をスキップします。
 
-これは見た目以上に重要です。**ターゲットを ignore するとテンプレートの評価自体も行われない**
-ため、`Dotfiles - ntfy` アイテムを持たないマシン（および CI ランナー）で `onepasswordRead` に
-到達しません。このフラグが無ければ、この機能をマージした時点で vault アイテムが作られるまで
-`chezmoi apply` が全環境で壊れ、両 CI ジョブの「Exclude CI-incompatible files」にも追加が
-必要になっていました。
+**ターゲットを ignore するとテンプレートの評価自体も行われない**ため、`Dotfiles - ntfy`
+アイテムを持たないマシン（および CI ランナー）で `onepasswordRead` に到達しません。この
+フラグがあるからこそ、vault アイテム無しでも `chezmoi apply` が全環境で収束し、両 CI
+ジョブの「Exclude CI-incompatible files」への追加も不要になっています。
 
 `dot_claude/settings.json` のフック配線は意図的にゲートしていません。同ファイルは
 テンプレートではなくプレーンファイルだからです。ブートストラップ前はフックが単に
@@ -288,8 +286,8 @@ docker compose --file ~/.config/ntfy/compose.yaml down
 tailscale serve --https=443 off
 ```
 
-再構成は `run_onchange_after_31-setup-ntfy` が担当し、[ライフサイクルスクリプト](lifecycle-scripts.ja.md)
-に記載しています。compose ファイルまたはサーバ設定が変わるたびに再実行され、Docker デーモンに
+再構成は `run_onchange_after_31-setup-ntfy` が担当します。3 つの再実行トリガーは
+[ライフサイクルスクリプト](lifecycle-scripts.ja.md)に列挙しています。Docker デーモンに
 到達できないときは失敗せず警告し、CI では no-op です。
 
 ---
@@ -301,9 +299,9 @@ tailscale serve --https=443 off
 
 | サーフェス | トリガー | 宛先 | 本チャネルとの関係 |
 |---|---|---|---|
-| **ntfy チャネル**（本ページ） | Claude Code の `Notification` / `Stop` / `StopFailure` / `SessionEnd` | tailnet 上の任意のデバイス + 7 日間の検索可能な履歴 | 主経路。ECC の `stop:desktop-notify` を置き換えた |
+| **ntfy チャネル**（本ページ） | Claude Code の `Notification` / `Stop` / `StopFailure` / `SessionEnd` | tailnet 上の任意のデバイス + [ピン留め](#ピン留めされた値)した保持期間の検索可能な履歴 | 主経路。ECC の `stop:desktop-notify` を置き換えた |
 | `clv2-session-notify.sh` | `SessionStart`（7 日に 1 回へスロットル） | ローカル `osascript` | 直交。`/evolve` の実行を促すもので、セッション活動の通知ではない |
-| `morning-radar.sh` | launchd、平日朝 | ローカル `osascript` | 直交。定時ブリーフの結果報告。**本チャネルのフォールバックはこのスクリプトの argv 渡し `osascript` パターンを採用した** |
+| `morning-radar.sh` | launchd、平日朝 | ローカル `osascript` | 直交。定時ブリーフの結果報告 |
 | `agentPushNotifEnabled`（settings.json） | Claude Code 内部 | Claude モバイルアプリ | トリガーは重なるが、属性付けもサーバ側履歴も無い（PRD の却下案 15 を参照） |
 | `notify` zsh エイリアス | シェルからの手動実行 | ローカルの効果音のみ | 本件のスコープ外 |
 

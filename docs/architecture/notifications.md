@@ -8,12 +8,10 @@ tailnet. This replaced the ECC `stop:desktop-notify` hook, which fired only on `
 only locally, kept no history, and could not say which session, repo or account a
 notification came from.
 
-The channel ships **disabled**. It needs a one-time manual bootstrap that chezmoi cannot
-perform; until then the hooks fall back to a local desktop notification for turn-end
-events only — matching what the Stop-only hook they replace covered. Falling back for
-every attention-tier event in that state would have made removing a Stop-only hook a
-severalfold *increase* in desktop popups on every machine, since disabled is the state
-this lands in.
+The channel ships **disabled**: it needs a one-time manual bootstrap that chezmoi cannot
+perform. Until then the hooks fall back to a local desktop notification for turn-end
+events only — matching what the Stop-only hook they replace covered. Why the fallback is
+this narrow is spelled out in [Failure behaviour](#failure-behaviour).
 
 ---
 
@@ -103,7 +101,7 @@ Every message carries:
 |---|---|
 | **title** | `<repo>/<branch> · <account>` — account is `cld` or `r06`, resolved from `CLAUDE_CONFIG_DIR` |
 | **tags** | one emoji tag, plus `evt-…`, `repo-…`, `branch-…`, `acct-…`, `sid-…` (first 8 chars of the session id) |
-| **message** | the first line of actual prose, truncated to 200 codepoints |
+| **message** | the first line of actual prose, truncated to the pinned summary length |
 
 The repository name comes from git's **common dir**, not `--show-toplevel`: worktrees here
 are named after their branch, so the toplevel basename would report `feat/337-x` as the
@@ -134,25 +132,27 @@ this channel can block or fail a session.
 | Malformed or empty hook payload | Treated as empty; generic summary; still published |
 | Non-git `cwd`, detached HEAD, unset `CLAUDE_CONFIG_DIR`, unset `HOME` | Literal placeholders, never an empty field or a crash |
 
-The priority ≥ 3 threshold is load-bearing. Min-priority lifecycle events exist for the
-server-side history; if they fell back to desktop popups, retiring the Stop-only ECC hook
-would have *increased* local notification volume rather than reducing it.
+Both fallback gates — turn-end only while unbootstrapped, priority ≥ 3 once configured —
+are load-bearing. Min-priority lifecycle events exist for the server-side history; if
+they, or every attention-tier event on a not-yet-bootstrapped machine, fell back to
+desktop popups, retiring the Stop-only ECC hook would have *increased* local notification
+volume rather than reducing it.
 
 **While Docker Desktop is not running, no history is recorded for that period.** Local
 notifications still fire. Force-starting Docker Desktop from a lifecycle script was
 rejected as too invasive.
 
-The local fallback uses `osascript` on macOS and `notify-send` elsewhere. The hook ECC's
-`stop:desktop-notify` replaced also covered WSL through PowerShell BurntToast; that path is
-**not** carried over, so on WSL a notification is lost when the server is unreachable. The
-primary ntfy path works there normally, so this only affects the offline case.
+The local fallback uses `osascript` on macOS and `notify-send` elsewhere. The ECC hook
+this channel replaced also covered WSL through PowerShell BurntToast; that path is **not**
+carried over, so on WSL a notification is lost when the server is unreachable — the
+primary ntfy path itself works there normally.
 
-The fallback passes the message and title to `osascript` as **argv**, using the same
-`on run argv` form `morning-radar.sh` already uses in this repo, so assistant text never
-enters the AppleScript source. That removes the injection surface and, just as importantly,
-removes the need to escape: AppleScript string literals have no backslash-escape syntax, so
-an interpolating implementation has to delete backslashes and rewrite quotes, silently
-mangling any path or code fragment in the notification.
+The fallback passes the message and title to `osascript` as **argv** (the `on run argv`
+form `morning-radar.sh` already uses in this repo), so assistant text never enters the
+AppleScript source. That removes both the injection surface and the need to escape:
+AppleScript string literals have no backslash-escape syntax, so an interpolating
+implementation must delete backslashes and rewrite quotes, silently mangling any path or
+code fragment in the notification.
 
 **`chezmoi apply` does not retry the setup script.** chezmoi marks a `run_onchange` script
 done once it exits 0 and re-runs it only when the rendered body changes — so after starting
@@ -168,13 +168,13 @@ ingress), ntfy's own `auth-default-access: deny-all` plus a per-topic ACL, and a
 1Password-rendered token. What that does **not** cover is worth stating plainly.
 
 - **Assistant text leaves the machine.** Up to the summary length pinned above — the first
-  prose line of the turn — is published, delivered to every subscribed device, and kept in
-  the server's SQLite cache for the retention window. There is no secret scanning on that
-  text. If a turn echoed a credential into its closing line, that fragment travels the
-  tailnet and persists for the retention period. Nothing leaves the tailnet (the upstream
-  relay carries no body — see above), but treat the notification history as being as
-  sensitive as the sessions that produced it. Automatic redaction was considered and left
-  out on purpose: partial pattern matching would suggest a guarantee it cannot make.
+  prose line of the turn — is published to every subscribed device and kept in the
+  server's SQLite cache for the retention window, with no secret scanning: a credential
+  echoed into a turn's closing line travels the tailnet and persists there. Nothing leaves
+  the tailnet itself (the upstream relay carries no body — see
+  [below](#ios-instant-delivery-and-what-leaves-the-tailnet)), but treat the history as
+  being as sensitive as the sessions that produced it. Automatic redaction was left out on
+  purpose: partial pattern matching would suggest a guarantee it cannot make.
 - **Loopback binding is not local isolation.** `127.0.0.1:2586` stops the server being
   reachable *over the network*; it does not stop other processes on this Mac from
   connecting to it directly, bypassing `tailscale serve`. Because `behind-proxy: true`
@@ -208,11 +208,10 @@ ingress), ntfy's own `auth-default-access: deny-all` plus a per-topic ACL, and a
 `home/.chezmoidata.toml` carries `[ntfy].enabled`, and `home/.chezmoiignore` skips the
 whole `.config/ntfy` target while it is false.
 
-That matters more than it looks: **ignoring a target also stops chezmoi from evaluating
-its template**, so `onepasswordRead` is never reached on a machine — or a CI runner — that
-has no `Dotfiles - ntfy` item. Without the flag, merging this feature would have broken
-`chezmoi apply` everywhere until the vault item existed, and both CI jobs would have needed
-new entries in their "Exclude CI-incompatible files" step.
+**Ignoring a target also stops chezmoi from evaluating its template**, so
+`onepasswordRead` is never reached on a machine — or a CI runner — that has no
+`Dotfiles - ntfy` item. The flag is what lets this feature converge everywhere without the
+vault item, and without new entries in the CI jobs' "Exclude CI-incompatible files" step.
 
 The hook wiring in `dot_claude/settings.json` is deliberately **not** gated: that file is a
 plain file, not a template. Before bootstrap the hooks simply take the fallback path.
@@ -292,10 +291,9 @@ docker compose --file ~/.config/ntfy/compose.yaml down
 tailscale serve --https=443 off
 ```
 
-Reconciliation lives in `run_onchange_after_31-setup-ntfy`, described in
-[lifecycle scripts](lifecycle-scripts.md). It re-runs whenever the compose file or the
-server config changes, warns instead of failing when the Docker daemon is unreachable, and
-is a no-op in CI.
+Reconciliation lives in `run_onchange_after_31-setup-ntfy` — its three re-run triggers are
+enumerated in [lifecycle scripts](lifecycle-scripts.md). It warns instead of failing when
+the Docker daemon is unreachable and is a no-op in CI.
 
 ---
 
@@ -307,9 +305,9 @@ adding a sixth.
 
 | Surface | Trigger | Destination | Relationship to this channel |
 |---|---|---|---|
-| **ntfy channel** (this page) | Claude Code `Notification` / `Stop` / `StopFailure` / `SessionEnd` | Any tailnet device, plus a 7-day queryable history | The primary path; replaced ECC's `stop:desktop-notify` |
+| **ntfy channel** (this page) | Claude Code `Notification` / `Stop` / `StopFailure` / `SessionEnd` | Any tailnet device, plus a queryable history for the [pinned](#pinned-values) retention window | The primary path; replaced ECC's `stop:desktop-notify` |
 | `clv2-session-notify.sh` | `SessionStart`, throttled to once per 7 days | Local `osascript` | Orthogonal: nudges a `/evolve` pass, not session activity |
-| `morning-radar.sh` | launchd, weekday mornings | Local `osascript` | Orthogonal: reports on the scheduled brief. Its argv-passing `osascript` form is the pattern this channel's fallback adopted |
+| `morning-radar.sh` | launchd, weekday mornings | Local `osascript` | Orthogonal: reports on the scheduled brief |
 | `agentPushNotifEnabled` (settings.json) | Claude Code internal | Claude mobile app | Overlapping trigger, but no attribution and no server-side history — see PRD alternative 15 |
 | `notify` zsh alias | Manual, in a shell | Local chime only | Out of scope here |
 
