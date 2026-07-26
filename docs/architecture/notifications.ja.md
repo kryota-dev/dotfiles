@@ -43,6 +43,10 @@ phones/tablets on the tailnet (read-only token)
   `tailscale serve --bg`（再起動をまたいで永続化）を通じてのみ行われます。`tailscale
   funnel` は禁止です — 疑わしい場合は `tailscale funnel status`（何も serve していないことを期待）で
   確認してください。
+- **publisher クレデンシャル**: write-only トークンは `~/.config/ntfy/notify-env`（0600）に
+  置かれます。これは `run_onchange_after_31-setup-ntfy` が `user.db`/`cache.db` と並ぶランタイム状態
+  として書き出すもので、chezmoi の管理対象でも 1Password の保管対象でもありません。1Password に
+  残すのは read-only の subscriber トークン（クロスデバイス配布チャネル）のみです。
 - **iOS の即時 push**: `upstream-base-url: https://ntfy.sh` は、**受信メッセージすべて**について
   ntfy.sh へポーリングリクエストを送ります — iOS デバイスが購読しているかどうかに関係なく
   （トピックのメタデータのみで、メッセージ本文は含みません）— これが APNs に即時配信の材料を渡します。
@@ -69,23 +73,28 @@ phones/tablets on the tailnet (read-only token)
 
 1. **1Password アイテム** — `kryota.dev` Vault に `Dotfiles - ntfy` を作成し、
    `base-url` には実値（serve エンドポイント `https://<host>.<tailnet>.ts.net`。
-   `tailscale status --json | jq -r .Self.DNSName` で確認可能）を、`credential` /
-   `subscriber-token` にはブートストラップ用プレースホルダー（`tk_REPLACE…`）を
-   設定します — 自動プロビジョニングはプレースホルダーが残っている間のみ
-   トークンを発行します。
+   `tailscale status --json | jq -r .Self.DNSName` で確認可能）を、`subscriber-token`
+   にはブートストラップ用プレースホルダー（`tk_REPLACE…`）を設定します — 自動
+   プロビジョニングは、プレースホルダーが残っている間のみ read-only の subscriber
+   トークンを発行します。write-only の publisher トークンはここには**置きません**:
+   セットアップスクリプトが `~/.config/ntfy/notify-env` へ直接書き出します（手順 4 参照）。
    [secrets-1password](../getting-started/secrets-1password.ja.md) を参照してください。
 2. **Docker Desktop** — *サインイン時に Docker Desktop を起動する*（設定 →
    一般）を有効化します。これにより compose の `restart: unless-stopped` ポリシーが、
    再起動のたびにサーバーを復帰させます。
 3. **Apply** — `chezmoi apply` が設定をレンダリングし、コンテナを起動し
    （`run_onchange_after_31-setup-ntfy`）、`tailscale serve --bg` のマッピングを検証します。
-4. **認証は手順 3 が自動でプロビジョニングします**: apply スクリプトが
+4. **認証は手順 3 が自動でプロビジョニングします**（再 apply 不要の 1 パス）: スクリプトが
    `publisher`/`subscriber` ユーザーを使い捨てパスワードで作成し、トピック別 ACL を
-   付与し、アイテムにプレースホルダーが残っている間のみトークンを発行して
-   1Password へ保存し、`~/.config/ntfy/notify-env` へ反映するための
-   `chezmoi apply` 再実行のリマインダーを印字します（ファイルテンプレートは
-   apply のたびに再レンダリングされます）。以下のコマンドは、プロビジョニングが
-   スキップ警告を出した場合（例: `op` CLI 不在）の**手動フォールバック**です:
+   付与し、2 つのトークンをプロビジョニングします:
+   - **publisher** トークンは `~/.config/ntfy/notify-env`（0600）へ直接書き出されます —
+     フックラッパーが source するランタイム状態ファイルです。1Password には一切触れず、
+     この処理に `op` は不要です。
+   - **subscriber** トークンは 1Password アイテムに保存されます（各スマホに手入力する
+     クロスデバイスチャネル）。この処理には `op` CLI が必要です。
+
+   以下のコマンドは、プロビジョニングがスキップ警告を出した場合（例: Docker 停止中、
+   または subscriber 側で `op` 不在）の**手動フォールバック**です:
 
    ```bash
    cd ~/.config/ntfy
@@ -99,8 +108,9 @@ phones/tablets on the tailnet (read-only token)
    docker compose exec ntfy ntfy token add --label devices subscriber
    ```
 
-   フォールバック時は、発行された 2 つのトークンをアイテムの `credential` /
-   `subscriber-token` フィールドに保存し、`chezmoi apply` を再実行します。
+   フォールバック時は、publisher トークンを `~/.config/ntfy/notify-env` に
+   `NTFY_TOKEN='tk_…'` として書き込み（ファイルは 0600 のまま）、subscriber トークンは
+   アイテムの `subscriber-token` フィールドに保存します。
    注: `ntfy token add` はトークンを端末の scrollback にそのまま出力します — 値を保存したら
    scrollback をクリアしてください。
 5. **デバイスの subscribe** — ntfy アプリ（iOS/Android）→ *別のサーバーを使う* で `base-url`
@@ -115,7 +125,8 @@ wrapper が課しているのと同じルールです）。代わりに process 
 ```bash
 BASE="$(op read 'op://kryota.dev/Dotfiles - ntfy/base-url')"
 ro() { printf 'header = "Authorization: Bearer %s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/subscriber-token')"; }
-wo() { printf 'header = "Authorization: Bearer %s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/credential')"; }
+# publisher トークンは 1Password にないため、notify-env から source する。
+wo() { ( . ~/.config/ntfy/notify-env; printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" ); }
 # anonymous publish must be denied (401/403)
 curl -s -o /dev/null -w '%{http_code}\n' -d test "$BASE/claude-test"
 # read-only token must be denied for publish (403)
@@ -141,12 +152,19 @@ upstream リレーは upstream 側で未検証です — PRD 参照）。
 | Old messages missing | `cache-duration` (168h, `[ntfy]` in `.chezmoidata.toml`) elapsed |
 | Notifications on the wrong account badge | `CLAUDE_CONFIG_DIR` unset in that session; account falls back to `default` |
 
-## リカバリ: user.db (auth) の消失・破損
+## リカバリ: user.db (auth) の消失・破損、またはトークンローテーション
 
-破損している場合は `~/Library/Application Support/ntfy/user.db` を削除し、セットアップ手順の
-4 を再実行してください。**トークンを再発行するとすべての既存トークンが無効化されます**: 1Password の
-`credential` フィールドを更新し、`chezmoi apply` を再実行し、subscribe している全デバイスで
-subscriber トークンを再入力してください。
+**クリーンインストールは自己修復します**: `run_onchange` の状態が無いためセットアップ
+スクリプトが走り、`~/.config/ntfy/notify-env` が存在しないことを検知して publisher トークンを
+再プロビジョニングします。
+
+**既存マシン**では notify-env を削除するだけでは不十分です — `run_onchange_after_31-setup-ntfy`
+は exit 0 を記録し、compose/server テンプレートが変更されたときのみ再発火するため、`chezmoi apply`
+だけでは書き直されません。手動フォールバック（手順 4）で再プロビジョニングしてください: 新しい
+`ntfy token add … publisher` を発行し、notify-env に `NTFY_TOKEN='tk_…'`（0600 のまま）として
+書き込みます。`user.db` が消失・破損している場合は先に削除してください。**トークンを再発行すると
+すべての既存トークンが無効化されます**ので、subscribe している全デバイスで subscriber トークンも
+再入力してください。
 
 ## ロールバック（1ステップ）
 

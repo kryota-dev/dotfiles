@@ -197,11 +197,13 @@ load helpers/setup
 
 @test "docs_facts: every <!-- FACT:ci-both-exclusion-count --> marker matches the Ubuntu job exclusion count" {
   # SSOT: .github/workflows/setup-validation.yml (Ubuntu job's
-  # "Exclude CI-incompatible files" step for f in \...; do block). Count is 8 as of
-  # #337, which added the two home/dot_config/ntfy/private_*.tmpl entries
-  # (PR #248 added private_gitleaks-own.toml.tmpl for the earlier count of 6).
+  # "Exclude CI-incompatible files" step for f in \...; do block). Count is 7:
+  # #337 added home/dot_config/ntfy/private_server.yml.tmpl on top of the earlier
+  # 6 (PR #248 added private_gitleaks-own.toml.tmpl). The publisher-token
+  # notify-env template that briefly pushed this to 8 was dropped once the setup
+  # script began writing notify-env directly (runtime state, not a chezmoi target).
   # Update this constant AND every marker in docs/ when entries are added or removed.
-  local expected=8
+  local expected=7
   local found=0 f val
   while IFS= read -r f; do
     while IFS= read -r val; do

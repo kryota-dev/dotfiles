@@ -76,17 +76,16 @@ echo "[ntfy] ntfy server up at ${serve_target:-} behind tailscale serve."
 
 # --- Auth auto-provisioning (idempotent; user-requested #337 follow-up,
 # overriding the PRD D6 manual runbook). Creates the publisher/subscriber
-# users and per-topic ACLs inside the container, issues tokens once, and
-# stores them in 1Password so the next apply renders them into notify-env.
+# users and per-topic ACLs inside the container, then provisions two tokens:
+#   - publisher token  -> written straight into ~/.config/ntfy/notify-env,
+#     runtime state this script owns (like user.db); the wrapper sources it
+#     locally, so this half needs neither op nor a second apply.
+#   - subscriber token -> stored in 1Password, the cross-device channel typed
+#     by hand on each phone; this half needs the op CLI.
 # Every failure path warns and exits 0 (fail-open, same contract as above).
 # The ntfy CLI edits user.db directly via the mounted server.yml, so this
 # works as soon as the container is up. Throwaway passwords: tokens are the
 # real credential; recovery = delete user.db and re-run this provisioning.
-if ! command -v op >/dev/null 2>&1; then
-  echo "[ntfy] op CLI not found; skipping auth provisioning." >&2
-  echo "[ntfy] Provision manually: docs/architecture/notifications.md (setup runbook)" >&2
-  exit 0
-fi
 compose_cfg="$HOME/.config/ntfy/compose.yaml"
 ntfy_exec() {
   docker compose -f "$compose_cfg" exec -T ntfy ntfy "$@"
@@ -107,37 +106,67 @@ for t in "${topic_attention:-}" "${topic_done:-}" claude-test; do
   ntfy_exec access publisher "$t" write-only >/dev/null || true
   ntfy_exec access subscriber "$t" read-only >/dev/null || true
 done
-# Issue tokens only while 1Password still holds bootstrap placeholders.
-# NOTE: `op item edit field=value` puts the token in argv for the local op
-# process — a deliberate, transient trade-off for one-shot local provisioning
-# (op offers no stdin path for individual field edits).
 issue_token() {
   ntfy_exec token add --label "$1" "$2" 2>/dev/null | grep -oE 'tk_[A-Za-z0-9]+' | head -n 1
 }
-tokens_updated=0
-cred="$(op read "op://kryota.dev/Dotfiles - ntfy/credential" 2>/dev/null || true)"
-if [ -z "$cred" ] || printf '%s' "$cred" | grep -q '^tk_REPLACE'; then
+
+# Publisher token -> notify-env (runtime state; no op CLI, no second apply).
+# Written 0600 via umask and never echoed or traced. The assignment-only
+# template values captured up top (serve_target / topic_*) are reused here so
+# the heredoc carries no template action for the lint pipeline to strip.
+env_file="$HOME/.config/ntfy/notify-env"
+write_notify_env() {
+  (
+    umask 077
+    cat >"$env_file" <<EOF
+# ntfy publisher credentials for the Claude Code hook wrapper
+# (~/.claude/ntfy-notify.sh, kryota-dev/dotfiles#337). Runtime state written
+# 0600 by run_onchange_after_31-setup-ntfy — NOT a chezmoi target. Sourced,
+# never exported, by the wrapper so the token only lives in that process. The
+# wrapper publishes to the loopback listener directly, so it keeps working even
+# if the tailscale serve front is down.
+NTFY_URL='${serve_target}'
+# Write-only publisher token (least privilege: cannot read history if leaked).
+NTFY_TOKEN='$1'
+NTFY_TOPIC_ATTENTION='${topic_attention}'
+NTFY_TOPIC_DONE='${topic_done}'
+EOF
+  )
+}
+have_pub_token=0
+if [ -f "$env_file" ] && grep -qE '^NTFY_TOKEN=.*tk_' "$env_file" && ! grep -qE '^NTFY_TOKEN=.*tk_REPLACE' "$env_file"; then
+  have_pub_token=1
+fi
+if [ "$have_pub_token" = 0 ]; then
   pub_token="$(issue_token chezmoi publisher || true)"
   if [ -n "$pub_token" ]; then
-    op item edit "Dotfiles - ntfy" --vault kryota.dev "credential[concealed]=${pub_token}" >/dev/null
-    tokens_updated=1
-    echo "[ntfy] publisher token issued and stored in 1Password."
+    if write_notify_env "$pub_token"; then
+      echo "[ntfy] publisher token issued and written to ~/.config/ntfy/notify-env."
+    else
+      echo "[ntfy] failed to write notify-env; provision manually (see notifications.md runbook)." >&2
+    fi
   else
     echo "[ntfy] publisher token issuance failed; provision manually (see notifications.md runbook)." >&2
   fi
 fi
-sub="$(op read "op://kryota.dev/Dotfiles - ntfy/subscriber-token" 2>/dev/null || true)"
-if [ -z "$sub" ] || printf '%s' "$sub" | grep -q '^tk_REPLACE'; then
-  sub_token="$(issue_token devices subscriber || true)"
-  if [ -n "$sub_token" ]; then
-    op item edit "Dotfiles - ntfy" --vault kryota.dev "subscriber-token[concealed]=${sub_token}" >/dev/null
-    tokens_updated=1
-    echo "[ntfy] subscriber token issued and stored in 1Password."
+
+# Subscriber token -> 1Password (cross-device channel). Needs the op CLI.
+# NOTE: `op item edit field=value` puts the token in argv for the local op
+# process — a deliberate, transient trade-off for one-shot local provisioning
+# (op offers no stdin path for individual field edits). Issue it only while the
+# item still holds a bootstrap placeholder.
+if command -v op >/dev/null 2>&1; then
+  sub="$(op read "op://kryota.dev/Dotfiles - ntfy/subscriber-token" 2>/dev/null || true)"
+  if [ -z "$sub" ] || printf '%s' "$sub" | grep -q '^tk_REPLACE'; then
+    sub_token="$(issue_token devices subscriber || true)"
+    if [ -n "$sub_token" ]; then
+      op item edit "Dotfiles - ntfy" --vault kryota.dev "subscriber-token[concealed]=${sub_token}" >/dev/null
+      echo "[ntfy] subscriber token issued and stored in 1Password."
+    fi
   fi
-fi
-if [ "$tokens_updated" = 1 ]; then
-  echo "[ntfy] Run 'chezmoi apply' once more to render the publisher token into ~/.config/ntfy/notify-env"
-  echo "[ntfy] (file templates re-render on every apply; no template change needed)."
+else
+  echo "[ntfy] op CLI not found; skipping subscriber-token provisioning (publisher/notify-env done)." >&2
+  echo "[ntfy] Store the subscriber token manually: docs/architecture/notifications.md (setup runbook)" >&2
 fi
 echo "[ntfy] auth provisioning complete."
 {{ end -}}

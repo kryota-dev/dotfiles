@@ -131,14 +131,15 @@ Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリ�
 
 ### 11 — validate-1password (`run_once`、after、macOS のみ)
 
-ハードゲートです。`op` がインストール済みかつ認証済みであることを確認し、<!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> つの必須 vault 参照に対して `op read` を呼び出します。
+ハードゲートです。`op` がインストール済みかつ認証済みであることを確認し、<!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> つの必須 vault 参照に対して `op read` を呼び出します。
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
 - `op://kryota.dev/Dotfiles - ntfy/base-url`
-- `op://kryota.dev/Dotfiles - ntfy/credential`
+
+（ntfy の publisher トークンは意図的に含まれません: スクリプト 31 がこれを `~/.config/ntfy/notify-env` へランタイム状態として直接書き出すため、1Password には保存されず、ゲートがチェックする対象もありません。）
 
 `Dotfiles - Redact Patterns` アイテムについては単純な存在確認にとどまらず、パターンが非空であること、`private_gitleaks-own.toml.tmpl` の TOML 生文字列リテラルを破壊する `'''` を含まないこと、有効な正規表現としてコンパイルできることも検証します。破損したパターンは自社名前空間リポジトリのすべてのコミットでクライアント識別子ルールをサイレントに無効化してしまいます。
 
@@ -176,7 +177,7 @@ repo 管理の launchd LaunchAgent（現在は平日朝ブリーフを発火す�
 
 ### 31 — setup-ntfy (`run_onchange`、after、macOS のみ)
 
-自己ホスト ntfy 通知サーバー（kryota-dev/dotfiles#337; [Notifications](notifications.ja.md) 参照）を起動します。ランタイム状態ディレクトリ（`~/Library/Application Support/ntfy`、0700、chezmoi のターゲットツリー外）を作成し、`~/.config/ntfy/compose.yaml` に対して `docker compose up -d` を実行し、`tailscale serve --bg` のマッピングを検証してサーバーが tailnet 全体から HTTPS で到達可能な状態を保ちます。compose テンプレートとサーバー設定の埋め込みハッシュで再トリガーされます。CI ではスキップします（サービスもネットワークもないため）。**規約 #6 からの意図的な逸脱**: Docker Desktop が起動していない（または tailscale CLI が存在しない）場合、ハードフェイルせず警告を出して exit 0 します——通知はセットアップクリティカルではなく、`chezmoi apply` をブロックしてはならないためです。各スキップパスは手動リカバリ手順を出力します。
+自己ホスト ntfy 通知サーバー（kryota-dev/dotfiles#337; [Notifications](notifications.ja.md) 参照）を起動します。ランタイム状態ディレクトリ（`~/Library/Application Support/ntfy`、0700、chezmoi のターゲットツリー外）を作成し、`~/.config/ntfy/compose.yaml` に対して `docker compose up -d` を実行し、`tailscale serve --bg` のマッピングを検証してサーバーが tailnet 全体から HTTPS で到達可能な状態を保ちます。続いて認証を冪等に自動プロビジョニングします: publisher/subscriber ユーザーとトピック別 ACL を作成し、write-only の publisher トークンを `~/.config/ntfy/notify-env`（0600 のランタイム状態。1Password を経由せず、再 apply も不要）へ直接書き出し、read-only の subscriber トークンを `Dotfiles - ntfy` 1Password アイテムに保存します（この処理には `op` CLI が必要）。クリーンインストールは notify-env が存在しないため書き直されて自己修復しますが、既存マシンでは exit 0 が記録されるため `chezmoi apply` だけでは再発火しません（Notifications のリカバリ節参照）。compose テンプレートとサーバー設定の埋め込みハッシュで再トリガーされます。CI ではスキップします（サービスもネットワークもないため）。**規約 #6 からの意図的な逸脱**: Docker Desktop が起動していない（または tailscale CLI が存在しない）場合、ハードフェイルせず警告を出して exit 0 します——通知はセットアップクリティカルではなく、`chezmoi apply` をブロックしてはならないためです。各スキップパスは手動リカバリ手順を出力します。
 
 ### 40 — setup-sheldon (`run_onchange`、after)
 
