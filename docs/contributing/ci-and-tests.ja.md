@@ -156,6 +156,14 @@ macOS ジョブは `~/.config/ghostty/config` も確認します。
 
 ---
 
+## `renovate-triage.yml` — 週次 Renovate トリアージ
+
+`schedule`（毎週月曜日 00:00 UTC = 09:00 JST）と `workflow_dispatch` で、`ubuntu-latest` 上で実行されます。[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) を automation モード（`prompt` 入力を渡し、`@claude` メンション不要）で実行し、open な Renovate PR を **read-only** でトリアージします。`gh` で PR を収集し、リスク / CI 状態 / semver で分類し、要注意のものを分析したうえで、Dependency Dashboard（Issue #12）に統合サマリーコメントを、分析対象の各 PR に個別詳細コメントを投稿します。
+
+このワークフローは**決してマージしません** — マージは `renovate-sweep` skill（`home/dot_agents/skills/renovate-sweep/SKILL.md`。プロンプトにインラインした分類ルールの概念的な source of truth）経由でローカル・人間承認のまま行われます。read-only は多層防御で担保します: ジョブは `contents: read` + `issues: write` + `pull-requests: write` のみを付与し（`contents: write` なし）、`--allowedTools` の allowlist には読み取り + コメント用の `gh` サブコマンドのみを含めます（`gh pr merge` は含めない）。認証は `CLAUDE_CODE_OAUTH_TOKEN` リポジトリシークレット（`claude setup-token` で発行）を使用します。アクションの ref は他のすべての `uses:` と同様に SHA ピンされ、Renovate が追跡します。
+
+---
+
 ## 再利用可能ワークフローと SHA ピン
 
 3 つの追加ワークフローが `kryota-dev/actions` の再利用可能ワークフローにコミット SHA でピンして委譲しています：

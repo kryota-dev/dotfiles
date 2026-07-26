@@ -156,6 +156,14 @@ The job installs chezmoi, sheldon, and starship via Homebrew, copies `home/dot_c
 
 ---
 
+## `renovate-triage.yml` — weekly Renovate triage
+
+Runs on a `schedule` (every Monday at 00:00 UTC = 09:00 JST) and on `workflow_dispatch`, on `ubuntu-latest`. It runs [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) in automation mode (a `prompt` input, no `@claude` mention) to triage open Renovate PRs **read-only**: it collects them with `gh`, classifies each by risk / CI state / semver, analyzes the risky ones, then posts a consolidated summary comment to the Dependency Dashboard (issue #12) and a per-PR detail comment on each analyzed PR.
+
+The workflow **never merges** — merging stays local and human-approved via the `renovate-sweep` skill (`home/dot_agents/skills/renovate-sweep/SKILL.md`), the conceptual source of truth for the classification rules inlined in the prompt. Read-only is enforced by defense-in-depth: the job grants only `contents: read` + `issues: write` + `pull-requests: write` (no `contents: write`), and the `--allowedTools` allowlist holds only read + comment `gh` subcommands (no `gh pr merge`). Auth uses the `CLAUDE_CODE_OAUTH_TOKEN` repository secret (from `claude setup-token`); the action ref is SHA-pinned and tracked by Renovate like every other `uses:`.
+
+---
+
 ## Reusable workflows and SHA pinning
 
 Three additional workflows delegate to reusable workflows in `kryota-dev/actions`, all pinned by commit SHA:
