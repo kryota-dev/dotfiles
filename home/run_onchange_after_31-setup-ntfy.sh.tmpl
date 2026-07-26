@@ -1,0 +1,72 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/bash
+# Start the self-hosted ntfy server and assert its tailnet front
+# (kryota-dev/dotfiles#337). Re-runs whenever the compose file or server
+# config changes (embedded hashes below).
+# compose hash: {{ include "dot_config/ntfy/compose.yaml.tmpl" | sha256sum }}
+# server.yml hash: {{ include "dot_config/ntfy/private_server.yml.tmpl" | sha256sum }}
+set -euo pipefail
+
+# CI runners must never start services or touch the network from this script.
+# Skip inside CI only — the render/apply path stays CI-validated.
+if [ -n "${CI:-}" ]; then
+  echo "[ntfy] CI detected; skipping ntfy setup."
+  exit 0
+fi
+
+# Template values live on assignment-only lines: the lint pipeline strips every
+# `{{` line before shellcheck/shfmt, so control flow must never carry them.
+# References use ${var:-} so the stripped body still lints clean.
+serve_target="http://127.0.0.1:{{ .ntfy.port }}"
+
+# Runtime state (auth user.db, message cache.db) lives outside the chezmoi
+# target tree; owner-only.
+state_dir="$HOME/Library/Application Support/ntfy"
+mkdir -p "$state_dir"
+chmod 700 "$state_dir"
+
+# Intentional deviation from the launchctl exit-1 convention (lifecycle
+# convention #6): notification setup must never block `chezmoi apply` —
+# notifications are not setup-critical. NOTE the run_onchange consequence:
+# exit 0 records this script as done, so re-running `chezmoi apply` does NOT
+# retry until the compose/server templates change. The printed manual command
+# is the recovery path that actually works.
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[ntfy] docker CLI not found; skipping server start." >&2
+  echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
+  exit 0
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "[ntfy] Docker Desktop is not running; skipping server start." >&2
+  echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
+  exit 0
+fi
+
+echo "[ntfy] starting ntfy server (docker compose up -d)..."
+if ! docker compose -f "$HOME/.config/ntfy/compose.yaml" up -d --remove-orphans; then
+  echo "[ntfy] docker compose up failed; notifications will fail open." >&2
+  echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
+  exit 0
+fi
+
+# Assert the tailnet HTTPS front. `--bg` persists the mapping across reboots
+# and tailscaled restarts (tailscale.com/kb/1242); re-running is idempotent.
+# NEVER use `tailscale funnel` here — the server must stay tailnet-only.
+tailscale_bin="$(command -v tailscale || true)"
+if [ -z "$tailscale_bin" ] && [ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ]; then
+  tailscale_bin="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+fi
+if [ -z "$tailscale_bin" ]; then
+  echo "[ntfy] tailscale CLI not found; skipping serve assertion." >&2
+  echo "[ntfy] Recover with: tailscale serve --bg ${serve_target:-}" >&2
+  exit 0
+fi
+
+echo "[ntfy] asserting tailscale serve mapping..."
+if ! "$tailscale_bin" serve --bg "${serve_target:-}"; then
+  echo "[ntfy] tailscale serve failed (tailscaled down or not logged in)." >&2
+  echo "[ntfy] Recover with: tailscale serve --bg ${serve_target:-}" >&2
+  exit 0
+fi
+echo "[ntfy] ntfy server up at ${serve_target:-} behind tailscale serve."
+{{ end -}}

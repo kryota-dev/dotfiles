@@ -162,3 +162,20 @@ ghq_user = "kryota-dev"
     "verification-loop",
     "vite-patterns",
   ]
+
+[ntfy]
+  # Self-hosted ntfy notification server (kryota-dev/dotfiles#337).
+  # SSOT for every ntfy constant except the Docker image tag, which lives
+  # literally in home/dot_config/ntfy/compose.yaml.tmpl so Renovate's regex
+  # manager can track it (drift is caught by tests/files.bats).
+  port = 2586
+  # Server-side history retention (cache-duration). User-approved trade-off:
+  # 7 days of reviewable history vs. plaintext SQLite residency on disk.
+  cache_duration = "168h"
+  # Fixed urgency-based topics; attribution (repo/branch/account/session/event)
+  # travels in tags and titles, never in topic names. The ad-hoc smoke-test
+  # topic (claude-test) is a runbook-only convention in
+  # docs/architecture/notifications.md, not rendered config, so it is
+  # intentionally not declared here.
+  topic_attention = "claude-attention"
+  topic_done = "claude-done"

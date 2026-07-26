@@ -44,7 +44,7 @@ macOS で `chezmoi apply` を実行する前に:
 1. **1Password デスクトップアプリ**がインストールされ、サインイン済みであること。
 2. **CLI 統合が有効**: 1Password → 設定 → デベロッパー → "1Password CLI と統合"。
 3. **1Password CLI（`op`）**がインストール済み: `brew install --cask 1password-cli`。
-4. 以下に示す <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの Vault アイテムすべてが `kryota.dev` Vault に存在すること。
+4. 以下に示す <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> つの Vault アイテム参照すべてが `kryota.dev` Vault に存在すること。
 
 ---
 
@@ -104,6 +104,19 @@ macOS で `chezmoi apply` を実行する前に:
 
 クライアント/勤務先の識別子パターンを `name1|name2|...` の交替形式で保存します（必要に応じて regex エスケープ済み; `'''` と改行は不可）。chezmoi は apply 時にこれを自社名前空間リポジトリ用の gitleaks 設定にレンダリングします。`run_once_after_11` スクリプトはさらにこの値をスモークテストします——パターンが非空であること、TOML 生文字列リテラルを破壊する `'''` を含まないこと、有効な正規表現としてコンパイルできることを検証します。破損したパターンは自社名前空間リポジトリのすべてのコミットでクライアント識別子ルールをサイレントに無効化してしまいます。
 
+### 5. `Dotfiles - ntfy`
+
+| 属性 | 値 |
+|-----|---|
+| Vault | `kryota.dev` |
+| アイテムタイトル | `Dotfiles - ntfy` |
+| フィールド参照 | `base-url`, `credential` |
+| op:// URI | `op://kryota.dev/Dotfiles - ntfy/base-url`, `op://kryota.dev/Dotfiles - ntfy/credential` |
+| レンダリング先 | `~/.config/ntfy/server.yml`（`base-url`）と `~/.config/ntfy/notify-env`（`credential`） |
+| ファイルモード | `0600`（`private_` プレフィックスによる） |
+
+自己ホスト ntfy 通知サーバー（#337; [Notifications](../architecture/notifications.ja.md) 参照）用に、1 アイテムで 2 つのフィールドを検証します。`base-url` は `tailscale serve` の HTTPS エンドポイント（`https://<host>.<tailnet>.ts.net`）です——tailnet の MagicDNS 名がこの公開リポジトリに残らないよう 1Password に保存しています。`credential` は `ntfy token add` で発行される**書き込み専用**の publisher トークンです（notifications のセットアップ手順を参照）。読み取り専用の subscriber トークンも同じアイテムに保存しますが、各デバイスへ手動で入力するため検証ゲートはチェックしません。
+
 ---
 
 ## アイテムが欠落またはリネームされた場合の影響
@@ -114,8 +127,9 @@ macOS で `chezmoi apply` を実行する前に:
 | `Dotfiles - Exa API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、exa MCP サーバーが認証失敗 |
 | `Dotfiles - Firecrawl API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、firecrawl MCP サーバーが認証失敗 |
 | `Dotfiles - Redact Patterns` | 検証ゲートで `chezmoi apply` が exit 1 | `gitleaks-own.toml` がレンダリングされない、自社名前空間リポジトリでクライアント識別子 gitleaks ルールが無効化 |
+| `Dotfiles - ntfy` | 検証ゲートで `chezmoi apply` が exit 1 | `~/.config/ntfy/server.yml` / `notify-env` がレンダリングされない、ntfy サーバーが未設定のままフックラッパーが no-op のまま |
 
-ゲートはすべての 4 アイテムを成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
+ゲートはすべての 6 参照を成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
 
 ---
 

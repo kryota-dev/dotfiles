@@ -1,0 +1,27 @@
+# Self-hosted ntfy server (kryota-dev/dotfiles#337).
+# Runs under Docker Desktop (Brewfile-provisioned) because the Homebrew ntfy
+# formula builds macOS binaries with the `noserver` tag — `ntfy serve` does not
+# exist outside containers/Linux. Managed by run_onchange_after_31-setup-ntfy.
+#
+# The image line below is intentionally literal (no template variables): the
+# Renovate regex manager in .github/renovate.json5 tracks the pinned tag, and
+# tests/files.bats asserts the pin format. Everything else templated here comes
+# from the [ntfy] SSOT block in home/.chezmoidata.toml.
+# Explicit project name so `--remove-orphans` can never touch containers from
+# another compose project that happens to share the default (dirname) name.
+name: ntfy-dotfiles
+services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.26.3@sha256:081b53dbb20674fcfe05fdb4eb8af9036a2645ef979543d16f7f80803af467b1
+    command: serve
+    restart: unless-stopped
+    ports:
+      # Loopback-only on the host; tailnet exposure happens exclusively via
+      # `tailscale serve` (TLS terminated by tailscaled). Never bind all
+      # interfaces (tests/files.bats rejects a wildcard address here).
+      - "127.0.0.1:{{ .ntfy.port }}:80"
+    volumes:
+      - "{{ .chezmoi.homeDir }}/.config/ntfy/server.yml:/etc/ntfy/server.yml:ro"
+      # Runtime state (auth user.db, message cache.db) lives outside the
+      # chezmoi target tree, same principle as the CLV2 homunculus move.
+      - "{{ .chezmoi.homeDir }}/Library/Application Support/ntfy:/var/lib/ntfy"

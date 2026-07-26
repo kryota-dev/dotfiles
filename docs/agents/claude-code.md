@@ -19,6 +19,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
   - [PostToolUseFailure](#posttoolusefailure)
+  - [Notification](#notification)
   - [Stop](#stop)
 - [ECC launcher — ecc-hook.sh](#ecc-launcher--ecc-hooksh)
 - [ECC hook forks (hooks-fork/)](#ecc-hook-forks-hooks-fork)
@@ -165,11 +166,14 @@ flowchart TD
     PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
     PoTU --> PoTU10[console-warn\nEdit]
 
+    NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
+
     STP[Stop] --> STP1[session-end async]
     STP --> STP2[cost-tracker async]
-    STP --> STP3[desktop-notify async]
-    STP --> STP4[format-typecheck async]
-    STP --> STP5[check-console-log sync]
+    STP --> STP3[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
+    STP --> STP4[ntfy-notify async]
+    STP --> STP5[format-typecheck async]
+    STP --> STP6[check-console-log sync]
 ```
 
 ### SessionStart
@@ -236,13 +240,20 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 |---|---|
 | `post:mcp-health-check` | Tracks failed MCP tool calls, marks unhealthy servers, attempts reconnect. `CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure` is set explicitly because Claude Code does not export it and `mcp-health-check.js` selects its handler from that env var. |
 
+### Notification
+
+| Hook ID | Matcher | Async | Description |
+|---|---|---|---|
+| `notification:ntfy-notify` | `permission_prompt\|idle_prompt\|agent_needs_input\|agent_completed` | Yes | Publishes attention/completion notifications to the self-hosted ntfy server over Tailscale with repo/branch/account/session attribution (#337; see [Notifications](../architecture/notifications.md)). Fail-open: silent no-op without `~/.config/ntfy/notify-env` |
+
 ### Stop
 
 | Hook ID | Async | Description |
 |---|---|---|
 | `stop:session-end` | Yes | Persists session state after each response |
 | `stop:cost-tracker` | Yes | Tracks token and cost metrics per session |
-| `stop:desktop-notify` | Yes | Sends macOS/WSL desktop notification with task summary |
+| `stop:desktop-notify` | Yes | **Disabled** via `env.ECC_DISABLED_HOOKS` — replaced by `stop:ntfy-notify` (#337). Wiring kept for the documented one-step rollback (re-enable here + remove the ntfy entries together) |
+| `stop:ntfy-notify` | Yes | Publishes a session-stop notification (truncated + client-identifier-scrubbed summary) to the self-hosted ntfy server (#337) |
 | `stop:format-typecheck` | Yes | Batch-formats and typechecks (`tsc --noEmit`) JS/TS files edited this session (timeout 300 s) |
 | `stop:check-console-log` | No | Aggregates `console.log` warnings across all git-modified JS/TS files |
 

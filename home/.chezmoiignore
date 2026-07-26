@@ -119,6 +119,10 @@
 .aws/sso
 
 # macOS-only: VS Code settings (on Linux, VS Code Server uses ~/.vscode-server/)
+# macOS-only: self-hosted ntfy server config (#337; the server only runs on this
+# Mac — the ~/.claude/ntfy-notify.sh hook wrapper still deploys everywhere and
+# no-ops without ~/.config/ntfy/notify-env)
 {{ if ne .chezmoi.os "darwin" }}
 Library/
+.config/ntfy
 {{ end }}

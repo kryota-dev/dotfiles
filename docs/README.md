@@ -28,6 +28,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 | [Lifecycle scripts: ordering & trigger model](architecture/lifecycle-scripts.md) | The two-phase before/after model, the full apply timeline (00→90), `run_once` vs `run_onchange` semantics, and the embedded-hash trick |
 | [zsh startup, prompt & shell modules](architecture/shell-environment.md) | `.zprofile` → `.zshrc` → sheldon deferred loading; how to add a new `.zsh` module |
 | [Developer toolchain: mise, Brewfile & git](architecture/dev-tooling.md) | mise version pins, `Brewfile` + `.brewfile-linux-exclude`, git 1Password signing, global gitleaks hook |
+| [Notifications: self-hosted ntfy over Tailscale](architecture/notifications.md) | Claude Code hook events → ntfy server (Docker, loopback-only) → tailnet devices; topics, auth/ACL, setup & recovery runbooks |
 
 ### Agents
 
