@@ -1915,8 +1915,9 @@ _gate_decision() {
   ! grep -qE '^[[:space:]]*base-url:' "$y"
   ! grep -q 'onepasswordRead' "$y"
   # tailscale funnel must never be USED in the ntfy config assets. A comment that
-  # warns against it (as the lib does) is fine — only non-comment lines count.
-  [ -z "$(grep -rn 'funnel' "${HOME_DIR}/dot_config/ntfy" | grep -v '#')" ]
+  # warns against it (as the lib does) is fine — strip inline comments before
+  # matching so a trailing `# … funnel …` note never masks a real usage.
+  [ -z "$(grep -rn 'funnel' "${HOME_DIR}/dot_config/ntfy" | sed 's/#.*//' | grep 'funnel')" ]
 }
 
 @test "ntfy setup script sources the lib, carries the embedded hashes and CI guard" {
@@ -1966,12 +1967,24 @@ _gate_decision() {
   # the removed token-in-1Password / subscriber-token paths must not resurrect
   ! grep -qF 'credential[concealed]' "$l"
   ! grep -qF 'subscriber-token' "$l"
+  # R-008 interactive rotate guard (central safety design): the prompt reads
+  # /dev/tty and defaults to N without a tty. Pin the helpers so a regression
+  # that silently rotates live credentials is caught.
+  grep -qF 'ntfy_creds_exist' "$l"
+  grep -qF 'ntfy_prompt_yn' "$l"
+  grep -qF '/dev/tty' "$l"
+  # op read failures must be distinguished from an empty value (a swallowed
+  # error must not overwrite a real subscriber password → device lockout).
+  grep -qF 'op error' "$l"
 }
 
-@test "ntfy-setup command is on PATH, sources the lib, and rotates" {
+@test "ntfy-setup: deploys under ~/.local/bin, sources the lib, prompts before rotating, rotates" {
   local n="${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
   [ -f "$n" ]
   bash -n "$n"
+  # It deploys to ~/.local/bin (already on PATH via dot_zshrc.tmpl) — the
+  # executable_ prefix + this path is the wiring; no separate PATH edit exists.
+  grep -qF '.local/bin/ntfy-setup' "${HOME_DIR}/.chezmoiignore"
   # sources the SSOT library rather than duplicating provisioning logic
   grep -qF '.config/ntfy/lib.sh' "$n"
   # full flow: brings the server up (not check-only) so it can restart a downed container
@@ -1981,8 +1994,13 @@ _gate_decision() {
   grep -qF -- '--rotate' "$n"
   grep -qF 'ntfy_rotate_publisher' "$n"
   grep -qF 'ntfy_rotate_subscriber' "$n"
-  # fail-clear: a distinct exit code when it cannot fix docker/tailscale itself
-  grep -qF 'EXIT_PREREQ' "$n"
+  # R-008: with no --rotate and live creds present, ask before rotating.
+  grep -qF 'ntfy_creds_exist' "$n"
+  grep -qF 'ntfy_prompt_yn' "$n"
+  # fail-clear: three DISTINCT exit codes (op error / usage / prereq), not collapsed.
+  grep -qE '^EXIT_ERR=1( |$)' "$n"
+  grep -qE '^EXIT_USAGE=2( |$)' "$n"
+  grep -qE '^EXIT_PREREQ=3( |$)' "$n"
   ! grep -qF 'set -x' "$n"
 }
 
@@ -2039,6 +2057,12 @@ _gate_decision() {
   ! _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/'
   # server.yml no longer reads any ntfy field from 1Password.
   ! grep -qF 'onepasswordRead' "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
+  # The base-url format-validation stanza (R-003) was removed from the validate
+  # gate too. If it is reintroduced, `op read` returns empty for the now-absent
+  # base-url and the stanza hard-fails every fresh `chezmoi apply` before the
+  # ntfy item is provisioned. Guard the removal.
+  ! grep -qF 'ts.net' "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
+  ! grep -qE 'ntfy_(url|tok)=' "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
 }
 
 @test "ntfy runtime state never lands in the chezmoi source tree" {
@@ -2054,4 +2078,31 @@ _gate_decision() {
   grep -qF '.config/ntfy' "${HOME_DIR}/.chezmoiignore"
   # the ntfy-setup command is macOS-only too (the server only runs on this Mac)
   grep -qF '.local/bin/ntfy-setup' "${HOME_DIR}/.chezmoiignore"
+}
+
+@test "ntfy templates render without a Go template parse error (#357 guard)" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  # The template-stripped 'bash -n' checks above cannot catch a stray literal
+  # open-brace pair in a comment: sed deletes that very line before bash sees
+  # it, yet chezmoi would fail to render. Assert a real render — this is exactly
+  # the #357 parse-error regression the non-functional requirements forbid.
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl" >/dev/null
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl" >/dev/null
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl" >/dev/null
+}
+
+@test "install.sh points at ntfy-setup on darwin only, and never provisions at bootstrap" {
+  local s="${REPO_ROOT}/install/install.sh"
+  [ -f "$s" ]
+  bash -n "$s"
+  # R-009: bootstrap stays thin — it points at ntfy-setup for the two-phase
+  # setup but performs no provisioning (no docker/tailscale/op) itself.
+  grep -qF 'ntfy-setup' "$s"
+  grep -qF 'if [ "$OS" = "Darwin" ]; then' "$s"
+  ! grep -qF 'docker compose' "$s"
+  ! grep -qF 'tailscale serve' "$s"
+  ! grep -qF 'op item' "$s"
 }

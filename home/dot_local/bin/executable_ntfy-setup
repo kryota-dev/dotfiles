@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ntfy-setup — bring up the self-hosted ntfy server and provision / rotate its
 # credentials (kryota-dev/dotfiles#337). All logic lives in the shared library;
 # this is the on-demand, re-runnable entry point (the apply-time
@@ -16,9 +16,9 @@
 # Desktop is not running, so run this once both are available.
 set -euo pipefail
 
-EXIT_ERR=1        # an operation failed
-EXIT_USAGE=2      # bad arguments / library missing
-EXIT_PREREQ=3     # a prerequisite this command cannot fix is missing
+EXIT_ERR=1    # an operation failed
+EXIT_USAGE=2  # bad arguments / library missing
+EXIT_PREREQ=3 # a prerequisite this command cannot fix is missing
 
 usage() {
   cat >&2 <<'USAGE'
@@ -32,25 +32,25 @@ USAGE
 
 rotate=""
 case "${1:-}" in
-"") ;;
---rotate)
-  rotate="${2:-}"
-  case "$rotate" in
-  publisher | subscriber | all) ;;
+  "") ;;
+  --rotate)
+    rotate="${2:-}"
+    case "$rotate" in
+      publisher | subscriber | all) ;;
+      *)
+        usage
+        exit "$EXIT_USAGE"
+        ;;
+    esac
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
   *)
     usage
     exit "$EXIT_USAGE"
     ;;
-  esac
-  ;;
--h | --help)
-  usage
-  exit 0
-  ;;
-*)
-  usage
-  exit "$EXIT_USAGE"
-  ;;
 esac
 
 lib="$HOME/.config/ntfy/lib.sh"
@@ -85,12 +85,12 @@ ntfy_wait_ready || echo "ntfy-setup: ntfy container is slow to become ready; con
 
 if [ -n "$rotate" ]; then
   case "$rotate" in
-  publisher) ntfy_rotate_publisher ;;
-  subscriber) ntfy_rotate_subscriber ;;
-  all)
-    ntfy_rotate_publisher
-    ntfy_rotate_subscriber
-    ;;
+    publisher) ntfy_rotate_publisher ;;
+    subscriber) ntfy_rotate_subscriber ;;
+    all)
+      ntfy_rotate_publisher
+      ntfy_rotate_subscriber
+      ;;
   esac
   ntfy_print_device_info
   exit 0

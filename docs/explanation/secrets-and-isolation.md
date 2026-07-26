@@ -36,6 +36,10 @@ The `private_` chezmoi prefix is the mechanism that enforces `0600` on the desti
 
 The values themselves are single-quoted at render time (the `squote` chezmoi template function): a key containing `$` or a backtick cannot trigger shell expansion or command substitution when the rendered file is sourced by the shell.
 
+### The one write path: ntfy-setup provisioning (#337)
+
+Every reference above is read-only — `op read` / `onepasswordRead` pulling a value out of the vault into a `0600` file. The self-hosted ntfy setup (#337) adds this repo's only 1Password **write** path: the shared library `~/.config/ntfy/lib.sh` calls `op item create` (once, only when the `Dotfiles - ntfy` item is absent) and `op item edit` (to store / rotate the read-only `subscriber-password` device-login credential). It runs from `ntfy-setup` on demand and from `run_onchange_after_31-setup-ntfy` at apply time, never during template render. Two properties bound this new surface: the create is **non-destructive** (guarded by `op item get`, so it never overwrites an existing item's fields), and it sits **off the apply-strict path** — macOS-only, and a failure warns and continues rather than aborting apply (the fail-open contract below). The single-field `op item edit field=value` call is the one accepted transient argv exposure for this write (op has no single-field stdin shortcut). See [Notifications](../architecture/notifications.md).
+
 ---
 
 ## Two strictness levels: apply-strict vs runtime-graceful

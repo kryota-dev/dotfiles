@@ -36,6 +36,10 @@
 
 値自体はレンダリング時にシングルクォートされます（chezmoi テンプレート関数 `squote`）。`$` やバッククォートを含むキーは、レンダリングされたファイルがシェルによってソースされる際にシェル展開やコマンド置換を引き起こすことができません。
 
+### 唯一の書き込みパス: ntfy-setup のプロビジョニング（#337）
+
+上記の参照はすべて読み取り専用です——`op read` / `onepasswordRead` が vault から値を取り出して `0600` ファイルに書き込みます。自己ホスト ntfy のセットアップ（#337）は、このリポジトリで唯一の 1Password への**書き込み**パスを追加します: 共通ライブラリ `~/.config/ntfy/lib.sh` が `op item create`（`Dotfiles - ntfy` アイテムが不在のときだけ、1 回）と `op item edit`（read-only の `subscriber-password` 端末ログイン資格情報の保存・ローテーション）を呼びます。これは `ntfy-setup`（オンデマンド）と `run_onchange_after_31-setup-ntfy`（apply 時）から実行され、テンプレートレンダリング中には決して実行されません。この新しい面は 2 つの性質で境界づけられます: create は**非破壊**（`op item get` でガードされ、既存アイテムのフィールドを決して上書きしない）であり、**apply-strict パスの外**にあります——macOS 限定で、失敗しても apply を中断せず warn して継続します（下記の fail-open 契約）。単一フィールドの `op item edit field=value` 呼び出しが、この書き込みで受容される唯一の transient な argv 露出です（op には単一フィールドの stdin ショートカットが無いため）。[Notifications](../architecture/notifications.md) を参照。
+
 ---
 
 ## 2 段階の厳格さ: apply-strict と runtime-graceful

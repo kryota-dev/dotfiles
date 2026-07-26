@@ -30,7 +30,8 @@ cache-file: /var/lib/ntfy/cache.db
 cache-duration: "{{ .ntfy.cache_duration }}"
 
 # Auth: private instance, deny-all by default. Users/tokens are provisioned
-# once manually via `docker compose exec` (see docs/architecture/notifications.md);
+# automatically by ~/.config/ntfy/lib.sh (run_onchange_after_31-setup-ntfy at
+# apply time, or `ntfy-setup` on demand — see docs/architecture/notifications.md);
 # user.db is runtime state, never chezmoi-managed.
 auth-file: /var/lib/ntfy/user.db
 auth-default-access: "deny-all"

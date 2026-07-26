@@ -9,9 +9,11 @@
 #   - This file is SOURCED. It never calls `exit`; functions `return` a status
 #     and the caller decides the exit policy. It never enables `set -x`.
 #   - No secret is ever echoed or traced. Passwords reach ntfy via the
-#     NTFY_PASSWORD env (never argv); the only argv exposure is the local
-#     `op item edit field=value` call, the same transient trade-off already
-#     accepted for tokens (op has no stdin path for single-field edits).
+#     NTFY_PASSWORD env (never argv). Two local, transient argv exposures are
+#     accepted: `op item edit field=value` (op has no single-field stdin
+#     shortcut — only a full JSON template), and the about-to-be-revoked old
+#     token passed to `ntfy token remove` (it takes the token positionally,
+#     with no env alternative). Both are local, one-shot, own-machine calls.
 #   - Template values live on assignment-only lines (the lint pipeline strips
 #     every line containing a template action before shellcheck); references use
 #     the ${var:-} form so the stripped body still lints clean. No comment or
@@ -74,7 +76,10 @@ ntfy_magicdns() {
   if command -v jq >/dev/null 2>&1; then
     dns="$(printf '%s' "$json" | jq -r '.Self.DNSName // empty' 2>/dev/null || true)"
   else
-    dns="$(printf '%s' "$json" | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\(.*\)"/\1/')"
+    # Scope to the .Self object before grabbing DNSName — JSON key order is not
+    # guaranteed, so a bare "first DNSName" could be a peer's. "Self" appears
+    # once at top level; strip everything up to it, then take the next DNSName.
+    dns="$(printf '%s' "$json" | sed 's/.*"Self"[[:space:]]*:[[:space:]]*{//' | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\(.*\)"/\1/')"
   fi
   dns="${dns%.}"
   [ -n "$dns" ] || return 1
@@ -119,7 +124,10 @@ ntfy_wait_ready() {
 # --- User / ACL / token primitives ------------------------------------------
 
 ntfy_user_exists() {
-  ntfy_exec user list 2>/dev/null | grep -q "user ${1}"
+  # Match the name exactly: the next char after it must be a field delimiter
+  # (space / colon / paren) or end of line, so `publisher` never matches a
+  # hypothetical `publisher-foo`. Does not assume where "user " sits on the line.
+  ntfy_exec user list 2>/dev/null | grep -qE "user ${1}([ :(]|$)"
 }
 
 # Create a user with a throwaway random password if it does not exist. Used for
@@ -190,9 +198,10 @@ ntfy_read_notify_env_token() {
 }
 
 ntfy_notify_env_has_token() {
+  # Only real server-issued tokens (tk_…) are ever written here; there is no
+  # placeholder-seeding path, so a shape check is sufficient.
   [ -f "$ntfy_env_file" ] &&
-    grep -qE '^NTFY_TOKEN=.*tk_' "$ntfy_env_file" &&
-    ! grep -qE '^NTFY_TOKEN=.*tk_REPLACE' "$ntfy_env_file"
+    grep -qE '^NTFY_TOKEN=.*tk_' "$ntfy_env_file"
 }
 
 # --- 1Password item (subscriber username/password) ---------------------------
@@ -211,8 +220,11 @@ ntfy_ensure_item() {
     "subscriber-password[password]=${ntfy_placeholder}" >/dev/null
 }
 
+# Prints the stored password (empty if the field is absent/empty) and — crucially
+# — propagates op's exit status so callers can tell a real op failure from a
+# genuinely empty value. Callers that overwrite on "empty" MUST check the status.
 ntfy_read_subscriber_password() {
-  op read "op://${ntfy_op_vault}/${ntfy_op_item}/subscriber-password" 2>/dev/null || true
+  op read "op://${ntfy_op_vault}/${ntfy_op_item}/subscriber-password" 2>/dev/null
 }
 
 ntfy_store_subscriber_password() {
@@ -224,12 +236,19 @@ ntfy_store_subscriber_password() {
 # --- High-level provisioning -------------------------------------------------
 
 ntfy_provision_publisher() {
+  local existed=1
+  ntfy_user_exists "$ntfy_pub_user" || existed=0
   ntfy_ensure_user "$ntfy_pub_user" || {
     ntfy_warn "could not create the publisher user; provision manually."
     return 1
   }
   ntfy_grant_acl "$ntfy_pub_user" write-only
-  if ntfy_notify_env_has_token; then
+  # Only trust an existing notify-env token if the publisher user was already
+  # present. If we just (re)created it — e.g. after a user.db loss — any token in
+  # notify-env is stale against the rebuilt server, so reissue. This mirrors the
+  # subscriber self-heal and makes "delete user.db, run ntfy-setup" actually
+  # restore the publisher too.
+  if [ "$existed" = 1 ] && ntfy_notify_env_has_token; then
     return 0
   fi
   local tok
@@ -254,8 +273,12 @@ ntfy_provision_subscriber() {
     ntfy_warn "could not ensure the 1Password item; skipping subscriber."
     return 1
   }
-  local stored pw
-  stored="$(ntfy_read_subscriber_password)"
+  local stored pw rc=0
+  stored="$(ntfy_read_subscriber_password)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    ntfy_warn "could not read the stored subscriber password (op error); leaving the existing subscriber credential untouched to avoid a device lockout."
+    return 1
+  fi
   if [ -n "$stored" ] && ! printf '%s' "$stored" | grep -q "$ntfy_placeholder"; then
     ntfy_ensure_user_with_password "$ntfy_sub_user" "$stored" || {
       ntfy_warn "could not reconcile the subscriber user password."
@@ -306,8 +329,13 @@ ntfy_rotate_publisher() {
   }
   ntfy_write_notify_env "$new" || return 1
   if [ -n "$old" ] && [ "$old" != "$new" ]; then
-    ntfy_exec token remove "$ntfy_pub_user" "$old" >/dev/null 2>&1 ||
-      ntfy_warn "could not revoke the old publisher token (it may already be gone)."
+    if ! ntfy_exec token remove "$ntfy_pub_user" "$old" >/dev/null 2>&1; then
+      # The new token is already active, but the OLD one may still be valid —
+      # for a leaked-token rotation that is the whole point, so surface it
+      # (non-zero) instead of reporting success.
+      ntfy_warn "the new publisher token is active, but revoking the old one failed; it may still be valid. Retry 'ntfy-setup --rotate publisher' or remove it manually."
+      return 1
+    fi
   fi
   ntfy_log "publisher token rotated."
 }
@@ -333,7 +361,9 @@ ntfy_creds_exist() {
   ntfy_notify_env_has_token || return 1
   command -v op >/dev/null 2>&1 || return 1
   local stored
-  stored="$(ntfy_read_subscriber_password)"
+  # An op read error here is conservatively treated as "no usable creds" (the
+  # interactive path then provisions rather than prompting to rotate).
+  stored="$(ntfy_read_subscriber_password || true)"
   [ -n "$stored" ] && ! printf '%s' "$stored" | grep -q "$ntfy_placeholder"
 }
 
@@ -345,8 +375,8 @@ ntfy_prompt_yn() {
     read -r ans </dev/tty || ans=""
   fi
   case "$ans" in
-  [yY] | [yY][eE][sS]) return 0 ;;
-  *) return 1 ;;
+    [yY] | [yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
   esac
 }
 
