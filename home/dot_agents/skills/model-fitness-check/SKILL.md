@@ -88,25 +88,25 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 
 ### シグナル 2: 実測 quota 圧力（statusline snapshot）
 
-`${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。**パスは writer と同じ XDG フォールバック式で解決し、`~/.cache` 決め打ちにしない** —— `XDG_CACHE_HOME` を設定した環境で誤って「snapshot 無し」と誤判定しないため。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。`five_hour.used_percentage` を圧力として使う。
+`${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。**パスは writer と同じ XDG フォールバック式で解決し、`~/.cache` 決め打ちにしない** —— `XDG_CACHE_HOME` を設定した環境で誤って「snapshot 無し」と誤判定しないため。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。**圧力値は `five_hour` と `seven_day` の `used_percentage` の大きい方（`max(5h, 7d)`）を使う**——ゲートが framing する harm は週次共有プールのクラウドアウト（`seven_day`）だが、短期バースト枯渇（`five_hour`）も捕捉したいので、圧力の高い方で発火判定する。片方のウィンドウが欠落していれば残る一方を使う。
 
-- **staleness / 欠損ガード**: 次のいずれかで quota 不明として count-only fallback（下表）に切り替える —— (a) ファイルが無い、(b) `ts` が 15 分より古い、(c) `five_hour.used_percentage` が欠落・非数値（writer は `five_hour` が無効でも `seven_day` だけの snapshot を書くため、fresh でも 5h が無いことがある）。silent skip はしない（fail-safe）。
-- **Team プランの rate_limits（`cld-r06` で live 検証済み）**: 公式ドキュメント（`code.claude.com/docs/en/statusline`）は `rate_limits` を「Claude.ai subscribers (Pro/Max) が最初の API 応答後」にのみ現れると明記し Team / Enterprise を列挙しない。しかし **`cld-r06`（Team premium seat）の実 stdin では `five_hour` / `seven_day` とも populate されることを実機確認済み**（docs の Pro/Max-only 列挙は Team premium に対して不完全）。よって cld-r06 でもシグナル 2（実測圧力）は利用可能で、yellow/red 帯に到達する（count-only 固定ではない）。count-only fallback は真の欠損時——最初の API 応答前・stale snapshot・`five_hour` 欠落（docs: 各ウィンドウは独立に absent になりうる）——のための fallback として維持する。
+- **staleness / 欠損ガード**: 次のいずれかで quota 不明として count-only fallback（下表）に切り替える —— (a) ファイルが無い、(b) `ts` が 15 分より古い、(c) `five_hour` と `seven_day` の `used_percentage` が**どちらも**欠落・非数値（writer は無効なウィンドウを省くため、fresh でも片方だけ／両方無いことがある）。**片方でも有効なら count-only にせず、有効な側の値で圧力を評価する**。silent skip はしない（fail-safe）。
+- **Team プランの rate_limits（`cld-r06` で live 検証済み）**: 公式ドキュメント（`code.claude.com/docs/en/statusline`）は `rate_limits` を「Claude.ai subscribers (Pro/Max) が最初の API 応答後」にのみ現れると明記し Team / Enterprise を列挙しない。しかし **`cld-r06`（Team premium seat）の実 stdin では `five_hour` / `seven_day` とも populate されることを実機確認済み**（docs の Pro/Max-only 列挙は Team premium に対して不完全）。よって cld-r06 でもシグナル 2（実測圧力）は利用可能で、yellow/red 帯に到達する（count-only 固定ではない）。count-only fallback は真の欠損時——最初の API 応答前・stale snapshot・両ウィンドウ欠落（docs: 各ウィンドウは独立に absent になりうる）——のための fallback として維持する。
 
 ### 発火条件（named constants）
 
 帯域は statusline `pct_color` の色閾値（50 / 80）と一致させる:
 
-| 5h used_percentage | 帯域 | 発火閾値（カウンタ） |
+| 圧力 = max(5h, 7d) | 帯域 | 発火閾値（カウンタ） |
 |---|---|---|
 | < 50 | green | 発火しない（FYI のみ） |
 | 50–79 | yellow | `OVERPROVISION_GATE_YELLOW = 5` 件 |
 | ≥ 80 | red | `OVERPROVISION_GATE_RED = 2` 件 |
-| snapshot 無し / stale | 不明 | `OVERPROVISION_GATE_FALLBACK = 5` 件（count-only） |
+| snapshot 無し / stale / 両窓欠落 | 不明 | `OVERPROVISION_GATE_FALLBACK = 5` 件（count-only） |
 
 ### 発火時の提示（`AskUserQuestion` で 1 回 blocking）
 
-文面には snapshot の実測値をそのまま載せる（例: 「5h ウィンドウ 62% 消費（↻14:00 リセット）。直近 5 件は Sonnet で足りる軽作業でした。このペースだと重作業の前に上限に当たる見込みです」）。選択肢はセッション種別で分岐する:
+文面には snapshot の実測値をそのまま載せ、**帯域を決めたウィンドウ（5h / 7d のうち圧力の高い方）を明示する**（例: 「7d ウィンドウ 63% 消費（↻07/30 07:00 リセット）。直近 5 件は Sonnet で足りる軽作業でした。このペースだと重作業の前に週次上限に当たる見込みです」）。選択肢はセッション種別で分岐する:
 
 - **cld 系（通常セッション）**:
   1. `/model sonnet` に下げて続行（推奨）
