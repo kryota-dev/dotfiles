@@ -196,11 +196,12 @@ load helpers/setup
 }
 
 @test "docs_facts: every <!-- FACT:ci-both-exclusion-count --> marker matches the Ubuntu job exclusion count" {
-  # SSOT: .github/workflows/setup-validation.yml lines 290-296 (Ubuntu job's
-  # "Exclude CI-incompatible files" step for f in \...; do block). Count is 6 as of
-  # PR #271 — PR #248 added home/dot_config/git/private_gitleaks-own.toml.tmpl.
+  # SSOT: .github/workflows/setup-validation.yml (Ubuntu job's
+  # "Exclude CI-incompatible files" step for f in \...; do block). Count is 8 as of
+  # #337, which added the two home/dot_config/ntfy/private_*.tmpl entries
+  # (PR #248 added private_gitleaks-own.toml.tmpl for the earlier count of 6).
   # Update this constant AND every marker in docs/ when entries are added or removed.
-  local expected=6
+  local expected=8
   local found=0 f val
   while IFS= read -r f; do
     while IFS= read -r val; do

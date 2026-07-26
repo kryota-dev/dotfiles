@@ -105,7 +105,7 @@ This workflow runs a real `chezmoi init --apply` on two platforms and asserts th
 
 Before `chezmoi apply`, both jobs move a set of files to `/tmp/chezmoi-excluded/` so that apply never attempts to call `op` or run interactive/install steps in the CI environment. Each file is moved inside a `for f in …; do if [ -f "$f" ]; then mv …; fi; done` loop so that a missing entry does not abort the step.
 
-Files excluded by **both** jobs (<!-- FACT:ci-both-exclusion-count -->6<!-- /FACT --> files):
+Files excluded by **both** jobs (<!-- FACT:ci-both-exclusion-count -->8<!-- /FACT --> files):
 
 - `home/private_dot_aws/config.tmpl`
 - `home/dot_config/zsh/private_claude-secrets.zsh.tmpl`
@@ -113,6 +113,8 @@ Files excluded by **both** jobs (<!-- FACT:ci-both-exclusion-count -->6<!-- /FAC
 - `home/run_onchange_before_10-brew-bundle.sh.tmpl`
 - `home/run_once_after_11-validate-1password.sh.tmpl`
 - `home/dot_config/git/private_gitleaks-own.toml.tmpl`
+- `home/dot_config/ntfy/private_server.yml.tmpl`
+- `home/dot_config/ntfy/private_notify-env.tmpl`
 
 Files excluded by the **macOS job only**:
 

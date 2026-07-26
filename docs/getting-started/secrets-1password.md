@@ -44,7 +44,7 @@ Before running `chezmoi apply` on macOS:
 1. **1Password desktop app** installed and signed in.
 2. **CLI integration enabled**: 1Password → Settings → Developer → "Integrate with 1Password CLI".
 3. **1Password CLI (`op`)** installed: `brew install --cask 1password-cli`.
-4. All <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> vault items listed below exist in the `kryota.dev` vault.
+4. All <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> vault item references listed below exist in the `kryota.dev` vault.
 
 ---
 
@@ -104,6 +104,19 @@ Used by the `firecrawl` user-scope Claude Code MCP server. Sets `FIRECRAWL_API_K
 
 Store the client/employer identifier pattern as a `name1|name2|...` alternation (regex-escaped where needed; no `'''`, no newlines). chezmoi renders it into the owner-scoped gitleaks config at apply time. The `run_once_after_11` script additionally smoke-tests this value — it verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal), and compiles as a valid regex. A broken pattern would silently disable the client-identifier rule on every commit in own-namespace repos.
 
+### 5. `Dotfiles - ntfy`
+
+| Attribute | Value |
+|-----------|-------|
+| Vault | `kryota.dev` |
+| Item title | `Dotfiles - ntfy` |
+| Field references | `base-url`, `credential` |
+| op:// URIs | `op://kryota.dev/Dotfiles - ntfy/base-url`, `op://kryota.dev/Dotfiles - ntfy/credential` |
+| Rendered to | `~/.config/ntfy/server.yml` (`base-url`) and `~/.config/ntfy/notify-env` (`credential`) |
+| File mode | `0600` (via `private_` prefix) |
+
+One item, two validated fields, for the self-hosted ntfy notification server (#337; see [Notifications](../architecture/notifications.md)). `base-url` is the `tailscale serve` HTTPS endpoint (`https://<host>.<tailnet>.ts.net`) — stored in 1Password so the tailnet's MagicDNS name never lands in this public repo. `credential` is the **write-only** publisher token issued by `ntfy token add` (see the notifications setup runbook). The read-only subscriber token also lives in this item but is entered on devices manually, so the validation gate does not check it.
+
 ---
 
 ## What breaks when an item is missing or renamed
@@ -114,8 +127,9 @@ Store the client/employer identifier pattern as a `name1|name2|...` alternation 
 | `Dotfiles - Exa API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; exa MCP server starts but fails to authenticate |
 | `Dotfiles - Firecrawl API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; firecrawl MCP server starts but fails to authenticate |
 | `Dotfiles - Redact Patterns` | `chezmoi apply` exits 1 at the validation gate | `gitleaks-own.toml` not rendered; client-identifier gitleaks rule inactive in own-namespace repos |
+| `Dotfiles - ntfy` | `chezmoi apply` exits 1 at the validation gate | `~/.config/ntfy/server.yml` / `notify-env` not rendered; ntfy server unconfigured and the hook wrapper stays a no-op |
 
-Because the gate checks all four items before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
+Because the gate checks all six references before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
 
 ---
 

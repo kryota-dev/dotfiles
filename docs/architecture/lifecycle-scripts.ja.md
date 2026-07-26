@@ -42,7 +42,8 @@ flowchart TD
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS のみ\n(repo 管理 LaunchAgent の launchctl bootstrap\nCI ではスキップ)"]
-        J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
+        J2 --> J3["31 setup-ntfy\nrun_onchange · macOS のみ\n(ntfy サーバー用の docker compose up +\ntailscale serve; CI ではスキップ)"]
+        J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
         K --> L["50 set-login-shell\nrun_once · Linux のみ\n(chsh -s zsh, sudo 失敗時は graceful)"]
         L --> M["90 other-apps\nrun_once · macOS のみ\n(Logi Options+ / Google IME ダウンロードプロンプト)\n(非 TTY は即時スキップ)"]
     end
@@ -79,6 +80,7 @@ flowchart TD
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | 自分自身のソースファイル（任意の編集で再トリガー） |
 
@@ -110,6 +112,7 @@ quoted heredoc の中に埋め込みます。これにより単一ソースを�
 | `18-setup-agent-browser` | 両対応 | `{{ if linux }}` で `--with-deps` を追加 |
 | `20-macos-defaults` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `30-register-launchd-agents` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
+| `31-setup-ntfy` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `40-setup-sheldon` | 両対応 | OS ガードなし |
 | `50-set-login-shell` | **Linux のみ** | 本文全体が `{{ if linux }}` 内。macOS ではほぼ空にレンダリング |
 | `90-other-apps` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
@@ -128,12 +131,14 @@ Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリ�
 
 ### 11 — validate-1password (`run_once`、after、macOS のみ)
 
-ハードゲートです。`op` がインストール済みかつ認証済みであることを確認し、<!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの必須 vault 参照に対して `op read` を呼び出します。
+ハードゲートです。`op` がインストール済みかつ認証済みであることを確認し、<!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> つの必須 vault 参照に対して `op read` を呼び出します。
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
+- `op://kryota.dev/Dotfiles - ntfy/base-url`
+- `op://kryota.dev/Dotfiles - ntfy/credential`
 
 `Dotfiles - Redact Patterns` アイテムについては単純な存在確認にとどまらず、パターンが非空であること、`private_gitleaks-own.toml.tmpl` の TOML 生文字列リテラルを破壊する `'''` を含まないこと、有効な正規表現としてコンパイルできることも検証します。破損したパターンは自社名前空間リポジトリのすべてのコミットでクライアント識別子ルールをサイレントに無効化してしまいます。
 
@@ -169,6 +174,10 @@ Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリ�
 
 repo 管理の launchd LaunchAgent（現在は平日朝ブリーフを発火する `dev.kryota.morning-radar` の 1 つ、kryota-dev/dotfiles#257。Claude Code ハーネスドキュメントの [朝次レーダーのスケジュール実行](../agents/claude-code.ja.md) 参照）を登録します。`launchctl bootout || true` → `launchctl bootstrap gui/$UID` の順で実行するため、plist の変更は冪等に再読み込みされます。再トリガーのキーは plist テンプレートの埋め込みハッシュです（wrapper script の編集は再登録不要 — launchd は発火のたびに現行ファイルを exec します）。`$CI` 設定時は登録をスキップします。headless runner には gui launchd domain が存在せず、in-script ガードならワークフローでファイルを除外する方式と異なり、レンダリング / apply パスが CI 検証対象に残ります。CI 外では bootstrap 失敗をハードフェイルとし、次回 apply で chezmoi がリトライします（規約 #6）。
 
+### 31 — setup-ntfy (`run_onchange`、after、macOS のみ)
+
+自己ホスト ntfy 通知サーバー（kryota-dev/dotfiles#337; [Notifications](notifications.ja.md) 参照）を起動します。ランタイム状態ディレクトリ（`~/Library/Application Support/ntfy`、0700、chezmoi のターゲットツリー外）を作成し、`~/.config/ntfy/compose.yaml` に対して `docker compose up -d` を実行し、`tailscale serve --bg` のマッピングを検証してサーバーが tailnet 全体から HTTPS で到達可能な状態を保ちます。compose テンプレートとサーバー設定の埋め込みハッシュで再トリガーされます。CI ではスキップします（サービスもネットワークもないため）。**規約 #6 からの意図的な逸脱**: Docker Desktop が起動していない（または tailscale CLI が存在しない）場合、ハードフェイルせず警告を出して exit 0 します——通知はセットアップクリティカルではなく、`chezmoi apply` をブロックしてはならないためです。各スキップパスは手動リカバリ手順を出力します。
+
 ### 40 — setup-sheldon (`run_onchange`、after)
 
 `.zshrc` が利用する zsh プラグインロックファイルを `sheldon lock` で再生成します。`plugins.toml` のハッシュで再トリガーされます。`sheldon` が未インストールの場合は警告を出して exit 0 します。
@@ -202,7 +211,7 @@ brew (00) → Homebrew パッケージ（mise, sheldon を含む）(10)
 
 ## スクリプト追加時の規約
 
-1. 順序付きタイムラインに自然に収まるプレフィックスを選ぶ。現在の空きスロット: `…15…17…19…31-39…`（40 より前）、`…41-49…`（sheldon とログインシェルの間）。
+1. 順序付きタイムラインに自然に収まるプレフィックスを選ぶ。現在の空きスロット: `…15…17…19…32-39…`（40 より前）、`…41-49…`（sheldon とログインシェルの間）。
 2. 高コスト・不可逆な操作には `run_once_`、冪等な同期ステップには `run_onchange_` を使用する。
 3. 外部ファイルへの変化で `run_onchange_` を再トリガーするには、先頭コメントに `{{ include "<path>" | sha256sum }}` を埋め込む。
 4. すべてのスクリプトを `#!/bin/bash` と `set -euo pipefail` で始める。ただし、スクリプト全体が OS 固有の場合は shebang を OS テンプレートガードの内側に置く。
