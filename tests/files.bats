@@ -1910,32 +1910,80 @@ _gate_decision() {
   grep -qF 'cache-duration: "{{ .ntfy.cache_duration }}"' "$y"
   # iOS instant-push relay, the sole user-approved metadata egress (#337 PRD D2').
   grep -qF 'upstream-base-url: "https://ntfy.sh"' "$y"
-  # tailscale funnel must never appear anywhere in the ntfy config assets.
-  ! grep -ri 'funnel' "${HOME_DIR}/dot_config/ntfy"
+  # base-url was dropped (optional for core messaging); the server config no
+  # longer reads anything from 1Password.
+  ! grep -qE '^[[:space:]]*base-url:' "$y"
+  ! grep -q 'onepasswordRead' "$y"
+  # tailscale funnel must never be USED in the ntfy config assets. A comment that
+  # warns against it (as the lib does) is fine — only non-comment lines count.
+  [ -z "$(grep -rn 'funnel' "${HOME_DIR}/dot_config/ntfy" | grep -v '#')" ]
 }
 
-@test "ntfy setup script carries the embedded hashes and CI guard" {
+@test "ntfy setup script sources the lib, carries the embedded hashes and CI guard" {
   local s="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
   [ -f "$s" ]
-  # embedded-hash trick: re-runs only when the compose file or server config changes
+  # embedded-hash trick: re-runs when the compose file, server config, OR the
+  # shared library changes (the last is what lets a lib edit re-fire apply).
   grep -qF 'include "dot_config/ntfy/compose.yaml.tmpl" | sha256sum' "$s"
   grep -qF 'include "dot_config/ntfy/private_server.yml.tmpl" | sha256sum' "$s"
+  grep -qF 'include "dot_config/ntfy/lib.sh.tmpl" | sha256sum' "$s"
+  # all logic is delegated to the SSOT library (sourced), not duplicated here
+  grep -qF '.config/ntfy/lib.sh' "$s"
+  grep -qF 'ntfy_provision' "$s"
   # CI must never start services from lifecycle scripts
   grep -qF 'if [ -n "${CI:-}" ]; then' "$s"
   # darwin-only: the whole body is inside the OS guard
   head -1 "$s" | grep -qF '{{ if eq .chezmoi.os "darwin" -}}'
   # template-stripped body must still parse
   sed '/{{/d' "$s" | bash -n
-  # tailscale serve with --bg (persists across reboots); funnel is forbidden
-  grep -qF 'serve --bg' "$s"
-  ! grep -qE '^[^#]*tailscale.*funnel' "$s"
-  # The publisher token is written straight into notify-env (runtime state),
-  # 0600 via umask, with no 1Password round-trip. Pin the write so it cannot
-  # silently regress back to `op item edit` for the publisher credential.
-  grep -qF 'write_notify_env' "$s"
-  grep -qF 'umask 077' "$s"
-  grep -qF '.config/ntfy/notify-env' "$s"
-  ! grep -qF 'credential[concealed]' "$s"
+  # fail-open: the apply path only ever exits 0 (never hard-fails)
+  ! grep -qE '(^|[[:space:];])exit 1([[:space:];]|$)' "$s"
+}
+
+@test "ntfy shared library provisions and rotates with secret hygiene" {
+  local l="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
+  [ -f "$l" ]
+  # template-stripped body must still parse
+  sed '/{{/d' "$l" | bash -n
+  # secrets are never traced
+  ! grep -qF 'set -x' "$l"
+  # publisher token -> notify-env (0600 via umask, heredoc)
+  grep -qF 'ntfy_write_notify_env' "$l"
+  grep -qF 'umask 077' "$l"
+  grep -qF '.config/ntfy/notify-env' "$l"
+  # device auth is username/password: change-pass fed via NTFY_PASSWORD env, not a token
+  grep -qF 'change-pass' "$l"
+  grep -qF 'NTFY_PASSWORD' "$l"
+  # 1Password item is created only when absent (op item get gate), never overwritten
+  grep -qF 'op item get' "$l"
+  grep -qF 'op item create' "$l"
+  # publisher rotation reads the OLD token first, then revokes it after issuing the new one
+  grep -qF 'ntfy_read_notify_env_token' "$l"
+  grep -qF 'token remove' "$l"
+  # serve --bg lives here now; funnel is forbidden across the ntfy assets
+  grep -qF 'serve --bg' "$l"
+  ! grep -qE '^[^#]*tailscale.*funnel' "$l"
+  # the removed token-in-1Password / subscriber-token paths must not resurrect
+  ! grep -qF 'credential[concealed]' "$l"
+  ! grep -qF 'subscriber-token' "$l"
+}
+
+@test "ntfy-setup command is on PATH, sources the lib, and rotates" {
+  local n="${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
+  [ -f "$n" ]
+  bash -n "$n"
+  # sources the SSOT library rather than duplicating provisioning logic
+  grep -qF '.config/ntfy/lib.sh' "$n"
+  # full flow: brings the server up (not check-only) so it can restart a downed container
+  grep -qF 'ntfy_start_server' "$n"
+  grep -qF 'ntfy_assert_serve' "$n"
+  # rotation entry point for both credentials
+  grep -qF -- '--rotate' "$n"
+  grep -qF 'ntfy_rotate_publisher' "$n"
+  grep -qF 'ntfy_rotate_subscriber' "$n"
+  # fail-clear: a distinct exit code when it cannot fix docker/tailscale itself
+  grep -qF 'EXIT_PREREQ' "$n"
+  ! grep -qF 'set -x' "$n"
 }
 
 @test "settings.json disables stop:desktop-notify and wires the ntfy hooks (#337)" {
@@ -1965,15 +2013,15 @@ _gate_decision() {
   ' "$s" >/dev/null
 }
 
-@test "CI excludes the ntfy onepasswordRead template in both jobs" {
+@test "CI keeps the ntfy server config excluded in both jobs" {
   local w="${REPO_ROOT}/.github/workflows/setup-validation.yml"
   [ -f "$w" ]
-  # The CI precedent is the hardcoded mv list (NOT .chezmoiignore): the sole
-  # remaining onepasswordRead template (server.yml) must appear once per job
-  # (macOS + Ubuntu).
+  # server.yml no longer reads 1Password (base-url was dropped), but it stays on
+  # the hardcoded mv list — a 0600 config of container-only paths with no CI
+  # value in rendering — once per job (macOS + Ubuntu).
   [ "$(grep -cF 'home/dot_config/ntfy/private_server.yml.tmpl' "$w")" -eq 2 ]
-  # notify-env is no longer a chezmoi target — the setup script writes it as
-  # runtime state — so it must not linger in the exclude list.
+  # notify-env is not a chezmoi target — the lib writes it as runtime state — so
+  # it must not linger in the exclude list.
   ! grep -qF 'private_notify-env' "$w"
 }
 
@@ -1983,16 +2031,14 @@ _gate_decision() {
   grep -qF "compose\\\\.yaml\\\\.tmpl" "$r"
 }
 
-@test "1password ITEMS covers the ntfy item fields" {
-  _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/base-url'
-  # The publisher token is no longer stored in 1Password — the setup script
-  # writes it straight into notify-env — so the gate must not validate a
-  # credential field for this item.
-  ! _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/credential'
-  # The server.yml template must consume exactly the URI the gate validates — a
-  # typo on either side would otherwise pass both checks independently.
-  grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url"' \
-    "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
+@test "1password ITEMS no longer references the ntfy item" {
+  # base-url was dropped; the ntfy item (read-only subscriber username/password)
+  # is provisioned by ntfy-setup after Tailscale/Docker come up, a later phase
+  # than the validate gate, so the gate must validate nothing ntfy — otherwise a
+  # fresh apply would hard-fail before the item exists.
+  ! _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/'
+  # server.yml no longer reads any ntfy field from 1Password.
+  ! grep -qF 'onepasswordRead' "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
 }
 
 @test "ntfy runtime state never lands in the chezmoi source tree" {
@@ -2004,6 +2050,8 @@ _gate_decision() {
   [ -z "$output" ]
 }
 
-@test "chezmoiignore excludes the ntfy config dir on non-darwin" {
+@test "chezmoiignore excludes the ntfy config dir and command on non-darwin" {
   grep -qF '.config/ntfy' "${HOME_DIR}/.chezmoiignore"
+  # the ntfy-setup command is macOS-only too (the server only runs on this Mac)
+  grep -qF '.local/bin/ntfy-setup' "${HOME_DIR}/.chezmoiignore"
 }
