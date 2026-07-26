@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Per-account launcher for Claude Code. Dispatches on $0 (the name it was invoked as):
+#   claude, cld -> personal account, fill-gaps (keeps an inherited CLAUDE_CONFIG_DIR so a
+#                  hook-spawned child stays on its parent session's account)
+#   cld-r06     -> work (r06) account, unconditional override
+# It injects the same per-account isolation env the retired `_claude_with_home` zsh helper did,
+# then execs the mise-managed claude binary (resolved via `mise which`, which follows the pin).
+# Being a real file on PATH, this works from any shell — interactive, hook, launchd, Claude's
+# Bash tool — not only interactive zsh, so the hand-copied env blocks it replaces cannot drift
+# (#345). claude stays mise-managed; the ~/.local/bin/claude native-install symlink is untouched.
+set -eu
+
+# Lowercase the invoked name before dispatching: on a case-insensitive filesystem (macOS APFS
+# default) a symlink invoked as e.g. `CLD-R06` resolves to the same file but $0 carries the typed
+# case, which would miss the override branch and silently fall through to the personal account.
+name="$(printf '%s' "${0##*/}" | tr '[:upper:]' '[:lower:]')"
+case "$name" in
+  cld-r06)
+    # -r06 name: select the work account unconditionally (override).
+    CLAUDE_CONFIG_DIR="$HOME/.claude-r06"
+    ;;
+  *)
+    # claude / cld: fill-gaps only, so an inherited account survives.
+    CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    ;;
+esac
+
+# Derive the homunculus slug from the config-dir basename, in the same three branches as
+# run_onchange_after_14 and the retired _claude_with_home: .claude -> default,
+# .claude-* -> the suffix, anything else -> strip a leading dot. Do NOT name an account dir
+# ".claude-default": its slug would collide with ~/.claude's and silently merge two accounts'
+# observations.
+account_dir_name="${CLAUDE_CONFIG_DIR%/}"
+account_dir_name="${account_dir_name##*/}"
+case "$account_dir_name" in
+  .claude) homunculus_slug=default ;;
+  .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
+  *) homunculus_slug="${account_dir_name#.}" ;;
+esac
+
+# MCP web-search keys: source the 0600 secrets file (KEY='value', no export) into this process
+# only, so bare `claude` and `cld` get identical keys without leaking them into the parent
+# shell. Skip if the caller already decided EXA_API_KEY (even to an empty value) — that lets
+# morning-radar opt out of web search by exporting an empty key.
+if [ -z "${EXA_API_KEY+x}" ] && [ -r "$HOME/.config/zsh/claude-secrets.zsh" ]; then
+  . "$HOME/.config/zsh/claude-secrets.zsh"
+fi
+
+# Resolve the pin-correct mise-managed binary directly (not via PATH, which would re-resolve
+# this wrapper). `mise which` follows the pinned version; latest/2 symlinks track highest-ever
+# instead, so they are deliberately not used. CLAUDE_LAUNCHER_BIN overrides the resolver for
+# tests and unusual installs. Fail loudly rather than run a wrong binary.
+real="${CLAUDE_LAUNCHER_BIN:-$(mise which claude 2>/dev/null || true)}"
+if [ ! -x "$real" ]; then
+  echo "claude launcher: could not resolve the mise-managed claude binary via 'mise which claude'." >&2
+  echo "  Run 'mise install claude' then retry." >&2
+  exit 127
+fi
+
+export CLAUDE_CONFIG_DIR
+export ECC_AGENT_DATA_HOME="$CLAUDE_CONFIG_DIR"
+export CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}"
+export ECC_MCP_HEALTH_STATE_PATH="$CLAUDE_CONFIG_DIR/mcp-health-cache.json"
+export GATEGUARD_STATE_DIR="$CLAUDE_CONFIG_DIR/.gateguard"
+# Observer knobs, each overridable. The 300s watchdog (vs the 120s upstream default) lets the
+# Haiku analysis pass finish (#256); OBSERVER_ACTIVE_HOURS 0/0 disables the clock gate that
+# skipped cycles because sessions run past midnight (#336); MAX_TURNS 100 is the upstream cap,
+# not the auto-scaled floor of 20 that cut the Read -> dedup -> Write pass off mid-write (#336).
+export ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}"
+export OBSERVER_ACTIVE_HOURS_START="${OBSERVER_ACTIVE_HOURS_START:-0}"
+export OBSERVER_ACTIVE_HOURS_END="${OBSERVER_ACTIVE_HOURS_END:-0}"
+export ECC_OBSERVER_MAX_TURNS="${ECC_OBSERVER_MAX_TURNS:-100}"
+export EXA_API_KEY="${EXA_API_KEY:-}"
+export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
+
+exec "$real" "$@"

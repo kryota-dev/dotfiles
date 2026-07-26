@@ -6,7 +6,7 @@
 
 This document covers the interactive shell stack: the two-file zsh startup sequence, the synchronous-versus-deferred split, the sheldon plugin manifest, per-domain `.zsh` modules, and adjacent terminal config (tmux, readline, vim, starship).
 
-AI-agent launcher aliases (`cld`, `cld-r06`, `cdx`, …) are covered in [Account isolation: aliases & env](../agents/account-isolation.md).
+AI-agent launcher commands (`cld`, `cld-r06`, `cdx`, …) are covered in [Account isolation: launcher commands & env](../agents/account-isolation.md).
 
 ---
 
@@ -58,7 +58,7 @@ Rendered from `home/dot_zprofile.tmpl`. Runs once at login, not for every new in
 Rendered from `home/dot_zshrc.tmpl`. Contains:
 
 1. **History options**: `setopt auto_pushd pushd_ignore_dups hist_ignore_dups share_history inc_append_history`; `HISTFILE`, `HISTSIZE=100000`, `SAVEHIST=100000`
-2. **PATH prepends**: `~/.local/bin` (mise shims and the claude launcher live here), then pnpm home (OS-branched template)
+2. **PATH prepends**: `~/.local/bin` (mise shims; also home to `~/.local/bin/claude`, the mise-managed-binary self-check symlink Claude Code's native-install detection expects), then `~/.local/launchers` (the per-account `claude`/`codex` wrapper scripts, kept ahead of everything else — see [Account isolation](../agents/account-isolation.md)), then pnpm home (OS-branched template)
 3. **Synchronous tool activations** (see next section)
 4. **`eval "$(sheldon source)"`** — loads all plugins, deferred and otherwise
 
@@ -219,17 +219,17 @@ Configured at `home/dot_vimrc`. Defaults: UTF-8 encoding, 2-space `expandtab`, i
 
 ## Secrets pattern
 
-A 0600 file is rendered from 1Password at `chezmoi apply` and sourced by `claude.zsh`:
+A 0600 file is rendered from 1Password at `chezmoi apply` and sourced by the `claude` launcher wrapper:
 
 - `~/.config/zsh/claude-secrets.zsh` — `EXA_API_KEY` and `FIRECRAWL_API_KEY` (MCP servers for the Claude Code harness)
 
-It uses `squote` on the `onepasswordRead` output so keys containing `$` or backticks cannot expand. The file is sourced (not exported) in `claude.zsh`, keeping keys out of the general shell environment. The launcher helpers re-export them scoped inline to the agent subprocess only. Full details are in [Account isolation: aliases & env](../agents/account-isolation.md) and [1Password secrets onboarding](../getting-started/secrets-1password.md).
+It uses `squote` on the `onepasswordRead` output so keys containing `$` or backticks cannot expand. The file is sourced (not exported) — by `~/.local/launchers/claude` since #345, no longer by `claude.zsh` — keeping keys out of the general shell environment. The wrapper re-exports them scoped inline to the agent subprocess it is about to `exec`. Full details are in [Account isolation: launcher commands & env](../agents/account-isolation.md) and [1Password secrets onboarding](../getting-started/secrets-1password.md).
 
 ---
 
 ## Cross-references
 
 - [Lifecycle scripts: ordering & trigger model](lifecycle-scripts.md) — script 40 locks the sheldon plugin set; script 50 sets the login shell these configs assume
-- [Account isolation: aliases & env](../agents/account-isolation.md) — the AI-agent launcher aliases defined in `claude.zsh`, `codex.zsh`
+- [Account isolation: launcher commands & env](../agents/account-isolation.md) — the AI-agent launcher wrapper scripts reached via `claude.zsh`/`codex.zsh`-adjacent short names
 - [Developer toolchain: mise, Brewfile & git](dev-tooling.md) — mise installs mise/direnv/starship/zoxide that `.zshrc` activates
 - [1Password secrets onboarding](../getting-started/secrets-1password.md) — the vault items rendered into the 0600 secrets files

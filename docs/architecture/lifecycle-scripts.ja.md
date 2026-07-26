@@ -152,7 +152,7 @@ Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリ�
 
 `claude mcp add-json --scope user` を通じて、4つの user-scope Claude Code MCP サーバー（`context7`、`deepwiki`、`exa`、`firecrawl`）を `~/.claude` と `~/.claude-r06` の両方に登録します。PATH ではなく `mise exec -- claude` 経由で呼び出します。初回 apply では `~/.local/bin/claude` ランチャーシンリンクがまだ存在しないためです（スクリプト 16 で作成）。登録エラーが1つでもあると非 0 で終了し、chezmoi が次回の apply でリトライします。
 
-**シークレットモデル**: exa と firecrawl の JSON 設定はリテラル文字列 `${EXA_API_KEY}` / `${FIRECRAWL_API_KEY}` を保持します（シェルが展開しないようシングルクォートで記述）。Claude Code は MCP サーバー起動時にプロセス環境からこれらのプレースホルダーを展開します。実際のキーは 1Password からレンダリングされた 0600 ファイル `~/.config/zsh/claude-secrets.zsh` にのみ存在し、`_claude_with_home` がアカウントごとに注入します。`.claude.json` にキーが残ることはありません。
+**シークレットモデル**: exa と firecrawl の JSON 設定はリテラル文字列 `${EXA_API_KEY}` / `${FIRECRAWL_API_KEY}` を保持します（シェルが展開しないようシングルクォートで記述）。Claude Code は MCP サーバー起動時にプロセス環境からこれらのプレースホルダーを展開します。実際のキーは 1Password からレンダリングされた 0600 ファイル `~/.config/zsh/claude-secrets.zsh` にのみ存在し、`claude` ランチャーラッパー（`~/.local/launchers/claude`）がアカウントごとに注入します。`.claude.json` にキーが残ることはありません。
 
 ### 14 — enable-clv2-observer (`run_onchange`、after)
 

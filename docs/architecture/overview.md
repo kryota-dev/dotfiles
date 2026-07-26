@@ -43,11 +43,11 @@ flowchart TD
 | chezmoi engine | Name decoding, template data, `includeTemplate`, OS branching, `chezmoiignore`/`chezmoiremove` | [chezmoi-engine.md](chezmoi-engine.md) |
 | Externals & pinning | SHA-pinned archive and file fetches; single-tarball URL cache; `range .ecc.skills` fan-out; Renovate bump model | [externals-and-pinning.md](externals-and-pinning.md) |
 | Lifecycle scripts | Two-phase (before/after) ordering (00→90); `run_once` vs `run_onchange`; 1Password gate | [lifecycle-scripts.md](lifecycle-scripts.md) |
-| Shell environment | `.zshrc` load order; sheldon deferred loading; starship; per-account zsh aliases | [shell-environment.md](shell-environment.md) |
+| Shell environment | `.zshrc` load order; sheldon deferred loading; starship; per-account launcher wrappers | [shell-environment.md](shell-environment.md) |
 | Developer tooling | mise version pins; `Brewfile` + `.brewfile-linux-exclude`; git 1Password signing; gitleaks | [dev-tooling.md](dev-tooling.md) |
 | Notifications | Claude Code hook events → self-hosted ntfy (Docker, loopback-only) → tailnet devices; topics, auth/ACL, runbooks | [notifications.md](notifications.md) |
 | AI-agent layer (overview) | Dual-harness × dual-account matrix; SSOT skill library; shared rule layer | [agents/overview.md](../agents/overview.md) |
-| Account isolation | Per-account env vars; `_claude_with_home`; Codex `CODEX_HOME` | [agents/account-isolation.md](../agents/account-isolation.md) |
+| Account isolation | Per-account env vars; the `claude`/`codex` launcher wrappers; Codex `CODEX_HOME` | [agents/account-isolation.md](../agents/account-isolation.md) |
 | Claude Code harness | `settings.json`; ECC hooks; CLV2 observer; statusline; review subagents | [agents/claude-code.md](../agents/claude-code.md) |
 | Codex CLI harness | Dual `CODEX_HOME`; `shared.config.toml`; `hooks.json`; gateguard | [agents/codex.md](../agents/codex.md) |
 | Skill provenance | 5-category taxonomy; adding curated vs ECC skills; `skill_provenance.bats` | [agents/skills-provenance.md](../agents/skills-provenance.md) |
@@ -87,7 +87,7 @@ See [lifecycle-scripts.md](lifecycle-scripts.md).
 
 ### Shell environment
 
-The interactive zsh stack: `.zprofile` activates Homebrew, `.zshrc` initialises mise, direnv, and starship synchronously, then delegates plugin loading to sheldon with deferred evaluation. Per-account launcher aliases (`cld`/`cld-r06`, `cdx`/`cdx-r06`) are defined in `~/.config/zsh/*.zsh` modules loaded by sheldon.
+The interactive zsh stack: `.zprofile` activates Homebrew, `.zshrc` initialises mise, direnv, and starship synchronously, then delegates plugin loading to sheldon with deferred evaluation. `.zshrc` also puts `~/.local/launchers` on PATH ahead of mise's shims, where the per-account `claude`/`codex` wrapper scripts live, reached as `cld`/`cld-r06` and `cdx`/`cdx-r06` (symlinks) or the bare binary names.
 
 See [shell-environment.md](shell-environment.md).
 

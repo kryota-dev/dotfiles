@@ -70,10 +70,14 @@ lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を Gi
 
 ### `tests/zsh_aliases.bats`
 
-`_claude_with_home` ヘルパーとアカウントごとのラッパーのふるまいリグレッションガードです。最小限の `zsh -f` 環境（rc ファイルなし）で `claude.zsh` をソースし、基礎となる関数を直接駆動します。主な確認事項：
+統合された claude/codex ランチャーラッパースクリプト（`home/dot_local/launchers/executable_{claude,codex}`）と、`claude.zsh` に残る zsh ヘルパーのふるまいリグレッションガードです。ラッパーは直接駆動されます：テストは chezmoi のレイアウトを模したランチャーディレクトリ（2 つのラッパースクリプトと `cld`/`cld-r06`/`cdx`/`cdx-r06` の `$0` ディスパッチ用シンボリックリンク）と、スタブの「本物」バイナリを構築します — `CLAUDE_LAUNCHER_BIN`/`CODEX_LAUNCHER_BIN` が本物バイナリの解決を上書きするため、ラッパーはこのスタブを exec し、受け取った env と argv をダンプします — そのため mise/brew/codex のインストールは不要です（CI セーフ）。主な確認事項：
 
-- `_claude_with_home` が指定したホームディレクトリ配下に複数の環境変数を設定し、指定したコマンドを実行する。テストが確認するのは `CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`GATEGUARD_STATE_DIR` の 3 つです。`CLV2_HOMUNCULUS_DIR` は別のテストが両アカウント分の値を pin し、config dir 配下に解決されないことを確認します（#336）。`ECC_MCP_HEALTH_STATE_PATH` は実行時に設定されますが確認対象外です。
-- MCP API キー（`EXA_API_KEY`、`FIRECRAWL_API_KEY`）がサブプロセス環境にエクスポートされるが、親シェルにはエクスポートされない。
+- **アカウント選択。** `claude`/`cld` は個人アカウントの per-account env（`CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`CLV2_HOMUNCULUS_DIR`、`GATEGUARD_STATE_DIR`）を導出し、互いに同一に振る舞います；`cld-r06` は業務アカウントを無条件に選択します。専用のテストが fill-gaps/override の分離不変条件を pin します：素の `claude` は継承した r06 の `CLAUDE_CONFIG_DIR` を維持し（フック起動の子プロセスが親セッションのアカウントに留まる）、`cld-r06` は継承した個人アカウントを r06 へ上書きします。別のテストは `CLV2_HOMUNCULUS_DIR` がどちらのアカウントでも config dir 配下に解決されないことを確認します（#336）。
+- **observer knobs とシークレット。** `ECC_OBSERVER_TIMEOUT_SECONDS`、`OBSERVER_ACTIVE_HOURS_START`/`END`、`ECC_OBSERVER_MAX_TURNS` が正しくデフォルトし、override 可能であること。ラッパーは MCP キーファイルを自ら source してキーを export しますが、呼び出し元がすでに決めたキー（`morning-radar` が web 検索をオプトアウトするための空文字を含む）は上書きしません。`claude-config` の `ECC_DISABLED_HOOKS_EXTRA` プレフィックスは、ラッパーの完全な env 継承を通じて exec されたプロセスに届きます。
+- **フェイルラウド。** 両ラッパーとも、本物のバイナリが解決できない場合はサイレントに何もしない代わりに、診断メッセージ付きで非ゼロ終了します。
+- **Codex のアカウント選択。** `codex`/`cdx` は `CLAUDE_CONFIG_DIR` に追従します（不一致な継承済み `CODEX_HOME` がアカウントをまたいでリークしてはいけないケースを含む — #345 が塞ぐクロスアカウントリーク）；`cdx-r06` は `CODEX_HOME` を無条件に上書きします；明示的な `CODEX_HOME` は `CLAUDE_CONFIG_DIR` がスコープにない場合のみ尊重されます。
+- **`--profile shared` の注入。** argv に `--profile`/`-p` フラグがない場合にのみ注入されます（`--profile x`、`--profile=x`、`-p x`、`-px` のすべての形式）；プロンプト引数内の `--profile` という部分文字列は誤って注入を抑制しません；走査はリテラルの `--` で停止します；フラグは常にサブコマンド（`exec`、`exec review`）より前に挿入されます。
+- **残存する zsh ヘルパー。** `_claude_fable`（`claude-fable-5` を pin し、readable な場合はオーケストレータープロンプトファイルを追加し、fable フラグより前に呼び出し元自身のフラグを通す）、`cldf`/`cldf-r06`（アカウントごとに Fable オーケストレーターを配線）、`claude-config`（フックのオプトアウトをプレフィックスし、デフォルトアカウントを pin する）は、従来どおり `claude.zsh` をソースする `zsh -fc` で駆動されます。
 
 ### `tests/skill_provenance.bats`
 

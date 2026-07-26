@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Per-account launcher for the Codex CLI. Dispatches on $0 (the name it was invoked as):
+#   codex, cdx -> the account follows CLAUDE_CONFIG_DIR when it is set (authoritative), else the
+#                 personal ~/.codex; a set-but-mismatched inherited CODEX_HOME is overridden so
+#                 a codex run inside a cld-r06 session stays on r06 and a personal session cannot
+#                 be dragged onto r06 by a stray CODEX_HOME.
+#   cdx-r06    -> work (r06) account, unconditional override.
+# It injects `--profile shared` (the chezmoi-managed SSOT config) when argv carries no --profile,
+# then execs the brew-managed codex. Being a real file on PATH it works from any shell, so the
+# codex skill's inline account-selection prelude is no longer needed (#345).
+set -eu
+
+# Lowercase the invoked name before dispatching (case-insensitive FS: `CDX-R06` resolves to the
+# same symlink but $0 keeps the typed case, which would miss the override branch — #345 review).
+name="$(printf '%s' "${0##*/}" | tr '[:upper:]' '[:lower:]')"
+case "$name" in
+  cdx-r06)
+    # -r06 name: work account, unconditional override.
+    CODEX_HOME="$HOME/.codex-r06"
+    ;;
+  *)
+    # codex / cdx: CLAUDE_CONFIG_DIR is authoritative when it is *set* (present, even if empty).
+    # An empty CLAUDE_CONFIG_DIR means the personal account (Claude Code treats unset/empty as
+    # ~/.claude), so the case below maps it to personal rather than letting a stray inherited
+    # CODEX_HOME survive via the else branch. Only a genuinely unset CLAUDE_CONFIG_DIR (no Claude
+    # account in scope) respects an explicit CODEX_HOME.
+    if [ -n "${CLAUDE_CONFIG_DIR+x}" ]; then
+      case "$CLAUDE_CONFIG_DIR" in
+        *.claude-r06) CODEX_HOME="$HOME/.codex-r06" ;;
+        *) CODEX_HOME="$HOME/.codex" ;;
+      esac
+    else
+      CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+    fi
+    ;;
+esac
+export CODEX_HOME
+
+# Inject --profile shared only when argv carries no profile flag. Scan per token — recognising
+# --profile, --profile=…, -p and -p<value> — and stop at a literal `--` so a "--profile"
+# substring inside a prompt argument cannot false-match. codex accepts --profile as a global
+# option, so insert it right after the program name, ahead of any subcommand (bare / exec /
+# exec review), where every form parses.
+has_profile=0
+for arg in "$@"; do
+  case "$arg" in
+    --) break ;;
+    --profile | --profile=* | -p | -p?*)
+      has_profile=1
+      break
+      ;;
+  esac
+done
+if [ "$has_profile" -eq 0 ]; then
+  set -- --profile shared "$@"
+fi
+
+# Resolve the brew-managed codex without going through PATH (which would re-resolve this wrapper).
+# Try the Apple-Silicon prefix first, then the Intel prefix, so a wrapped invocation works on both
+# Mac architectures. CODEX_LAUNCHER_BIN overrides for tests and non-standard prefixes.
+real="${CODEX_LAUNCHER_BIN:-}"
+if [ -z "$real" ]; then
+  for cand in /opt/homebrew/bin/codex /usr/local/bin/codex; do
+    if [ -x "$cand" ]; then
+      real="$cand"
+      break
+    fi
+  done
+fi
+if [ -z "$real" ] || [ ! -x "$real" ]; then
+  echo "codex launcher: no executable codex found (is the codex cask installed?)." >&2
+  exit 127
+fi
+exec "$real" "$@"

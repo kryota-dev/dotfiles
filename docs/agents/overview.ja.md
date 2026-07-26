@@ -13,8 +13,8 @@
 
 | | 個人（デフォルト） | 業務（r06） |
 |---|---|---|
-| **Claude Code** | `~/.claude` — エイリアス `cld` | `~/.claude-r06` — エイリアス `cld-r06` |
-| **Codex CLI** | `~/.codex` — エイリアス `cdx` | `~/.codex-r06` — エイリアス `cdx-r06` |
+| **Claude Code** | `~/.claude` — ランチャー `cld` | `~/.claude-r06` — ランチャー `cld-r06` |
+| **Codex CLI** | `~/.codex` — ランチャー `cdx` | `~/.codex-r06` — ランチャー `cdx-r06` |
 
 各セルは完全に隔離されたランタイム環境を表します。セッション履歴、ガバナンスデータベース、継続学習のインスティンクト、bash コマンド監査ログ、MCP 状態がそれぞれ独立しています。一方、設定ファイルは共有されており、各ハーネス内の両アカウントはシンボリックリンク経由で同じデプロイ済み設定ファイルを参照します。
 
@@ -82,9 +82,9 @@ chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドス
 
 ## ランタイムにおけるアカウント分離
 
-設定は共有されていますが、ランタイム状態は zsh エイリアスラッパーが注入する環境変数によってアカウントごとに分離されます。Claude Code 用の `_claude_with_home`、Codex 用の `cdx`/`cdx-r06` エイリアスといったラッパーが、プロセス単位の環境変数をセットして各ツールをそれぞれの状態ディレクトリへ向けます。（`cdx-r06` は `CODEX_HOME=$HOME/.codex-r06` を設定し、`cdx` は `CODEX_HOME` を未設定のままにして Codex が `~/.codex` をデフォルト使用します。）状態変数はシェルの一般的な環境にはエクスポートされません。
+設定は共有されていますが、ランタイム状態は `~/.local/launchers/{claude,codex}` にある 2 つのランチャーラッパースクリプトが注入する環境変数によってアカウントごとに分離されます。これらは `claude`/`cld`/`cld-r06` と `codex`/`cdx`/`cdx-r06` としてアクセスされます。各ラッパーは `$0` で分岐し、プロセス単位の環境変数をセットして各ツールを正しい状態ディレクトリへ向けます。（`cdx-r06` は `CODEX_HOME=$HOME/.codex-r06` を無条件に設定し、`codex`/`cdx` は設定済みの `CLAUDE_CONFIG_DIR` に追従し、なければ `~/.codex` にデフォルトします。）インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、ラッパーはどのシェルからでも同一に動作します。状態変数は、ラッパー自身の短命なプロセスを超えてシェルの一般的な環境にエクスポートされることはありません。
 
-すべての環境変数とエイリアスの詳細は [account-isolation.ja.md](account-isolation.ja.md) を参照してください。
+すべての環境変数とランチャーコマンドの詳細は [account-isolation.ja.md](account-isolation.ja.md) を参照してください。
 
 ---
 
@@ -92,7 +92,7 @@ chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドス
 
 | トピック | ドキュメント |
 |---|---|
-| アカウントごとの環境変数テーブル、エイリアスマトリクス | [account-isolation.ja.md](account-isolation.ja.md) |
+| アカウントごとの環境変数テーブル、ランチャーコマンドマトリクス | [account-isolation.ja.md](account-isolation.ja.md) |
 | Claude Code ハーネス：フック、ECC、CLV2、ステータスライン | [claude-code.ja.md](claude-code.ja.md) |
 | Codex CLI ハーネス：プロファイル設定、フック、アカウント設定 | [codex.ja.md](codex.ja.md) |
 | スキルタクソノミー、キュレーテッドインベントリ、外部フェッチ、プロベナンス強制 | [skills-provenance.ja.md](skills-provenance.ja.md) |

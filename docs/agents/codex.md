@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-This document covers the OpenAI Codex CLI harness configuration deployed by this dotfiles repo. The harness provisions two isolated `CODEX_HOME` accounts (`~/.codex` and `~/.codex-r06`), keeps their hooks and shared profile config in sync via chezmoi templates, applies a shared SSOT profile through aliases and a PATH shim, and gates destructive Bash commands through a cross-harness gateguard shared with Claude Code.
+This document covers the OpenAI Codex CLI harness configuration deployed by this dotfiles repo. The harness provisions two isolated `CODEX_HOME` accounts (`~/.codex` and `~/.codex-r06`), keeps their hooks and shared profile config in sync via chezmoi templates, applies a shared SSOT profile through a PATH-resolvable launcher wrapper, and gates destructive Bash commands through a cross-harness gateguard shared with Claude Code.
 
 ---
 
@@ -17,8 +17,8 @@ This document covers the OpenAI Codex CLI harness configuration deployed by this
 - [agent.config.toml — the agent profile](#agentconfigtoml--the-agent-profile)
 - [Template SSOT — preventing account drift](#template-ssot--preventing-account-drift)
 - [--profile shared mechanism](#--profile-shared-mechanism)
-  - [cdx / cdx-r06 aliases](#cdx--cdx-r06-aliases)
-  - [Bare codex skips the SSOT config](#bare-codex-skips-the-ssot-config)
+  - [codex / cdx / cdx-r06 — the wrapper](#codex--cdx--cdx-r06--the-wrapper)
+  - [Bare codex now loads the SSOT config too](#bare-codex-now-loads-the-ssot-config-too)
 - [The unmanaged base config and project trust](#the-unmanaged-base-config-and-project-trust)
 - [Gateguard](#gateguard)
 - [Shared rule and skill layers](#shared-rule-and-skill-layers)
@@ -44,12 +44,14 @@ There is also `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agen
 
 ## Two-account model
 
-The personal account uses the default `CODEX_HOME=~/.codex` (Codex's built-in default); the work account uses `CODEX_HOME=~/.codex-r06`, set explicitly by the `cdx-r06` alias. The `cdx`/`cdx-r06` zsh aliases select the active account:
+The personal account uses the default `CODEX_HOME=~/.codex` (Codex's built-in default); the work account uses `CODEX_HOME=~/.codex-r06`. Account selection now lives in a wrapper *script*, `~/.local/launchers/codex` (source: `home/dot_local/launchers/executable_codex`), reached as `codex` / `cdx` / `cdx-r06` — the latter two are symlinks to it, and it dispatches on `$0`:
 
 ```
-cdx      → codex --profile shared "$@"            (personal — CODEX_HOME unset, Codex defaults to ~/.codex)
-cdx-r06  → CODEX_HOME=~/.codex-r06 codex --profile shared "$@"   (work / r06)
+codex / cdx  → CODEX_HOME follows CLAUDE_CONFIG_DIR when set (else defaults to ~/.codex), then --profile shared "$@"
+cdx-r06      → CODEX_HOME=~/.codex-r06 (unconditional override), then --profile shared "$@"
 ```
+
+Being a real file on PATH rather than an interactive-zsh-only alias, the wrapper works identically from any shell — interactive, a hook, or Claude Code's own Bash tool — so `codex` and `cdx` are literally the same behavior for the personal-account case; see [codex / cdx / cdx-r06 — the wrapper](#codex--cdx--cdx-r06--the-wrapper) below for the full dispatch logic, including how `CLAUDE_CONFIG_DIR` propagates the account from an enclosing Claude Code session.
 
 Because both homes receive their own copy of `hooks.json` and `shared.config.toml` — rendered from shared templates — each account runs the identical hook and config logic while keeping auth tokens and conversation state isolated in separate directories.
 
@@ -155,23 +157,42 @@ If the actual config were duplicated in `dot_codex/` and `dot_codex-r06/`, a cha
 
 ## --profile shared mechanism
 
-`shared.config.toml` is a named Codex CLI profile. It is layered on top of Codex's dynamically-written `config.toml` only when Codex is invoked with `--profile shared`. Without that flag, the SSOT config is silently ignored.
+`shared.config.toml` is a named Codex CLI profile. It is layered on top of Codex's dynamically-written `config.toml` only when Codex is invoked with `--profile shared`. Without that flag, the underlying `codex` binary silently ignores the SSOT config — but since #345 the wrapper injects that flag on essentially every invocation, so in practice this only matters for the rare call that bypasses the wrapper entirely (see below).
 
-Only one mechanism injects `--profile shared` automatically:
+The wrapper script is the only mechanism that injects `--profile shared` automatically:
 
-### cdx / cdx-r06 aliases
+### codex / cdx / cdx-r06 — the wrapper
 
-The `cdx` and `cdx-r06` zsh aliases (defined in `home/dot_config/zsh/codex.zsh`) are the standard user-facing entry points. Both inject `--profile shared`. Only `cdx-r06` also sets `CODEX_HOME`; `cdx` leaves `CODEX_HOME` unset so Codex uses its default `~/.codex`:
+`~/.local/launchers/codex` (source: `home/dot_local/launchers/executable_codex`) is the actual per-account launcher; `cdx` and `cdx-r06` are symlinks to it, and it dispatches on `$0` (the name it was invoked as). Being a real file on PATH — not a zsh alias — it works identically from any shell: interactive zsh, a hook, launchd, or Claude Code's own Bash tool.
 
-```zsh
-# Actual shape (from codex.zsh)
-cdx      → codex --profile shared "$@"                            # CODEX_HOME unset → Codex defaults to ~/.codex
-cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
-```
+Two things happen on every invocation:
 
-### Bare codex skips the SSOT config
+1. **Account selection.** `cdx-r06` forces `CODEX_HOME=$HOME/.codex-r06` unconditionally (override). `codex` / `cdx` follow `CLAUDE_CONFIG_DIR` when it is set — `~/.codex-r06` when `CLAUDE_CONFIG_DIR` ends in `.claude-r06`, else `~/.codex` — and only fall back to an already-set `CODEX_HOME` (or `~/.codex`) when `CLAUDE_CONFIG_DIR` is unset:
 
-A direct `codex` invocation — without the aliases — does **not** load `shared.config.toml`. The `--profile shared` flag is the only mechanism that applies it. This is intentional (profiles are opt-in in Codex), but easy to trip over in scripts, CI, or editor integrations that invoke `codex` directly.
+   ```bash
+   case "${0##*/}" in
+     cdx-r06) CODEX_HOME="$HOME/.codex-r06" ;;
+     *)
+       if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+         case "$CLAUDE_CONFIG_DIR" in
+           *.claude-r06) CODEX_HOME="$HOME/.codex-r06" ;;
+           *) CODEX_HOME="$HOME/.codex" ;;
+         esac
+       else
+         CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+       fi
+       ;;
+   esac
+   ```
+
+   `CLAUDE_CONFIG_DIR` being authoritative means a `codex` call made from inside a `cld-r06` Claude Code session (e.g. via the `codex` skill's Bash tool, or a hook) lands on the r06 Codex account even if some stray inherited `CODEX_HOME` says otherwise — closing a cross-account leak that existed before #345. An explicit `CODEX_HOME` is only honored when no Claude Code session is in scope (`CLAUDE_CONFIG_DIR` unset).
+2. **`--profile shared` injection.** The wrapper scans argv token by token (`--profile`, `--profile=…`, `-p`, `-p<value>`, stopping at a literal `--`) and injects `--profile shared` only when no profile flag is already present. `codex --profile agent …` therefore still resolves to the `agent` profile untouched, and the injected flag lands ahead of any subcommand (`exec`, `exec review`) so it parses in every invocation shape.
+
+`real="${CODEX_LAUNCHER_BIN:-/opt/homebrew/bin/codex}"` resolves the brew-managed binary directly — unlike the `claude` wrapper, Codex stays brew-managed rather than mise-managed. `CODEX_LAUNCHER_BIN` overrides this for tests. If the real binary cannot be resolved, the wrapper fails loudly rather than silently doing nothing.
+
+### Bare codex now loads the SSOT config too
+
+Before #345, a direct `codex` invocation — without the `cdx`/`cdx-r06` aliases — did **not** load `shared.config.toml`; only the aliases injected `--profile shared`, and that was easy to trip over in scripts, CI, or editor integrations that invoked `codex` directly. That gap is closed: because `codex` on PATH now resolves to the same wrapper as `cdx` (the launcher directory is kept ahead of Homebrew's `bin` both by a static PATH prepend in `dot_zshrc.tmpl` and a `precmd` hook that re-asserts it after `mise activate`, plus a hard-coded prepend in launchd's morning-radar script), any bare `codex` call gets `--profile shared` injected exactly like `cdx` does, unless the caller already passed an explicit `--profile`. The only way to reach the true bare binary, un-wrapped, is to invoke it by its absolute path (`/opt/homebrew/bin/codex`) — something most callers never do.
 
 ---
 
@@ -185,7 +206,7 @@ The base `$CODEX_HOME/config.toml` is written by the Codex CLI itself and is del
 - `chezmoi apply` would revert user-approved `[projects.*] trust_level` entries.
 - Committing it would leak absolute paths of unrelated projects into a public repository.
 
-The cost is a known, accepted drift source: the base config carries its own copy of model settings that ages independently of the SSOT pin. Profile-based invocations (`--profile shared` / `--profile agent`) layer over it and are unaffected; a bare `codex` run resolves against the unmanaged base config alone (see [Bare codex skips the SSOT config](#bare-codex-skips-the-ssot-config)).
+The cost is a known, accepted drift source: the base config carries its own copy of model settings that ages independently of the SSOT pin. Profile-based invocations (`--profile shared` / `--profile agent`) layer over it and are unaffected; since #345 that includes bare `codex` calls too, because the wrapper injects `--profile shared` by default (see [Bare codex now loads the SSOT config too](#bare-codex-now-loads-the-ssot-config-too)). Only an invocation that bypasses the wrapper entirely (the brew binary's absolute path) resolves against the unmanaged base config alone.
 
 ### Project trust policy
 

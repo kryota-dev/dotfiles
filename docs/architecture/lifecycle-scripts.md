@@ -153,7 +153,7 @@ Runs `mise install --yes` with up to 3 retry attempts (backoff: 10 s, 20 s). Sou
 
 Registers four user-scope Claude Code MCP servers (`context7`, `deepwiki`, `exa`, `firecrawl`) in both `~/.claude` and `~/.claude-r06` via `claude mcp add-json --scope user`. Invokes `claude` through `mise exec -- claude` rather than relying on PATH — on a fresh apply the `~/.local/bin/claude` launcher symlink does not yet exist (that is created by script 16). Fails non-zero on any registration error so chezmoi marks the run incomplete and retries on the next apply.
 
-**Secret model**: the exa and firecrawl JSON configs store the literal string `${EXA_API_KEY}` / `${FIRECRAWL_API_KEY}` (single-quoted in the shell so the script never expands them). Claude Code expands these placeholders at MCP server spawn from the process environment. The actual keys sit only in the 0600 `~/.config/zsh/claude-secrets.zsh` rendered from 1Password, and are injected per-account by `_claude_with_home`. Keys never appear in `.claude.json` at rest.
+**Secret model**: the exa and firecrawl JSON configs store the literal string `${EXA_API_KEY}` / `${FIRECRAWL_API_KEY}` (single-quoted in the shell so the script never expands them). Claude Code expands these placeholders at MCP server spawn from the process environment. The actual keys sit only in the 0600 `~/.config/zsh/claude-secrets.zsh` rendered from 1Password, and are injected per-account by the `claude` launcher wrapper (`~/.local/launchers/claude`). Keys never appear in `.claude.json` at rest.
 
 ### 14 — enable-clv2-observer (`run_onchange`, after)
 

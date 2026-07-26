@@ -22,8 +22,9 @@ set -euo pipefail
 # the literal "${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}" placeholders, which Claude Code expands
 # from the launching process's environment when it spawns the server (verified: add-json keeps
 # the literal, expansion happens at spawn). The keys themselves are rendered from 1Password into
-# a 0600 ~/.config/zsh/claude-secrets.zsh and injected per-account by _claude_with_home, so this
-# rendered script body stays secret-free and the keys never sit at rest in .claude.json.
+# a 0600 ~/.config/zsh/claude-secrets.zsh and injected per-account by the claude wrapper
+# (~/.local/launchers/claude), so this rendered script body stays secret-free and the keys never
+# sit at rest in .claude.json.
 
 if ! command -v mise &>/dev/null; then
   echo "WARNING: mise is not installed; skipping user-scope MCP setup."
@@ -38,7 +39,7 @@ config_dirs=("$HOME/.claude" "$HOME/.claude-r06")
 # Server name -> canonical JSON. All stdio (npx-launched, -y so the first run never blocks on an
 # install prompt); deepwiki bridges to its remote HTTP endpoint via mcp-remote. exa/firecrawl
 # carry an env placeholder ("${EXA_API_KEY}" / "${FIRECRAWL_API_KEY}") expanded by Claude Code at
-# spawn time from the per-account env set by _claude_with_home. Single-quoted here so the shell
+# spawn time from the per-account env set by the claude wrapper. Single-quoted here so the shell
 # stores the literal placeholder rather than expanding it now. Keep in sync with the project's
 # .mcp.json removal of context7/deepwiki.
 #

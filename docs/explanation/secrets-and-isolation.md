@@ -55,15 +55,17 @@ This lifecycle script runs once on macOS and aborts `chezmoi apply` with a non-z
 
 If `op` is not installed, not authenticated, or an item cannot be read, `chezmoi apply` fails fast. Note that `run_once_after_11` is an AFTER-phase script — home has already been mutated by the time it runs. The actual fail-fast paths are: (1) `onepasswordRead` inside `.tmpl` files aborts apply during template render, before those files are written; and (2) `run_once_after_11` acts as a fail-fast gate before the heavier after-phase provisioning (mise, MCP, CLV2, etc.). The intent is that a partially-provisioned machine with missing secrets is worse than a clean abort at either of those points. The script is macOS-only (`{{ if ne .chezmoi.os "darwin" }}` exits early) because CI runs on Ubuntu without a 1Password installation.
 
-### Runtime-graceful: sourcing with `[[ -r ... ]]` guards
+### Runtime-graceful: sourcing with a readability guard
 
-At shell startup, `claude.zsh` sources the rendered secrets file only if it exists and is readable:
+The rendered secrets file is sourced by the `claude` wrapper (`~/.local/launchers/claude`), not by `claude.zsh`, only if it exists, is readable, and the caller has not already decided the key:
 
-```zsh
-[[ -r "${HOME}/.config/zsh/claude-secrets.zsh" ]] && source "${HOME}/.config/zsh/claude-secrets.zsh"
+```bash
+if [ -z "${EXA_API_KEY+x}" ] && [ -r "$HOME/.config/zsh/claude-secrets.zsh" ]; then
+  . "$HOME/.config/zsh/claude-secrets.zsh"
+fi
 ```
 
-If `chezmoi apply` has not yet been run on the machine, the secrets file is absent and the guard short-circuits cleanly. The MCP servers launch without a key rather than the shell erroring out at startup. The `${VAR:-}` default in each launcher function (see below) extends this graceful degradation to the subprocess level.
+If `chezmoi apply` has not yet been run on the machine, the secrets file is absent and the guard short-circuits cleanly. The MCP servers launch without a key rather than the wrapper erroring out. Because the wrapper runs on every invocation — interactive shell, hook, launchd, or Claude Code's own Bash tool — this sourcing happens once per process, not once per interactive shell session the way a `claude.zsh` source would; the `${VAR:-}` default on export (see below) extends this graceful degradation to the exec'd binary. The `-z "${EXA_API_KEY+x}"` check (unset vs. empty) is what lets a caller opt out of web search by exporting an *empty* `EXA_API_KEY` before invoking the wrapper — `morning-radar` uses exactly this to skip loading the key entirely.
 
 This two-level design — strict at apply time, graceful at runtime — means a freshly cloned machine that hasn't yet provisioned secrets still gets a functional shell, while a machine that has been provisioned but loses 1Password access doesn't have its next `chezmoi apply` silently succeed with empty secrets.
 
@@ -75,26 +77,26 @@ This is the most consequential secret-handling decision in the repo.
 
 **The pattern:**
 
-1. `claude.zsh` sources `claude-secrets.zsh` without `export`. The variables (`EXA_API_KEY`, `FIRECRAWL_API_KEY`) exist in the interactive shell's local scope but are not inherited by child processes.
-2. The launcher function `_claude_with_home` re-exports them inline, scoped to the specific subprocess:
+1. `private_claude-secrets.zsh.tmpl` is rendered *without* `export` statements — it is plain `KEY='value'` assignment.
+2. The `claude` wrapper sources it inside its own short-lived process (not the interactive shell — see [How this composes with the account-isolation env model](#how-this-composes-with-the-account-isolation-env-model)) and then exports the variables (`EXA_API_KEY`, `FIRECRAWL_API_KEY`) just before `exec`ing the real `claude` binary:
 
-```zsh
-_claude_with_home() {
-  local home_dir="$1"; shift
-  CLAUDE_CONFIG_DIR="$home_dir" \
-    EXA_API_KEY="${EXA_API_KEY:-}" \
-    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
-    "$@"
-}
+```bash
+if [ -z "${EXA_API_KEY+x}" ] && [ -r "$HOME/.config/zsh/claude-secrets.zsh" ]; then
+  . "$HOME/.config/zsh/claude-secrets.zsh"
+fi
+# ...
+export EXA_API_KEY="${EXA_API_KEY:-}"
+export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
+exec "$real" "$@"
 ```
 
 **Why not just `export` in the sourced file?**
 
-An `export` in a sourced file leaks the variable into every child process for the lifetime of the shell session — every subshell, every external command, every background job. If any of those processes log their environment, dump a core file, or are compromised, the key is exposed.
+An `export` in a file sourced by an interactive shell would leak the variable into every child process for the lifetime of the shell session — every subshell, every external command, every background job. Even sourced inside the wrapper's own process (not the interactive shell), a bare `export` in the secrets file would be redundant with — and less explicit than — the wrapper's own `export` statement, which is the one place that decides exactly which variables reach the exec'd binary.
 
-The subprocess-scoped re-export means the key is available exactly where it is needed: Claude Code reads `${EXA_API_KEY}` from its process environment when spawning the MCP server. It is not available to any other process.
+Because the wrapper process itself is replaced by `exec` rather than spawning a child, the exported variables are scoped to exactly the process that needs them — the real `claude` binary and whatever it spawns (the MCP server) — and never touch the interactive shell that invoked the wrapper in the first place. Claude Code reads `${EXA_API_KEY}` from its process environment when spawning the MCP server; no other process sees it.
 
-The `${VAR:-}` default (empty string when the variable is unset) ensures the re-export is safe even when the secrets file was never sourced — the MCP servers receive an empty key rather than the launcher function erroring.
+The `${VAR:-}` default (empty string when the variable is unset) ensures the export is safe even when the secrets file was never sourced — the MCP servers receive an empty key rather than the wrapper erroring.
 
 ---
 
@@ -129,27 +131,24 @@ When adding a new 1Password-backed template, both the lifecycle script's `ITEMS`
 
 ## How this composes with the account-isolation env model
 
-Account isolation and secret scoping are two overlapping concerns that share the same mechanism: environment variables set at subprocess boundary.
+Account isolation and secret scoping are two overlapping concerns that share the same mechanism: environment variables exported at the wrapper's process boundary, just before it `exec`s the real binary.
 
-`_claude_with_home` does both at once:
+The `claude` wrapper (`~/.local/launchers/claude`) does both at once:
 
-```zsh
-_claude_with_home() {
-  local home_dir="$1"; shift
-  CLAUDE_CONFIG_DIR="$home_dir" \          # account isolation
-    ECC_AGENT_DATA_HOME="$home_dir" \      # account isolation
-    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-<slug>" \   # account isolation, outside the config dir (#336)
-    ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
-    GATEGUARD_STATE_DIR="$home_dir/.gateguard" \       # account isolation
-    EXA_API_KEY="${EXA_API_KEY:-}" \       # secret scoping
-    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \       # secret scoping
-    "$@"
-}
+```bash
+export CLAUDE_CONFIG_DIR                                              # account isolation
+export ECC_AGENT_DATA_HOME="$CLAUDE_CONFIG_DIR"                       # account isolation
+export CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}"  # account isolation, outside the config dir (#336)
+export ECC_MCP_HEALTH_STATE_PATH="$CLAUDE_CONFIG_DIR/mcp-health-cache.json"
+export GATEGUARD_STATE_DIR="$CLAUDE_CONFIG_DIR/.gateguard"            # account isolation
+export EXA_API_KEY="${EXA_API_KEY:-}"                                 # secret scoping
+export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"                     # secret scoping
+exec "$real" "$@"
 ```
 
-The same single subprocess boundary that isolates ECC state, CLV2 instincts, and gateguard state by account also confines the API keys to that subprocess. Neither concern requires a separate mechanism.
+The same single process boundary that isolates ECC state, CLV2 instincts, and gateguard state by account also confines the API keys to that subprocess. Neither concern requires a separate mechanism.
 
-`cdx-r06` adds the Codex account env (`CODEX_HOME`) to the same env-var set, extending the pattern to the Codex CLI. The two places that define the per-account env set (`_claude_with_home`, `cdx-r06`) must stay in sync; this is the main maintenance burden of the isolation model.
+The `codex` wrapper (`~/.local/launchers/codex`) mirrors the pattern for the Codex account env (`CODEX_HOME`), extending it to the Codex CLI. Before #345, the per-account env set was defined in two places that had to be hand-kept in sync — the zsh helper `_claude_with_home` (`claude.zsh`) and the `cdx-r06` alias (`codex.zsh`) — which was the main maintenance burden of the isolation model. #345 removes that duplication: each wrapper is now the single place that defines its harness's env set, and being a real script on PATH rather than a zsh alias, it is reached identically from `cld`/`cld-r06`/`cdx`/`cdx-r06`, a bare `claude`/`codex`, a hook, launchd, or Claude Code's own Bash tool — so there is no second copy left to drift.
 
 The r06 config directory (`~/.claude-r06`) is entirely symlinks pointing back to `~/.claude` — settings, statusline, agents, commands, skills — so config is one SSOT while state trees diverge. Secrets are not per-account in the config-directory sense: both accounts receive the same API keys (the same 1Password items). Account isolation is about state (sessions, governance, caches), not about using different keys per account.
 

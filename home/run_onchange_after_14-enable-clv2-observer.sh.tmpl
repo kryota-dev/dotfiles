@@ -65,11 +65,12 @@ _enable_in() {
 
 # Wrapper accounts: enable in the homunculus dir belonging to each account config dir that
 # exists. The config dir still selects WHICH accounts are in use; only the state location moved
-# out of it. The slug mapping mirrors _claude_with_home in dot_config/zsh/claude.zsh — the two
-# must stay in sync or the observer would be enabled in a dir no session ever reads.
+# out of it. The slug mapping mirrors the claude wrapper's slug derivation
+# (dot_local/launchers/executable_claude) — the two must stay in sync or the observer would be
+# enabled in a dir no session ever reads.
 for account in "${HOME}/.claude" "${HOME}/.claude-r06"; do
   if [ -d "$account" ]; then
-    # Derive the slug from the basename only, in the same three branches as the zsh helper, so
+    # Derive the slug from the basename only, in the same three branches as the claude wrapper, so
     # the two cannot disagree on a name neither of them was written for (a path-based strip
     # here would also leak a trailing slash into the slug).
     account_dir_name="${account##*/}"
