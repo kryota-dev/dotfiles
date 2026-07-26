@@ -7,13 +7,22 @@ echo "Applying macOS defaults..."
 
 # Base
 defaults write com.apple.HIToolbox AppleFnUsageType -int 2
-defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
+# AppleKeyboardUIMode: value semantics changed in Sonoma — 3 ("Enabled on older
+# macOS versions") stopped enabling Full Keyboard Access; 2 is the Sonoma+ value
+# for the same effect (nix-darwin/nix-darwin#1378, #1501).
+defaults write NSGlobalDomain AppleKeyboardUIMode -int 2
 defaults write NSGlobalDomain AppleShowAllExtensions -bool true
 defaults write NSGlobalDomain AppleShowScrollBars -string "Always"
 defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
 defaults write NSGlobalDomain KeyRepeat -int 2
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain InitialKeyRepeat -int 25
+defaults write NSGlobalDomain com.apple.springing.enabled -bool true
+defaults write NSGlobalDomain com.apple.springing.delay -float 0.5
+defaults write NSGlobalDomain com.apple.trackpad.forceClick -bool true
+defaults write NSGlobalDomain com.apple.trackpad.scaling -float 2
+defaults write NSGlobalDomain com.apple.sound.beep.feedback -bool true
+defaults write NSGlobalDomain com.apple.sound.beep.flash -bool false
 
 # DesktopServices
 defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true
@@ -21,6 +30,10 @@ defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true
 
 # Dock
 defaults write com.apple.dock autohide-delay -float 0
+defaults write com.apple.dock autohide -bool true
+defaults write com.apple.dock mru-spaces -bool false
+defaults write com.apple.dock show-recents -bool false
+defaults write com.apple.dock tilesize -int 44
 
 # Finder
 defaults write com.apple.finder AppleShowAllFiles -bool true
@@ -30,14 +43,22 @@ defaults write com.apple.finder ShowMountedServersOnDesktop -bool true
 defaults write com.apple.finder ShowRemovableMediaOnDesktop -bool true
 defaults write com.apple.finder ShowStatusBar -bool true
 defaults write com.apple.finder ShowPathbar -bool true
+defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
 
 # SystemUIServer
-defaults write com.apple.menuextra.clock DateFormat -string 'EEE d MMM HH:mm'
+# menuextra.clock DateFormat stopped being honored once the Big Sur+ Control
+# Center redesign replaced it with these discrete keys (tech-otaku/menu-bar-clock).
+defaults write com.apple.menuextra.clock IsAnalog -bool false
+defaults write com.apple.menuextra.clock Show24Hour -bool true
+defaults write com.apple.menuextra.clock ShowAMPM -bool true
+defaults write com.apple.menuextra.clock ShowDate -int 0
+defaults write com.apple.menuextra.clock ShowDayOfWeek -bool true
+defaults write com.apple.menuextra.clock ShowSeconds -bool true
 
 # Terminal
 defaults write com.apple.terminal StringEncodings -array 4
 
-for app in "Dock" "Finder" "SystemUIServer"; do
+for app in "Dock" "Finder" "SystemUIServer" "ControlCenter"; do
   killall "${app}" &>/dev/null || true
 done
 
