@@ -130,7 +130,37 @@ marketplace_source() {
   '
 }
 
+# The ref a marketplace is pinned to in settings.json (empty for the official marketplace, which has no
+# ref, or for an unpinned entry). This is the SSOT the runtime must converge to. Kept as a git ref
+# string ("v1.0.6"), the same shape known_marketplaces.json stores, so the two compare without any
+# version normalization.
+declared_ref() {
+  local name="$1"
+  if [ "$name" = "$OFFICIAL_MARKETPLACE" ]; then
+    printf ''
+    return 0
+  fi
+  # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+  printf '%s' "$declaration_json" | "${jq_cmd[@]}" -r --arg m "$name" '.extraKnownMarketplaces[$m].source.ref // ""'
+}
+
+# The ref a marketplace is currently registered at, read from the account's known_marketplaces.json --
+# the file `marketplace add` writes and `marketplace update` follows. Empty when the marketplace is
+# unregistered or was registered without a ref. Comparing it against declared_ref() is how a pin bump
+# the runtime has not caught up to is detected. Always succeeds (empty on any read failure), so it is
+# safe under `set -e`.
+registered_ref() {
+  local file="$1" name="$2"
+  [ -f "$file" ] || {
+    printf ''
+    return 0
+  }
+  # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
+  "${jq_cmd[@]}" -r --arg m "$name" '.[$m].source.ref // ""' "$file" 2>/dev/null || printf ''
+}
+
 failed=0
+reconciled=0
 for config_dir in "${config_dirs[@]}"; do
   echo "==> Reconciling Claude Code plugins in ${config_dir}..."
   mkdir -p "$config_dir"
@@ -143,12 +173,30 @@ for config_dir in "${config_dirs[@]}"; do
 
   for plugin in "${plugins[@]}"; do
     marketplace="${plugin##*@}"
+    want_ref="$(declared_ref "$marketplace")"
 
-    # Presence is keyed on the marketplace name only: an entry already registered under a different
-    # source is trusted as-is. Rewriting it would need local write access to known_marketplaces.json,
-    # which already implies control of this machine.
+    # Presence is keyed on the marketplace name only. A registration under a different *repo* (same name)
+    # is trusted as-is -- only a lagging *ref* (handled just below) triggers a re-registration, not a repo
+    # swap. Rewriting an entry needs local write access to known_marketplaces.json, which already implies
+    # control of this machine.
+    is_registered=0
     # shellcheck disable=SC2016  # $m is a jq variable bound by --arg, not a shell expansion.
-    if [ ! -f "$known_marketplaces" ] || ! "${jq_cmd[@]}" -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
+    if [ -f "$known_marketplaces" ] && "${jq_cmd[@]}" -e --arg m "$marketplace" 'has($m)' "$known_marketplaces" >/dev/null 2>&1; then
+      is_registered=1
+    fi
+
+    # A pin bump rewrites settings.json (and this script's run_onchange key), but the runtime keeps the
+    # old ref until the marketplace is re-registered: `marketplace add` skips an already-known name and
+    # `plugin install` skips an already-installed plugin. Detect the lag by comparing the pinned ref
+    # against the one recorded in known_marketplaces.json. Only a registered, ref-pinned marketplace can
+    # drift (the official one has no ref).
+    ref_drift=0
+    if [ "$is_registered" -eq 1 ] && [ -n "$want_ref" ] && [ "$(registered_ref "$known_marketplaces" "$marketplace")" != "$want_ref" ]; then
+      ref_drift=1
+    fi
+
+    if [ "$is_registered" -eq 0 ]; then
+      # First apply on this machine: register the marketplace. A failure here is fatal (see below).
       if ! source_spec="$(marketplace_source "$marketplace")"; then
         printf 'ERROR: cannot resolve a source for marketplace %s (needed by %s); declare it in settings.json extraKnownMarketplaces\n' "$marketplace" "$plugin" >&2
         failed=1
@@ -159,17 +207,68 @@ for config_dir in "${config_dirs[@]}"; do
         failed=1
         continue
       fi
+    elif [ "$ref_drift" -eq 1 ]; then
+      # The pin moved. `marketplace update` alone would re-pull the stale registered ref, so re-register
+      # from scratch (rm + add) to pick up the pinned ref. A convergence failure here is a WARNING, not
+      # fatal: the plugin stays usable at its old ref, and exiting non-zero would only make chezmoi retry
+      # a step the CLI has already refused -- endlessly -- instead of surfacing it once.
+      if ! source_spec="$(marketplace_source "$marketplace")"; then
+        printf 'WARNING: cannot resolve a source to converge marketplace %s (needed by %s) to %s; leaving the installed version in place\n' "$marketplace" "$plugin" "$want_ref" >&2
+        continue
+      fi
+      prev_ref="$(registered_ref "$known_marketplaces" "$marketplace")"
+      CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace remove "$marketplace" --scope user >/dev/null 2>&1 || true
+      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$source_spec" --scope user 2>&1)"; then
+        # The rm above already dropped the working registration. Restore it (best effort) so the still-
+        # installed plugin is not stranded with no marketplace: this run still exits 0, so an unregistered
+        # marketplace would not be retried until the pin changes again. Warn without failing the apply.
+        prev_spec="${source_spec%%#*}"
+        [ -n "$prev_ref" ] && prev_spec="${prev_spec}#${prev_ref}"
+        if CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin marketplace add "$prev_spec" --scope user >/dev/null 2>&1; then
+          printf 'WARNING: could not re-register marketplace %s in %s to converge to %s; kept the previous registration (%s)\n%s\n' "$marketplace" "$config_dir" "$want_ref" "$prev_ref" "$out" >&2
+        else
+          printf 'WARNING: could not re-register marketplace %s in %s to converge to %s, and could not restore the previous registration; re-run chezmoi apply, or use the manual fallback in docs/agents/codex.md\n%s\n' "$marketplace" "$config_dir" "$want_ref" "$out" >&2
+        fi
+        continue
+      fi
     fi
 
-    if printf '%s\n' "$installed" | grep -qxF "$plugin"; then
+    if ! printf '%s\n' "$installed" | grep -qxF "$plugin"; then
+      # Not installed yet: a failed install is fatal so chezmoi retries -- a fresh machine genuinely
+      # needs the plugin, and the failure is more likely transient than a ref the CLI refuses.
+      if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin install "$plugin" --scope user 2>&1)"; then
+        printf 'ERROR: failed to install plugin %s in %s\n%s\n' "$plugin" "$config_dir" "$out" >&2
+        failed=1
+      fi
       continue
     fi
-    if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin install "$plugin" --scope user 2>&1)"; then
-      printf 'ERROR: failed to install plugin %s in %s\n%s\n' "$plugin" "$config_dir" "$out" >&2
-      failed=1
+
+    # Already installed. Nothing to do unless the pin moved.
+    [ "$ref_drift" -eq 1 ] || continue
+
+    # Converge the installed plugin to the re-registered ref. `plugin update` reports "restart required
+    # to apply". A failed update is a WARNING, not fatal (same reasoning as the re-register above).
+    if ! out="$(CLAUDE_CONFIG_DIR="$config_dir" mise exec -- claude plugin update "$plugin" --scope user 2>&1)"; then
+      printf 'WARNING: failed to update plugin %s in %s to converge to %s; leaving the installed version in place\n%s\n' "$plugin" "$config_dir" "$want_ref" "$out" >&2
+      continue
+    fi
+    reconciled=1
+
+    # Post-verify against the marketplace registration -- the SSOT the CLI follows -- as a proxy for the
+    # plugin having converged (the installed plugin records a bare version, not the git ref, so it is not
+    # directly comparable). The CLI has been observed to ignore a ref on some paths; WARN -- without
+    # failing or looping -- if the registered ref still lags the pin, rather than reporting a false success.
+    got_ref="$(registered_ref "$known_marketplaces" "$marketplace")"
+    if [ "$got_ref" != "$want_ref" ]; then
+      printf 'WARNING: plugin %s in %s did not converge to %s (registered ref is now "%s"); a Claude Code restart or a manual re-register may be needed\n' "$plugin" "$config_dir" "$want_ref" "$got_ref" >&2
     fi
   done
 done
+
+if [ "$reconciled" -ne 0 ]; then
+  # `claude plugin update` takes effect on the next Claude Code start, not in the running session.
+  echo "==> Plugin version(s) converged to the pinned ref; restart Claude Code to apply (\"restart required to apply\")."
+fi
 
 if [ "$failed" -ne 0 ]; then
   # Exit non-zero so chezmoi does not record this run as successful and retries on the next apply,
