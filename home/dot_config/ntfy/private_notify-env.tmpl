@@ -1,0 +1,12 @@
+# ntfy publisher credentials for the Claude Code hook wrapper
+# (~/.claude/ntfy-notify.sh, kryota-dev/dotfiles#337). Deployed 0600; sourced —
+# never exported — by the wrapper at publish time so the token only ever lives
+# in that process. CI never renders this file (setup-validation.yml exclude list).
+#
+# The wrapper publishes to the local loopback listener directly: it must keep
+# working even if the `tailscale serve` front is down.
+NTFY_URL='http://127.0.0.1:{{ .ntfy.port }}'
+# Write-only publisher token (least privilege: cannot read history if leaked).
+NTFY_TOKEN={{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/credential" | squote }}
+NTFY_TOPIC_ATTENTION='{{ .ntfy.topic_attention }}'
+NTFY_TOPIC_DONE='{{ .ntfy.topic_done }}'

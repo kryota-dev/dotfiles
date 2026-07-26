@@ -42,7 +42,8 @@ flowchart TD
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
         I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
-        J2 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
+        J2 --> J3["31 setup-ntfy\nrun_onchange · macOS only\n(docker compose up + tailscale serve\nfor the ntfy server; skipped in CI)"]
+        J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
         K --> L["50 set-login-shell\nrun_once · Linux only\n(chsh -s zsh, graceful on sudo fail)"]
         L --> M["90 other-apps\nrun_once · macOS only\n(Logi Options+ / Google IME download prompts)\n(non-TTY short-circuits immediately)"]
     end
@@ -79,6 +80,7 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
@@ -111,6 +113,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | `18-setup-agent-browser` | dual | `{{ if linux }}` adds `--with-deps` |
 | `20-macos-defaults` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `30-register-launchd-agents` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
+| `31-setup-ntfy` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `40-setup-sheldon` | both | No OS guard |
 | `50-set-login-shell` | **Linux only** | Entire body inside `{{ if linux }}`; renders near-empty on macOS |
 | `90-other-apps` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
@@ -129,12 +132,14 @@ Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Br
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
-Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> required vault references:
+Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> required vault references:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
+- `op://kryota.dev/Dotfiles - ntfy/base-url`
+- `op://kryota.dev/Dotfiles - ntfy/credential`
 
 For the `Dotfiles - Redact Patterns` item the script goes further than a simple existence check: it also verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal in `private_gitleaks-own.toml.tmpl`), and compiles as a valid regex. A broken pattern would otherwise allow `chezmoi apply` to succeed while silently disabling the client-identifier gitleaks rule on every commit in own-namespace repos.
 
@@ -170,6 +175,19 @@ Applies `defaults write` for keyboard, Finder, Dock, DesktopServices, clock, and
 
 Registers the repo-managed launchd LaunchAgents — currently one, `dev.kryota.morning-radar`, which fires the weekday-morning brief (kryota-dev/dotfiles#257; see [Scheduled morning radar](../agents/claude-code.md) in the Claude Code harness doc). Performs `launchctl bootout || true` then `launchctl bootstrap gui/$UID` so a changed plist is reloaded idempotently; the plist template's embedded hash is the re-trigger key (wrapper-script edits need no re-registration — launchd execs the current file on every fire). Skips registration when `$CI` is set: headless runners have no gui launchd domain, and the in-script guard keeps the render/apply path CI-validated (unlike excluding the file in the workflow). Outside CI a bootstrap failure hard-fails so chezmoi retries on the next apply (convention #6).
 
+### 31 — setup-ntfy (`run_onchange`, after, macOS only)
+
+Starts the self-hosted ntfy notification server (kryota-dev/dotfiles#337; see
+[Notifications](notifications.md)): creates the runtime-state dir
+(`~/Library/Application Support/ntfy`, 0700, outside the chezmoi target tree), runs
+`docker compose up -d` on `~/.config/ntfy/compose.yaml`, and asserts the
+`tailscale serve --bg` mapping so the server stays reachable tailnet-wide over HTTPS.
+Re-triggered by the embedded hashes of the compose template and the server config.
+Skips in CI (no services, no network). **Intentional deviation from convention #6**:
+when Docker Desktop is not running (or the tailscale CLI is missing) it warns and
+exits 0 instead of hard-failing — notifications are not setup-critical and must never
+block `chezmoi apply`; each skip path prints its manual recovery command.
+
 ### 40 — setup-sheldon (`run_onchange`, after)
 
 Runs `sheldon lock` to regenerate the zsh plugin lockfile consumed by `.zshrc`. Re-triggered by the `plugins.toml` hash. Exits 0 with a warning when `sheldon` is not yet installed.
@@ -203,7 +221,7 @@ Scripts 13 and 14 invoke tools through `mise exec --` rather than via PATH becau
 
 ## Conventions for adding scripts
 
-1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…15…17…19…31-39…` (before 40), `…41-49…` (between sheldon and login-shell).
+1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…15…17…19…32-39…` (before 40), `…41-49…` (between sheldon and login-shell).
 2. Use `run_once_` for expensive/irreversible operations; `run_onchange_` for idempotent sync.
 3. For `run_onchange_` scripts that must react to an external file, embed `{{ include "<path>" | sha256sum }}` in a leading comment.
 4. Start every script with `#!/bin/bash` and `set -euo pipefail` — or place the shebang inside the OS template guard if the entire script is OS-specific.

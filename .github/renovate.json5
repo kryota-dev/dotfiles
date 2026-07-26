@@ -105,6 +105,20 @@
       datasourceTemplate: 'github-tags',
       extractVersionTemplate: '^v(?<version>.+)$',
     },
+    {
+      // Self-hosted ntfy server image (#337). The tag is pinned literally in the
+      // compose template (chezmoi .tmpl files are invisible to the built-in
+      // docker-compose manager), so track it with a regex manager instead.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
+      ],
+      matchStrings: [
+        'image: binwiederhier/ntfy:(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]+)',
+      ],
+      depNameTemplate: 'binwiederhier/ntfy',
+      datasourceTemplate: 'docker',
+    },
   ],
   mise: {
     managerFilePatterns: [

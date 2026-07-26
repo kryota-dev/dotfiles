@@ -19,6 +19,7 @@
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
   - [PostToolUseFailure](#posttoolusefailure)
+  - [Notification](#notification)
   - [Stop](#stop)
 - [ECC ランチャー — ecc-hook.sh](#ecc-ランチャー--ecc-hooksh)
 - [ECC フック fork (hooks-fork/)](#ecc-フック-fork-hooks-fork)
@@ -163,11 +164,14 @@ flowchart TD
     PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
     PoTU --> PoTU10[console-warn\nEdit]
 
+    NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
+
     STP[Stop] --> STP1[session-end async]
     STP --> STP2[cost-tracker async]
-    STP --> STP3[desktop-notify async]
-    STP --> STP4[format-typecheck async]
-    STP --> STP5[check-console-log sync]
+    STP --> STP3[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
+    STP --> STP4[ntfy-notify async]
+    STP --> STP5[format-typecheck async]
+    STP --> STP6[check-console-log sync]
 ```
 
 ### SessionStart
@@ -234,13 +238,20 @@ flowchart TD
 |---|---|
 | `post:mcp-health-check` | 失敗した MCP ツール呼び出しを追跡し、不健全なサーバーをマーク、再接続を試みる。Claude Code はこの env var をエクスポートしないため、`CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure` を明示的に設定している。 |
 
+### Notification
+
+| フック ID | マッチャー | Async | 説明 |
+|---|---|---|---|
+| `notification:ntfy-notify` | `permission_prompt\|idle_prompt\|agent_needs_input\|agent_completed` | Yes | repo/branch/account/session の帰属情報付きで、attention/completion 通知を Tailscale 経由の自己ホスト ntfy サーバーへ publish する（#337; [Notifications](../architecture/notifications.ja.md) 参照）。フェイルオープン: `~/.config/ntfy/notify-env` が無ければサイレント no-op |
+
 ### Stop
 
 | フック ID | Async | 説明 |
 |---|---|---|
 | `stop:session-end` | Yes | 各レスポンス後にセッション状態を永続化 |
 | `stop:cost-tracker` | Yes | セッションごとのトークンとコストメトリクスを追跡 |
-| `stop:desktop-notify` | Yes | タスクサマリー付きの macOS/WSL デスクトップ通知を送信 |
+| `stop:desktop-notify` | Yes | **Disabled**（`env.ECC_DISABLED_HOOKS` により）— `stop:ntfy-notify` に置き換え（#337）。ドキュメント化された 1 ステップロールバック（ここで再有効化 + ntfy エントリを一緒に削除）のため配線は維持 |
+| `stop:ntfy-notify` | Yes | セッション停止通知（切り詰め + client-identifier スクラブ済みサマリー）を自己ホスト ntfy サーバーへ publish する（#337） |
 | `stop:format-typecheck` | Yes | 今セッションで編集した JS/TS ファイルを一括フォーマット・型チェック (`tsc --noEmit`、タイムアウト 300 秒) |
 | `stop:check-console-log` | No | git 変更のある全 JS/TS ファイルで `console.log` 警告を集計 |
 

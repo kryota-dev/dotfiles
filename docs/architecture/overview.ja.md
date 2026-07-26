@@ -45,6 +45,7 @@ flowchart TD
 | ライフサイクルスクリプト | 2 フェーズ（before/after）順序（00→90）、`run_once` vs `run_onchange`、1Password ゲート | [lifecycle-scripts.ja.md](lifecycle-scripts.ja.md) |
 | シェル環境 | `.zshrc` ロード順序、sheldon 遅延ロード、starship、per-account zsh エイリアス | [shell-environment.ja.md](shell-environment.ja.md) |
 | 開発ツールチェーン | mise バージョンピン、`Brewfile` + `.brewfile-linux-exclude`、git 1Password 署名、gitleaks | [dev-tooling.ja.md](dev-tooling.ja.md) |
+| Notifications | Claude Code フックイベント → 自己ホスト ntfy（Docker、loopback のみ）→ tailnet デバイス。トピック、認証/ACL、ランブック | [notifications.ja.md](notifications.ja.md) |
 | AI エージェント層（概要） | デュアルハーネス × デュアルアカウントマトリクス、SSOT スキルライブラリ、共有ルール層 | [agents/overview.ja.md](../agents/overview.ja.md) |
 | アカウント分離 | per-account 環境変数、`_claude_with_home`、Codex `CODEX_HOME` | [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) |
 | Claude Code ハーネス | `settings.json`、ECC フック、CLV2 オブザーバー、statusline、レビューサブエージェント | [agents/claude-code.ja.md](../agents/claude-code.ja.md) |

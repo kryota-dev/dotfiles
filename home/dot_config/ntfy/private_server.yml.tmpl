@@ -1,0 +1,35 @@
+# ntfy server configuration (kryota-dev/dotfiles#337). Deployed 0600; mounted
+# read-only into the ntfy container at /etc/ntfy/server.yml (paths below are
+# container paths). CI never renders this file — it is on the
+# "Exclude CI-incompatible files" list in setup-validation.yml (onepasswordRead).
+
+# Public URL of this server as seen by subscribers (the `tailscale serve`
+# HTTPS endpoint). Stored in 1Password so the tailnet's MagicDNS name never
+# lands in this public repo.
+base-url: "{{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url" | trim }}"
+
+# iOS instant push relay (user-approved at the #337 PRD gate). NOTE: per
+# docs.ntfy.sh/config this publishes a poll request to ntfy.sh for EVERY
+# incoming message (topic metadata only, never message bodies), regardless of
+# whether any iOS device subscribes. The sole approved metadata egress beyond
+# the tailnet; remove this key to bring egress to zero if the smoke test shows
+# iOS instant push does not work on the tailnet-only setup.
+upstream-base-url: "https://ntfy.sh"
+
+# Container-internal listener; host exposure is limited to 127.0.0.1 by the
+# compose port mapping.
+listen-http: ":80"
+
+# Persistent message history (AC-002). Retention is the [ntfy] SSOT value in
+# home/.chezmoidata.toml.
+cache-file: /var/lib/ntfy/cache.db
+cache-duration: "{{ .ntfy.cache_duration }}"
+
+# Auth: private instance, deny-all by default. Users/tokens are provisioned
+# once manually via `docker compose exec` (see docs/architecture/notifications.md);
+# user.db is runtime state, never chezmoi-managed.
+auth-file: /var/lib/ntfy/user.db
+auth-default-access: "deny-all"
+
+# tailscale serve fronts this server as a reverse proxy.
+behind-proxy: true
