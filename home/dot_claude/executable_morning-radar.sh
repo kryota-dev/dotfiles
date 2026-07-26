@@ -2,27 +2,30 @@
 # Weekday-morning radar wrapper (kryota-dev/dotfiles#257, delivery #361).
 # Launched by the dev.kryota.morning-radar LaunchAgent on weekday mornings.
 # Runs /morning-brief headless (degraded mode) on the personal Claude Code
-# account, saves the brief to a dated file, renders a mobile-readable HTML view,
-# and hands the result off as an ntfy notification whose click opens the brief
-# page served on the tailnet (#361). Detection + notify only: no downstream
-# skill dispatch. All delivery stays tailnet-only — brief content never leaves
-# the tailnet (no Artifact/claude.ai path); the notification carries only the
-# 1-line HEADLINE plus the tailnet URL.
+# account, saves the brief to a dated file, and delivers it as a Markdown ntfy
+# message (#361): the brief's full text is the message body (rendered as
+# Markdown in the ntfy web app; the mobile apps show it as raw-but-readable
+# Markdown for now), the HEADLINE is the notification title. Detection + notify
+# only: no downstream skill dispatch. Delivery is tailnet-only — the brief is
+# published to the self-hosted ntfy server (loopback), never to a third party
+# (no Artifact/claude.ai path).
 #
 # Source-safe: side effects live in main(), guarded by the BASH_SOURCE check at
-# the end, so tests can source this file and exercise ntfy_publish /
-# render_brief_html without launching claude.
+# the end, so tests can source this file and exercise ntfy_publish without
+# launching claude.
 set -euo pipefail
 
 LABEL="dev.kryota.morning-radar"
 LOG_FILE="${MORNING_RADAR_LOG_FILE:-$HOME/Library/Logs/${LABEL}.log}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/morning-radar"
 BRIEF_DIR="$HOME/dotfiles/.kryota-dev/morning-brief"
-# Publisher credentials + brief topic/base-URL, written 0600 by ~/.config/ntfy/
-# lib.sh (#337/#357/#361). Overridable for tests. Sourced only inside a subshell
-# so the token never enters this script's (or claude's) environment.
+# Publisher credentials + brief topic, written 0600 by ~/.config/ntfy/lib.sh
+# (#337/#357/#361). Overridable for tests. Sourced only inside a subshell so the
+# token never enters this script's (or claude's) environment.
 ENV_FILE="${MORNING_RADAR_NTFY_ENV_FILE:-$HOME/.config/ntfy/notify-env}"
-TIMEOUT_SECONDS=600
+# Overridable only so the bats main() integration tests can shorten the watchdog
+# (its backgrounded sleep would otherwise outlive the run); 600s in production.
+TIMEOUT_SECONDS="${MORNING_RADAR_TIMEOUT_SECONDS:-600}"
 MAX_TURNS=50
 # Pinned model keeps the pre-approved weekday recurring cost predictable even
 # when the account's default model changes.
@@ -41,31 +44,38 @@ CLAUDE_MODEL="sonnet"
 # NotebookEdit included). The Write(path) form it replaced was accepted but
 # never matched, so it granted nothing while warning at every startup. Note:
 # Artifact is deliberately NOT granted — brief delivery is tailnet-only (#361),
-# so the HTML view is rendered locally by this wrapper, not published to
-# claude.ai. Everything else (edits outside that dir, WebFetch/WebSearch, Agent,
-# mcp tools, other Bash commands) stays auto-denied in print mode.
+# so the brief is published to the self-hosted ntfy server, not to claude.ai.
+# Everything else (edits outside that dir, WebFetch/WebSearch, Agent, mcp
+# tools, other Bash commands) stays auto-denied in print mode.
 ALLOWED_TOOLS="Bash(gh search:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(gh api graphql:*),Bash(git log:*),Bash(git status:*),Bash(git diff:*),Bash(git show:*),Bash(git branch:*),Bash(ls:*),Bash(cat:*),Bash(date:*),Bash(jq:*),Bash(find:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Glob,Grep,Skill(morning-brief),Skill(repo-radar),Skill(gmail-triage),Edit(~/dotfiles/.kryota-dev/morning-brief/**)"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOG_FILE" 2>/dev/null || true
 }
 
-# Publish an ntfy notification. Fail-open: a broken/absent ntfy provisioning is a
-# silent no-op and no failure ever aborts the run.
-#   ntfy_publish <kind> <priority> <message> [click]
+# Publish a Markdown ntfy notification. Fail-open: a broken/absent ntfy
+# provisioning is a silent no-op and no failure ever aborts the run.
+#   ntfy_publish <kind> <priority> <title> <message>
 #   kind: brief -> NTFY_TOPIC_BRIEF (success)   attention -> NTFY_TOPIC_ATTENTION (errors)
 # The env file is sourced inside a subshell so NTFY_TOKEN never lands in this
 # script's environment (and thus never in the claude subprocess); the token
 # reaches curl only through a 0600 `curl -K` config file, never argv/stdout/
 # trace (mirrors home/dot_claude/executable_ntfy-notify.sh; bats asserts this).
+# The env file must be owner-only (0600/0400) — sourcing it is code execution,
+# so a group/other-accessible file fails open (same guard as ntfy-notify.sh).
 ntfy_publish() {
-  local kind="$1" priority="$2" message="$3" click="${4:-}"
+  local kind="$1" priority="$2" title="$3" message="$4"
+  local env_mode
   [ -f "$ENV_FILE" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
   command -v curl >/dev/null 2>&1 || return 0
-  # Sourcing is code execution: only accept a file we own (the lib-written file
-  # is 0600). Anything else fails open.
   [ -O "$ENV_FILE" ] || return 0
+  if stat --version >/dev/null 2>&1; then
+    env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  else
+    env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
+  fi
+  case "$env_mode" in 600 | 400) ;; *) return 0 ;; esac
   (
     umask 077
     # shellcheck source=/dev/null
@@ -83,83 +93,35 @@ ntfy_publish() {
       *) exit 0 ;;
     esac
     [ -n "$topic" ] || exit 0
-    if [ -n "$click" ]; then
-      payload="$(jq -n --arg topic "$topic" --arg title "Morning Radar" \
-        --arg message "$message" --arg emoji "$emoji" --arg click "$click" \
-        --argjson priority "$priority" \
-        '{topic: $topic, title: $title, message: $message, priority: $priority,
-          click: $click, tags: [$emoji, "morning-radar"]}')" || exit 0
-    else
-      payload="$(jq -n --arg topic "$topic" --arg title "Morning Radar" \
-        --arg message "$message" --arg emoji "$emoji" \
-        --argjson priority "$priority" \
-        '{topic: $topic, title: $title, message: $message, priority: $priority,
-          tags: [$emoji, "morning-radar"]}')" || exit 0
-    fi
-    umask 077
+    # markdown:true renders the body as Markdown in the ntfy web app (the mobile
+    # apps currently show raw Markdown, still readable). tags carry the emoji.
+    payload="$(jq -n --arg topic "$topic" --arg title "$title" \
+      --arg message "$message" --arg emoji "$emoji" \
+      --argjson priority "$priority" \
+      '{topic: $topic, title: $title, message: $message, priority: $priority,
+        markdown: true, tags: [$emoji, "morning-radar"]}')" || exit 0
     curl_cfg="$(mktemp "${TMPDIR:-/tmp}/morning-radar-ntfy.XXXXXX")" || exit 0
     # EXIT alone misses signal deaths (the watchdog may kill us); cover the
     # catchable signals so the token file never lingers.
     trap 'rm -f "$curl_cfg"' EXIT INT TERM HUP
     printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" >"$curl_cfg"
-    if ! printf '%s' "$payload" | curl -fs -K "$curl_cfg" --max-time 3 \
+    if ! printf '%s' "$payload" | curl -fs -K "$curl_cfg" --max-time 5 \
       -o /dev/null -d @- "$NTFY_URL" 2>/dev/null; then
       log "ntfy publish failed: kind=${kind} topic=${topic} url=${NTFY_URL}"
     fi
   ) || true
 }
 
-# Error notification helper: high-priority attention topic, no link.
+# Error notification helper: high-priority attention topic, no brief body.
 notify_error() {
-  ntfy_publish attention 5 "$1"
-}
-
-# Render the brief markdown as a mobile-readable HTML page at $2. Prefer pandoc
-# (rich rendering; mise-pinned, on the launchd PATH); on absence or any failure,
-# fall back to a self-contained shell that shows the markdown verbatim in a
-# wrapping <pre>. HTML-escape & < > so brief content cannot inject markup.
-# Returns non-zero if no readable page could be produced (caller then degrades
-# to a headline-only notification).
-render_brief_html() {
-  local md="$1" html="$2" title="$3"
-  [ -s "$md" ] || return 1
-  if command -v pandoc >/dev/null 2>&1 &&
-    pandoc -s -f gfm -t html --metadata title="$title" -o "$html" "$md" 2>>"$LOG_FILE"; then
-    return 0
-  fi
-  {
-    printf '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
-    printf '<meta name="viewport" content="width=device-width, initial-scale=1">'
-    printf '<title>%s</title>' "$title"
-    printf '<style>body{margin:0;padding:1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#1a1a1a;background:#fff}@media(prefers-color-scheme:dark){body{color:#e6e6e6;background:#111}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style>'
-    printf '</head><body><pre>'
-    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$md"
-    printf '</pre></body></html>'
-  } >"$html" 2>/dev/null || return 1
-  return 0
-}
-
-# Build the tailnet click URL for the given date, or empty when the brief base
-# URL was not provisioned (MagicDNS underivable at provision time -> degrade).
-# Sourced in a subshell so only the (non-secret) base URL is read out.
-ntfy_brief_url() {
-  local today="$1" base
-  [ -f "$ENV_FILE" ] || return 0
-  [ -O "$ENV_FILE" ] || return 0
-  base="$(
-    # shellcheck source=/dev/null
-    . "$ENV_FILE" 2>/dev/null || true
-    printf '%s' "${NTFY_BRIEF_BASE_URL:-}"
-  )"
-  [ -n "$base" ] || return 0
-  printf '%s/%s.html' "$base" "$today"
+  ntfy_publish attention 5 "Morning Radar" "$1"
 }
 
 main() {
   # launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
-  # mise-managed binaries (pandoc/gh/jq), and curl resolve. ~/.local/launchers is first so
-  # `claude` hits the per-account wrapper (#345); the mise shims dir follows, the same
-  # hand-built-PATH approach statusline.sh uses for its own headless launchd/hook context.
+  # mise-managed binaries (gh/jq), and curl resolve. ~/.local/launchers is first so `claude`
+  # hits the per-account wrapper (#345); the mise shims dir follows, the same hand-built-PATH
+  # approach statusline.sh uses for its own headless launchd/hook context.
   export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
   [ "$(uname)" = "Darwin" ] || exit 0
@@ -286,17 +248,11 @@ EOF
   # day can be retried manually (the approved budget is one successful run/day).
   printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
 
-  # Render the mobile view and build the tailnet click URL. If either is
-  # unavailable, publish still carries the HEADLINE (graceful degradation).
-  click=""
-  if render_brief_html "$BRIEF_FILE" "$BRIEF_DIR/$TODAY.html" "Morning brief — $TODAY"; then
-    click="$(ntfy_brief_url "$TODAY")"
-  else
-    log "warn: brief HTML render failed; notifying without a link"
-  fi
-
+  # Deliver the brief as a Markdown ntfy message: HEADLINE is the notification
+  # title (preview), the full brief markdown is the body (rendered on open).
+  # publish is fail-open, so a delivery failure never affects the stamp above.
   log "done: $HEADLINE"
-  ntfy_publish brief 3 "$HEADLINE" "$click"
+  ntfy_publish brief 3 "$HEADLINE" "$(cat "$BRIEF_FILE")"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

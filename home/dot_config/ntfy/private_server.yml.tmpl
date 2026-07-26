@@ -33,6 +33,13 @@ listen-http: ":80"
 cache-file: /var/lib/ntfy/cache.db
 cache-duration: "{{ .ntfy.cache_duration }}"
 
+# Raise the per-message size ceiling above ntfy's 4 KB default (#361): the
+# morning brief is delivered as a single Markdown message body, and a message
+# over the limit is silently converted to a downloadable attachment (which the
+# apps do not render inline). 32 KB comfortably fits a brief while staying well
+# under ntfy's 512 KB hard maximum.
+message-size-limit: 32768
+
 # Auth: private instance, deny-all by default. Users/tokens are provisioned
 # automatically by ~/.config/ntfy/lib.sh (run_onchange_after_31-setup-ntfy at
 # apply time, or `ntfy-setup` on demand — see docs/architecture/notifications.md);

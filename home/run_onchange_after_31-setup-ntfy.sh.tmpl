@@ -49,12 +49,6 @@ if ! ntfy_assert_serve; then
 fi
 echo "[ntfy] ntfy server up at ${ntfy_serve_target:-} behind tailscale serve."
 
-# Assert the morning-brief static mount (#361). Non-fatal: a missing mount only
-# drops the notification's link (headline-only fallback), so it never blocks apply.
-if ! ntfy_assert_brief_serve; then
-  echo "[ntfy] brief serve mount failed; the morning brief will notify without a link." >&2
-fi
-
 # Provision publisher (token -> notify-env) and subscriber (username/password ->
 # 1Password). Every failure inside is warn-and-continue; recovery is ntfy-setup.
 ntfy_provision || echo "[ntfy] provisioning incomplete; recover with: ntfy-setup" >&2

@@ -81,11 +81,6 @@ if ! ntfy_assert_serve; then
   echo "ntfy-setup: 'tailscale serve' failed (is tailscaled healthy?)." >&2
   exit "$EXIT_ERR"
 fi
-# Auxiliary morning-brief mount (#361). Non-fatal: a missing mount only drops the
-# brief notification's link, so it must not fail the core ntfy setup.
-if ! ntfy_assert_brief_serve; then
-  echo "ntfy-setup: brief serve mount failed; the morning brief will notify without a link." >&2
-fi
 ntfy_wait_ready || echo "ntfy-setup: ntfy container is slow to become ready; continuing." >&2
 
 if [ -n "$rotate" ]; then
