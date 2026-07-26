@@ -675,17 +675,41 @@ case "${1:-} ${2:-}" in
     cat "${cfg}/plugins/installed.json"
     ;;
   "plugin marketplace")
-    src="$4"
-    echo "marketplace-add ${cfg##*/} ${src}" >>"$log"
-    case "$src" in
-      anthropics/claude-plugins-official*) key=claude-plugins-official ;;
-      openai/codex-plugin-cc*) key=openai-codex ;;
-      *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
-    esac
+    sub="$3"
     mkdir -p "${cfg}/plugins"
     [ -f "${cfg}/plugins/known_marketplaces.json" ] || echo '{}' >"${cfg}/plugins/known_marketplaces.json"
-    jq --arg k "$key" '.[$k] = {}' "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
-    mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
+    case "$sub" in
+      add)
+        src="$4"
+        # FAKE_CLAUDE_ADD_FAILS=<ref> fails `marketplace add` for that specific ref, reproducing a
+        # re-register whose clone fails. It exits before writing, so the previous registration stays intact.
+        if [ -n "${FAKE_CLAUDE_ADD_FAILS:-}" ] && [ "${src#*#}" = "${FAKE_CLAUDE_ADD_FAILS}" ]; then
+          echo "boom-add ${src}" >&2
+          exit 1
+        fi
+        echo "marketplace-add ${cfg##*/} ${src}" >>"$log"
+        repo="${src%%#*}"
+        case "$repo" in
+          anthropics/claude-plugins-official) key=claude-plugins-official ;;
+          openai/codex-plugin-cc) key=openai-codex ;;
+          *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
+        esac
+        ref=""
+        [ "$src" != "$repo" ] && ref="${src#*#}"
+        # FAKE_CLAUDE_IGNORES_REF drops the stored ref to reproduce the CLI ignoring a ref on a path the
+        # reconciler must post-verify and warn about.
+        [ "${FAKE_CLAUDE_IGNORES_REF:-0}" = "1" ] && ref=""
+        # Mirror the real known_marketplaces.json shape (.<name>.source.{repo,ref}) so a later run can
+        # detect that the registration lags a bumped pin.
+        jq --arg k "$key" --arg repo "$repo" --arg ref "$ref" \
+          '.[$k] = {source: ({source: "github", repo: $repo} + (if $ref == "" then {} else {ref: $ref} end))}' \
+          "${cfg}/plugins/known_marketplaces.json" >"${cfg}/plugins/km.tmp"
+        mv "${cfg}/plugins/km.tmp" "${cfg}/plugins/known_marketplaces.json"
+        ;;
+      # No `remove | rm` handler on purpose: the reconciler must never call `marketplace remove` (it
+      # cascade-uninstalls the plugin). The catch-all below fails the test if a regression reintroduces it.
+      *) echo "unexpected fake marketplace subcommand: $*" >&2; exit 1 ;;
+    esac
     ;;
   "plugin install")
     id="$3"
@@ -699,6 +723,11 @@ case "${1:-} ${2:-}" in
     # atomic rename, which clobbers the work account's symlink).
     jq 'del(.hooks.SessionStart[0].id, .hooks.SessionStart[0].description)' "${cfg}/settings.json" >"${cfg}/settings.tmp"
     mv "${cfg}/settings.tmp" "${cfg}/settings.json"
+    ;;
+  "plugin update")
+    id="$3"
+    [ "${FAKE_CLAUDE_UPDATE_FAILS:-0}" = "1" ] && { echo "boom-update" >&2; exit 1; }
+    echo "plugin-update ${cfg##*/} ${id}" >>"$log"
     ;;
   *) echo "unexpected fake claude invocation: $*" >&2; exit 1 ;;
 esac
@@ -766,6 +795,141 @@ FAKE_CLAUDE
   [ "$status" -ne 0 ]
   # A partially-reconciled run must still leave settings.json as chezmoi wrote it.
   jq -e '.hooks.SessionStart[0] | has("id")' "${sandbox}/home/.claude/settings.json"
+
+  rm -rf "$sandbox"
+}
+
+# Simulate a pin bump by rendering the reconciler once, then advancing the embedded ref. The ref string
+# (v1.0.6) appears only as the pinned ref in the embedded declaration, so a global sed replace is safe;
+# settings.json is the only place the ref lives, and the rendered script embeds the declaration verbatim.
+@test "claude plugin reconciler: a pin bump re-registers the marketplace and updates the plugin in both accounts" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  sed 's/v1\.0\.6/v1.0.7/g' "${sandbox}/reconcile.sh" >"${sandbox}/reconcile-bumped.sh"
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile-bumped.sh"
+  [ "$status" -eq 0 ]
+
+  # The marketplace is re-registered in place (a plain `marketplace add`, no rm) at the bumped ref and
+  # the plugin updated -- in both accounts.
+  grep -qF 'marketplace-add .claude openai/codex-plugin-cc#v1.0.7' "${sandbox}/calls.log"
+  grep -qF 'plugin-update .claude codex@openai-codex' "${sandbox}/calls.log"
+  grep -qF 'marketplace-add .claude-r06 openai/codex-plugin-cc#v1.0.7' "${sandbox}/calls.log"
+  grep -qF 'plugin-update .claude-r06 codex@openai-codex' "${sandbox}/calls.log"
+  # `marketplace remove` must never be used -- it cascade-uninstalls the plugin (claude 2.1.220).
+  ! grep -qF 'marketplace-remove' "${sandbox}/calls.log"
+  # The unpinned official plugin has no ref, so it never drifts and is left untouched.
+  ! grep -qF 'claude-code-setup' "${sandbox}/calls.log"
+  # The "restart required to apply" notice is surfaced.
+  echo "$output" | grep -qi 'restart Claude Code'
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a ref the CLI ignores warns but does not fail the run" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  sed 's/v1\.0\.6/v1.0.7/g' "${sandbox}/reconcile.sh" >"${sandbox}/reconcile-bumped.sh"
+  : >"${sandbox}/calls.log"
+
+  # FAKE_CLAUDE_IGNORES_REF makes `marketplace add` drop the ref, so post-verify still sees a lag.
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_IGNORES_REF=1 bash "${sandbox}/reconcile-bumped.sh"
+  # Warn -- neither an endless-retry exit 1 nor a silent success.
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi 'did not converge'
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a failed plugin update warns but does not fail the run" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  sed 's/v1\.0\.6/v1.0.7/g' "${sandbox}/reconcile.sh" >"${sandbox}/reconcile-bumped.sh"
+  : >"${sandbox}/calls.log"
+
+  # A convergence-step failure is best-effort: warn, but do not fail the apply (unlike the fresh-install
+  # path, which stays fatal so chezmoi retries).
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_UPDATE_FAILS=1 bash "${sandbox}/reconcile-bumped.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi 'failed to update plugin'
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a failed re-register leaves the previous registration intact and does not fail the run" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  sed 's/v1\.0\.6/v1.0.7/g' "${sandbox}/reconcile.sh" >"${sandbox}/reconcile-bumped.sh"
+  : >"${sandbox}/calls.log"
+
+  # The plain `marketplace add` for the bumped ref fails (no rm precedes it), so the previous registration
+  # is untouched and the plugin stays at its old version. Warn without failing the apply (a non-zero exit
+  # would only make chezmoi retry a ref the CLI has already refused).
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" FAKE_CLAUDE_ADD_FAILS=v1.0.7 bash "${sandbox}/reconcile-bumped.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qi 'previous registration is left intact'
+  # The previous ref is preserved (not orphaned) in both accounts, and no rm was attempted.
+  jq -e '.["openai-codex"].source.ref == "v1.0.6"' "${sandbox}/home/.claude/plugins/known_marketplaces.json"
+  jq -e '.["openai-codex"].source.ref == "v1.0.6"' "${sandbox}/home/.claude-r06/plugins/known_marketplaces.json"
+  ! grep -qF 'marketplace-remove' "${sandbox}/calls.log"
+
+  rm -rf "$sandbox"
+}
+
+@test "claude plugin reconciler: a lost registration with the plugin still installed re-registers and updates it" {
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local sandbox
+  sandbox="$(mktemp -d)"
+  _reconciler_sandbox "$sandbox"
+
+  # Fresh apply: marketplace registered, plugin installed.
+  env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  # Drop the marketplace registration (e.g. a manual `marketplace rm`) while the plugin stays installed --
+  # the state the fresh path must recover from without leaving the installed plugin stale.
+  for acct in .claude .claude-r06; do
+    jq 'del(."openai-codex")' "${sandbox}/home/${acct}/plugins/known_marketplaces.json" >"${sandbox}/km.tmp"
+    mv "${sandbox}/km.tmp" "${sandbox}/home/${acct}/plugins/known_marketplaces.json"
+  done
+  : >"${sandbox}/calls.log"
+
+  run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
+    FAKE_CLAUDE_LOG="${sandbox}/calls.log" bash "${sandbox}/reconcile.sh"
+  [ "$status" -eq 0 ]
+  # The marketplace is re-added AND the already-installed plugin is updated (not silently left stale).
+  grep -qF 'marketplace-add .claude openai/codex-plugin-cc#v1.0.6' "${sandbox}/calls.log"
+  grep -qF 'plugin-update .claude codex@openai-codex' "${sandbox}/calls.log"
+  grep -qF 'plugin-update .claude-r06 codex@openai-codex' "${sandbox}/calls.log"
 
   rm -rf "$sandbox"
 }

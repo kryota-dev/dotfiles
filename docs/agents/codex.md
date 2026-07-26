@@ -280,19 +280,27 @@ The Claude Code side reaches Codex through the `codex` plugin from the `openai-c
 
 ### Converging the installed version
 
-The plugin setup script (`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`) installs a plugin only when it is absent: its install loop skips on a plugin-name match alone, with no version comparison. Editing the `ref` pin therefore never converges an already-installed plugin — a known gap (implementing reconciliation in the script is deliberately deferred). Convergence is manual, run once per account (`CLAUDE_CONFIG_DIR`):
+The plugin setup script (`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`) converges the installed plugin to the pinned `ref` whenever the pin changes. The pin is part of the script's `run_onchange` key (via the rendered `extraKnownMarketplaces`), so **editing the `ref` re-runs the script on the next `chezmoi apply`, which reconciles both accounts (`~/.claude` and `~/.claude-r06`) automatically** — no manual plugin commands. (An apply that leaves the declaration unchanged does not re-run it.)
+
+It compares the pinned `ref` against the one the runtime recorded in `known_marketplaces.json`. When they differ it re-registers the marketplace at the new ref with a plain `marketplace add`, which overwrites the registration in place (`marketplace update` alone would re-pull the stale registered ref, and `marketplace rm` would cascade-uninstall the plugin), and then runs `plugin update`. The reconcile is deliberately fail-safe:
+
+- **Post-verification, not silent success** — after converging it re-reads the registered ref; if it still lags (the CLI has been observed to ignore a ref on some paths) the script prints an explicit `WARNING` rather than reporting success.
+- **A convergence failure warns, it does not fail the apply** — `chezmoi apply` stays green so a ref the CLI refuses is surfaced once instead of retried on every apply. Only a *fresh* install (a plugin that is absent and cannot be installed) stays fatal, so chezmoi retries it.
+- **Restart notice** — when it updates a plugin the script reports that a Claude Code restart is required to apply (`claude plugin update` itself reports "restart required to apply").
+
+**Manual fallback** — only needed if the automated path warns it could not converge. Run once per account (`CLAUDE_CONFIG_DIR`), substituting the pinned tag for `<ref>`:
 
 ```bash
 # default account (~/.claude)
-claude plugin marketplace update openai-codex
+claude plugin marketplace add openai/codex-plugin-cc#<ref>
 claude plugin update codex@openai-codex
 
 # work account (~/.claude-r06)
-CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace update openai-codex
+CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace add openai/codex-plugin-cc#<ref>
 CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin update codex@openai-codex
 ```
 
-A Claude Code restart is required afterwards for the updated plugin to take effect (`claude plugin update` itself reports "restart required to apply"). One caveat for a future ref bump: the marketplace registration keeps its own copy of the source ref (in the runtime's `known_marketplaces.json`), and `marketplace update` pulls from that stored registration — so after changing the `settings.json` pin, verify the registered ref and re-register the marketplace (`claude plugin marketplace rm` + `add`) if it lags.
+Use `marketplace add` (it overwrites an already-registered marketplace in place) rather than `marketplace update`: the registration keeps its own copy of the source ref in `known_marketplaces.json`, and `marketplace update` pulls from that stored (stale) registration. Do not `marketplace rm` first — that uninstalls the marketplace's plugins. A Claude Code restart is required afterwards for the updated plugin to take effect.
 
 ### codex:codex-rescue — manual rescue only
 
