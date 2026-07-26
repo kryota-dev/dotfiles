@@ -16,9 +16,14 @@
 #      never edit/delete, never `gh api`, never an arbitrary issue/PR. Every other agent tool
 #      is a read-only `gh` subcommand (no merge/close/review/edit, no MCP tools). So the write
 #      surface is structurally limited to creating in-scope comments, not prompt-dependent.
-#   3. Best-effort subprocess env scrub + a prompt that treats all fetched data as untrusted
-#      and forbids emitting secrets, to blunt prompt-injection token exfil (the OAuth token
-#      is long-lived; this repo is public so comment bodies are not secret-masked).
+#   3. A prompt that treats all fetched data as untrusted and forbids emitting secrets, to
+#      blunt prompt-injection token exfil (the OAuth token is long-lived; this repo is public
+#      so comment bodies are not secret-masked). NOTE: the subprocess env scrub
+#      (CLAUDE_CODE_SUBPROCESS_ENV_SCRUB) is intentionally NOT set — it hard-requires
+#      bubblewrap, which the action installs only in allowed_non_write_users mode, so enabling
+#      it here made Claude Code fail to start. The residual `$VAR`-into-comment-body exfil path
+#      is narrowed by the empty arbitrary-Bash surface (only read-only gh subcommands and the
+#      create-only wrapper are allowed — no echo/printenv/cat).
 #
 # Prerequisite: the CLAUDE_CODE_OAUTH_TOKEN repository secret must be set
 # (generated via `claude setup-token`). Without it the action fails fast at auth.
@@ -52,12 +57,6 @@ jobs:
 
       - name: Renovate triage
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
-        env:
-          # Best-effort scrub of Anthropic/GitHub secrets from the agent's Bash subprocess
-          # env, so a prompt-injected `--body "$CLAUDE_CODE_OAUTH_TOKEN"` expands to nothing.
-          # The PID-namespace isolation layer only activates with allowed_non_write_users,
-          # so treat this as defense-in-depth, not a complete guarantee.
-          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
         with:
           # Pass the job-scoped least-privilege GITHUB_TOKEN explicitly. Without it the action
           # falls back to an OIDC exchange that requires `id-token: write` (absent here) and
