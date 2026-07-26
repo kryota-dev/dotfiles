@@ -1993,6 +1993,12 @@ _gate_decision() {
   grep -qF 'ntfy_write_compose_env' "$l"
   grep -qF 'NTFY_BASE_URL' "$l"
   ! grep -qE '\.ts\.net' "$l"
+  # Provisioning is idempotent / race-proof: a `user add` "already exists"
+  # outcome (a racy `user list` right after container start reported no user)
+  # must be tolerated, and publisher reissue keys off the actual add result
+  # (ntfy_user_created), not a fragile pre-check.
+  grep -qF 'already exists' "$l"
+  grep -qF 'ntfy_user_created' "$l"
 }
 
 @test "ntfy-setup: deploys under ~/.local/bin, sources the lib, prompts before rotating, rotates" {
