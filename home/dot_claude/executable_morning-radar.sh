@@ -125,31 +125,95 @@ notify_error() {
   ntfy_publish attention 5 "Morning Radar" "$1"
 }
 
-# Render the brief markdown as a mobile-readable HTML page at $2. Prefer pandoc;
-# `-f markdown-raw_html` escapes any raw HTML in the brief (GitHub issue titles
-# etc. are untrusted) while keeping GFM pipe tables, so a `<script>` in brief
-# content cannot execute on the served page. On pandoc absence/failure, fall
-# back to a self-contained shell that shows the markdown verbatim in a wrapping
-# <pre>, HTML-escaping & < >. Returns non-zero if no page could be produced.
+# Render the brief markdown as a mobile-readable HTML page at $2. Pandoc
+# converts the body to an HTML fragment; `markdown-raw_html` escapes any raw
+# HTML in the brief (GitHub issue titles etc. are untrusted) while keeping GFM
+# pipe tables and bare-URI autolinking, so a `<script>` in brief content can
+# never execute on the served page. The leading `# ...` line is dropped before
+# conversion -- brief_page_shell supplies its own masthead heading, so
+# pandoc's document h1 would otherwise duplicate it. On pandoc absence/
+# failure, fall back to a self-contained shell that shows the markdown
+# verbatim in a wrapping <pre>, HTML-escaping & < >. Returns non-zero if no
+# page could be produced.
 render_brief_html() {
   local md="$1" html="$2" title="$3"
   [ -s "$md" ] || return 1
-  if command -v pandoc >/dev/null 2>&1 &&
-    pandoc -s -f markdown-raw_html -t html --metadata title="$title" \
-      --metadata lang=ja -o "$html" "$md" 2>>"$LOG_FILE"; then
-    return 0
+  if command -v pandoc >/dev/null 2>&1; then
+    local fragment
+    if fragment="$(sed -e '1{' -e '/^# /d' -e '}' "$md" |
+      pandoc -f markdown-raw_html+autolink_bare_uris -t html 2>>"$LOG_FILE")"; then
+      brief_page_shell "$title" "$fragment" >"$html" 2>/dev/null && return 0
+    fi
   fi
   {
     printf '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
     printf '<meta name="viewport" content="width=device-width, initial-scale=1">'
     printf '<meta name="color-scheme" content="light dark">'
     printf '<title>%s</title>' "$title"
-    printf '<style>body{margin:0;padding:1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#1a1a1a;background:#fff}@media(prefers-color-scheme:dark){body{color:#e6e6e6;background:#111}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style>'
+    printf '%s' '<style>body{margin:0;padding:1.25rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#20242c;background:#f7f8fa}@media(prefers-color-scheme:dark){body{color:#f2f3f5;background:#20242c}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0;font:15px/1.7 ui-monospace,"SF Mono",Menlo,monospace}</style>'
     printf '</head><body><pre>'
     sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$md"
     printf '</pre></body></html>'
   } >"$html" 2>/dev/null || return 1
   return 0
+}
+
+# Build the full HTML shell around a pandoc-rendered fragment. Every static
+# piece and both dynamic arguments go through `printf '%s' <single-arg>` --
+# never through a format string containing the fragment/title -- so a literal
+# `%` (e.g. "90%消費" occurs in real briefs) or a `$`/backtick sequence in
+# untrusted brief content can never be misread as a printf conversion or
+# expanded by the shell (a heredoc, by contrast, would expand `$(...)` found
+# inside the fragment).
+#
+# Design: a single dawn-signal accent (amber) on a light, airy ground; dark
+# mode via prefers-color-scheme stays a lighter slate rather than near-black
+# so it reads as calm, not heavy (this is a one-shot static page with no
+# theme toggle). System sans (-apple-system) carries the masthead, section
+# headings, and body copy -- weight and size carry the hierarchy instead of a
+# second typeface; system mono carries only the kicker label and tabular data
+# (times, table cells) via font-variant-numeric. No web fonts are fetched --
+# the page is served entirely tailnet-local.
+brief_page_shell() {
+  local title="$1" fragment="$2"
+  printf '%s' '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+  printf '%s' '<meta name="viewport" content="width=device-width, initial-scale=1">'
+  printf '%s' '<meta name="color-scheme" content="light dark">'
+  printf '<title>%s</title>' "$title"
+  printf '%s' '<style>'
+  printf '%s' ':root{--bg:#f7f8fa;--surface:#fff;--ink:#20242c;--ink-soft:#666e7a;--line:#e4e7ec;--accent:#c1710f;--accent-soft:#fbe7cd;--crit:#c0392b;--ok:#2f8558}'
+  printf '%s' '@media (prefers-color-scheme:dark){:root{--bg:#20242c;--surface:#2b3038;--ink:#f2f3f5;--ink-soft:#aab1bd;--line:#3c424c;--accent:#f0ac5c;--accent-soft:#3c2c14;--crit:#e8897c;--ok:#6fcb9e}}'
+  printf '%s' '*{box-sizing:border-box}'
+  printf '%s' 'body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}'
+  printf '%s' '.wrap{max-width:38rem;margin:0 auto;padding:2.25rem 1.25rem 4rem}'
+  printf '%s' '.kicker{display:block;font:600 .72rem/1 ui-monospace,"SF Mono",Menlo,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:.6rem}'
+  printf '%s' 'h1.masthead{font:700 1.85rem/1.25 -apple-system,"SF Pro Display",system-ui,sans-serif;margin:0 0 2rem;text-wrap:balance;letter-spacing:-.015em}'
+  printf '%s' 'main h2{font:700 1.05rem/1.3 -apple-system,"SF Pro Display",system-ui,sans-serif;margin:2.25rem 0 .75rem;padding-top:1.25rem;border-top:1px solid var(--line)}'
+  printf '%s' 'main h2:first-of-type{border-top:none;padding-top:0;margin-top:0}'
+  printf '%s' 'main h3{font:600 .92rem/1.4 -apple-system,system-ui,sans-serif;margin:1.25rem 0 .5rem;color:var(--ink-soft)}'
+  printf '%s' 'main p{margin:.6rem 0}'
+  printf '%s' 'main em{color:var(--ink-soft)}'
+  printf '%s' 'main code{font:.85em ui-monospace,"SF Mono",Menlo,monospace;background:var(--accent-soft);padding:.1em .3em;border-radius:.25em}'
+  printf '%s' 'main a{color:var(--accent);text-decoration-color:var(--line);text-underline-offset:.15em}'
+  printf '%s' 'main ul{padding-left:1.15rem;margin:.6rem 0}'
+  printf '%s' 'main ul li{margin:.35rem 0}'
+  printf '%s' 'main ol{list-style:none;padding:0;margin:1rem 0;display:flex;flex-direction:column;gap:.55rem;counter-reset:step}'
+  printf '%s' 'main ol li{position:relative;counter-increment:step;padding:.75rem .9rem .75rem 2.7rem;background:var(--surface);border:1px solid var(--line);border-radius:.5rem}'
+  printf '%s' 'main ol li::before{position:absolute;left:.85rem;top:.72rem;content:counter(step,decimal-leading-zero);font:700 1.05rem/1 -apple-system,"SF Pro Display",system-ui,sans-serif;color:var(--accent);font-variant-numeric:tabular-nums}'
+  printf '%s' 'main table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:.92rem;margin:.75rem 0}'
+  printf '%s' 'main th,main td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}'
+  printf '%s' 'main th{font:600 .7rem/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft)}'
+  printf '%s' 'main strong{color:var(--ink);font-weight:700}'
+  printf '%s' 'footer.meta{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--ink-soft);font:.75rem/1.5 ui-monospace,monospace}'
+  printf '%s' '@media (prefers-reduced-motion:no-preference){main a{transition:opacity .15s ease}}'
+  printf '%s' '</style></head><body><div class="wrap">'
+  printf '%s' '<span class="kicker">Morning Radar</span>'
+  printf '<h1 class="masthead">%s</h1>' "$title"
+  printf '%s' '<main>'
+  printf '%s' "$fragment"
+  printf '%s' '</main>'
+  printf '%s' '<footer class="meta">tailnet-only &middot; self-hosted</footer>'
+  printf '%s' '</div></body></html>'
 }
 
 # Build the tailnet click URL for the given date, or empty when the brief base
