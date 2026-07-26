@@ -1,6 +1,6 @@
 ---
 name: compact-docs
-description: Compress, reduce, optimize, or shrink documentation files. Use when docs are verbose, redundant, or need consolidation for clarity.
+description: ドキュメントファイルを圧縮・削減・最適化・縮小する。冗長・重複していて明確化のため統合が必要なドキュメントに使用する。
 disable-model-invocation: true
 allowed-tools: Read, Edit
 ---
