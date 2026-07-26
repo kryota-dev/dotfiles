@@ -1,16 +1,20 @@
 # ntfy server configuration (kryota-dev/dotfiles#337). Deployed 0600; mounted
 # read-only into the ntfy container at /etc/ntfy/server.yml (paths below are
 # container paths). This file is kept on the "Exclude CI-incompatible files"
-# list in setup-validation.yml; it no longer reads from 1Password (base-url was
-# dropped — see below), but staying excluded avoids CI rendering a 0600 config
-# full of container-only paths.
+# list in setup-validation.yml; it reads nothing from 1Password (base-url is
+# injected at runtime, see below), but staying excluded avoids CI rendering a
+# 0600 config full of container-only paths.
 
-# NOTE: `base-url` is intentionally NOT set. It is optional for core messaging
-# (only attachments / email footer links need it, none of which this setup
-# uses), it does not affect the iOS `upstream-base-url` relay, and deriving the
-# tailnet MagicDNS name at apply time would couple `chezmoi apply` to Tailscale
-# being up. The MagicDNS URL is derived on demand (device login / smoke test)
-# by ntfy-setup instead, and never stored.
+# NOTE: `base-url` is not set HERE (in the committed config) because it is the
+# tailnet MagicDNS URL, which must not live in this public repo. But ntfy
+# REQUIRES base-url whenever `upstream-base-url` (the iOS relay below) is set —
+# the server refuses to start otherwise ("if upstream-base-url is set, base-url
+# must also be set"). So the shared library derives the MagicDNS URL at server
+# start and injects it via the `NTFY_BASE_URL` env (written to
+# ~/.config/ntfy/.env, runtime state, docker-compose auto-loads it, never
+# committed). Consequence: the server cannot start until Tailscale is up — the
+# intended two-phase behaviour; run_onchange fails open and ntfy-setup completes
+# it once Tailscale/Docker are available.
 
 # iOS instant push relay (user-approved at the #337 PRD gate). NOTE: per
 # docs.ntfy.sh/config this publishes a poll request to ntfy.sh for EVERY
