@@ -151,37 +151,42 @@ ntfy_wait_ready() {
 
 # --- User / ACL / token primitives ------------------------------------------
 
-ntfy_user_exists() {
-  # Match the name exactly: the next char after it must be a field delimiter
-  # (space / colon / paren) or end of line, so `publisher` never matches a
-  # hypothetical `publisher-foo`. Does not assume where "user " sits on the line.
-  ntfy_exec user list 2>/dev/null | grep -qE "user ${1}([ :(]|$)"
-}
+# Set to 1 by ntfy_ensure_user when it actually created the user this call, 0
+# when the user already existed. Read by ntfy_provision_publisher to tell a
+# user.db loss (create → reissue token) from a normal re-run.
+ntfy_user_created=0
 
-# Create a user with a throwaway random password if it does not exist. Used for
-# the publisher, which authenticates with a token, so its password is never
-# needed or stored.
+# Ensure the publisher user exists. It authenticates with a token, so its
+# password is a throwaway that is never needed or stored. Idempotent and robust
+# against a racy `user list` right after container start: it relies on the ACTUAL
+# `user add` result, not a pre-check — an "already exists" outcome is success.
 ntfy_ensure_user() {
-  local u="$1"
-  ntfy_user_exists "$u" && return 0
-  ntfy_log "creating ntfy user ${u}..."
-  NTFY_PASSWORD="$(openssl rand -base64 24)" \
-    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user add "$u"
+  local u="$1" out
+  ntfy_user_created=0
+  if out="$(NTFY_PASSWORD="$(openssl rand -base64 24)" \
+    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user add "$u" 2>&1)"; then
+    ntfy_log "created ntfy user ${u}."
+    ntfy_user_created=1
+    return 0
+  fi
+  if printf '%s' "$out" | grep -qi 'already exists'; then
+    return 0
+  fi
+  ntfy_warn "ntfy user add ${u} failed: ${out}"
+  return 1
 }
 
-# Ensure a user exists with a specific (known) password. `user add` when absent,
-# `user change-pass` when present — both read the password from NTFY_PASSWORD
-# (verified in the ntfy CLI source), so the password never lands in argv, and
-# change-pass preserves the user's ACLs.
+# Ensure a user exists with a specific (known) password (the subscriber device
+# login). Idempotent and race-proof: create if absent (ignoring "already
+# exists"), then set the password authoritatively via `change-pass` (preserves
+# ACLs). Both read the password from NTFY_PASSWORD (verified in the ntfy CLI
+# source), so it never lands in argv.
 ntfy_ensure_user_with_password() {
-  local u="$1" pw="$2" sub
-  if ntfy_user_exists "$u"; then
-    sub="change-pass"
-  else
-    sub="add"
-  fi
+  local u="$1" pw="$2"
   NTFY_PASSWORD="$pw" \
-    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user "$sub" "$u"
+    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user add "$u" >/dev/null 2>&1 || true
+  NTFY_PASSWORD="$pw" \
+    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user change-pass "$u"
 }
 
 # Idempotent ACL grant across the two rendered topics plus the runbook-only
@@ -264,19 +269,18 @@ ntfy_store_subscriber_password() {
 # --- High-level provisioning -------------------------------------------------
 
 ntfy_provision_publisher() {
-  local existed=1
-  ntfy_user_exists "$ntfy_pub_user" || existed=0
   ntfy_ensure_user "$ntfy_pub_user" || {
     ntfy_warn "could not create the publisher user; provision manually."
     return 1
   }
   ntfy_grant_acl "$ntfy_pub_user" write-only
-  # Only trust an existing notify-env token if the publisher user was already
-  # present. If we just (re)created it — e.g. after a user.db loss — any token in
-  # notify-env is stale against the rebuilt server, so reissue. This mirrors the
-  # subscriber self-heal and makes "delete user.db, run ntfy-setup" actually
-  # restore the publisher too.
-  if [ "$existed" = 1 ] && ntfy_notify_env_has_token; then
+  # Only trust an existing notify-env token if the publisher user already
+  # existed. If ntfy_ensure_user just (re)created it — e.g. after a user.db loss
+  # — any token in notify-env is stale against the rebuilt server, so reissue.
+  # ntfy_user_created is set from the actual `user add` result (not a racy
+  # pre-check). This mirrors the subscriber self-heal and makes "delete user.db,
+  # run ntfy-setup" actually restore the publisher too.
+  if [ "${ntfy_user_created:-0}" = 0 ] && ntfy_notify_env_has_token; then
     return 0
   fi
   local tok
