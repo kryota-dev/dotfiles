@@ -79,7 +79,7 @@ flowchart TD
 | `12-setup-mise` | `dot_config/mise/config.toml` |
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
-| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
+| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` + `Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl` |
 | `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` + `dot_config/ntfy/lib.sh.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | 自分自身のソースファイル（任意の編集で再トリガー） |
@@ -207,9 +207,27 @@ Control Center 刷新で個別キー（`IsAnalog`、`Show24Hour`、`ShowAMPM`、
 プロファイルテーマは意図的に除外しています — 既存機の状態を破壊するリスクがあるか、
 `defaults write` 一行を超えて別ファイルの配布が必要になるためです。
 
+本スクリプトは `chezmoi apply` 実行時にのみ設定を適用します — その後、管理対象の設定が
+（例えばシステム設定 UI の操作で）乖離しても気づきません。`dev.kryota.macos-defaults-drift`
+LaunchAgent（kryota-dev/dotfiles#365、下記の `30-register-launchd-agents` が登録）が
+このギャップを埋めます。週次で本スクリプトの `defaults write` 行を一時 plist に再生して
+各管理対象キーの期待値を導出し、実際の値と比較して、乖離があれば ntfy（`topic_attention`）
+で通知します — 検出・通知のみで、本スクリプトへの書き戻しや git 操作は一切行いません。
+
 ### 30 — register-launchd-agents (`run_onchange`、after、macOS のみ)
 
-repo 管理の launchd LaunchAgent（現在は平日朝ブリーフを発火する `dev.kryota.morning-radar` の 1 つ、kryota-dev/dotfiles#257。Claude Code ハーネスドキュメントの [朝次レーダーのスケジュール実行](../agents/claude-code.ja.md) 参照）を登録します。`launchctl bootout || true` → `launchctl bootstrap gui/$UID` の順で実行するため、plist の変更は冪等に再読み込みされます。再トリガーのキーは plist テンプレートの埋め込みハッシュです（wrapper script の編集は再登録不要 — launchd は発火のたびに現行ファイルを exec します）。`$CI` 設定時は登録をスキップします。headless runner には gui launchd domain が存在せず、in-script ガードならワークフローでファイルを除外する方式と異なり、レンダリング / apply パスが CI 検証対象に残ります。CI 外では bootstrap 失敗をハードフェイルとし、次回 apply で chezmoi がリトライします（規約 #6）。
+repo 管理の launchd LaunchAgent を登録します: 平日朝ブリーフを発火する
+`dev.kryota.morning-radar`（kryota-dev/dotfiles#257。Claude Code ハーネスドキュメントの
+[朝次レーダーのスケジュール実行](../agents/claude-code.ja.md) 参照）と、上記の週次
+`20-macos-defaults` ドリフトチェックを発火する `dev.kryota.macos-defaults-drift`
+（kryota-dev/dotfiles#365）の 2 つです。共通の `register_agent <label> <plist>` 関数が
+それぞれについて `launchctl bootout || true` → `launchctl bootstrap gui/$UID` の順で実行するため、
+plist の変更は冪等に再読み込みされます。再トリガーのキーは各 plist テンプレートの埋め込み
+ハッシュです（wrapper script の編集は再登録不要 — launchd は発火のたびに現行ファイルを
+exec します）。`$CI` 設定時は登録をスキップします。headless runner には gui launchd domain
+が存在せず、in-script ガードならワークフローでファイルを除外する方式と異なり、レンダリング /
+apply パスが CI 検証対象に残ります。CI 外では bootstrap 失敗をハードフェイルとし、次回
+apply で chezmoi がリトライします（規約 #6）。
 
 ### 31 — setup-ntfy (`run_onchange`、after、macOS のみ)
 
