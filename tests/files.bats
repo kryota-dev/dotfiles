@@ -1652,3 +1652,115 @@ _gate_decision() {
   grep -q 'instinct-cli.py' "$sk"
   grep -q 'clv2-session-notify' "$sk"
 }
+
+# --- Self-hosted ntfy notification system (#337) ---
+
+@test "ntfy compose pins an exact image tag, stays loopback-only, and restarts" {
+  local c="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  [ -f "$c" ]
+  # Exact version pin — Renovate's regex manager tracks this line; `latest`
+  # (or any non-vX.Y.Z tag) would make the deployment unauditable.
+  grep -qE '^    image: binary/ntfy:v[0-9]+\.[0-9]+\.[0-9]+$' "$c"
+  ! grep -q 'image:.*latest' "$c"
+  grep -q 'restart: unless-stopped' "$c"
+  # Host exposure must be loopback-only; tailnet access goes through
+  # `tailscale serve`, never a direct bind.
+  grep -qF '"127.0.0.1:{{ .ntfy.port }}:80"' "$c"
+  ! grep -q '0\.0\.0\.0' "$c"
+}
+
+@test "ntfy server config enforces deny-all auth and persistent cache" {
+  local y="${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
+  [ -f "$y" ]
+  grep -q 'auth-default-access: "deny-all"' "$y"
+  grep -q 'auth-file:' "$y"
+  grep -q 'cache-file:' "$y"
+  grep -qF 'cache-duration: "{{ .ntfy.cache_duration }}"' "$y"
+  # iOS instant-push relay, the sole user-approved metadata egress (#337 PRD D2').
+  grep -qF 'upstream-base-url: "https://ntfy.sh"' "$y"
+  # tailscale funnel must never appear anywhere in the ntfy config assets.
+  ! grep -ri 'funnel' "${HOME_DIR}/dot_config/ntfy"
+}
+
+@test "ntfy setup script carries the embedded hashes and CI guard" {
+  local s="${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  [ -f "$s" ]
+  # embedded-hash trick: re-runs only when the compose file or server config changes
+  grep -qF 'include "dot_config/ntfy/compose.yaml.tmpl" | sha256sum' "$s"
+  grep -qF 'include "dot_config/ntfy/private_server.yml.tmpl" | sha256sum' "$s"
+  # CI must never start services from lifecycle scripts
+  grep -qF 'if [ -n "${CI:-}" ]; then' "$s"
+  # darwin-only: the whole body is inside the OS guard
+  head -1 "$s" | grep -qF '{{ if eq .chezmoi.os "darwin" -}}'
+  # template-stripped body must still parse
+  sed '/{{/d' "$s" | bash -n
+  # tailscale serve with --bg (persists across reboots); funnel is forbidden
+  grep -qF 'serve --bg' "$s"
+  ! grep -qE '^[^#]*tailscale.*funnel' "$s"
+}
+
+@test "settings.json disables stop:desktop-notify and wires the ntfy hooks (#337)" {
+  local s="${HOME_DIR}/dot_claude/settings.json"
+  [ -f "$s" ]
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  jq -e '
+    (.env.ECC_DISABLED_HOOKS | split(",")) as $ids
+    | ($ids | index("stop:desktop-notify")) != null
+  ' "$s" >/dev/null
+  # Notification hook entry: the four subscribed matchers, async command wrapper
+  jq -e '
+    .hooks.Notification[] | select(.id=="notification:ntfy-notify")
+    | .matcher=="permission_prompt|idle_prompt|agent_needs_input|agent_completed"
+      and .hooks[0].type=="command"
+      and .hooks[0].command=="$HOME/.claude/ntfy-notify.sh"
+      and .hooks[0].async==true
+      and .hooks[0].timeout==10
+  ' "$s" >/dev/null
+  # Stop hook entry replacing desktop-notify (same structural bar as Notification)
+  jq -e '
+    .hooks.Stop[] | select(.id=="stop:ntfy-notify")
+    | .hooks[0].type=="command"
+      and .hooks[0].command=="$HOME/.claude/ntfy-notify.sh"
+      and .hooks[0].async==true
+      and .hooks[0].timeout==10
+  ' "$s" >/dev/null
+}
+
+@test "CI excludes the ntfy onepasswordRead templates in both jobs" {
+  local w="${REPO_ROOT}/.github/workflows/setup-validation.yml"
+  [ -f "$w" ]
+  # The CI precedent is the hardcoded mv list (NOT .chezmoiignore): each
+  # onepasswordRead template must appear once per job (macOS + Ubuntu).
+  [ "$(grep -cF 'home/dot_config/ntfy/private_server.yml.tmpl' "$w")" -eq 2 ]
+  [ "$(grep -cF 'home/dot_config/ntfy/private_notify-env.tmpl' "$w")" -eq 2 ]
+}
+
+@test "renovate tracks the ntfy image tag via the compose regex manager" {
+  local r="${REPO_ROOT}/.github/renovate.json5"
+  grep -qF 'binary/ntfy' "$r"
+  grep -qF "compose\\\\.yaml\\\\.tmpl" "$r"
+}
+
+@test "1password ITEMS covers the ntfy item fields" {
+  _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/base-url'
+  _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/credential'
+  # The templates must consume exactly the URIs the gate validates — a typo on
+  # either side would otherwise pass both checks independently.
+  grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/credential"' \
+    "${HOME_DIR}/dot_config/ntfy/private_notify-env.tmpl"
+  grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url"' \
+    "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
+}
+
+@test "ntfy runtime state never lands in the chezmoi source tree" {
+  # user.db / cache.db are runtime state under ~/Library/Application Support/ntfy.
+  # Structural check first: chezmoi must not manage that target dir (the sibling
+  # Application Support/Code entry for VS Code is unrelated and stays).
+  [ ! -e "${HOME_DIR}/Library/Application Support/ntfy" ]
+  run find "${HOME_DIR}" -name 'user.db*' -o -name 'cache.db*'
+  [ -z "$output" ]
+}
+
+@test "chezmoiignore excludes the ntfy config dir on non-darwin" {
+  grep -qF '.config/ntfy' "${HOME_DIR}/.chezmoiignore"
+}
