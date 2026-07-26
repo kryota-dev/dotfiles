@@ -431,11 +431,14 @@ load helpers/setup
   # Phases are renumbered and contiguous after the removal.
   grep -q '^## Phase 5: コミット & PR' "$skill"
   grep -q '^## Phase 6: 完了報告' "$skill"
-  # Hidden from the / menu (user-invocable: false) AND model-invocation disabled, so it
-  # runs only when pr-workflow invokes it via the Skill tool. user-invocable defaults to
-  # true when absent, so the false must be explicit (verified against the CC docs).
+  # Hidden from the / menu so a user cannot run it standalone, while pr-workflow can
+  # still invoke it via the Skill tool (user-invocable: false blocks menu/user access
+  # but NOT Skill-tool access; per the CC docs it keeps "Claude can invoke: yes").
+  # NB: disable-model-invocation is deliberately NOT set — it would also set
+  # "Claude can invoke: no", which would stop pr-workflow from invoking sdd.
+  # user-invocable defaults to true when absent, so the false must be explicit.
   grep -q '^user-invocable: false$' "$skill"
-  grep -q '^disable-model-invocation: true$' "$skill"
+  ! grep -q '^disable-model-invocation:' "$skill"
 }
 
 @test "multi-review wires the cross-cutting specialist roster and spec-context (#347)" {
