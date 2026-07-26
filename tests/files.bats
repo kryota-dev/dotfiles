@@ -126,6 +126,36 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "knowledge-distill launchd agent source files exist" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh" ]
+}
+
+@test "knowledge-distill plist schedules Friday only and never runs at load" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
+  # RunAtLoad must stay absent so (re-)registration never triggers a billed run.
+  run grep -q '<key>RunAtLoad</key>' "$plist"
+  [ "$status" -ne 0 ]
+  # Weekly on Friday at 18:00 local time: exactly one Weekday/Hour entry (#368).
+  [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 1 ]
+  local weekday hour
+  weekday="$(grep -A1 '<key>Weekday</key>' "$plist" | grep -oE '[0-9]+')"
+  [ "$weekday" = "5" ]
+  hour="$(grep -A1 '<key>Hour</key>' "$plist" | grep -oE '[0-9]+')"
+  [ "$hour" = "18" ]
+}
+
+@test "knowledge-distill plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
 @test "launcher dir reaches interactive (precmd+sync) and login (zprofile) shells (#345)" {
   local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
   local zprofile="${HOME_DIR}/dot_zprofile.tmpl"
@@ -222,8 +252,13 @@ load helpers/setup
 
 @test "launchd registration script embeds the plist hash and guards CI" {
   local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
-  # Re-registration is keyed to the plist content (embedded-hash trick).
+  # Re-registration is keyed to the plist content (embedded-hash trick), one
+  # hash line per managed agent (#368 generalized this to a label loop).
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" | sha256sum }}' "$script"
+  # Both labels must be registered via the shared loop, not hardcoded once.
+  grep -Fq 'labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill)' "$script"
+  grep -Fq 'for label in "${labels[@]}"; do' "$script"
   # CI runners have no gui launchd domain; the script must self-skip there.
   grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
   # Template-stripped body must be valid bash (same strip trick as make lint).
