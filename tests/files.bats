@@ -1216,6 +1216,79 @@ FAKE_CLAUDE
   [ "$perms" = "600" ]       # owner-only permissions
 }
 
+@test "prompt-conform-suggest hook exists and passes node syntax check" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  [ -f "$hook" ]
+  node --check "$hook"
+}
+
+@test "prompt-conform-suggest triggers on a long JP task-shaped prompt" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='ユーザー認証機能を実装してください。要件は以下の通りです。メールアドレスとパスワードでログインできること。セッションはJWTで管理すること。パスワードはbcryptでハッシュ化すること。ログイン失敗時は適切なエラーメッセージを返すこと。既存のミドルウェアとの統合方法も検討し、テストも一緒に書いてください。ドキュメントの更新も忘れずにお願いします。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ "$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
+  [ -n "$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext')" ]
+}
+
+@test "prompt-conform-suggest triggers on a long EN task-shaped prompt" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='Please implement a new caching layer for the API responses. It should support TTL-based eviction, be pluggable so we can swap Redis for an in-memory store in tests, and include unit tests covering the eviction edge cases as well as documentation for future maintainers.'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ "$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
+}
+
+@test "prompt-conform-suggest is silent on a short conversational prompt" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"ありがとうございます、完璧です"}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest is silent on a long prompt with no task/keyword shape" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"A".repeat(300)}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest fails open on malformed stdin JSON" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  run bash -c "printf 'not json' | node \"$hook\""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "prompt-conform-suggest honours a PROMPT_CONFORM_SUGGEST_MIN_LENGTH override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"直してください"}))' \
+    | PROMPT_CONFORM_SUGGEST_MIN_LENGTH=5 node "$hook")
+  [ -n "$out" ]
+}
+
+@test "prompt-conform-suggest falls back to the built-in task regex on an invalid override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='ユーザー認証機能を実装してください。要件は以下の通りです。メールアドレスとパスワードでログインできること。セッションはJWTで管理すること。パスワードはbcryptでハッシュ化すること。ログイン失敗時は適切なエラーメッセージを返すこと。既存のミドルウェアとの統合方法も検討し、テストも一緒に書いてください。ドキュメントの更新も忘れずにお願いします。'
+  local out err
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" \
+    | PROMPT_CONFORM_SUGGEST_TASK_REGEX='(' node "$hook" 2>"${BATS_TEST_TMPDIR}/stderr.log")
+  err=$(cat "${BATS_TEST_TMPDIR}/stderr.log")
+  [ -n "$out" ]
+  [[ "$err" == *"ignoring invalid PROMPT_CONFORM_SUGGEST_TASK_REGEX regex"* ]]
+}
+
+@test "settings.json wires the prompt-conform-suggest UserPromptSubmit hook" {
+  local settings="${HOME_DIR}/dot_claude/settings.json"
+  local hook
+  hook=$(jq -r '.hooks.UserPromptSubmit[]? | select(.id == "user-prompt-submit:prompt-conform-suggest")' "$settings")
+  [ -n "$hook" ]
+  [ "$(echo "$hook" | jq -r '.matcher')" = "*" ]
+  [ "$(echo "$hook" | jq -r '.hooks[0].command')" = 'node "$HOME/.claude/hooks-fork/prompt-conform-suggest.js"' ]
+  [ "$(echo "$hook" | jq -r '.hooks[0].timeout')" -le 30 ]
+}
+
 @test "1password-backed secret template exists" {
   [ -f "${HOME_DIR}/private_dot_aws/config.tmpl" ]
 }
