@@ -282,7 +282,7 @@ Claude Code 側は `openai-codex` marketplace の `codex` プラグインを通�
 
 プラグインセットアップスクリプト（`home/run_onchange_after_17-setup-claude-plugins.sh.tmpl`）は、pin が変わったときにインストール済みプラグインを pin された `ref` へ収束させます。pin はスクリプトの `run_onchange` キーの一部（レンダリングされた `extraKnownMarketplaces` 経由）なので、**`ref` を編集すると次の `chezmoi apply` でスクリプトが再実行され、両アカウント（`~/.claude` と `~/.claude-r06`）が自動的に収束します** — 手動のプラグインコマンドは不要です（宣言が変わらない apply では再実行されません）。
 
-収束は、pin された `ref` とランタイムが `known_marketplaces.json` に記録した ref を比較して行います。両者が異なる場合、marketplace を新しい ref で再登録し（`marketplace update` だけでは stale な登録 ref を pull し直してしまうため `marketplace rm` + `add`）、続いて `plugin update` を実行します。この収束は意図的に fail-safe です：
+収束は、pin された `ref` とランタイムが `known_marketplaces.json` に記録した ref を比較して行います。両者が異なる場合、plain な `marketplace add` で marketplace を新しい ref に再登録し（`marketplace add` は既登録を in-place で上書きします。`marketplace update` だけでは stale な登録 ref を pull し直し、`marketplace rm` はプラグインをカスケード・アンインストールしてしまうため）、続いて `plugin update` を実行します。この収束は意図的に fail-safe です：
 
 - **silent success ではなく post-verification** — 収束後に登録済み ref を再読込し、依然として遅れている場合（CLI が一部の経路で ref を無視することが観測されています）は、成功として報告せず明示的な `WARNING` を出力します。
 - **収束の失敗は warning であり、apply を fail させません** — `chezmoi apply` は green のまま（`exit 0`）で、CLI が拒否した ref は毎回 retry されるのではなく一度だけ surface されます。fatal を維持するのは *fresh* install（プラグインが存在せずインストールもできない）のみで、その場合は chezmoi が retry します。
@@ -292,17 +292,15 @@ Claude Code 側は `openai-codex` marketplace の `codex` プラグインを通�
 
 ```bash
 # デフォルトアカウント (~/.claude)
-claude plugin marketplace rm openai-codex
 claude plugin marketplace add openai/codex-plugin-cc#<ref>
 claude plugin update codex@openai-codex
 
 # ワークアカウント (~/.claude-r06)
-CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace rm openai-codex
 CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin marketplace add openai/codex-plugin-cc#<ref>
 CLAUDE_CONFIG_DIR=~/.claude-r06 claude plugin update codex@openai-codex
 ```
 
-`marketplace update` ではなく `rm` + `add` を使うのは、marketplace 登録がソース ref の独自コピーを `known_marketplaces.json` に保持し、`marketplace update` がその保存済み（stale な）登録から pull するためです。反映には、その後 Claude Code の再起動が必要です。
+`marketplace update` ではなく `marketplace add`（既登録を in-place で上書きします）を使うのは、marketplace 登録がソース ref の独自コピーを `known_marketplaces.json` に保持し、`marketplace update` がその保存済み（stale な）登録から pull するためです。先に `marketplace rm` はしないでください — その marketplace のプラグインをアンインストールしてしまいます。反映には、その後 Claude Code の再起動が必要です。
 
 ### codex:codex-rescue — 手動レスキュー専用
 
