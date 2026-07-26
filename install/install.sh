@@ -55,3 +55,14 @@ sh -c "$installer" -- init --apply kryota-dev
 echo ""
 echo "=== Setup complete! ==="
 echo "Please restart your terminal."
+
+# ntfy notifications are macOS-only and inherently two-phase: at first apply
+# Tailscale is not yet `up` and Docker Desktop is not running, so the server and
+# device credentials cannot be provisioned during bootstrap. Point the user at
+# the one command that finishes the job once those are available.
+if [ "$OS" = "Darwin" ]; then
+  echo ""
+  echo "ntfy notifications (this Mac): once Tailscale is up ('tailscale up') and"
+  echo "Docker Desktop is running, run 'ntfy-setup' to bring up the server and"
+  echo "provision device login. See docs/architecture/notifications.md."
+fi

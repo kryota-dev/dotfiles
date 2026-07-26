@@ -1,12 +1,16 @@
 # ntfy server configuration (kryota-dev/dotfiles#337). Deployed 0600; mounted
 # read-only into the ntfy container at /etc/ntfy/server.yml (paths below are
-# container paths). CI never renders this file — it is on the
-# "Exclude CI-incompatible files" list in setup-validation.yml (onepasswordRead).
+# container paths). This file is kept on the "Exclude CI-incompatible files"
+# list in setup-validation.yml; it no longer reads from 1Password (base-url was
+# dropped — see below), but staying excluded avoids CI rendering a 0600 config
+# full of container-only paths.
 
-# Public URL of this server as seen by subscribers (the `tailscale serve`
-# HTTPS endpoint). Stored in 1Password so the tailnet's MagicDNS name never
-# lands in this public repo.
-base-url: "{{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url" | trim }}"
+# NOTE: `base-url` is intentionally NOT set. It is optional for core messaging
+# (only attachments / email footer links need it, none of which this setup
+# uses), it does not affect the iOS `upstream-base-url` relay, and deriving the
+# tailnet MagicDNS name at apply time would couple `chezmoi apply` to Tailscale
+# being up. The MagicDNS URL is derived on demand (device login / smoke test)
+# by ntfy-setup instead, and never stored.
 
 # iOS instant push relay (user-approved at the #337 PRD gate). NOTE: per
 # docs.ntfy.sh/config this publishes a poll request to ntfy.sh for EVERY

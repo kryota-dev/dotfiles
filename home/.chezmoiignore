@@ -125,4 +125,5 @@
 {{ if ne .chezmoi.os "darwin" }}
 Library/
 .config/ntfy
+.local/bin/ntfy-setup
 {{ end }}

@@ -1,0 +1,107 @@
+#!/bin/bash
+# ntfy-setup — bring up the self-hosted ntfy server and provision / rotate its
+# credentials (kryota-dev/dotfiles#337). All logic lives in the shared library;
+# this is the on-demand, re-runnable entry point (the apply-time
+# run_onchange_after_31-setup-ntfy sources the same library, fail-open).
+#
+# Unlike the apply-time path this command is fail-clear: it exits non-zero with
+# guidance when a prerequisite it cannot fix itself is missing.
+#
+#   ntfy-setup                         set up / repair (asks before rotating live creds)
+#   ntfy-setup --rotate publisher      rotate the publisher token
+#   ntfy-setup --rotate subscriber     rotate the subscriber password
+#   ntfy-setup --rotate all            rotate both
+#
+# Two-phase reality: on a fresh machine Tailscale is not yet `up` and Docker
+# Desktop is not running, so run this once both are available.
+set -euo pipefail
+
+EXIT_ERR=1        # an operation failed
+EXIT_USAGE=2      # bad arguments / library missing
+EXIT_PREREQ=3     # a prerequisite this command cannot fix is missing
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: ntfy-setup [--rotate publisher|subscriber|all]
+  (no args)                 set up or repair; prompts before rotating live credentials
+  --rotate publisher        rotate the write-only publisher token (notify-env)
+  --rotate subscriber       rotate the read-only subscriber password (1Password + devices)
+  --rotate all              rotate both
+USAGE
+}
+
+rotate=""
+case "${1:-}" in
+"") ;;
+--rotate)
+  rotate="${2:-}"
+  case "$rotate" in
+  publisher | subscriber | all) ;;
+  *)
+    usage
+    exit "$EXIT_USAGE"
+    ;;
+  esac
+  ;;
+-h | --help)
+  usage
+  exit 0
+  ;;
+*)
+  usage
+  exit "$EXIT_USAGE"
+  ;;
+esac
+
+lib="$HOME/.config/ntfy/lib.sh"
+if [ ! -r "$lib" ]; then
+  echo "ntfy-setup: $lib not found. Run 'chezmoi apply' first." >&2
+  exit "$EXIT_USAGE"
+fi
+# shellcheck source=/dev/null
+. "$lib"
+
+# Prerequisites this command cannot fix itself.
+if ! ntfy_docker_ready; then
+  echo "ntfy-setup: Docker Desktop is not running. Start it, then re-run ntfy-setup." >&2
+  exit "$EXIT_PREREQ"
+fi
+if ! ntfy_tailscale_up; then
+  echo "ntfy-setup: Tailscale is not up. Run 'tailscale up', then re-run ntfy-setup." >&2
+  exit "$EXIT_PREREQ"
+fi
+
+# Bring the server up (idempotent) — this is what restarts a container that went
+# down after a reboot, which a plain 'chezmoi apply' cannot do.
+if ! ntfy_start_server; then
+  echo "ntfy-setup: failed to start the ntfy container." >&2
+  exit "$EXIT_ERR"
+fi
+if ! ntfy_assert_serve; then
+  echo "ntfy-setup: 'tailscale serve' failed (is tailscaled healthy?)." >&2
+  exit "$EXIT_ERR"
+fi
+ntfy_wait_ready || echo "ntfy-setup: ntfy container is slow to become ready; continuing." >&2
+
+if [ -n "$rotate" ]; then
+  case "$rotate" in
+  publisher) ntfy_rotate_publisher ;;
+  subscriber) ntfy_rotate_subscriber ;;
+  all)
+    ntfy_rotate_publisher
+    ntfy_rotate_subscriber
+    ;;
+  esac
+  ntfy_print_device_info
+  exit 0
+fi
+
+# No explicit rotate: provision/repair. If live credentials already exist, ask
+# before rotating them (default N without a tty).
+if ntfy_creds_exist && ntfy_prompt_yn "ntfy credentials already exist — rotate them? [y/N] "; then
+  ntfy_rotate_publisher
+  ntfy_rotate_subscriber
+else
+  ntfy_provision
+fi
+ntfy_print_device_info
