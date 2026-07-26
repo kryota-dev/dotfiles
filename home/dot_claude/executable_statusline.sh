@@ -306,8 +306,10 @@ write_harness_cost() {
 # gate on measured quota pressure instead of guessing from session length.
 write_rate_limits_snapshot() {
   local fh_pct="$1" fh_reset="$2" sd_pct="$3" sd_reset="$4" effort="$5"
-  # API-key auth sessions never populate rate_limits on stdin; skip silently
-  # and leave any prior snapshot in place (the reader ages it out via ts).
+  # rate_limits is absent on stdin for API-key auth sessions, and also for
+  # subscription sessions before the first API response lands. Either way, skip
+  # silently and leave any prior snapshot in place (the reader ages it out via
+  # ts) rather than clobbering a still-fresh window with an empty one.
   [ -n "$fh_pct" ] || [ -n "$sd_pct" ] || return 0
   # Same JSON-number regex as write_harness_cost. Reject each field
   # independently so one malformed value can't sink the other window.
@@ -346,8 +348,18 @@ write_rate_limits_snapshot() {
     fi
   fi
 
-  local target="$CACHE_DIR/rate_limits_${profile}.json" tmpf
-  tmpf=$(mktemp "$CACHE_DIR/rate_limits_${profile}.XXXXXX" 2>/dev/null) || return 0
+  # Match write_harness_cost: umask 077 so the temp file is 0600 regardless of
+  # the caller's umask. CACHE_DIR is already chmod 700, but that chmod swallows
+  # errors (2>/dev/null), so a pre-existing loosely-permissioned XDG_CACHE_HOME
+  # would otherwise leak quota/effort data to group/other. Belt and suspenders.
+  local target="$CACHE_DIR/rate_limits_${profile}.json" tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "$CACHE_DIR/rate_limits_${profile}.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
   if printf '{"ts":%s,"profile":"%s",%s%s"effort":"%s"}' \
     "$(date +%s)" "$profile" "$fh_json" "$sd_json" "$effort_out" >"$tmpf" 2>/dev/null; then
     mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null

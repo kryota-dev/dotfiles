@@ -137,3 +137,14 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$(cat "$snapshot")" != *not_a_number* ]]
 }
+
+# Guards the umask-077 bracket around the snapshot's mktemp: the file holds
+# quota-pressure data and must stay 0600 even when the session runs under a lax
+# umask (mktemp otherwise honors the ambient umask, e.g. 000 -> 0666).
+@test "statusline writes the rate-limits snapshot as 0600 even under a lax umask" {
+  run bash -c "umask 000; printf '%s' '${MOCK_JSON_RL}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  local snapshot="${RL_CACHE_HOME}/claude-statusline/rate_limits_.claude.json"
+  [ -f "$snapshot" ]
+  [ "$(_file_mode "$snapshot")" = "600" ]
+}
