@@ -1,4 +1,4 @@
-.PHONY: all help lint fmt test test-bats benchmark sync-ghq-completion
+.PHONY: all help lint fmt test test-bats lint-deno test-deno benchmark sync-ghq-completion
 
 # Default target — show help (avoid accidental mutation of $HOME via apply)
 all: help
@@ -48,6 +48,17 @@ test: lint test-bats
 ## Run Bats tests
 test-bats:
 	@bats tests/*.bats
+
+## Type-check and format-check the ntfy dashboard's Deno code (kryota-dev/dotfiles#371)
+lint-deno:
+	@command -v deno >/dev/null 2>&1 || { echo "deno not found (mise install deno); skipping."; exit 0; }
+	@echo "==> Running deno check/fmt (ntfy dashboard)..."
+	@cd home/dot_config/ntfy-dashboard && deno check server.ts server_test.ts && deno fmt --check server.ts server_test.ts
+
+## Run the ntfy dashboard's Deno unit tests (kryota-dev/dotfiles#371)
+test-deno:
+	@command -v deno >/dev/null 2>&1 || { echo "deno not found (mise install deno); skipping."; exit 0; }
+	@cd home/dot_config/ntfy-dashboard && deno test
 
 ## Run zsh startup benchmark
 benchmark:
