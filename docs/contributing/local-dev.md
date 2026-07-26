@@ -20,7 +20,6 @@ The `Makefile` is the single source of truth for all local dev commands. The def
 | `test` | `lint` then `test-bats` |
 | `test-bats` | `bats tests/*.bats` |
 | `benchmark` | `scripts/benchmark.sh` (cold start + 10-iteration average) |
-| `dump-brewfile` | `rm home/dot_Brewfile && brew bundle dump --file home/dot_Brewfile` |
 | `sync-ghq-completion` | Fetches the vendored `_ghq` from upstream at the mise-pinned ghq version |
 
 ### Why there is no `make apply`

@@ -124,7 +124,7 @@ mise 設定の全構造については [dev-tooling.ja.md](../architecture/dev-t
 
 **なぜ:** `chezmoi apply` は `$HOME` を変更します。ユーザーのホームディレクトリのファイルを書き込み、移動し、場合によっては削除します。`make apply` ターゲット——特にプロジェクトを探索する際に `make` を誤って実行したコントリビューターによってトリガーされる可能性があるもの——は、意図しないホームディレクトリ変更という受け入れがたいリスクをもたらします。明示的な `chezmoi apply` の呼び出しを要求することで意図を強制します。
 
-`make help` デフォルトはドキュメントとしても機能します。利用可能なターゲット（`lint`、`test`、`benchmark`、`dump-brewfile`、`sync-ghq-completion`）はすべて読み取り専用またはリポジトリツリーにスコープされており、ホームディレクトリには作用しません。
+`make help` デフォルトはドキュメントとしても機能します。利用可能なターゲット（`lint`、`test`、`benchmark`、`sync-ghq-completion`）はすべて読み取り専用またはリポジトリツリーにスコープされており、ホームディレクトリには作用しません。
 
 `make` ターゲット一覧については [local-dev.ja.md](../contributing/local-dev.ja.md) を参照してください。
 

@@ -48,7 +48,9 @@ ruby.compile = false
 
 ### `dot_Brewfile`
 
-`home/dot_Brewfile` は標準の Homebrew バンドルファイルです: tap、formula、cask、mas（App Store）、vscode 拡張、go エントリを含みます。これは**プレーンテキスト — `.tmpl` ファイルではありません**。これは意図的なものです: `make dump-brewfile` は `brew bundle dump` を実行してファイルを上書き再生成します。テンプレートにすると上書きされるか再生成できなくなります。
+`home/dot_Brewfile` は標準の Homebrew バンドルファイルです: tap、formula、cask、mas（App Store）、vscode 拡張、go エントリを含みます。これは**プレーンテキスト — `.tmpl` ファイルではありません**。これは意図的なものです: `brew bundle dump` はファイルを上書き再生成するため、テンプレートにすると上書きされるか再生成できなくなります。
+
+Brewfile は `brew` の PATH-shim ラッパー（`home/dot_local/launchers/executable_brew`、`~/.local/launchers/brew` に配置 — #358 で real brew より前に `PATH` 前置される launcher ディレクトリ）によって自動的に同期されます。パッケージ集合を変更する subcommand（`install`、`uninstall`、`reinstall`、`tap`、`untap`）の後、ラッパーは `$(chezmoi source-path)/dot_Brewfile` に対して `brew bundle dump --force` を実行するため、場当たり的な `brew install` / `brew uninstall` の後も追跡対象の Brewfile が drift しなくなります。ラッパーは real brew の終了コードを保持し、chezmoi が未インストールの場合は dump をスキップします（stderr に通知）。Homebrew には post-install フックが無いため（Homebrew/brew#2202）、この shim が——`make` ターゲットではなく——同期機構です。絶対パス起動（`/opt/homebrew/bin/brew`）は shim を bypass し（許容された制限）、`run_onchange_before_10-brew-bundle` は `brew bundle`（非 mutating subcommand）を実行するため dump をトリガーしません。
 
 制約:
 - Brewfile に `brew "chezmoi"` を追加しないでください。chezmoi 自体はスタンドアロンの `curl get.chezmoi.io` ブートストラップでインストールされます（PR #22）。Brewfile に追加すると mise 管理バージョンと競合します。

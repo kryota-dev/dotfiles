@@ -129,7 +129,6 @@ See [`docs/agents/`](docs/agents/overview.md) for the dual-harness × dual-accou
 | `make fmt` | Format shell scripts with shfmt |
 | `make test` | Run lint + Bats tests |
 | `make benchmark` | Measure zsh startup time |
-| `make dump-brewfile` | Export current Homebrew packages |
 | `make sync-ghq-completion` | Refresh vendored `_ghq` completion |
 
 > Applying and diffing are done with chezmoi directly: `chezmoi apply -v`, `chezmoi diff`.
