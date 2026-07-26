@@ -5,41 +5,41 @@ description: PR作成後やCI実行中にStatus Checksの状態を監視する�
 
 # Monitor CI Checks
 
-Monitors pull request CI checks until they are resolved (pass or fail).
+Pull Request の CI チェックが解決する（成功または失敗）まで監視する。
 
-## Usage
+## 使い方
 
-When asked to monitor CI checks, Claude will:
+CI チェックの監視を求められたら、Claude は以下を行う:
 
-1. Run `gh pr checks --watch` to continuously monitor the status
-2. Wait until all checks are completed
-3. Report the final status of all checks
-4. If checks fail, analyze the failure logs and suggest fixes
+1. `gh pr checks --watch` を実行し、継続的にステータスを監視する
+2. すべてのチェックが完了するまで待つ
+3. 全チェックの最終ステータスを報告する
+4. チェックが失敗した場合、失敗ログを分析し修正案を提示する
 
-## Command
+## コマンド
 
 ```bash
-# Monitor PR checks in watch mode
+# watch モードで PR チェックを監視
 gh pr checks --watch
 
-# Alternative: Check status once
+# 代替: 一度だけステータスを確認
 gh pr checks
 
-# View specific check details if needed
+# 必要に応じて特定チェックの詳細を表示
 gh pr checks --verbose
 ```
 
-## Workflow
+## ワークフロー
 
-1. **Start Monitoring**: Run `gh pr checks --watch` immediately after PR creation or when requested
-2. **Track Progress**: The command will show real-time updates of all CI checks
-3. **Completion**: Wait until all checks show as either ✓ (passed) or X (failed)
-4. **Action on Failure**:
-   - If any checks fail, use `gh pr checks --verbose` to get detailed logs
-   - Analyze the failure and suggest or implement fixes
-   - After fixes, push changes and monitor again
+1. **監視開始**: PR 作成直後、または依頼を受けたら即座に `gh pr checks --watch` を実行する
+2. **進捗の追跡**: このコマンドは全 CI チェックの状態をリアルタイムで表示する
+3. **完了**: すべてのチェックが ✓（成功）または X（失敗）になるまで待つ
+4. **失敗時の対応**:
+   - チェックが失敗したら `gh pr checks --verbose` で詳細ログを取得する
+   - 失敗内容を分析し、修正を提案または実装する
+   - 修正後、変更を push して再度監視する
 
-## Example Output
+## 出力例
 
 ```
 Refreshing checks status every 10 seconds. Press Ctrl+C to quit.
@@ -53,9 +53,9 @@ Type Check              in_progress -           ◐
 Some checks were not successful
 ```
 
-## Important Notes
+## 重要な注意事項
 
-- The `--watch` flag refreshes every 10 seconds
-- Press Ctrl+C to stop monitoring
-- Always wait for all checks to complete before proceeding
-- If checks fail, investigate and fix issues before merging
+- `--watch` フラグは10秒ごとに更新する
+- 監視を止めるには Ctrl+C を押す
+- 次のステップに進む前に、必ずすべてのチェックの完了を待つこと
+- チェックが失敗した場合、マージ前に問題を調査・修正すること
