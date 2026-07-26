@@ -40,7 +40,7 @@ flowchart TD
         G --> H["16 migrate-claude-binary\nrun_once\n(symlink ~/.local/bin/claude\n-> mise installs/claude/latest)"]
         H --> H2["17 setup-claude-plugins\nrun_onchange\n(registers marketplaces + installs plugins\ndeclared in dot_claude/settings.json)"]
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
-        I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder)"]
+        I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder/ControlCenter)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
         J2 --> J3["31 setup-ntfy\nrun_onchange · macOS only\n(docker compose up + tailscale serve\nfor the ntfy server; skipped in CI)"]
         J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -169,7 +169,35 @@ Runs `mise exec -- agent-browser install` (with `--with-deps` on Linux to pull s
 
 ### 20 — macos-defaults (`run_onchange`, after, macOS only)
 
-Applies `defaults write` for keyboard, Finder, Dock, DesktopServices, clock, and scroll settings, then runs `killall Dock Finder SystemUIServer` to apply them immediately. Self-hashes using `joinPath .chezmoi.sourceDir` so any edit to the script body re-triggers it.
+Applies `defaults write` across the managed domains below, then runs `killall Dock Finder
+SystemUIServer ControlCenter` to apply them immediately. Self-hashes using `joinPath
+.chezmoi.sourceDir` so any edit to the script body re-triggers it.
+
+**Managed domains**: `NSGlobalDomain` (keyboard/Full Keyboard Access, scroll bars, spring
+loading, trackpad force-click and tracking speed, volume-change sound feedback),
+`com.apple.desktopservices` (suppress `.DS_Store` on network/USB volumes),
+`com.apple.dock` (auto-hide, icon size, Spaces reordering, recent-apps display),
+`com.apple.finder` (hidden files, desktop drive icons, status/path bar, default view
+style), `com.apple.menuextra.clock` (menu bar clock display format via the discrete
+Big Sur+ keys — see below), and `com.apple.terminal` (string encoding).
+
+**Known-dead keys already fixed**: `AppleKeyboardUIMode` was `3` ("Enabled on older macOS
+versions"), which stopped enabling Full Keyboard Access starting with Sonoma — the script
+now writes `2` ("Enabled on Sonoma or later"); the value moved, the key did not
+(nix-darwin/nix-darwin#1378, #1501). `com.apple.menuextra.clock DateFormat` (a single
+format string) stopped being honored once the Big Sur+ Control Center redesign replaced
+it with discrete keys (`IsAnalog`, `Show24Hour`, `ShowAMPM`, `ShowDate`, `ShowDayOfWeek`,
+`ShowSeconds`); the reload target also moved from `SystemUIServer` to `ControlCenter`
+(tech-otaku/menu-bar-clock). `ApplePressAndHoldEnabled` was evaluated and intentionally
+**not** added: it is unreliable on Sonoma/Sequoia with no confirmed `defaults`-based
+replacement (geerlingguy/mac-dev-playbook#210).
+
+**Known limitations**: TCC/privacy settings (Full Disk Access, camera/microphone
+permissions, etc.) and non-plist or sandboxed app settings (Safari, Mail, and similar)
+cannot be managed via `defaults write` and are out of scope for this script. Dock icon
+layout (`persistent-apps`/`persistent-others`), hot corners, and custom Terminal profile
+themes are deliberately excluded — they are either destructive to an existing machine's
+state or require shipping additional files beyond a `defaults write` line.
 
 ### 30 — register-launchd-agents (`run_onchange`, after, macOS only)
 

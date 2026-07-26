@@ -40,7 +40,7 @@ flowchart TD
         G --> H["16 migrate-claude-binary\nrun_once\n(~/.local/bin/claude を\nmise installs/claude/latest へ symlink)"]
         H --> H2["17 setup-claude-plugins\nrun_onchange\n(dot_claude/settings.json が宣言する\nmarketplace 登録 + plugin インストール)"]
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
-        I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder)"]
+        I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder/ControlCenter)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS のみ\n(repo 管理 LaunchAgent の launchctl bootstrap\nCI ではスキップ)"]
         J2 --> J3["31 setup-ntfy\nrun_onchange · macOS のみ\n(ntfy サーバー用の docker compose up +\ntailscale serve; CI ではスキップ)"]
         J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -174,7 +174,37 @@ tailnet の MagicDNS 名は保存されず、必要な都度その場で導出�
 
 ### 20 — macos-defaults (`run_onchange`、after、macOS のみ)
 
-キーボード、Finder、Dock、DesktopServices、時計、スクロール設定に対して `defaults write` を適用し、`killall Dock Finder SystemUIServer` で即時反映します。`joinPath .chezmoi.sourceDir` を使った自己ハッシュにより、スクリプト本文の任意の編集で再トリガーされます。
+以下の管理対象ドメインに `defaults write` を適用し、`killall Dock Finder SystemUIServer
+ControlCenter` で即時反映します。`joinPath .chezmoi.sourceDir` を使った自己ハッシュにより、
+スクリプト本文の任意の編集で再トリガーされます。
+
+**管理対象ドメイン**: `NSGlobalDomain`（キーボード/Full Keyboard Access、スクロールバー、
+スプリングローディング、トラックパッドのフォースクリックと追跡速度、音量変更時の
+サウンドフィードバック）、`com.apple.desktopservices`（ネットワーク/USB ボリュームでの
+`.DS_Store` 抑制）、`com.apple.dock`（自動非表示、アイコンサイズ、Spaces の並び替え、
+最近使ったアプリの表示）、`com.apple.finder`（隠しファイル、デスクトップのドライブ
+アイコン、ステータス/パスバー、既定の表示スタイル）、`com.apple.menuextra.clock`
+（メニューバー時計の表示形式。Big Sur 以降の個別キー方式 — 下記参照）、
+`com.apple.terminal`（文字エンコーディング）。
+
+**修正済みの既知の死んだキー**: `AppleKeyboardUIMode` は `3`（「古い macOS バージョンで
+有効」）だったが、Sonoma 以降 Full Keyboard Access を有効化しなくなったため、
+現在は `2`（「Sonoma 以降で有効」）を書き込む。キーがドメイン移動したわけではなく、
+値の意味が変わっただけ（nix-darwin/nix-darwin#1378, #1501）。
+`com.apple.menuextra.clock DateFormat`（単一のフォーマット文字列）は、Big Sur 以降の
+Control Center 刷新で個別キー（`IsAnalog`、`Show24Hour`、`ShowAMPM`、`ShowDate`、
+`ShowDayOfWeek`、`ShowSeconds`）に置き換わり効果を失った。リロード対象も
+`SystemUIServer` から `ControlCenter` に変わっている（tech-otaku/menu-bar-clock）。
+`ApplePressAndHoldEnabled` は検討したうえで**追加していない**: Sonoma/Sequoia では
+動作が不安定で、確実な `defaults` ベースの代替手段が確認できなかった
+（geerlingguy/mac-dev-playbook#210）。
+
+**既知の制限事項**: TCC/プライバシー設定（フルディスクアクセス、カメラ/マイク許可等）や、
+非 plist・サンドボックス化されたアプリ設定（Safari、Mail 等）は `defaults write` では
+管理できず、本スクリプトのスコープ外です。Dock のアイコン配置
+（`persistent-apps`/`persistent-others`）、ホットコーナー、カスタム Terminal
+プロファイルテーマは意図的に除外しています — 既存機の状態を破壊するリスクがあるか、
+`defaults write` 一行を超えて別ファイルの配布が必要になるためです。
 
 ### 30 — register-launchd-agents (`run_onchange`、after、macOS のみ)
 
