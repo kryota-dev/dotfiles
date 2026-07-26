@@ -20,7 +20,8 @@ typeset -gU path
 
 # Per-account agent launchers (~/.local/launchers): also prepend here, in a login-sourced file, so
 # a non-interactive login shell (`zsh -lc '<cmd>'`) — which does not source ~/.zshrc — still
-# resolves the claude/codex wrappers rather than the bare mise/brew binary (#345). Interactive
+# resolves the claude/codex wrappers (and the brew auto-dump shim, #360) rather than the bare
+# mise/brew binary (#345). Interactive
 # shells additionally get a precmd hook in ~/.zshrc to stay ahead of mise's per-prompt re-prepend.
 case ":$PATH:" in
   *":$HOME/.local/launchers:"*) ;;

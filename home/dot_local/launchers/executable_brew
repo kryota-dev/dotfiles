@@ -18,15 +18,21 @@
 # (not a mutating subcommand), so it never triggers a dump — no recursion.
 set -eu
 
-# Subcommands that change the installed package set and so warrant a Brewfile refresh.
+# Subcommands that change the installed package set and so warrant a Brewfile refresh. `remove` and
+# `rm` are aliases of `uninstall` (see `brew help uninstall`), so they must trigger too — otherwise
+# `brew rm foo` would drift the Brewfile, the very problem this wrapper fixes. install/reinstall/
+# tap/untap have no aliases.
 is_dump_trigger() {
   case "$1" in
-    install | uninstall | reinstall | tap | untap) return 0 ;;
+    install | uninstall | remove | rm | reinstall | tap | untap) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 # The subcommand is the first non-option argument (global flags like `--verbose` may precede it).
+# This is a heuristic, not brew's full dispatcher: a query form whose first non-option token happens
+# to be a trigger word (e.g. `brew --prefix install`, where `install` is a formula name) runs one
+# extra, harmless dump — the dump faithfully reflects the unchanged package set. Accepted limitation.
 subcommand=""
 for arg in "$@"; do
   case "$arg" in
@@ -39,13 +45,18 @@ for arg in "$@"; do
 done
 
 # Resolve the real brew WITHOUT going through PATH (which would re-resolve this wrapper).
-# BREW_LAUNCHER_BIN overrides the resolver for tests. Otherwise prefer the exported HOMEBREW_PREFIX,
-# then the standard install prefixes for Apple Silicon, Intel, and Linuxbrew. Fail loudly rather
-# than silently do nothing.
+# BREW_LAUNCHER_BIN overrides the resolver for tests. HOMEBREW_PREFIX is exported into every shell
+# by `brew shellenv`, so later code could repoint it at an attacker-controlled dir; trust it only
+# when it names a standard prefix (allowlist), then fall back to the standard install prefixes for
+# Apple Silicon, Intel, and Linuxbrew. Fail loudly rather than silently do nothing.
 real="${BREW_LAUNCHER_BIN:-}"
 if [ -z "$real" ]; then
+  case "${HOMEBREW_PREFIX:-}" in
+    /opt/homebrew | /usr/local | /home/linuxbrew/.linuxbrew) prefix_cand="$HOMEBREW_PREFIX/bin/brew" ;;
+    *) prefix_cand="" ;;
+  esac
   for cand in \
-    "${HOMEBREW_PREFIX:+$HOMEBREW_PREFIX/bin/brew}" \
+    "$prefix_cand" \
     /opt/homebrew/bin/brew \
     /usr/local/bin/brew \
     /home/linuxbrew/.linuxbrew/bin/brew; do
@@ -66,16 +77,27 @@ status=0
 "$real" "$@" || status=$?
 
 # After a package-set-mutating subcommand, refresh the chezmoi source Brewfile so it tracks the
-# ad-hoc change. Resolve the target via `chezmoi source-path` (cwd-independent). A dump failure or a
-# missing chezmoi only warns — the caller still sees the real brew's original exit code.
+# ad-hoc change. Resolve the target via `chezmoi source-path` (cwd-independent). Every failure path
+# only warns and still falls through to `exit "$status"`, so the caller always sees the real brew's
+# original exit code (AC3). The guarded `if source_path="$(...)"` matters: an unguarded assignment
+# would abort here under `set -e` on a chezmoi failure and mask that exit code.
 if is_dump_trigger "$subcommand"; then
-  if command -v chezmoi >/dev/null 2>&1; then
-    brewfile="$(chezmoi source-path)/dot_Brewfile"
-    if ! "$real" bundle dump --force --file="$brewfile" >/dev/null 2>&1; then
-      echo "brew launcher: 'brew bundle dump' failed; $brewfile not refreshed." >&2
-    fi
-  else
+  if ! command -v chezmoi >/dev/null 2>&1; then
     echo "brew launcher: chezmoi not found; skipped Brewfile refresh." >&2
+  elif ! source_path="$(chezmoi source-path)"; then
+    echo "brew launcher: 'chezmoi source-path' failed; Brewfile not refreshed." >&2
+  else
+    brewfile="$source_path/dot_Brewfile"
+    # Neutralize the subtractive HOMEBREW_BUNDLE_DUMP_NO_* vars so a stray env setting cannot make
+    # the automatic --force dump overwrite the tracked Brewfile with a whole category missing.
+    # Capture the dump's own stderr so a failure reports its cause, not just a generic line.
+    if ! dump_err="$(env \
+      -u HOMEBREW_BUNDLE_DUMP_NO_BREW -u HOMEBREW_BUNDLE_DUMP_NO_CASK -u HOMEBREW_BUNDLE_DUMP_NO_TAP \
+      -u HOMEBREW_BUNDLE_DUMP_NO_MAS -u HOMEBREW_BUNDLE_DUMP_NO_VSCODE \
+      "$real" bundle dump --force --file="$brewfile" 2>&1 >/dev/null)"; then
+      echo "brew launcher: 'brew bundle dump' failed; $brewfile not refreshed." >&2
+      if [ -n "$dump_err" ]; then printf '%s\n' "$dump_err" >&2; fi
+    fi
   fi
 fi
 
