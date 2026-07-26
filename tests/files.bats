@@ -269,6 +269,21 @@ load helpers/setup
   grep -q "^effort: xhigh$" "$agent"
 }
 
+@test "cross-cutting specialist reviewer agents exist with expected frontmatter" {
+  # #347: sdd's built-in review (Phase 5) was removed and its performance/test/ux
+  # perspectives moved to multi-review as dedicated specialist agents, mirroring the
+  # language reviewer pattern (SSOT in the agent definition, sonnet + high pinned).
+  local role agent
+  for role in performance test ux; do
+    agent="${HOME_DIR}/dot_claude/agents/${role}-reviewer.md"
+    [ -f "$agent" ]
+    grep -q "^name: ${role}-reviewer$" "$agent"
+    grep -q "^model: sonnet$" "$agent"
+    grep -q "^effort: high$" "$agent"
+    grep -q "^tools: Read, Glob, Grep, Bash$" "$agent"
+  done
+}
+
 @test "every agent definition pins both model and effort" {
   # Sweeps the whole directory rather than a hardcoded roster, so a newly added agent is
   # covered automatically. `model:` accepts aliases only — switching an agent to a literal
@@ -417,6 +432,40 @@ load helpers/setup
   grep -q 'planning_session:' "${skills}/planning/SKILL.md"
   grep -q '上書きしない\|上書き禁止' "${skills}/grill-me/SKILL.md"
   grep -q '上書きしない\|上書き禁止' "${skills}/planning/SKILL.md"
+}
+
+@test "sdd is a single-pass component with no built-in review phase (#347)" {
+  local skill="${HOME_DIR}/dot_agents/skills/sdd/SKILL.md"
+  [ -f "$skill" ]
+  # The review phase and its review-team machinery are gone; review is owned by
+  # pr-workflow's post-PR pipeline (monitor-ci -> multi-review -> review-resolve-loop).
+  ! grep -q '^## Phase 5: レビュー' "$skill"
+  ! grep -q 'shutdown_request' "$skill"
+  ! grep -q 'Review Team' "$skill"
+  # Phases are renumbered and contiguous after the removal.
+  grep -q '^## Phase 5: コミット & PR' "$skill"
+  grep -q '^## Phase 6: 完了報告' "$skill"
+  # Hidden from the / menu so a user cannot run it standalone, while pr-workflow can
+  # still invoke it via the Skill tool (user-invocable: false blocks menu/user access
+  # but NOT Skill-tool access; per the CC docs it keeps "Claude can invoke: yes").
+  # NB: disable-model-invocation is deliberately NOT set — it would also set
+  # "Claude can invoke: no", which would stop pr-workflow from invoking sdd.
+  # user-invocable defaults to true when absent, so the false must be explicit.
+  grep -q '^user-invocable: false$' "$skill"
+  ! grep -q '^disable-model-invocation:' "$skill"
+}
+
+@test "multi-review wires the cross-cutting specialist roster and spec-context (#347)" {
+  local skill="${HOME_DIR}/dot_agents/skills/multi-review/SKILL.md"
+  [ -f "$skill" ]
+  # The three ported specialists are referenced by subagent_type.
+  grep -q 'performance-reviewer' "$skill"
+  grep -q 'test-reviewer' "$skill"
+  grep -q 'ux-reviewer' "$skill"
+  # spec-implementation consistency context is an opt-in flag from the caller.
+  grep -q -- '--spec-context' "$skill"
+  # pr-workflow passes the spec dir on the standard/large path.
+  grep -q -- '--spec-context' "${HOME_DIR}/dot_agents/skills/pr-workflow/SKILL.md"
 }
 
 # The pipeline Plan (<slug>.plan.md) must be git-trackable while ad-hoc

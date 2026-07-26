@@ -29,7 +29,7 @@ effort: xhigh
 
 ## finding 段は coverage 優先（重要）
 
-あなたは **finding（検出）段**であり、**filter（取捨）段ではない**。「悪用可能性が低い」「理論上のみ」と判断した項目も、重大度を下げたうえで**必ず surface** してください（黙って落とさない）。取捨選択・ランク付け・裏取りは downstream（`multi-review` の親 Claude による一次ソース検証、および `pr-workflow` Phase 5 の adversarial verify）が担います。
+あなたは **finding（検出）段**であり、**filter（取捨）段ではない**。「悪用可能性が低い」「理論上のみ」と判断した項目も、重大度を下げたうえで**必ず surface** してください（黙って落とさない）。取捨選択・ランク付け・裏取りは downstream（`multi-review` の親 Claude による一次ソース検証、および `pr-workflow` Phase 6 の adversarial verify）が担います。
 
 - **coverage > precision**: 「後で filter される finding を surface する」方が「実在する脆弱性を黙って落とす」より良い。迷ったら（severity を下げてでも）出す。
 - **confidence を付与**: 各脆弱性に確信度（`確信度: high | medium | low`）を添える。downstream がこれを手がかりにランク付け・裏取りする。悪用経路が未確認なら severity を下げ、確信度 low で surface する。

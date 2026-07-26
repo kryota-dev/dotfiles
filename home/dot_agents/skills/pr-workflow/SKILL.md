@@ -127,13 +127,15 @@ CI green 確認後、`/multi-review` を起動する。
 - trivial/small: Phase 1-4 で `/create-pr` 済の PR に対して起動
 - standard/large: `/sdd` が作成済の PR に対して起動
 - **large tier**: `/multi-review --arch`（diff-scope の盲点検出に `architecture-reviewer` を追加）
-- **二重 review の扱い（決定: 併用＝役割分離）**: standard/large では `/sdd` 内蔵 review（=開発中の自己 review）と本 `/multi-review`（=最終 PR への独立 second opinion）を**役割分離で併用**する（置換・skip しない）。
+- **レビューは PR 作成後の 1 回に一本化（決定: single-pass, #347）**: 以前は standard/large で `/sdd` 内蔵 review（開発中の自己 review）と本 `/multi-review` を併用していたが、二重レビューは同一 diff にコード品質・セキュリティ観点が重複し、`/sdd` 内蔵 review の指摘は GitHub に痕跡を残さず dedup もできないため、`/sdd` から内蔵 review を廃止し、レビューは本 Phase 5-7 パイプライン（monitor-ci → multi-review → review-resolve-loop）の 1 回に集約した。`/sdd` の廃止した内蔵レビューで失われた performance / test / ux 観点と spec 整合チェックは、`/multi-review` の横断観点 specialist（`{performance,test,ux}-reviewer`）+ `--spec-context` 入力として移植済み（下記オーバーライド参照）。
 
 ### pr-workflow からの呼び出し時オーバーライド指示
 
 `/multi-review` を pr-workflow から呼ぶ際は、以下を**委譲プロンプトに明記**してオーバーライドする:
 
 > **投稿方法は「サマリーを body に含めて投稿」を自動選択すること。Phase 5 の投稿方法確認（`AskUserQuestion` の 3 択）はスキップし、body サマリー（統合レビュー結果）＋ インラインコメント（MUST/SHOULD/NITS）を `event: "COMMENT"` で即時 submit する。**
+>
+> **standard/large tier では、`/sdd` が生成した spec ディレクトリを `--spec-context <dir>` として渡すこと（`<dir>` は必ず絶対パス。例 `$(pwd)/.spec-workflow/specs/<name>/`。`.spec-workflow/` は gitignore されるため、相対パスだと reviewer サブエージェントが cwd 依存で解決に失敗しうる）。これにより multi-review が spec-implementation 整合チェック（要件取りこぼし・設計逸脱・未完了タスク）を行い、single-pass 化（#347）で `/sdd` の廃止した内蔵 review から失われた spec 整合観点を補う。performance / test / ux の横断観点 specialist は diff 特性で自動 spawn されるが、`<dir>/requirements.md` に性能要件（NFR）が明示されている場合は `performance-reviewer` を明示要請すること。**
 
 これにより `/multi-review` のレビュー結果（body サマリー + インラインコメント）が GitHub PR に投稿された状態で Phase 7 へ進む。
 

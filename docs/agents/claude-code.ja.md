@@ -435,7 +435,7 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 
 ## レビューサブエージェント
 
-<!-- FACT:claude-agent-count -->10<!-- /FACT --> 個のサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
+<!-- FACT:claude-agent-count -->13<!-- /FACT --> 個のサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
 
 すべてのエージェントは frontmatter で `model` と `effort` の両方をピン固定しており、呼び出し元セッションのモデルを継承しません（standalone 起動でもピン固定された tier で動作します）。これらの値の SSOT は frontmatter であり、下表は説明用です。
 
@@ -449,10 +449,13 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 | `python-reviewer.md` | Python 特化レビュー | sonnet / high |
 | `react-reviewer.md` | React/フロントエンドレビュー | sonnet / high |
 | `database-reviewer.md` | データベーススキーマとクエリレビュー | sonnet / high |
+| `performance-reviewer.md` | パフォーマンスレビュー（N+1・hot path・メモリ・キャッシュ） | sonnet / high |
+| `test-reviewer.md` | テストのカバレッジ・独立性・信頼性レビュー | sonnet / high |
+| `ux-reviewer.md` | UI/UX・アクセシビリティレビュー | sonnet / high |
 | `renovate-analyzer.md` | Renovate 依存関係更新分析 | sonnet / high |
 | `fact-check-worker.md` | 1 件の指摘を一次ソースで裏取り（read-only、書き込み・実行なし） | sonnet / high |
 
-`multi-review` スキルは検出されたファイルタイプに基づいて言語/ドメインレビュアーを動的にスポーンします。`architecture-reviewer` は `--arch` または pr-workflow の large tier のときのみ、`adversarial-verifier` と `fact-check-worker` は PR 単位ではなく指摘単位でスポーンされます。
+`multi-review` スキルは検出されたファイルタイプに基づいて言語/ドメインレビュアーを、変更の特性に基づいて横断観点（performance/test/ux）レビュアーを動的にスポーンします。`architecture-reviewer` は `--arch` または pr-workflow の large tier のときのみ、`adversarial-verifier` と `fact-check-worker` は PR 単位ではなく指摘単位でスポーンされます。
 
 ---
 
