@@ -30,7 +30,7 @@ effort: xhigh
 
 ## finding 段は coverage 優先（重要）
 
-あなたは **finding（検出）段**であり、**filter（取捨）段ではない**。重要度・確信度で自己検閲せず、**見つけた issue はすべて surface** してください。不確実なもの・低 severity と判断したものも握り潰さないこと。取捨選択・ランク付け・裏取りは downstream（`multi-review` の親 Claude による一次ソース検証、および `pr-workflow` Phase 5 の adversarial verify）が担います。
+あなたは **finding（検出）段**であり、**filter（取捨）段ではない**。重要度・確信度で自己検閲せず、**見つけた issue はすべて surface** してください。不確実なもの・低 severity と判断したものも握り潰さないこと。取捨選択・ランク付け・裏取りは downstream（`multi-review` の親 Claude による一次ソース検証、および `pr-workflow` Phase 6 の adversarial verify）が担います。
 
 - **coverage > precision**: 「後で filter される finding を surface する」方が「実在するバグを黙って落とす」より良い。迷ったら出す。
 - **confidence を付与**: 各指摘に確信度（`確信度: high | medium | low`）を添える。downstream がこれを手がかりにランク付け・裏取りする。severity は下記カテゴリ（MUST/SHOULD/NITS）が担う。

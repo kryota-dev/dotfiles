@@ -6,7 +6,7 @@ description: |
   PRの包括的レビューを一度に実行したい場合に使用する。
   トリガー: "multi-review", "マルチレビュー", "全レビュー", "並列レビュー", "フルレビュー", "3ツールレビュー"
   使用場面: PRのコードレビュー・セキュリティレビュー・Codexレビューを一括で実行したい場合
-argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--arch]"
+argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--arch] [--spec-context <dir>]"
 ---
 
 # Multi Review
@@ -25,7 +25,7 @@ argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--arch]"
 
 ## 引数の解釈
 
-**手順 0（フラグ抽出を最優先）**: `$ARGUMENTS` からまず `--arch` を取り除き `ARCH=true`（未指定なら `ARCH=false`）にする。残った 0/1 個のトークンを **target** として下記の優先順で判定する。フラグを先に剥がしておくことで `owner/repo#N --arch` のような複合引数のパース順序事故を避ける。
+**手順 0（フラグ抽出を最優先）**: `$ARGUMENTS` からまず `--arch` を取り除き `ARCH=true`（未指定なら `ARCH=false`）にする。次に `--spec-context <dir>` があれば取り除き `SPEC_CONTEXT=<dir>`（未指定なら空）にする（spec ドキュメントのディレクトリパス。「spec-context 入力」節参照）。残った 0/1 個のトークンを **target** として下記の優先順で判定する。フラグを先に剥がしておくことで `owner/repo#N --arch` のような複合引数のパース順序事故を避ける。
 
 target を以下の優先順で判定し、**owner/repo と PR 番号の 2 つ組**を確定する。以降の全 `gh` 呼び出しには `--repo <owner/repo>` を明示すること（cross-repo バッチで cwd の repo に暗黙解決される事故を防ぐ）。**cross-repo バッチ（review-fleet 等）から委譲されるときは PR 番号のみを渡さない**（case 3 の cwd 暗黙解決を踏むため）:
 
@@ -95,6 +95,21 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 - **roster 外の agent**: `renovate-analyzer` 等の専用 skill / フローから起動するエージェントは本動的 roster の spawn 対象外。今後 specialist を増やす場合も「diff の言語・ドメインで自動 spawn する reviewer」のみを上表に載せる。
 - **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/<lang>-reviewer.md`）に内蔵。multi-review は cc-code-review と同じく「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳」のみ渡し、観点を再掲しない。
 
+### 横断観点 specialist roster（変更特性ベース, #347）
+
+言語 roster（拡張子ベース）とは別に、**変更の特性**に応じて横断観点の specialist を動的に追加する。sdd の内蔵レビューを廃止（single-pass 化, #347）したことで失われる performance / test / ux 観点を multi-review 側で補うためのレイヤ。言語 roster と同じく自前 curated のサブエージェント（`model: sonnet` + `effort: high` をエージェント frontmatter で固定、rubric は `[MUST]/[SHOULD]/[NITS]/[GOOD]`）。
+
+| specialist | subagent_type | spawn 条件（変更ファイル・特性） |
+|------------|---------------|--------------------------------|
+| Test | `test-reviewer` | テストファイルの追加・変更（`*.test.*` / `*.spec.*` / `*_test.*` / `tests/` 配下 / `__tests__/` 配下 / `*.bats`） |
+| UX | `ux-reviewer` | UI ファイルの変更（`.tsx` / `.jsx` / `.vue` / `.svelte` / `.astro` / `.css` / `.scss` / `.sass` / `.less` / `.html`） |
+| Performance | `performance-reviewer` | データ層 / hot-path（`*.sql` / `migrations/` 配下 / `schema.prisma`）を含む、**または**呼び出し元（pr-workflow の large tier / spec-context で性能要件が明示された場合）が要請したとき |
+
+- **検出方法**: 言語 roster と同じく Phase 1 の手順 2 で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` のパス一覧を上表のマッチ基準で判定する。performance は差分特性に加え **caller 要請**でも spawn しうる（性能は差分の字面だけでは判定しづらいため、spec-context や large tier のヒントを併用する）。
+- **language roster と重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer / react-reviewer（言語 roster）と ux-reviewer（横断観点）が同時に立つ（観点が直交するため許容）。DB 系 PR（`*.sql` / `migrations/` / `schema.prisma`）では database-reviewer（スキーマ安全性・injection）と performance-reviewer（クエリ効率・N+1）が両方立つ —— 追加コストが最も大きい重複パターンだが、観点が異なるため意図的に許容する。
+- **マッチ 0 件なら spawn しない**: 非対象の変更（例: shell/zsh のみの dotfiles PR）では横断観点 specialist を spawn しない。
+- **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/{performance,test,ux}-reviewer.md`）に内蔵。multi-review は cc-code-review と同じく「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context があればそのパス）」のみ渡し、観点を再掲しない。
+
 ### aggregate-view reviewer（repo/architecture 集約視点, #223）
 
 diff 起動の specialist roster とは **別レイヤ**の reviewer。常設 3 ツールも specialist も **diff 起点**のため、「既存抽象との重複」「不要な結合」「意図した設計からの drift」のような **単一 PR の差分だけでは見えない集約視点の問題**は誰も検出できない。それを埋めるのが `architecture-reviewer`（`~/.claude/agents/architecture-reviewer.md`、`model: sonnet` 固定 = #28 model-tier 整合）。
@@ -102,6 +117,14 @@ diff 起動の specialist roster とは **別レイヤ**の reviewer。常設 3 
 - **対象が違う**: 上記 roster は diff を起点にするが、architecture-reviewer は **repo tree・既存モジュール・設計ドキュメント（`docs/architecture/`・design-rationale・steering docs）を横断スキャン**する（diff は探索の起点に過ぎない）。よって roster の「diff 言語で自動 spawn」ロジックには載せず、別レイヤとして扱う。
 - **gated（毎 PR は走らせない・コスト方針）**: whole-repo スキャンは高コストなため、**opt-in（`--arch`）または pr-workflow の large tier から要請されたときのみ** spawn する。デフォルト（無印の multi-review）では spawn しない。この gating が #223 の「per-PR vs periodic」コスト方針の SSOT（＝毎 PR ではなく large/opt-in の per-PR）。
 - **SSOT**: 観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/architecture-reviewer.md`）に内蔵。multi-review は「対象 PR 説明 + 差分取得コマンド + 作業ディレクトリ絶対パス + 棄却台帳」のみ渡す（cc-code-review と同形。差分はエージェント自身が取得し、そこから repo 全体へ探索を広げる）。
+
+### spec-context 入力（呼び出し元からの spec 整合コンテキスト, #347）
+
+`--spec-context <dir>`（手順 0 で抽出）が渡されたとき、`<dir>` は spec ドキュメント（`requirements.md` / `design.md` / `tasks.md`）を含むディレクトリ（例: `.spec-workflow/specs/<name>/`）を指す。sdd の内蔵レビューを廃止（single-pass 化, #347）したことで失われる **spec-implementation 整合チェック**（実装が要件・設計・タスクに整合しているか）を multi-review 側で補うための入力。
+
+- **未指定時は従来動作**（spec 整合チェックなし・差分のみのレビュー）を完全に維持する。opt-in。
+- **指定時の扱い**: Phase 2 で各 reviewer（常設 3 ツール + specialist）のプロンプトに、spec ドキュメントの**絶対パス**（`<dir>/requirements.md` 等）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する。**spec ドキュメント本文は埋め込まず、パスを渡して reviewer に Read させる**（`.spec-workflow/` は gitignore されうるため、reviewer は絶対パスで Read する）。`<dir>` が相対パスで渡された場合は、Phase 1 で確定した作業ディレクトリの絶対パスと結合して解決してから reviewer に渡す。
+- **pr-workflow からの呼び出し**: standard/large tier では sdd が生成した spec ディレクトリのパスが `--spec-context` として渡される（pr-workflow Phase 6 のオーバーライド指示参照）。
 
 ## 実行手順
 
@@ -177,7 +200,7 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 
 常設 3 ツール + マッチした動的 specialist を **同一メッセージ内で並列起動**する。cc-code-review / cc-security-review および各 specialist は **Agent ツール**（`run_in_background: true`）、codex は **バックグラウンド Bash**（`run_in_background: true`）。
 
-**Phase 2 開始前**: 「動的 specialist roster」節の検出方法（Phase 1 手順 2 で確保した `${DIFF}` のヘッダ行 `diff --git a/<path> b/<path>` を primary に、`${DIFF}` が空のときのみ fallback として `gh pr diff --repo <owner/repo> <番号> --name-only`）で spawn 対象 specialist を確定する。fallback を先に選ぶと cross-repo で `--repo` 忘れの事故が増えるため、原則 `${DIFF}` 再利用を推奨。
+**Phase 2 開始前**: 「動的 specialist roster」節（言語ベース）と「横断観点 specialist roster」節（変更特性ベース）の検出方法（Phase 1 手順 2 で確保した `${DIFF}` のヘッダ行 `diff --git a/<path> b/<path>` を primary に、`${DIFF}` が空のときのみ fallback として `gh pr diff --repo <owner/repo> <番号> --name-only`）で spawn 対象 specialist を確定する。performance-reviewer は差分特性に加え caller 要請（large tier / spec-context）でも spawn しうる。fallback を先に選ぶと cross-repo で `--repo` 忘れの事故が増えるため、原則 `${DIFF}` 再利用を推奨。
 
 #### 起動内容
 
@@ -186,7 +209,7 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 | cc-code-review | Agent ツール `subagent_type: cc-code-review`, `run_in_background: true` | プロンプト = 「PR #<番号>（owner/repo）のレビュー依頼 + 差分取得コマンド（`gh pr diff --repo <owner/repo> <番号>`）+ 作業ディレクトリ絶対パス」。**差分はエージェント自身が取得**するため埋め込まない。`--repo` を含めないと cwd 依存で cross-repo バッチが誤解決される。観点・出力形式はエージェント定義に内蔵のため再掲しない |
 | cc-security-review | Agent ツール `subagent_type: cc-security-review`, `run_in_background: true` | 同上（セキュリティ観点。差分取得コマンドにも `--repo <owner/repo>` を明示）。差分はエージェント自身が取得。OWASP チェックリストはエージェント定義に内蔵 |
 | codex | バックグラウンド Bash `run_in_background: true` | **primary（base をローカルに取得できる通常ケース）**: 先に `git fetch origin <base_branch>` してから `codex exec --profile shared --sandbox read-only --cd <dir> --color never -o <RESULT_FILE> review --base origin/<base_branch>`（first-class `review` サブコマンド。exec 側フラグを `review` より前に置く — codex/SKILL.md 参照。差分の heredoc 埋め込みが不要）。**`origin/` を付ける理由**: `--base` はローカル ref を基準にするため、ローカル `main` が古いと既に main へマージ済みの他 PR のコミットまで差分に混入し、codex leg だけ他 reviewer と異なるスコープを見ることになる。**fallback**（fetch できない / base ref を解決できない）は従来の codex skill「PR 差分のレビュー」heredoc 方式（`-o <RESULT_FILE>`、差分は事前変数 `${DIFF}` 埋め込み）。**cross-repo 注意**: `--cd <dir>` は cwd のリポジトリを見るため、`<dir>` が対象 PR のリポジトリと一致しない場合（`review-fleet` 等からの cross-repo 委譲）は primary を使わず fallback を選ぶ。いずれも**冒頭に codex skill のアカウント選択 prelude を同一ブロックで前置**する（`cdx`/`cdx-r06` を再現） |
-| 動的 specialist（マッチ分のみ） | Agent ツール `subagent_type: <lang>-reviewer`, `run_in_background: true` | cc-code-review と同じプロンプト（「対象説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」）。**差分はエージェント自身が取得**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵のため再掲・再指定しない |
+| 動的 specialist（言語 + 横断観点、マッチ分のみ） | Agent ツール `subagent_type: <lang>-reviewer` / `{performance,test,ux}-reviewer`, `run_in_background: true` | cc-code-review と同じプロンプト（「対象説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」。`--spec-context` 指定時は spec ドキュメントのパスと spec 整合チェック指示も付す）。**差分はエージェント自身が取得**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵のため再掲・再指定しない |
 | architecture-reviewer（**`--arch` / large tier のときのみ**） | Agent ツール `subagent_type: architecture-reviewer`, `run_in_background: true` | cc-code-review と同形のプロンプト（「対象 PR 説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」）。**差分は起点として自身が取得し、そこから repo 全体へ探索を広げる**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵。diff 言語では spawn 判定せず、フラグ/tier で判定する（「aggregate-view reviewer」節参照） |
 
 #### 手順
@@ -194,9 +217,10 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 1. **codex skill を Read**（codex のコマンド構築の SSOT）。cc-code-review / cc-security のエージェント定義は起動時に自動ロードされるため、multi-review 側で Read 不要。
 2. **同一メッセージ内で 常設 3 ツール + マッチ specialist（+ `--arch`/large tier 時は architecture-reviewer）を並列起動**:
    - Agent × 2（cc-code-review, cc-security-review）: `run_in_background: true`。プロンプトに差分取得コマンド・作業ディレクトリ絶対パス・（多ラウンド時は）棄却台帳を含める（**差分そのものは埋め込まず、エージェントに取得させる**）。
-   - Agent × N（マッチした `<lang>-reviewer`、0〜4 個）: cc-code-review と同形のプロンプトで `run_in_background: true` 起動。`model` は指定不要（エージェント frontmatter の `sonnet` が適用）。
+   - Agent × N（マッチした specialist: 言語 `<lang>-reviewer` + 横断観点 `{performance,test,ux}-reviewer`）: cc-code-review と同形のプロンプトで `run_in_background: true` 起動。`model` は指定不要（エージェント frontmatter の `sonnet` が適用）。
    - Agent × 0〜1（`--arch` または large tier 要請時のみ `architecture-reviewer`）: cc-code-review と同形のプロンプトで `run_in_background: true` 起動。diff 言語に依存せず、フラグ/tier のみで spawn 判定する。`model` は指定不要（frontmatter の `sonnet`）。
    - Bash × 1（codex）: `run_in_background: true`。**コマンド形状は上記「起動内容」表の codex 行の primary / fallback 分岐に従う** —— `<dir>` が対象 PR のリポジトリで base を fetch できれば `review --base origin/<base_branch>`、できなければ `-o <RESULT_FILE>` 形式で事前確保した `${DIFF}` を埋め込む heredoc 方式。`RESULT_FILE` パスを記録する。**コマンド冒頭に codex skill のアカウント選択 prelude（`if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi`）を同一 Bash ブロックで前置し、`codex exec --profile shared` を使う**（Bash ツールは呼び出しごとに別シェルのため、export を別ブロックにすると効かない）。
+   - **`--spec-context` 指定時**: 上記すべての reviewer（常設 3 ツール + specialist）のプロンプトに spec ドキュメントの絶対パス（`<dir>/requirements.md` / `design.md` / `tasks.md`）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する（「spec-context 入力」節）。
 3. **失敗時のリトライ**: 1 回までリトライ。codex が `No prompt provided via stdin.` の場合は事前変数確保パターンで再実行（codex skill 参照）。再失敗なら該当ツールをスキップして Phase 3 へ。
 
 #### 棄却台帳（多ラウンドレビュー時）
@@ -588,7 +612,7 @@ multi-review が投稿するインラインコメントの本文先頭には、�
 - 常設 3 ツール並列実行は合計コストが高い（cc-code-review / cc-security-review サブエージェント 2 つ + Codex CLI 1 つ）
 - **各 agent の model / effort tier の SSOT は各エージェント定義の frontmatter**。以下は挙動を説明するための記述であり、値が食い違ったときは frontmatter が正。
 - **cc-code-review / cc-security-review は frontmatter で `model: sonnet` + `effort: xhigh` に固定済み**（#28 model-tier 整合、一次検出層として thoroughness に投資）。既定で安価に振り、**呼び出し元が必要と判断したときだけ model を引き上げる** opt-in にする: security-critical な変更 / large tier のレビューでは、Agent 呼び出し時に `model: "opus"` 等を明示指定して品質を上げる（それ以外は sonnet 固定のまま）。この引き上げ判断基準を委譲プロンプトに明記する。
-- 動的 specialist も frontmatter で `model: sonnet` + `effort: high` 固定。**マッチした言語のみ** spawn し、非対象言語の PR では追加コストゼロ。cc-code-review / cc-security-review（sonnet + xhigh）と specialist（sonnet + high）は同 tier で、以前の `inherit` 由来の非対称（Opus セッションで generalist だけ高コスト）は解消済み。
+- 動的 specialist も frontmatter で `model: sonnet` + `effort: high` 固定。**マッチした言語/特性のみ** spawn し、非対象の PR では追加コストゼロ。cc-code-review / cc-security-review（sonnet + xhigh）と specialist（sonnet + high）は同 tier で、以前の `inherit` 由来の非対称（Opus セッションで generalist だけ高コスト）は解消済み。
 - **`model: inherit` からの脱却は standalone 利用にも影響する behavioral change**: これらの agent を `multi-review` 以外で単体起動した場合も sonnet + pinned effort で動くようになる（以前は呼び出し元セッションの model を継承していた）。
 - **architecture-reviewer（#223）は最もコストが高い**（repo tree・既存モジュール・設計ドキュメントを横断スキャンするため）。これを毎 PR で走らせるのは高コストなので、**`--arch` opt-in または pr-workflow の large tier のときのみ** spawn する（デフォルトでは走らせない）。`model: sonnet` 固定で相対的に安価に抑えつつ、走らせる PR を絞ることでコストを管理する（＝ #223 の per-PR コスト方針）。
 - **codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT**（`codex:codex-rescue` を起動しない理由もそこに集約。ここでは再掲しない）。レビュー leg は read-only なので `--profile shared` を使う。
