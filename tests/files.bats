@@ -2006,30 +2006,35 @@ _gate_decision() {
   grep -qF 'ntfy_user_created' "$l"
 }
 
-@test "ntfy library provisions the morning-brief Markdown delivery (#361)" {
+@test "ntfy provisions the morning-brief page delivery (#361)" {
   local l="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
-  # Dedicated brief topic is SSOT-declared and threaded into the library.
+  local c="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
+  local r="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  # Dedicated brief topic + sidecar port are SSOT-declared.
   grep -qF 'topic_brief = "claude-brief"' "${HOME_DIR}/.chezmoidata.toml"
+  grep -qF 'brief_port = ' "${HOME_DIR}/.chezmoidata.toml"
   grep -qF '{{ .ntfy.topic_brief }}' "$l"
-  # Publisher gets write access to the brief topic through the shared ACL grant,
-  # and notify-env carries the brief topic for the wrapper to publish to.
   grep -qF 'ntfy_topic_brief' "$l"
   grep -qF 'NTFY_TOPIC_BRIEF' "$l"
-  # Delivery is a Markdown ntfy MESSAGE, not a served page: there is no tailscale
-  # serve mount for the brief and no click base URL (that path was rejected after
-  # the macOS serve-directory limitation surfaced in review — see the PRD).
-  ! grep -qF 'ntfy_assert_brief_serve' "$l"
-  ! grep -qF 'NTFY_BRIEF_BASE_URL' "$l"
-  ! grep -qF 'set-path' "$l"
-  # Existing installs (publisher token already present) must still get the new
-  # notify-env keys without reissuing the token (migration on upgrade): the
-  # provisioner rewrites notify-env with the existing token on that path.
+  # Delivery is a rendered HTML page served by a loopback nginx sidecar fronted
+  # by a tailscale PORT proxy on a dedicated HTTPS port (macOS cannot serve
+  # files/directories directly). The click opens NTFY_BRIEF_BASE_URL/<date>.html.
+  grep -qE 'image: nginx:[0-9.]+-alpine@sha256:[a-f0-9]{64}' "$c"
+  grep -qF '127.0.0.1:{{ .ntfy.brief_port }}:80' "$c"
+  grep -qF 'ntfy_assert_brief_serve' "$l"
+  grep -qF 'serve --bg --https' "$l"
+  ! grep -qE '^[^#]*serve.*--set-path' "$l"
+  grep -qF 'NTFY_BRIEF_BASE_URL' "$l"
+  # Both setup entry points assert the front so it self-heals on apply/ntfy-setup.
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
+  # Existing installs (token already present) still get the new notify-env keys
+  # without reissuing the token (migration on upgrade).
   grep -qF 'ntfy_write_notify_env "$existing"' "$l"
-  # The server raises the per-message size ceiling so a full brief is not
-  # silently converted to an attachment.
-  grep -qF 'message-size-limit' "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
-  # Both publishers mark bodies as Markdown.
-  grep -qF 'markdown: true' "${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  # The brief page escapes raw HTML from untrusted brief content (pandoc
+  # markdown-raw_html; a <script> in a GitHub title must not execute on the page).
+  grep -qF 'markdown-raw_html' "$r"
+  # Existing hook-notification bodies render as Markdown in the web app (#361).
   grep -qF 'markdown: true' "${HOME_DIR}/dot_claude/executable_ntfy-notify.sh"
 }
 
@@ -2147,6 +2152,9 @@ _gate_decision() {
     <"${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl" >/dev/null
   chezmoi execute-template --source "${HOME_DIR}" \
     <"${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl" >/dev/null
+  # compose carries the brief_port template var (#361); render it too.
+  chezmoi execute-template --source "${HOME_DIR}" \
+    <"${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl" >/dev/null
 }
 
 @test "install.sh points at ntfy-setup on darwin only, and never provisions at bootstrap" {
