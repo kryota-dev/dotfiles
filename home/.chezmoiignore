@@ -18,7 +18,13 @@
 .claude/teams
 .claude/todos
 
-# ECC runtime state (hooks, governance state.db, continuous-learning, gateguard)
+# ECC runtime state (hooks, governance state.db, continuous-learning, gateguard).
+# The ecc-homunculus entries under the account dirs cover state left behind by the pre-#336
+# layout only; live CLV2 state now sits at ~/.local/share/ecc-homunculus-<slug>. That path is
+# outside chezmoi's target tree today, but it is ignored below anyway: observations.jsonl holds
+# tool input/output whose redaction is best-effort, and this is a public repo, so a stray
+# `chezmoi add` under ~/.local/share must not be able to pick it up.
+.local/share/ecc-homunculus-*
 .claude/ecc
 .claude/ecc-homunculus
 .claude/.gateguard

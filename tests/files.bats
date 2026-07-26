@@ -144,6 +144,40 @@ load helpers/setup
   grep -q 'on run argv' "$wrapper"
 }
 
+@test "morning-radar wrapper points CLV2 state at the dir _claude_with_home derives (#336)" {
+  # The wrapper duplicates this value by hand ("Keep in sync with _claude_with_home"), so a
+  # revert to <account>/ecc-homunculus here alone would silently reintroduce #336 for the
+  # launchd brief: Claude Code treats the config dir as sensitive, and a headless session has
+  # nobody to approve the instinct write. Derive the expectation from the zsh helper instead of
+  # repeating the literal, so the two can only ever drift together.
+  command -v zsh >/dev/null || skip "zsh not available"
+  local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
+  local vals
+  vals=$(zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"\$CLV2_HOMUNCULUS_DIR|\$OBSERVER_ACTIVE_HOURS_START|\$OBSERVER_ACTIVE_HOURS_END|\$ECC_OBSERVER_MAX_TURNS\"; }
+    _claude_with_home \"\$HOME/.claude\"
+  ")
+  [ -n "$vals" ]
+  local dir start end turns
+  dir=$(printf '%s' "$vals" | cut -d'|' -f1)
+  start=$(printf '%s' "$vals" | cut -d'|' -f2)
+  end=$(printf '%s' "$vals" | cut -d'|' -f3)
+  turns=$(printf '%s' "$vals" | cut -d'|' -f4)
+  # The wrapper keeps $HOME unexpanded, so compare on the $HOME-relative tail.
+  grep -qF "CLV2_HOMUNCULUS_DIR=\"\$HOME${dir#"$BATS_TEST_TMPDIR"}\"" "$wrapper"
+  run grep -qF '.claude/ecc-homunculus' "$wrapper"
+  [ "$status" -ne 0 ]
+  # The observer knobs have to be mirrored too, not just the storage path: this session
+  # lazy-starts an observer that inherits its environment for the whole process lifetime, so a
+  # wrapper missing these would run the brief's observer on the upstream clock gate and turn
+  # floor. Derived from the helper as well, so changing a default in claude.zsh forces it here.
+  grep -qF "OBSERVER_ACTIVE_HOURS_START=\"\${OBSERVER_ACTIVE_HOURS_START:-${start}}\"" "$wrapper"
+  grep -qF "OBSERVER_ACTIVE_HOURS_END=\"\${OBSERVER_ACTIVE_HOURS_END:-${end}}\"" "$wrapper"
+  grep -qF "ECC_OBSERVER_MAX_TURNS=\"\${ECC_OBSERVER_MAX_TURNS:-${turns}}\"" "$wrapper"
+}
+
 @test "morning-radar wrapper does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
   # settings.json's env block is the effective SSOT for ECC_DISABLED_HOOKS (Claude Code
   # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
@@ -745,22 +779,34 @@ FAKE_CLAUDE
   # Pin XDG_DATA_HOME inside the sandbox so the bare-`claude` fallback branch can never
   # touch the developer's real ~/.local/share/ecc-homunculus.
   local run=(env "HOME=$tmp" "XDG_DATA_HOME=$tmp/.local/share" bash "$script")
+  # The account config dir still selects WHICH accounts are in use, but the state it enables
+  # now lives at ~/.local/share/ecc-homunculus-<slug>, outside that config dir (#336).
   # Seed a pre-existing config (disabled + unrelated keys) to exercise the jq-merge branch:
   # it must force enabled=true while preserving every other field, and stay stable on re-run.
-  mkdir -p "$tmp/.claude/ecc-homunculus"
+  mkdir -p "$tmp/.claude" "$tmp/.local/share/ecc-homunculus-default"
   printf '%s' '{"version":"2.1","observer":{"enabled":false,"run_interval_minutes":7},"custom":42}' \
-    > "$tmp/.claude/ecc-homunculus/config.json"
+    > "$tmp/.local/share/ecc-homunculus-default/config.json"
   "${run[@]}" >/dev/null 2>&1
   "${run[@]}" >/dev/null 2>&1
-  local cfg="$tmp/.claude/ecc-homunculus/config.json"
+  local cfg="$tmp/.local/share/ecc-homunculus-default/config.json"
   [ "$(jq -r '.observer.enabled' "$cfg")" = "true" ]
   [ "$(jq -r '.observer.run_interval_minutes' "$cfg")" = "7" ]
   [ "$(jq -r '.custom' "$cfg")" = "42" ]
+  # Nothing is created under the Claude config dir: a headless observer can never get a write
+  # there approved, which is exactly what kept instinct generation dead (#336).
+  [ ! -e "$tmp/.claude/ecc-homunculus" ]
+  # The state dir stays private. observations.jsonl records tool input/output, and it now lives
+  # in the shared ~/.local/share tree rather than under the config dir.
+  local mode
+  mode=$(_file_mode "$tmp/.local/share/ecc-homunculus-default")
+  [ "$mode" = "700" ]
   # Fresh-write branch: an account dir with no prior config gets a fully-formed enabled config.
   mkdir -p "$tmp/.claude-r06"
   "${run[@]}" >/dev/null 2>&1
-  [ "$(jq -r '.observer.enabled' "$tmp/.claude-r06/ecc-homunculus/config.json")" = "true" ]
-  # Bare-`claude` fallback: not created speculatively, but enabled once it exists.
+  [ "$(jq -r '.observer.enabled' "$tmp/.local/share/ecc-homunculus-r06/config.json")" = "true" ]
+  [ ! -e "$tmp/.claude-r06/ecc-homunculus" ]
+  # Bare-`claude` fallback: a distinct, unsuffixed dir — not created speculatively, but enabled
+  # once it exists, and never conflated with either account's dir.
   [ ! -e "$tmp/.local/share/ecc-homunculus/config.json" ]
   mkdir -p "$tmp/.local/share/ecc-homunculus"
   "${run[@]}" >/dev/null 2>&1

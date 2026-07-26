@@ -113,12 +113,22 @@ log "start: claude -p /morning-brief (model=$CLAUDE_MODEL, max-turns=$MAX_TURNS)
 # #257), minus the MCP web-search keys — the brief does not need them and the
 # MCP servers tolerate missing keys. Headless launch + watchdog mirror the
 # CLV2 observer-loop.sh pattern.
+# CLV2_HOMUNCULUS_DIR carries the "default" slug that _claude_with_home derives for
+# ~/.claude, and deliberately sits outside the config dir: Claude Code treats paths under it
+# as sensitive files, which no headless session can approve a write to (#336).
+# The observer knobs have to be mirrored here as well, not just the storage path: this session
+# lazy-starts a CLV2 observer through the PreToolUse hook, and that observer inherits this
+# environment for its whole lifetime. Omitting them would leave the brief's observer on the
+# upstream clock gate and the auto-scaled turn floor that #336 exists to get past.
 CLAUDE_CONFIG_DIR="$HOME/.claude" \
   ECC_AGENT_DATA_HOME="$HOME/.claude" \
-  CLV2_HOMUNCULUS_DIR="$HOME/.claude/ecc-homunculus" \
+  CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-default" \
   ECC_MCP_HEALTH_STATE_PATH="$HOME/.claude/mcp-health-cache.json" \
   GATEGUARD_STATE_DIR="$HOME/.claude/.gateguard" \
   ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
+  OBSERVER_ACTIVE_HOURS_START="${OBSERVER_ACTIVE_HOURS_START:-0}" \
+  OBSERVER_ACTIVE_HOURS_END="${OBSERVER_ACTIVE_HOURS_END:-0}" \
+  ECC_OBSERVER_MAX_TURNS="${ECC_OBSERVER_MAX_TURNS:-100}" \
   claude "${CLAUDE_ARGS[@]}" -p "$PROMPT" >"$STDOUT_FILE" 2>>"$LOG_FILE" &
 CLAUDE_PID=$!
 

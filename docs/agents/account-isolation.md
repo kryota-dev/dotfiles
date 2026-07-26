@@ -18,12 +18,14 @@ These variables are set inline on the agent subprocess — they are never export
 |---|---|---|
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | `~/.claude-r06` |
 | `ECC_AGENT_DATA_HOME` | `~/.claude` | `~/.claude-r06` |
-| `CLV2_HOMUNCULUS_DIR` | `~/.claude/ecc-homunculus` | `~/.claude-r06/ecc-homunculus` |
+| `CLV2_HOMUNCULUS_DIR` | `~/.local/share/ecc-homunculus-default` | `~/.local/share/ecc-homunculus-r06` |
 | `ECC_MCP_HEALTH_STATE_PATH` | `~/.claude/mcp-health-cache.json` | `~/.claude-r06/mcp-health-cache.json` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 | `CODEX_HOME` | (default — `~/.codex`) | `~/.codex-r06` |
 
 The r06 Claude config directory (`~/.claude-r06`) contains only symlinks pointing back to `~/.claude` for every config artifact (settings, agents, commands, skills). What differs between accounts is entirely in the state that these env vars direct the tools to write.
+
+`CLV2_HOMUNCULUS_DIR` is the one directory that lives entirely outside `~/.claude` / `~/.claude-r06`, under `~/.local/share/`: Claude Code treats every path under the config dir as a sensitive file requiring interactive Write approval, and the CLV2 analysis session runs headless (`claude --model haiku --print`), so it could never grant that approval and every instinct write failed (issue #336). The other per-account vars (`CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `ECC_MCP_HEALTH_STATE_PATH`, `GATEGUARD_STATE_DIR`) stay under the config dir because they are written directly by node/shell code rather than through Claude Code's Write tool, so they never hit that gate.
 
 ---
 
@@ -67,9 +69,16 @@ _claude_with_home() {
   local home_dir="$1"
   shift
   (($#)) || set -- claude
+  local account_dir_name="${home_dir:t}"
+  local homunculus_slug
+  case "$account_dir_name" in
+    .claude) homunculus_slug=default ;;
+    .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
+    *) homunculus_slug="${account_dir_name#.}" ;;
+  esac
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
-    CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
+    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
     EXA_API_KEY="${EXA_API_KEY:-}" \

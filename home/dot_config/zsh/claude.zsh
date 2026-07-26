@@ -28,12 +28,42 @@ _claude_with_home() {
   # the Haiku analysis pass (up to a 500-line observation batch and 100 --max-turns) cannot
   # finish in 120s, so every run was SIGTERMed (observer log exit 143) and no instinct was
   # ever written (#256). The :- default keeps an explicit override winning.
+  # CLV2 state must stay OUTSIDE the account config dir. Claude Code classifies every path
+  # under the config dir as a sensitive file and demands interactive approval before a Write,
+  # but the CLV2 analysis pass runs headless (claude --model haiku --print), so every instinct
+  # write failed with "... which is a sensitive file", spent the turn budget negotiating
+  # permission and ended at "Reached max turns" — not one instinct was ever produced while
+  # this pointed at <account>/ecc-homunculus (#336). The per-account suffix keeps cld and
+  # cld-r06 isolated from each other and both from the bare-`claude` fallback
+  # (~/.local/share/ecc-homunculus). XDG_DATA_HOME is deliberately NOT consulted: morning-radar.sh
+  # reproduces this same value, and a second precedence chain there is what would let the two
+  # drift apart.
+  # OBSERVER_ACTIVE_HOURS_* are both 0 to disable the CLV2 session-guardian clock gate
+  # (default 800-2300), which skipped ~90 analysis cycles per project because sessions here
+  # routinely run past midnight (#336). The guardian's cooldown and idle gates still throttle
+  # cycles, so this does not make the observer busier while nobody is at the keyboard.
+  # ECC_OBSERVER_MAX_TURNS pins the ceiling at the upstream cap rather than the auto-scaled
+  # floor of 20, which cut the Read -> dedup-check -> Write pass off mid-write; the 300s
+  # watchdog above is what actually bounds a cycle.
+  # Supported account dirs are ~/.claude and ~/.claude-<suffix>; the last branch only exists so an
+  # unexpected name still yields a usable dir name. Do not name an account dir ".claude-default":
+  # its slug would collide with ~/.claude's and silently merge two accounts' observations.
+  local account_dir_name="${home_dir:t}"
+  local homunculus_slug
+  case "$account_dir_name" in
+    .claude) homunculus_slug=default ;;
+    .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
+    *) homunculus_slug="${account_dir_name#.}" ;;
+  esac
   CLAUDE_CONFIG_DIR="$home_dir" \
     ECC_AGENT_DATA_HOME="$home_dir" \
-    CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \
+    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}" \
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
     ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
+    OBSERVER_ACTIVE_HOURS_START="${OBSERVER_ACTIVE_HOURS_START:-0}" \
+    OBSERVER_ACTIVE_HOURS_END="${OBSERVER_ACTIVE_HOURS_END:-0}" \
+    ECC_OBSERVER_MAX_TURNS="${ECC_OBSERVER_MAX_TURNS:-100}" \
     EXA_API_KEY="${EXA_API_KEY:-}" \
     FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
     "$@"

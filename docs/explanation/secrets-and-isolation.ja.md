@@ -136,7 +136,7 @@ _claude_with_home() {
   local home_dir="$1"; shift
   CLAUDE_CONFIG_DIR="$home_dir" \          # アカウント分離
     ECC_AGENT_DATA_HOME="$home_dir" \      # アカウント分離
-    CLV2_HOMUNCULUS_DIR="$home_dir/ecc-homunculus" \   # アカウント分離
+    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-<slug>" \   # アカウント分離、config dir 外（#336）
     ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
     GATEGUARD_STATE_DIR="$home_dir/.gateguard" \       # アカウント分離
     EXA_API_KEY="${EXA_API_KEY:-}" \       # シークレットスコーピング

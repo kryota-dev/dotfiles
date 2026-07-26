@@ -72,7 +72,7 @@ Behavioral tests for `dot_claude/executable_statusline.sh`. Pipes mock JSON thro
 
 Behavioral regression guard for the `_claude_with_home` helper and the per-account wrappers. Sources `claude.zsh` in a minimal `zsh -f` environment (no rc files) and drives the underlying functions directly. Key assertions:
 
-- `_claude_with_home` sets several env vars rooted at the given home dir and runs the given command. The test asserts three of them: `CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, and `GATEGUARD_STATE_DIR`. (`_claude_with_home` also sets `CLV2_HOMUNCULUS_DIR` and `ECC_MCP_HEALTH_STATE_PATH` at runtime, but the bats test does not assert those.)
+- `_claude_with_home` sets several env vars rooted at the given home dir and runs the given command. The test asserts three of them: `CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, and `GATEGUARD_STATE_DIR`. A separate test pins `CLV2_HOMUNCULUS_DIR` for both accounts and asserts it never resolves under the config dir (#336). `ECC_MCP_HEALTH_STATE_PATH` is set at runtime but is not asserted.
 - MCP API keys (`EXA_API_KEY`, `FIRECRAWL_API_KEY`) are exported into the subprocess env but are not exported into the parent shell.
 
 ### `tests/skill_provenance.bats`

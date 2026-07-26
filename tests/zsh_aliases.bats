@@ -35,6 +35,50 @@ load helpers/setup
   [ "${lines[1]}" = "45" ]
 }
 
+@test "claude.zsh: _claude_with_home keeps the CLV2 homunculus dir out of the config dir" {
+  # Regression guard for #336: Claude Code classifies every path under the Claude config dir as
+  # a sensitive file, so the headless CLV2 analysis pass (claude --model haiku --print) can
+  # never get an instinct write there approved — instinct generation stayed at exactly zero for
+  # as long as this pointed at <account>/ecc-homunculus. Pin the real values, then pin the
+  # property that made them necessary, so moving the dir back under ~/.claude* fails here.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"\$CLV2_HOMUNCULUS_DIR\"; }
+    _claude_with_home \"\$HOME/.claude\"
+    _claude_with_home \"\$HOME/.claude-r06\"
+  "
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "$BATS_TEST_TMPDIR/.local/share/ecc-homunculus-default" ]
+  [ "${lines[1]}" = "$BATS_TEST_TMPDIR/.local/share/ecc-homunculus-r06" ]
+  # Neither account may resolve under the config dir.
+  [[ "${lines[0]}" != "$BATS_TEST_TMPDIR/.claude"* ]]
+  [[ "${lines[1]}" != "$BATS_TEST_TMPDIR/.claude"* ]]
+  # The accounts stay distinct from each other and from the bare-`claude` fallback, which
+  # carries no account suffix.
+  [ "${lines[0]}" != "${lines[1]}" ]
+  [ "${lines[0]}" != "$BATS_TEST_TMPDIR/.local/share/ecc-homunculus" ]
+  [ "${lines[1]}" != "$BATS_TEST_TMPDIR/.local/share/ecc-homunculus" ]
+}
+
+@test "claude.zsh: _claude_with_home disables the observer clock gate and lifts its turn ceiling" {
+  # #336: the CLV2 session-guardian clock gate (default 800-2300) skipped ~90 analysis cycles
+  # per project because sessions here run past midnight, and the auto-scaled --max-turns floor
+  # of 20 cut the Read -> dedup-check -> Write pass off mid-write. BOTH halves of the window
+  # must be 0 — the guardian only skips the gate when START and END are both zero — and all
+  # three values must stay overridable.
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"\$OBSERVER_ACTIVE_HOURS_START|\$OBSERVER_ACTIVE_HOURS_END|\$ECC_OBSERVER_MAX_TURNS\"; }
+    _claude_with_home \"\$HOME/.claude\"
+    OBSERVER_ACTIVE_HOURS_START=900 OBSERVER_ACTIVE_HOURS_END=2200 ECC_OBSERVER_MAX_TURNS=40 _claude_with_home \"\$HOME/.claude\"
+  "
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "0|0|100" ]
+  [ "${lines[1]}" = "900|2200|40" ]
+}
+
 @test "claude.zsh: _claude_with_home defaults to claude when no command is given" {
   run zsh -fc "
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'

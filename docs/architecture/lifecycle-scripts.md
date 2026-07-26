@@ -152,7 +152,7 @@ Registers four user-scope Claude Code MCP servers (`context7`, `deepwiki`, `exa`
 
 ### 14 — enable-clv2-observer (`run_onchange`, after)
 
-Sets `observer.enabled = true` in each per-account `ecc-homunculus/config.json` via an atomic `jq` merge (write to a temp file, `mv` into place). Writes to the per-account runtime state directory rather than the chezmoi-managed CLV2 skill directory so the flag survives the external's 168-hour refresh cycle. Prefers a PATH `jq`; falls back to `mise exec -- jq`; exits non-zero if neither is available (so chezmoi retries).
+Sets `observer.enabled = true` in each per-account `~/.local/share/ecc-homunculus-<slug>/config.json` (`<slug>` is `default` for `~/.claude`, the `.claude-` suffix otherwise) via an atomic `jq` merge (write to a temp file, `mv` into place). Writes to the per-account runtime state directory rather than the chezmoi-managed CLV2 skill directory so the flag survives the external's 168-hour refresh cycle. Prefers a PATH `jq`; falls back to `mise exec -- jq`; exits non-zero if neither is available (so chezmoi retries).
 
 ### 16 — migrate-claude-binary (`run_once`, after)
 

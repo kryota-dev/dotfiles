@@ -40,12 +40,14 @@ user-invocable: true
 ## Phase 0: 健全性診断（必ず実施）
 
 ```bash
-H="${CLV2_HOMUNCULUS_DIR:-$HOME/.claude/ecc-homunculus}"    # 未設定なら既定へ fallback（診断表に明記）
+H="${CLV2_HOMUNCULUS_DIR:-$HOME/.local/share/ecc-homunculus-default}"    # 未設定なら既定へ fallback（診断表に明記）
 jq '.observer' "$H/config.json"                              # enabled / run_interval / min_observations
 ls "$H/instincts/personal/" 2>/dev/null | wc -l              # instinct 蓄積数
 ls -lt "$H"/projects/*/observations.jsonl 2>/dev/null | head -3   # 観測の鮮度（記録が進んでいるか）
 ls "$H"/projects/*/observations.archive/ 2>/dev/null | tail -3    # 分析の処理痕跡（processed-<時刻> 名はソート=時系列のため tail が直近）
 grep -h 'timed out' "$H"/projects/*/*.log 2>/dev/null | tail -3   # timeout 痕跡（#256 の再発監視）
+grep -h 'Reached max turns' "$H"/projects/*/*.log 2>/dev/null | tail -3   # turn 枯渇痕跡（#336 の再発監視）
+grep -h 'sensitive file' "$H"/projects/*/*.log 2>/dev/null | tail -3      # 保存先が config dir 配下へ戻った兆候（#336）
 printf '%s\n' "${ECC_OBSERVER_TIMEOUT_SECONDS:-unset (この場合 observer は既定 120s)}"
 ```
 
@@ -59,17 +61,22 @@ printf '%s\n' "${ECC_OBSERVER_TIMEOUT_SECONDS:-unset (この場合 observer は�
 | observations の鮮度 | 対象週内に更新 | | |
 | 分析完走の痕跡（archive） | 増加している | | |
 | timeout 痕跡 | なし | | |
+| turn 枯渇痕跡（Reached max turns） | なし | | |
+| sensitive-file 痕跡 | なし | | |
 | ECC_OBSERVER_TIMEOUT_SECONDS | 300 以上 | | |
 | instinct 蓄積数 | ≥ --min-instincts | | |
 
 - `ECC_OBSERVER_TIMEOUT_SECONDS` が unset の場合、cld / cld-r06 wrapper（claude.zsh）を経由しない起動の可能性を指摘する（#256 の修正は wrapper の env 注入で効く）。
-- **timeout 痕跡が残る場合**: 既に起動済みの**長寿命 observer プロセスには新しい env が届いていない**。推奨アクションに observer の再起動を含める（新しい wrapper セッションからの起動し直しでも可）:
+- **timeout / turn 枯渇痕跡が残る場合**: 既に起動済みの**長寿命 observer プロセスには新しい env が届いていない**。推奨アクションに observer の再起動を含める（cld / cld-r06 セッションからの起動し直しが確実 — wrapper が保存先・timeout・active-hours・max-turns の env を一式注入するため、手動起動では取りこぼしやすい）:
 
 ```bash
 ~/.agents/skills/continuous-learning-v2/agents/start-observer.sh stop || true
+# 手動起動は timeout のみを固定する例。他の env は wrapper 側（claude.zsh）が SSOT。
 ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
   ~/.agents/skills/continuous-learning-v2/agents/start-observer.sh start
 ```
+
+- **sensitive-file 痕跡が残る場合**: 保存先が config dir 配下（`~/.claude*`）に戻っている。Claude Code は config dir 配下を sensitive file として扱い、非対話セッションは instinct の Write を承認できない。`claude.zsh` の `CLV2_HOMUNCULUS_DIR` が `~/.local/share/ecc-homunculus-<slug>` を指しているか確認する（#336）。
 
 - その他の判定 NG の項目には修理手段を添える（例: chezmoi apply の再実行、`run_onchange_after_14-enable-clv2-observer` の確認、issue 起票）。
 
@@ -89,7 +96,10 @@ instinct 蓄積数 < `--min-instincts` の場合、**縮退レポート**を出�
 - cluster 候補を取得する（instinct 3 件未満は exit 1 になるため、その場合はこの経路を skip）:
 
 ```bash
-python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
+# $H を明示的に渡す: CLV2_HOMUNCULUS_DIR 未設定のまま呼ぶと、CLI は upstream の fallback
+# （$XDG_DATA_HOME/ecc-homunculus か ~/.local/share/ecc-homunculus）を解決し、Phase 0 で診断した
+# ストアとは別の場所を見てしまう（診断と evolve が食い違う）。
+CLV2_HOMUNCULUS_DIR="$H" python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
 # 出力の「## SKILL CANDIDATES」節（trigger / 構成 instinct ID / avg confidence）を候補として読む
 ```
 
