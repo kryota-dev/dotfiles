@@ -67,16 +67,25 @@ phones/tablets on the tailnet (read-only token)
 
 ## セットアップ手順（初回のみ）
 
-1. **1Password アイテム** — `kryota.dev` Vault に `Dotfiles - ntfy` を作成し、フィールド
-   `base-url`（serve エンドポイント、`https://<host>.<tailnet>.ts.net`）と
-   `credential`（手順4まではプレースホルダー）を設定します。
+1. **1Password アイテム** — `kryota.dev` Vault に `Dotfiles - ntfy` を作成し、
+   `base-url` には実値（serve エンドポイント `https://<host>.<tailnet>.ts.net`。
+   `tailscale status --json | jq -r .Self.DNSName` で確認可能）を、`credential` /
+   `subscriber-token` にはブートストラップ用プレースホルダー（`tk_REPLACE…`）を
+   設定します — 自動プロビジョニングはプレースホルダーが残っている間のみ
+   トークンを発行します。
    [secrets-1password](../getting-started/secrets-1password.ja.md) を参照してください。
 2. **Docker Desktop** — *サインイン時に Docker Desktop を起動する*（設定 →
    一般）を有効化します。これにより compose の `restart: unless-stopped` ポリシーが、
    再起動のたびにサーバーを復帰させます。
 3. **Apply** — `chezmoi apply` が設定をレンダリングし、コンテナを起動し
    （`run_onchange_after_31-setup-ntfy`）、`tailscale serve --bg` のマッピングを検証します。
-4. **認証情報のプロビジョニング**（コンテナ内で実行; 認証はランタイム状態であり chezmoi 管理外です）:
+4. **認証は手順 3 が自動でプロビジョニングします**: apply スクリプトが
+   `publisher`/`subscriber` ユーザーを使い捨てパスワードで作成し、トピック別 ACL を
+   付与し、アイテムにプレースホルダーが残っている間のみトークンを発行して
+   1Password へ保存し、`~/.config/ntfy/notify-env` へ反映するための
+   `chezmoi apply` 再実行のリマインダーを印字します（ファイルテンプレートは
+   apply のたびに再レンダリングされます）。以下のコマンドは、プロビジョニングが
+   スキップ警告を出した場合（例: `op` CLI 不在）の**手動フォールバック**です:
 
    ```bash
    cd ~/.config/ntfy
@@ -90,9 +99,8 @@ phones/tablets on the tailnet (read-only token)
    docker compose exec ntfy ntfy token add --label devices subscriber
    ```
 
-   publisher トークンをアイテムの `credential` フィールドに、subscriber トークンを
-   `subscriber-token` フィールドに（各デバイスへ手動で入力するため）保存し、`chezmoi apply`
-   を再実行します。
+   フォールバック時は、発行された 2 つのトークンをアイテムの `credential` /
+   `subscriber-token` フィールドに保存し、`chezmoi apply` を再実行します。
    注: `ntfy token add` はトークンを端末の scrollback にそのまま出力します — 値を保存したら
    scrollback をクリアしてください。
 5. **デバイスの subscribe** — ntfy アプリ（iOS/Android）→ *別のサーバーを使う* で `base-url`

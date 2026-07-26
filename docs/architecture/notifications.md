@@ -67,9 +67,11 @@ the 200-char window — general secret detection is explicitly out of scope.
 
 ## Setup runbook (one-time)
 
-1. **1Password item** — create `Dotfiles - ntfy` in the `kryota.dev` vault with
-   fields `base-url` (the serve endpoint, `https://<host>.<tailnet>.ts.net`) and
-   `credential` (placeholder until step 4). See
+1. **1Password item** — create `Dotfiles - ntfy` in the `kryota.dev` vault with a
+   real `base-url` (the serve endpoint, `https://<host>.<tailnet>.ts.net`; look it
+   up with `tailscale status --json | jq -r .Self.DNSName`) and bootstrap
+   placeholders (`tk_REPLACE…`) in the `credential` / `subscriber-token` fields —
+   auto-provisioning only issues tokens while those placeholders are in place. See
    [secrets-1password](../getting-started/secrets-1password.md).
 2. **Docker Desktop** — enable *Start Docker Desktop when you sign in* (Settings →
    General); the compose `restart: unless-stopped` policy then revives the server
@@ -77,7 +79,14 @@ the 200-char window — general secret detection is explicitly out of scope.
 3. **Apply** — `chezmoi apply` renders the config, starts the container
    (`run_onchange_after_31-setup-ntfy`), and asserts the `tailscale serve --bg`
    mapping.
-4. **Provision auth** (inside the container; auth is runtime state, never chezmoi-managed):
+4. **Auth is provisioned automatically by step 3**: the apply script creates the
+   `publisher`/`subscriber` users (throwaway passwords), grants the per-topic
+   ACLs, issues both tokens while the item still holds bootstrap placeholders,
+   stores them in the 1Password item, and prints a reminder to run
+   `chezmoi apply` once more so the token lands in `~/.config/ntfy/notify-env`
+   (file templates re-render on every apply). The commands below are the
+   **manual fallback** only for when provisioning printed a skip warning
+   (e.g. `op` CLI unavailable):
 
    ```bash
    cd ~/.config/ntfy
@@ -91,9 +100,8 @@ the 200-char window — general secret detection is explicitly out of scope.
    docker compose exec ntfy ntfy token add --label devices subscriber
    ```
 
-   Store the publisher token in the item's `credential` field, the subscriber token
-   in a `subscriber-token` field (entered on devices manually), then re-run
-   `chezmoi apply`.
+   In the fallback case, store the two issued tokens in the item's `credential` /
+   `subscriber-token` fields, then re-run `chezmoi apply`.
    Note: `ntfy token add` echoes tokens into terminal scrollback — clear it after
    storing the values.
 5. **Subscribe devices** — ntfy app (iOS/Android) → *Use another server* with the
