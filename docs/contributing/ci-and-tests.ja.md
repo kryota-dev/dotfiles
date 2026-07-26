@@ -124,7 +124,7 @@ awk パーサーは `[ecc]` テーブルの `skills` 配列のみにスコープ
 - `home/run_once_after_90-other-apps.sh.tmpl`
 - `home/run_once_after_30-setup-fonts.sh.tmpl` — **古い参照**: このスクリプトはもう存在しません。フォントは `home/.chezmoiexternal.toml` の `["Library/Fonts"]` external を通じて chezmoi エンジン自体がデプロイします。`if [ -f ]` ガードにより、ファイルが存在しなくてもサイレントに処理されます（既知の問題を参照）
 
-新しい 1Password バックドのシークレットテンプレートを追加する際は、両ジョブの除外リストにも追加してください。
+エントリの多くは 1Password バックドのテンプレート（apply 時に `op` を呼ぶ）です。`home/dot_config/ntfy/private_server.yml.tmpl` は例外で、base-url が除去された（#337）ことで 1Password を読まなくなりましたが、コンテナ専用パスのみの 0600 設定でありレンダリングに CI 上の価値がないため、除外リストには残しています。apply 時に `op` を呼ぶ（またはその他の理由で CI 非互換な）新しいテンプレートを追加する際は、両ジョブの除外リストにも追加してください。
 
 ### Brewfile の処理
 

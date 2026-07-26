@@ -1,0 +1,395 @@
+# shellcheck shell=bash
+# ntfy lifecycle library (kryota-dev/dotfiles#337). Deployed 0644 to
+# ~/.config/ntfy/lib.sh and sourced by run_onchange_after_31-setup-ntfy (apply
+# time, fail-open) and ~/.local/bin/ntfy-setup (user command, fail-clear). This
+# is the single source of truth for bringing the server up and provisioning /
+# rotating credentials, so the two entry points can never drift.
+#
+# Design contract:
+#   - This file is SOURCED. It never calls `exit`; functions `return` a status
+#     and the caller decides the exit policy. It never enables `set -x`.
+#   - No secret is ever echoed or traced. Passwords reach ntfy via the
+#     NTFY_PASSWORD env (never argv). Two local, transient argv exposures are
+#     accepted: `op item edit field=value` (op has no single-field stdin
+#     shortcut — only a full JSON template), and the about-to-be-revoked old
+#     token passed to `ntfy token remove` (it takes the token positionally,
+#     with no env alternative). Both are local, one-shot, own-machine calls.
+#   - Template values live on assignment-only lines (the lint pipeline strips
+#     every line containing a template action before shellcheck); references use
+#     the ${var:-} form so the stripped body still lints clean. No comment or
+#     control-flow line contains a literal open-brace pair.
+ntfy_port="{{ .ntfy.port }}"
+ntfy_topic_attention="{{ .ntfy.topic_attention }}"
+ntfy_topic_done="{{ .ntfy.topic_done }}"
+
+ntfy_compose_cfg="$HOME/.config/ntfy/compose.yaml"
+ntfy_env_file="$HOME/.config/ntfy/notify-env"
+ntfy_state_dir="$HOME/Library/Application Support/ntfy"
+ntfy_serve_target="http://127.0.0.1:${ntfy_port:-}"
+ntfy_op_item="Dotfiles - ntfy"
+ntfy_op_vault="kryota.dev"
+ntfy_smoke_topic="claude-test"
+ntfy_pub_user="publisher"
+ntfy_sub_user="subscriber"
+# Placeholder marker the 1Password bootstrap password carries until provisioned.
+ntfy_placeholder="REPLACE_ME"
+
+ntfy_log() { echo "[ntfy] $*"; }
+ntfy_warn() { echo "[ntfy] $*" >&2; }
+
+ntfy_ensure_state_dir() {
+  mkdir -p "$ntfy_state_dir"
+  chmod 700 "$ntfy_state_dir"
+}
+
+# --- Prerequisite probes -----------------------------------------------------
+
+ntfy_docker_ready() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+ntfy_tailscale_bin() {
+  local b
+  b="$(command -v tailscale 2>/dev/null || true)"
+  if [ -z "$b" ] && [ -x "/Applications/Tailscale.app/Contents/MacOS/Tailscale" ]; then
+    b="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+  fi
+  printf '%s' "$b"
+}
+
+ntfy_tailscale_up() {
+  local b
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || return 1
+  # BackendState is "Running" once tailscaled is up and logged in.
+  "$b" status --json 2>/dev/null | grep -q '"BackendState"[[:space:]]*:[[:space:]]*"Running"'
+}
+
+# MagicDNS name of this host (for human-facing device-login / smoke-test hints
+# only; never stored). Trailing dot stripped. Empty if unavailable.
+ntfy_magicdns() {
+  local b json dns
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || return 1
+  json="$("$b" status --json 2>/dev/null || true)"
+  [ -n "$json" ] || return 1
+  if command -v jq >/dev/null 2>&1; then
+    dns="$(printf '%s' "$json" | jq -r '.Self.DNSName // empty' 2>/dev/null || true)"
+  else
+    # Scope to the .Self object before grabbing DNSName — JSON key order is not
+    # guaranteed, so a bare "first DNSName" could be a peer's. "Self" appears
+    # once at top level; strip everything up to it, then take the next DNSName.
+    dns="$(printf '%s' "$json" | sed 's/.*"Self"[[:space:]]*:[[:space:]]*{//' | grep -oE '"DNSName"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\(.*\)"/\1/')"
+  fi
+  dns="${dns%.}"
+  [ -n "$dns" ] || return 1
+  printf '%s' "$dns"
+}
+
+# --- Server bring-up ---------------------------------------------------------
+
+ntfy_start_server() {
+  ntfy_ensure_state_dir
+  docker compose -f "$ntfy_compose_cfg" up -d --remove-orphans
+}
+
+# Assert the tailnet HTTPS front. `--bg` persists across reboots. NEVER use
+# `tailscale funnel` here: the server must stay tailnet-only.
+ntfy_assert_serve() {
+  local b
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || {
+    ntfy_warn "tailscale CLI not found; cannot assert serve mapping."
+    return 1
+  }
+  "$b" serve --bg "${ntfy_serve_target:-}"
+}
+
+ntfy_exec() {
+  docker compose -f "$ntfy_compose_cfg" exec -T ntfy ntfy "$@"
+}
+
+# Give the freshly-started container a moment to accept `ntfy user` calls.
+ntfy_wait_ready() {
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    if ntfy_exec user list >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# --- User / ACL / token primitives ------------------------------------------
+
+ntfy_user_exists() {
+  # Match the name exactly: the next char after it must be a field delimiter
+  # (space / colon / paren) or end of line, so `publisher` never matches a
+  # hypothetical `publisher-foo`. Does not assume where "user " sits on the line.
+  ntfy_exec user list 2>/dev/null | grep -qE "user ${1}([ :(]|$)"
+}
+
+# Create a user with a throwaway random password if it does not exist. Used for
+# the publisher, which authenticates with a token, so its password is never
+# needed or stored.
+ntfy_ensure_user() {
+  local u="$1"
+  ntfy_user_exists "$u" && return 0
+  ntfy_log "creating ntfy user ${u}..."
+  NTFY_PASSWORD="$(openssl rand -base64 24)" \
+    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user add "$u"
+}
+
+# Ensure a user exists with a specific (known) password. `user add` when absent,
+# `user change-pass` when present — both read the password from NTFY_PASSWORD
+# (verified in the ntfy CLI source), so the password never lands in argv, and
+# change-pass preserves the user's ACLs.
+ntfy_ensure_user_with_password() {
+  local u="$1" pw="$2" sub
+  if ntfy_user_exists "$u"; then
+    sub="change-pass"
+  else
+    sub="add"
+  fi
+  NTFY_PASSWORD="$pw" \
+    docker compose -f "$ntfy_compose_cfg" exec -T -e NTFY_PASSWORD ntfy ntfy user "$sub" "$u"
+}
+
+# Idempotent ACL grant across the two rendered topics plus the runbook-only
+# smoke-test topic.
+ntfy_grant_acl() {
+  local u="$1" perm="$2" t
+  for t in "${ntfy_topic_attention:-}" "${ntfy_topic_done:-}" "$ntfy_smoke_topic"; do
+    ntfy_exec access "$u" "$t" "$perm" >/dev/null 2>&1 || true
+  done
+}
+
+ntfy_issue_token() {
+  ntfy_exec token add --label "$1" "$2" 2>/dev/null | grep -oE 'tk_[A-Za-z0-9]+' | head -n 1
+}
+
+# --- notify-env (publisher token, runtime state) -----------------------------
+
+# Write notify-env 0600 via umask; the token reaches the file only through the
+# heredoc (never echoed or traced). Reuses the exact format the wrapper sources.
+ntfy_write_notify_env() {
+  (
+    umask 077
+    cat >"$ntfy_env_file" <<EOF
+# ntfy publisher credentials for the Claude Code hook wrapper
+# (~/.claude/ntfy-notify.sh, kryota-dev/dotfiles#337). Runtime state written
+# 0600 by ~/.config/ntfy/lib.sh — NOT a chezmoi target. Sourced, never exported,
+# by the wrapper so the token only lives in that process. The wrapper publishes
+# to the loopback listener directly, so it keeps working even if the tailscale
+# serve front is down.
+NTFY_URL='${ntfy_serve_target}'
+# Write-only publisher token (least privilege: cannot read history if leaked).
+NTFY_TOKEN='$1'
+NTFY_TOPIC_ATTENTION='${ntfy_topic_attention}'
+NTFY_TOPIC_DONE='${ntfy_topic_done}'
+EOF
+  )
+}
+
+ntfy_read_notify_env_token() {
+  [ -f "$ntfy_env_file" ] || return 1
+  sed -n "s/^NTFY_TOKEN='\{0,1\}\(tk_[A-Za-z0-9]*\).*/\1/p" "$ntfy_env_file" | head -n 1
+}
+
+ntfy_notify_env_has_token() {
+  # Only real server-issued tokens (tk_…) are ever written here; there is no
+  # placeholder-seeding path, so a shape check is sufficient.
+  [ -f "$ntfy_env_file" ] &&
+    grep -qE '^NTFY_TOKEN=.*tk_' "$ntfy_env_file"
+}
+
+# --- 1Password item (subscriber username/password) ---------------------------
+
+ntfy_item_exists() {
+  op item get "$ntfy_op_item" --vault "$ntfy_op_vault" >/dev/null 2>&1
+}
+
+# Create the item only when absent — a create-time non-destructive guard. Never
+# touches an existing item's fields.
+ntfy_ensure_item() {
+  ntfy_item_exists && return 0
+  ntfy_log "creating 1Password item '${ntfy_op_item}'..."
+  op item create --category "Secure Note" --title "$ntfy_op_item" --vault "$ntfy_op_vault" \
+    "subscriber-username[text]=${ntfy_sub_user}" \
+    "subscriber-password[password]=${ntfy_placeholder}" >/dev/null
+}
+
+# Prints the stored password (empty if the field is absent/empty) and — crucially
+# — propagates op's exit status so callers can tell a real op failure from a
+# genuinely empty value. Callers that overwrite on "empty" MUST check the status.
+ntfy_read_subscriber_password() {
+  op read "op://${ntfy_op_vault}/${ntfy_op_item}/subscriber-password" 2>/dev/null
+}
+
+ntfy_store_subscriber_password() {
+  op item edit "$ntfy_op_item" --vault "$ntfy_op_vault" \
+    "subscriber-username[text]=${ntfy_sub_user}" \
+    "subscriber-password[password]=${1}" >/dev/null
+}
+
+# --- High-level provisioning -------------------------------------------------
+
+ntfy_provision_publisher() {
+  local existed=1
+  ntfy_user_exists "$ntfy_pub_user" || existed=0
+  ntfy_ensure_user "$ntfy_pub_user" || {
+    ntfy_warn "could not create the publisher user; provision manually."
+    return 1
+  }
+  ntfy_grant_acl "$ntfy_pub_user" write-only
+  # Only trust an existing notify-env token if the publisher user was already
+  # present. If we just (re)created it — e.g. after a user.db loss — any token in
+  # notify-env is stale against the rebuilt server, so reissue. This mirrors the
+  # subscriber self-heal and makes "delete user.db, run ntfy-setup" actually
+  # restore the publisher too.
+  if [ "$existed" = 1 ] && ntfy_notify_env_has_token; then
+    return 0
+  fi
+  local tok
+  tok="$(ntfy_issue_token chezmoi "$ntfy_pub_user" || true)"
+  [ -n "$tok" ] || {
+    ntfy_warn "publisher token issuance failed; provision manually."
+    return 1
+  }
+  ntfy_write_notify_env "$tok" || {
+    ntfy_warn "failed to write notify-env."
+    return 1
+  }
+  ntfy_log "publisher token issued and written to notify-env."
+}
+
+# Requires op. Creates the item if absent, then reconciles the subscriber user's
+# password with 1Password: if a real password is stored, re-apply it to the
+# ntfy user (self-heals after a user.db loss); if only a placeholder is stored,
+# generate one, apply it, and store it.
+ntfy_provision_subscriber() {
+  ntfy_ensure_item || {
+    ntfy_warn "could not ensure the 1Password item; skipping subscriber."
+    return 1
+  }
+  local stored pw rc=0
+  stored="$(ntfy_read_subscriber_password)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    ntfy_warn "could not read the stored subscriber password (op error); leaving the existing subscriber credential untouched to avoid a device lockout."
+    return 1
+  fi
+  if [ -n "$stored" ] && ! printf '%s' "$stored" | grep -q "$ntfy_placeholder"; then
+    ntfy_ensure_user_with_password "$ntfy_sub_user" "$stored" || {
+      ntfy_warn "could not reconcile the subscriber user password."
+      return 1
+    }
+    ntfy_grant_acl "$ntfy_sub_user" read-only
+    ntfy_log "subscriber user reconciled with the password in 1Password."
+    return 0
+  fi
+  pw="$(openssl rand -base64 24)"
+  ntfy_ensure_user_with_password "$ntfy_sub_user" "$pw" || {
+    ntfy_warn "could not set the subscriber password."
+    return 1
+  }
+  ntfy_grant_acl "$ntfy_sub_user" read-only
+  ntfy_store_subscriber_password "$pw" || {
+    ntfy_warn "failed to store the subscriber password in 1Password."
+    return 1
+  }
+  ntfy_log "subscriber user provisioned; username/password stored in 1Password."
+}
+
+# Full provisioning. Publisher never needs op; the subscriber half is skipped
+# (warn) when op is absent, without failing the publisher half.
+ntfy_provision() {
+  ntfy_wait_ready || ntfy_warn "ntfy container not ready yet; provisioning may be incomplete."
+  ntfy_provision_publisher || ntfy_warn "publisher provisioning incomplete."
+  if command -v op >/dev/null 2>&1; then
+    ntfy_provision_subscriber || ntfy_warn "subscriber provisioning incomplete."
+  else
+    ntfy_warn "op CLI not found; skipping subscriber (device login) provisioning."
+  fi
+}
+
+# --- Rotation ----------------------------------------------------------------
+
+# Read the OLD token first, issue the NEW one, write it, then revoke the OLD so
+# the genuinely-previous (possibly leaked) token is the one that is removed.
+ntfy_rotate_publisher() {
+  ntfy_ensure_user "$ntfy_pub_user" || return 1
+  ntfy_grant_acl "$ntfy_pub_user" write-only
+  local old new
+  old="$(ntfy_read_notify_env_token || true)"
+  new="$(ntfy_issue_token chezmoi "$ntfy_pub_user" || true)"
+  [ -n "$new" ] || {
+    ntfy_warn "new publisher token issuance failed."
+    return 1
+  }
+  ntfy_write_notify_env "$new" || return 1
+  if [ -n "$old" ] && [ "$old" != "$new" ]; then
+    if ! ntfy_exec token remove "$ntfy_pub_user" "$old" >/dev/null 2>&1; then
+      # The new token is already active, but the OLD one may still be valid —
+      # for a leaked-token rotation that is the whole point, so surface it
+      # (non-zero) instead of reporting success.
+      ntfy_warn "the new publisher token is active, but revoking the old one failed; it may still be valid. Retry 'ntfy-setup --rotate publisher' or remove it manually."
+      return 1
+    fi
+  fi
+  ntfy_log "publisher token rotated."
+}
+
+ntfy_rotate_subscriber() {
+  command -v op >/dev/null 2>&1 || {
+    ntfy_warn "op CLI not found; cannot rotate the subscriber credential."
+    return 1
+  }
+  ntfy_ensure_item || return 1
+  local pw
+  pw="$(openssl rand -base64 24)"
+  ntfy_ensure_user_with_password "$ntfy_sub_user" "$pw" || return 1
+  ntfy_grant_acl "$ntfy_sub_user" read-only
+  ntfy_store_subscriber_password "$pw" || return 1
+  ntfy_log "subscriber password rotated and updated in 1Password."
+  ntfy_log "Re-enter the new password in the ntfy app on every subscribed device."
+}
+
+# --- Interactive helpers -----------------------------------------------------
+
+ntfy_creds_exist() {
+  ntfy_notify_env_has_token || return 1
+  command -v op >/dev/null 2>&1 || return 1
+  local stored
+  # An op read error here is conservatively treated as "no usable creds" (the
+  # interactive path then provisions rather than prompting to rotate).
+  stored="$(ntfy_read_subscriber_password || true)"
+  [ -n "$stored" ] && ! printf '%s' "$stored" | grep -q "$ntfy_placeholder"
+}
+
+# Prompt on /dev/tty; default to N (skip) when no tty is available (fail-open).
+ntfy_prompt_yn() {
+  local ans=""
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf '%s' "$1" >/dev/tty
+    read -r ans </dev/tty || ans=""
+  fi
+  case "$ans" in
+    [yY] | [yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+ntfy_print_device_info() {
+  local dns url
+  dns="$(ntfy_magicdns || true)"
+  if [ -n "$dns" ]; then
+    url="https://${dns}"
+  else
+    url="https://<your-tailnet-magicdns-name>"
+  fi
+  ntfy_log "Device login — server: ${url}"
+  ntfy_log "  username: ${ntfy_sub_user}"
+  ntfy_log "  password: 1Password ${ntfy_op_item} / subscriber-password"
+  ntfy_log "  topics:   ${ntfy_topic_attention}, ${ntfy_topic_done}"
+}

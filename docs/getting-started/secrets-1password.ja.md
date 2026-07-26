@@ -44,7 +44,7 @@ macOS で `chezmoi apply` を実行する前に:
 1. **1Password デスクトップアプリ**がインストールされ、サインイン済みであること。
 2. **CLI 統合が有効**: 1Password → 設定 → デベロッパー → "1Password CLI と統合"。
 3. **1Password CLI（`op`）**がインストール済み: `brew install --cask 1password-cli`。
-4. 以下に示す <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> つの Vault アイテム参照すべてが `kryota.dev` Vault に存在すること。
+4. 以下に示す <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの Vault アイテム参照すべてが `kryota.dev` Vault に存在すること。
 
 ---
 
@@ -104,18 +104,18 @@ macOS で `chezmoi apply` を実行する前に:
 
 クライアント/勤務先の識別子パターンを `name1|name2|...` の交替形式で保存します（必要に応じて regex エスケープ済み; `'''` と改行は不可）。chezmoi は apply 時にこれを自社名前空間リポジトリ用の gitleaks 設定にレンダリングします。`run_once_after_11` スクリプトはさらにこの値をスモークテストします——パターンが非空であること、TOML 生文字列リテラルを破壊する `'''` を含まないこと、有効な正規表現としてコンパイルできることを検証します。破損したパターンは自社名前空間リポジトリのすべてのコミットでクライアント識別子ルールをサイレントに無効化してしまいます。
 
-### 5. `Dotfiles - ntfy`
+### 5. `Dotfiles - ntfy`（ゲートの検証対象外）
 
 | 属性 | 値 |
 |-----|---|
 | Vault | `kryota.dev` |
 | アイテムタイトル | `Dotfiles - ntfy` |
-| フィールド参照 | `base-url`（検証対象）, `subscriber-token`（デバイス手入力） |
-| op:// URI | `op://kryota.dev/Dotfiles - ntfy/base-url` |
-| レンダリング先 | `~/.config/ntfy/server.yml`（`base-url`） |
-| ファイルモード | `0600`（`private_` プレフィックスによる） |
+| フィールド参照 | `subscriber-username`（値は `subscriber`）, `subscriber-password`（concealed） |
+| op:// URI | `op://kryota.dev/Dotfiles - ntfy/subscriber-username`, `op://kryota.dev/Dotfiles - ntfy/subscriber-password` |
+| レンダリング先 | chezmoi テンプレートではレンダリングされない — `~/.local/bin/ntfy-setup`（と、それが source する共有ライブラリ `~/.config/ntfy/lib.sh`）が読み書きする |
+| ファイルモード | n/a（1Password アイテムであり、レンダリングされるファイルではない） |
 
-自己ホスト ntfy 通知サーバー（#337; [Notifications](../architecture/notifications.ja.md) 参照）用の 1 アイテムです。`base-url` は `tailscale serve` の HTTPS エンドポイント（`https://<host>.<tailnet>.ts.net`）です——tailnet の MagicDNS 名がこの公開リポジトリに残らないよう 1Password に保存しており、検証ゲートがチェックする唯一のフィールドです。`subscriber-token` はブートストラップ用プレースホルダー（`tk_REPLACE…`）として作成し、セットアップスクリプトが**読み取り専用**のデバイストークンを書き込みます。各スマホへ手入力するためゲートはチェックしません。**書き込み専用**の publisher トークンはここには一切保存しません——セットアップスクリプトが `~/.config/ntfy/notify-env` へ直接書き出します（`user.db` と同様のランタイム状態で、1Password を経由しません）。
+自己ホスト ntfy 通知サーバー（#337; [Notifications](../architecture/notifications.ja.md) 参照）用の 1 アイテムで、**read-only** のデバイスログイン用クレデンシャルのみを保持します。`ntfy-setup` は、このアイテムが存在しない場合に初回だけ自動作成します（Secure Note として）——それは `chezmoi apply` の後、かつ Tailscale/Docker が起動した後というタイミングで、`run_once_after_11` の検証ゲートより後のフェーズです。そのため**このゲートはこのアイテムを一切検証しません**——`Dotfiles - ntfy` が欠落していても `chezmoi apply` が失敗することはありません。**書き込み専用**の publisher トークンも 1Password には保存しません——`ntfy-setup` が `~/.config/ntfy/notify-env` へ直接書き出します（`user.db` と同様のランタイム状態）。`base-url` フィールドはありません: tailnet の MagicDNS 名は保存されず、必要になるたび（デバイスログイン、smoke test）に `tailscale status --json | jq -r .Self.DNSName` でその場導出します。
 
 ---
 
@@ -127,9 +127,9 @@ macOS で `chezmoi apply` を実行する前に:
 | `Dotfiles - Exa API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、exa MCP サーバーが認証失敗 |
 | `Dotfiles - Firecrawl API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、firecrawl MCP サーバーが認証失敗 |
 | `Dotfiles - Redact Patterns` | 検証ゲートで `chezmoi apply` が exit 1 | `gitleaks-own.toml` がレンダリングされない、自社名前空間リポジトリでクライアント識別子 gitleaks ルールが無効化 |
-| `Dotfiles - ntfy` | 検証ゲートで `chezmoi apply` が exit 1（`base-url` 欠落） | `~/.config/ntfy/server.yml` がレンダリングされない、ntfy サーバーに tailnet エンドポイントが設定されずフックラッパーが no-op のまま |
+| `Dotfiles - ntfy` | **`chezmoi apply` は失敗しない** — このアイテムは検証ゲートの対象外 | `ntfy-setup` を実行するまで 1Password にデバイスログイン用クレデンシャルが存在せず、それまでスマホはログインできない。`ntfy-setup` が初回実行時にアイテムを自動作成する。 |
 
-ゲートはすべての 5 参照を成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
+ゲートはこれより上の4参照すべてを成功前にチェックするため、その4つのうち1つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。`Dotfiles - ntfy` は意図的にこのゲートの対象外です。
 
 ---
 
@@ -159,7 +159,7 @@ regex = '''(?i)({{ onepasswordRead "op://kryota.dev/Dotfiles - Redact Patterns/p
 
 ## CI での除外
 
-`setup-validation.yml` は CI で `chezmoi apply` を実行する前に 1Password 依存のファイルをすべて除外します。以下の 6 ファイルは **両方のジョブ**（macOS および Ubuntu）で `/tmp/chezmoi-excluded/` に移動されます:
+`setup-validation.yml` は CI で `chezmoi apply` を実行する前に、1Password 依存のファイルに加え、レンダリングだけでなくインストール/対話を行うファイルも除外します。以下の <!-- FACT:ci-both-exclusion-count -->7<!-- /FACT --> ファイルは **両方のジョブ**（macOS および Ubuntu）で `/tmp/chezmoi-excluded/` に移動されます:
 
 ```
 home/private_dot_aws/config.tmpl
@@ -168,7 +168,10 @@ home/run_once_before_00-install-prerequisites.sh.tmpl
 home/run_onchange_before_10-brew-bundle.sh.tmpl
 home/run_once_after_11-validate-1password.sh.tmpl
 home/dot_config/git/private_gitleaks-own.toml.tmpl
+home/dot_config/ntfy/private_server.yml.tmpl
 ```
+
+`home/dot_config/ntfy/private_server.yml.tmpl` はもう 1Password バックドではありません（`base-url`/`onepasswordRead` 呼び出しを廃止したため——[Notifications](../architecture/notifications.ja.md) 参照）が、除外リストには残っています。ntfy Docker コンテナ内でのみ意味を持つコンテナ専用パスを含む 0600 の設定をレンダリングするファイルであり、除外を維持することで churn を最小化するためです（[CI とテスト](../contributing/ci-and-tests.ja.md) 参照）。
 
 **macOS ジョブ**はさらに `home/run_once_after_90-other-apps.sh.tmpl` を除外します（および `home/run_once_after_30-setup-fonts.sh.tmpl` への古い参照も含みますが、そのスクリプトはもう存在しないため `if [ -f ]` ガードにより無視されます）。
 

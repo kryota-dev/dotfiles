@@ -124,7 +124,7 @@ Files excluded by the **macOS job only**:
 - `home/run_once_after_90-other-apps.sh.tmpl`
 - `home/run_once_after_30-setup-fonts.sh.tmpl` — **stale**: this script no longer exists; the `if [ -f ]` guard tolerates the missing file silently (see Known Issues)
 
-When adding a new 1Password-backed secret template, add it to the exclusion list in both jobs.
+Most entries are 1Password-backed templates (they call `op` at apply time). `home/dot_config/ntfy/private_server.yml.tmpl` is the exception: since base-url was dropped (#337) it no longer reads 1Password, but it stays excluded because it is a 0600 config of container-only paths with no CI value in rendering. When adding a new template that calls `op` at apply time (or is otherwise CI-incompatible), add it to the exclusion list in both jobs.
 
 ### Brewfile handling
 

@@ -32,7 +32,7 @@ http://127.0.0.1:2586 ── docker: binwiederhier/ntfy (restart: unless-stopped
         ▲                        └─ state: ~/Library/Application Support/ntfy/
 tailscale serve --bg (HTTPS, MagicDNS)          (user.db, cache.db — outside chezmoi)
         ▲
-phones/tablets on the tailnet (read-only token)
+phones/tablets on the tailnet (username/password login)
 ```
 
 - **サーバーランタイム**: Homebrew の `ntfy` formula は `noserver` タグ付きで macOS バイナリを
@@ -44,9 +44,15 @@ phones/tablets on the tailnet (read-only token)
   funnel` は禁止です — 疑わしい場合は `tailscale funnel status`（何も serve していないことを期待）で
   確認してください。
 - **publisher クレデンシャル**: write-only トークンは `~/.config/ntfy/notify-env`（0600）に
-  置かれます。これは `run_onchange_after_31-setup-ntfy` が `user.db`/`cache.db` と並ぶランタイム状態
-  として書き出すもので、chezmoi の管理対象でも 1Password の保管対象でもありません。1Password に
-  残すのは read-only の subscriber トークン（クロスデバイス配布チャネル）のみです。
+  置かれます。これは共有ライブラリ `~/.config/ntfy/lib.sh`（`run_onchange_after_31-setup-ntfy`
+  と `ntfy-setup` の両方が source する）が `user.db`/`cache.db` と並ぶランタイム状態として
+  書き出すもので、chezmoi の管理対象でも 1Password の保管対象でもありません。
+- **subscriber クレデンシャル**: read-only の `subscriber` ntfy ユーザーは、トークンではなく
+  **username + password** で認証します。ntfy モバイルアプリの公式ドキュメントは、2つの認証方式
+  ——サーバーごとのユーザーログイン（Basic Auth、アプリが自動設定）と、カスタム `Authorization`
+  ヘッダー（手動のトークン経路）——が互いに排他的だと説明しており、実際に iOS で機能するのは
+  前者のみです。username（`subscriber`）と生成されたパスワードは `Dotfiles - ntfy` 1Password
+  アイテムに保存されます。
 - **iOS の即時 push**: `upstream-base-url: https://ntfy.sh` は、**受信メッセージすべて**について
   ntfy.sh へポーリングリクエストを送ります — iOS デバイスが購読しているかどうかに関係なく
   （トピックのメタデータのみで、メッセージ本文は含みません）— これが APNs に即時配信の材料を渡します。
@@ -71,65 +77,74 @@ phones/tablets on the tailnet (read-only token)
 
 ## セットアップ手順（初回のみ）
 
-1. **1Password アイテム** — `kryota.dev` Vault に `Dotfiles - ntfy` を作成し、
-   `base-url` には実値（serve エンドポイント `https://<host>.<tailnet>.ts.net`。
-   `tailscale status --json | jq -r .Self.DNSName` で確認可能）を、`subscriber-token`
-   にはブートストラップ用プレースホルダー（`tk_REPLACE…`）を設定します — 自動
-   プロビジョニングは、プレースホルダーが残っている間のみ read-only の subscriber
-   トークンを発行します。write-only の publisher トークンはここには**置きません**:
-   セットアップスクリプトが `~/.config/ntfy/notify-env` へ直接書き出します（手順 4 参照）。
-   [secrets-1password](../getting-started/secrets-1password.ja.md) を参照してください。
-2. **Docker Desktop** — *サインイン時に Docker Desktop を起動する*（設定 →
+これらの手順の前提として、`chezmoi apply` が compose ファイル・`~/.config/ntfy/lib.sh`・
+`ntfy-setup` コマンドをすでにデプロイ済みです — どれも手作業で作る必要はありません。
+
+1. **Docker Desktop** — *サインイン時に Docker Desktop を起動する*（設定 →
    一般）を有効化します。これにより compose の `restart: unless-stopped` ポリシーが、
    再起動のたびにサーバーを復帰させます。
-3. **Apply** — `chezmoi apply` が設定をレンダリングし、コンテナを起動し
-   （`run_onchange_after_31-setup-ntfy`）、`tailscale serve --bg` のマッピングを検証します。
-4. **認証は手順 3 が自動でプロビジョニングします**（再 apply 不要の 1 パス）: スクリプトが
-   `publisher`/`subscriber` ユーザーを使い捨てパスワードで作成し、トピック別 ACL を
-   付与し、2 つのトークンをプロビジョニングします:
+2. **Tailscale** — この Mac が `tailscale up` 済みでログインしていることを確認します。
+3. **`ntfy-setup` を実行**（`~/.local/bin/ntfy-setup`、PATH 済み）— ライフサイクル
+   全体のための単一の再実行可能エントリポイントです。コンテナを起動し
+   （`docker compose up -d --remove-orphans`）、`tailscale serve --bg` を検証した上で、
+   1 パスで両方のクレデンシャルをプロビジョニングします:
    - **publisher** トークンは `~/.config/ntfy/notify-env`（0600）へ直接書き出されます —
-     フックラッパーが source するランタイム状態ファイルです。1Password には一切触れず、
-     この処理に `op` は不要です。
-   - **subscriber** トークンは 1Password アイテムに保存されます（各スマホに手入力する
-     クロスデバイスチャネル）。この処理には `op` CLI が必要です。
+     フックラッパーが source するランタイム状態ファイルです。この処理に `op` は不要です。
+   - **subscriber** ユーザーは生成されたパスワードで作成（または修復）され、そのパスワードは
+     `Dotfiles - ntfy` 1Password アイテムに保存されます。この処理には `op` CLI が必要です。
+     **1Password アイテムは、存在しない場合に初回だけ自動作成されます**（Secure Note、
+     `subscriber-username`/`subscriber-password`）— 手動での 1Password 設定は不要です。
+     [secrets-1password](../getting-started/secrets-1password.ja.md) を参照してください。
 
-   以下のコマンドは、プロビジョニングがスキップ警告を出した場合（例: Docker 停止中、
-   または subscriber 側で `op` 不在）の**手動フォールバック**です:
+   `chezmoi apply` も同じプロビジョニングを apply 時に実行します
+   （`run_onchange_after_31-setup-ntfy` が同じ `~/.config/ntfy/lib.sh` を source します）が、
+   Tailscale がすでに up、かつ Docker がすでに起動しているマシンでのみ完了します。
+   **フレッシュなマシンではどちらもまだ true ではない**ため、apply 時の実行は警告してスキップ
+   します（下記の障害モード参照）— 両方が揃った時点で `ntfy-setup` を実行してセットアップを
+   完了させてください。この 2 フェーズのギャップこそが、`ntfy-setup` を `chezmoi apply` 単独に
+   頼らない独立した再実行可能コマンドとして用意している理由です。
+
+   以下のコマンドは、`op` が利用できない場合（subscriber 側は警告付きでスキップされます）の
+   **手動フォールバック**専用です:
 
    ```bash
    cd ~/.config/ntfy
    docker compose exec ntfy ntfy user add publisher     # publisher, write-only
-   docker compose exec ntfy ntfy user add subscriber    # devices, read-only
+   NTFY_PASSWORD='<choose-a-strong-password>' \
+     docker compose exec -T -e NTFY_PASSWORD ntfy ntfy user add subscriber   # devices, read-only
    for t in claude-attention claude-done claude-test; do
      docker compose exec ntfy ntfy access publisher "$t" write-only
      docker compose exec ntfy ntfy access subscriber "$t" read-only
    done
    docker compose exec ntfy ntfy token add --label chezmoi publisher
-   docker compose exec ntfy ntfy token add --label devices subscriber
    ```
 
    フォールバック時は、publisher トークンを `~/.config/ntfy/notify-env` に
-   `NTFY_TOKEN='tk_…'` として書き込み（ファイルは 0600 のまま）、subscriber トークンは
-   アイテムの `subscriber-token` フィールドに保存します。
+   `NTFY_TOKEN='tk_…'` として書き込み（ファイルは 0600 のまま）、subscriber の
+   username/password は `Dotfiles - ntfy` アイテムの `subscriber-username`/
+   `subscriber-password` フィールドに保存します。
    注: `ntfy token add` はトークンを端末の scrollback にそのまま出力します — 値を保存したら
    scrollback をクリアしてください。
-5. **デバイスの subscribe** — ntfy アプリ（iOS/Android）→ *別のサーバーを使う* で `base-url`
-   エンドポイント、1Password の subscriber トークン、2つのトピックを設定します。
+4. **デバイスの subscribe** — ntfy アプリ（iOS/Android）→ *別のサーバーを使う* → サーバー URL
+   （`ntfy-setup` が表示します。または `tailscale status --json | jq -r .Self.DNSName` で
+   自分で導出し、末尾のドットを除去して `https://` を前置します）→ username `subscriber` と
+   `Dotfiles - ntfy` 1Password アイテムのパスワードでログイン → 2 つのトピックを購読します。
 
 ## Smoke test
 
-トークンをコマンドラインに乗せることは決してしません（`-H` だと `ps` やシェル履歴に露出します —
-wrapper が課しているのと同じルールです）。代わりに process substitution で curl に header 設定を
-渡します:
+トークンやパスワードをコマンドラインに乗せることは決してしません（`-H`/`-u` だと `ps` やシェル
+履歴に露出します — wrapper が課しているのと同じルールです）。代わりに process substitution で
+curl に設定を渡します。サーバー URL もその場で導出し、保存はしません:
 
 ```bash
-BASE="$(op read 'op://kryota.dev/Dotfiles - ntfy/base-url')"
-ro() { printf 'header = "Authorization: Bearer %s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/subscriber-token')"; }
+DNS="$(tailscale status --json | jq -r .Self.DNSName)"
+BASE="https://${DNS%.}"
+ro() { printf 'user = "subscriber:%s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/subscriber-password')"; }
 # publisher トークンは 1Password にないため、notify-env から source する。
 wo() { ( . ~/.config/ntfy/notify-env; printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" ); }
 # anonymous publish must be denied (401/403)
 curl -s -o /dev/null -w '%{http_code}\n' -d test "$BASE/claude-test"
-# read-only token must be denied for publish (403)
+# read-only な username/password は publish が拒否されなければならない (403)
 curl -s -o /dev/null -w '%{http_code}\n' -K <(ro) -d test "$BASE/claude-test"
 # publisher token succeeds (200); phones should receive it
 curl -s -o /dev/null -w '%{http_code}\n' -K <(wo) -d test "$BASE/claude-test"
@@ -145,26 +160,37 @@ upstream リレーは upstream 側で未検証です — PRD 参照）。
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| Local alert sound, no phone notification | Wrapper publish failed — server down. Check `~/Library/Logs/ntfy-notify.log`, then `docker compose -f ~/.config/ntfy/compose.yaml up -d` |
-| No notifications right after login | Docker Desktop still starting; the fail-open window is expected. Enable start-at-login (runbook step 2) |
-| `chezmoi apply` prints `[ntfy] Docker Desktop is not running` | Intentional warn-and-skip (deviation from lifecycle convention #6): notifications must not block apply. **復旧は印字された `docker compose up -d` コマンドで行う** — `chezmoi apply` の再実行だけでは再試行されない（exit 0 で `run_onchange` の state が記録され、compose/server テンプレートが変更されたときのみ再発火する） |
-| Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — re-run `tailscale serve --bg http://127.0.0.1:2586` (also asserted by every re-triggered apply) |
+| Local alert sound, no phone notification | Wrapper publish failed — server down. Check `~/Library/Logs/ntfy-notify.log`, then run `ntfy-setup` |
+| No notifications right after login | Docker Desktop still starting; the fail-open window is expected. Enable start-at-login (runbook step 1) |
+| `chezmoi apply` prints `[ntfy] Docker Desktop is not running` | Intentional warn-and-skip (deviation from lifecycle convention #6): notifications must not block apply. **復旧は Docker 起動後に `ntfy-setup` を実行する** — `chezmoi apply` の再実行だけでは再試行されない（exit 0 で `run_onchange` の state が記録され、compose/server/lib テンプレートが変更されたときのみ再発火する） |
+| Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — `ntfy-setup` を実行する（`tailscale serve --bg` を再検証する。再トリガーされた apply のたびにも検証される） |
 | Old messages missing | `cache-duration` (168h, `[ntfy]` in `.chezmoidata.toml`) elapsed |
 | Notifications on the wrong account badge | `CLAUDE_CONFIG_DIR` unset in that session; account falls back to `default` |
 
-## リカバリ: user.db (auth) の消失・破損、またはトークンローテーション
+## リカバリ: user.db (auth) の消失・破損、またはクレデンシャルのローテーション
 
 **クリーンインストールは自己修復します**: `run_onchange` の状態が無いためセットアップ
-スクリプトが走り、`~/.config/ntfy/notify-env` が存在しないことを検知して publisher トークンを
-再プロビジョニングします。
+スクリプトが走り、`~/.config/ntfy/notify-env` が存在しないことを検知して publisher トークンと
+subscriber のユーザー/パスワードを再プロビジョニングします。
 
-**既存マシン**では notify-env を削除するだけでは不十分です — `run_onchange_after_31-setup-ntfy`
-は exit 0 を記録し、compose/server テンプレートが変更されたときのみ再発火するため、`chezmoi apply`
-だけでは書き直されません。手動フォールバック（手順 4）で再プロビジョニングしてください: 新しい
-`ntfy token add … publisher` を発行し、notify-env に `NTFY_TOKEN='tk_…'`（0600 のまま）として
-書き込みます。`user.db` が消失・破損している場合は先に削除してください。**トークンを再発行すると
-すべての既存トークンが無効化されます**ので、subscribe している全デバイスで subscriber トークンも
-再入力してください。
+**既存マシン**では、`run_onchange_after_31-setup-ntfy` は exit 0 を記録し、compose/server/lib
+テンプレートが変更されたときのみ再発火するため、`chezmoi apply` だけではダウンしたコンテナの
+復旧も、`user.db` の消失の修復も、クレデンシャルのローテーションもできません。**`ntfy-setup` が
+これらすべてに対する単一のリカバリコマンドです**:
+
+- **コンテナのダウン / `tailscale serve` マッピングの喪失** — `ntfy-setup` がコンテナを再起動し、
+  `tailscale serve --bg` を再検証します。
+- **`user.db` の消失・破損** — 先に削除してから `ntfy-setup` を実行します。両方のユーザーを
+  再作成し、既知のパスワード/トークンを再適用します。
+- **クレデンシャルの漏洩・ローテーション** — `ntfy-setup --rotate publisher|subscriber|all`。
+  `ntfy token add` は加算的です（各ユーザーは複数のトークンを持てます。新規発行は既存トークンを
+  無効化**しません**）。そのため publisher のローテーションは、まず notify-env から現在の
+  トークンを読み取り、新しいトークンを発行して書き込んだ後、古いトークンを（`ntfy token remove`
+  で）失効させます — すべてのクレデンシャルを一括無効化するのは `user.db` を削除した場合のみです。
+  subscriber のローテーションは `ntfy user change-pass` を使います（ユーザーと ACL を維持、
+  del/re-add のギャップなし）。1Password の `subscriber-password` フィールドも更新します。
+  **subscriber のローテーション後は、subscribe している全デバイスで新しいパスワードを
+  再入力する必要があります。**
 
 ## ロールバック（1ステップ）
 

@@ -36,6 +36,10 @@ The `private_` chezmoi prefix is the mechanism that enforces `0600` on the desti
 
 The values themselves are single-quoted at render time (the `squote` chezmoi template function): a key containing `$` or a backtick cannot trigger shell expansion or command substitution when the rendered file is sourced by the shell.
 
+### The one write path: ntfy-setup provisioning (#337)
+
+Every reference above is read-only — `op read` / `onepasswordRead` pulling a value out of the vault into a `0600` file. The self-hosted ntfy setup (#337) adds this repo's only 1Password **write** path: the shared library `~/.config/ntfy/lib.sh` calls `op item create` (once, only when the `Dotfiles - ntfy` item is absent) and `op item edit` (to store / rotate the read-only `subscriber-password` device-login credential). It runs from `ntfy-setup` on demand and from `run_onchange_after_31-setup-ntfy` at apply time, never during template render. Two properties bound this new surface: the create is **non-destructive** (guarded by `op item get`, so it never overwrites an existing item's fields), and it sits **off the apply-strict path** — macOS-only, and a failure warns and continues rather than aborting apply (the fail-open contract below). The single-field `op item edit field=value` call is the one accepted transient argv exposure for this write (op has no single-field stdin shortcut). See [Notifications](../architecture/notifications.md).
+
 ---
 
 ## Two strictness levels: apply-strict vs runtime-graceful
@@ -44,13 +48,14 @@ The system draws a hard line between apply-time and runtime behavior:
 
 ### Apply-strict: `run_once_after_11-validate-1password.sh.tmpl`
 
-This lifecycle script runs once on macOS and aborts `chezmoi apply` with a non-zero exit if any of the <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> required 1Password item references is missing or unreachable. The checked references are:
+This lifecycle script runs once on macOS and aborts `chezmoi apply` with a non-zero exit if any of the <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> required 1Password item references is missing or unreachable. The checked references are:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
-- `op://kryota.dev/Dotfiles - ntfy/base-url`
+
+The `Dotfiles - ntfy` item (self-hosted notifications, #337) is deliberately outside this gate: it holds only the read-only `subscriber-username`/`subscriber-password` device-login credential, auto-created and filled by `ntfy-setup` after `chezmoi apply` and after Tailscale/Docker are up — a later phase than this validation script. There is no `base-url` field any more; the tailnet MagicDNS name is never stored in 1Password, only derived on demand. See [Notifications](../architecture/notifications.md).
 
 If `op` is not installed, not authenticated, or an item cannot be read, `chezmoi apply` fails fast. Note that `run_once_after_11` is an AFTER-phase script — home has already been mutated by the time it runs. The actual fail-fast paths are: (1) `onepasswordRead` inside `.tmpl` files aborts apply during template render, before those files are written; and (2) `run_once_after_11` acts as a fail-fast gate before the heavier after-phase provisioning (mise, MCP, CLV2, etc.). The intent is that a partially-provisioned machine with missing secrets is worse than a clean abort at either of those points. The script is macOS-only (`{{ if ne .chezmoi.os "darwin" }}` exits early) because CI runs on Ubuntu without a 1Password installation.
 

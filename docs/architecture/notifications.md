@@ -30,7 +30,7 @@ http://127.0.0.1:2586 ── docker: binwiederhier/ntfy (restart: unless-stopped
         ▲                        └─ state: ~/Library/Application Support/ntfy/
 tailscale serve --bg (HTTPS, MagicDNS)          (user.db, cache.db — outside chezmoi)
         ▲
-phones/tablets on the tailnet (read-only token)
+phones/tablets on the tailnet (username/password login)
 ```
 
 - **Server runtime**: the Homebrew `ntfy` formula builds macOS binaries with the
@@ -42,9 +42,15 @@ phones/tablets on the tailnet (read-only token)
   funnel` is prohibited — verify with `tailscale funnel status` (expect nothing
   served) whenever in doubt.
 - **Publisher credential**: the write-only token lives in `~/.config/ntfy/notify-env`
-  (0600), runtime state written by `run_onchange_after_31-setup-ntfy` alongside the
-  `user.db`/`cache.db` state — never a chezmoi target, never in 1Password. Only the
-  read-only subscriber token (the cross-device channel) is kept in 1Password.
+  (0600), runtime state written by the shared `~/.config/ntfy/lib.sh` library
+  (sourced by both `run_onchange_after_31-setup-ntfy` and `ntfy-setup`) alongside the
+  `user.db`/`cache.db` state — never a chezmoi target, never in 1Password.
+- **Subscriber credential**: the read-only `subscriber` ntfy user authenticates with a
+  **username + password**, not a token. The ntfy mobile app's own docs describe the
+  two auth modes as mutually exclusive — a per-server user login (Basic Auth, set
+  automatically by the app) or a custom `Authorization` header (the manual token
+  path) — and only the former works in practice on iOS. The username (`subscriber`)
+  and a generated password are stored in the `Dotfiles - ntfy` 1Password item.
 - **iOS instant push**: `upstream-base-url: https://ntfy.sh` publishes a poll
   request to ntfy.sh for **every incoming message** — regardless of whether any
   iOS device subscribes (topic metadata only, never message bodies) — feeding
@@ -71,66 +77,77 @@ the 200-char window — general secret detection is explicitly out of scope.
 
 ## Setup runbook (one-time)
 
-1. **1Password item** — create `Dotfiles - ntfy` in the `kryota.dev` vault with a
-   real `base-url` (the serve endpoint, `https://<host>.<tailnet>.ts.net`; look it
-   up with `tailscale status --json | jq -r .Self.DNSName`) and a bootstrap
-   placeholder (`tk_REPLACE…`) in the `subscriber-token` field — auto-provisioning
-   issues the read-only subscriber token only while that placeholder is in place.
-   The write-only publisher token is **not** kept here: the setup script writes it
-   straight into `~/.config/ntfy/notify-env` (see step 4). See
-   [secrets-1password](../getting-started/secrets-1password.md).
-2. **Docker Desktop** — enable *Start Docker Desktop when you sign in* (Settings →
+`chezmoi apply` must have already deployed the compose file, `~/.config/ntfy/lib.sh`,
+and the `ntfy-setup` command before these steps — none of them need to be created by
+hand.
+
+1. **Docker Desktop** — enable *Start Docker Desktop when you sign in* (Settings →
    General); the compose `restart: unless-stopped` policy then revives the server
    after every reboot.
-3. **Apply** — `chezmoi apply` renders the config, starts the container
-   (`run_onchange_after_31-setup-ntfy`), and asserts the `tailscale serve --bg`
-   mapping.
-4. **Auth is provisioned automatically by step 3**, in a single pass with no
-   second apply: the script creates the `publisher`/`subscriber` users (throwaway
-   passwords), grants the per-topic ACLs, then provisions the two tokens:
+2. **Tailscale** — make sure this Mac is `tailscale up` and logged in.
+3. **Run `ntfy-setup`** (`~/.local/bin/ntfy-setup`, on PATH) — the single
+   re-runnable entry point for the whole lifecycle. It starts the container
+   (`docker compose up -d --remove-orphans`), asserts `tailscale serve --bg`, then
+   provisions both credentials in one pass:
    - the **publisher** token is written straight into `~/.config/ntfy/notify-env`
-     (0600) — the runtime-state file the hook wrapper sources. It never touches
-     1Password, and `op` is not required for this half.
-   - the **subscriber** token is stored in the 1Password item (the cross-device
-     channel you type into each phone); this half needs the `op` CLI.
+     (0600) — the runtime-state file the hook wrapper sources. `op` is not
+     required for this half.
+   - the **subscriber** user is created (or repaired) with a generated password,
+     which is stored in the `Dotfiles - ntfy` 1Password item. This half needs the
+     `op` CLI; **the 1Password item is auto-created the first time it is
+     absent** (Secure Note, `subscriber-username`/`subscriber-password`) — no
+     manual 1Password setup is required. See
+     [secrets-1password](../getting-started/secrets-1password.md).
 
-   The commands below are the **manual fallback** only for when provisioning
-   printed a skip warning (e.g. Docker down, or `op` unavailable for the
-   subscriber half):
+   `chezmoi apply` runs the same provisioning at apply time
+   (`run_onchange_after_31-setup-ntfy` sources the same `~/.config/ntfy/lib.sh`),
+   but only completes it on a machine where Tailscale is already up and Docker is
+   already running. On a **fresh machine neither is true yet**, so the apply-time
+   run warns and skips (see Failure modes below) — run `ntfy-setup` once both are
+   available to finish setup. This two-phase gap is why `ntfy-setup` exists as a
+   separate, re-runnable command rather than relying on `chezmoi apply` alone.
+
+   The commands below are the **manual fallback** only for when `op` is
+   unavailable (the subscriber half is then skipped with a warning):
 
    ```bash
    cd ~/.config/ntfy
    docker compose exec ntfy ntfy user add publisher     # publisher, write-only
-   docker compose exec ntfy ntfy user add subscriber    # devices, read-only
+   NTFY_PASSWORD='<choose-a-strong-password>' \
+     docker compose exec -T -e NTFY_PASSWORD ntfy ntfy user add subscriber   # devices, read-only
    for t in claude-attention claude-done claude-test; do
      docker compose exec ntfy ntfy access publisher "$t" write-only
      docker compose exec ntfy ntfy access subscriber "$t" read-only
    done
    docker compose exec ntfy ntfy token add --label chezmoi publisher
-   docker compose exec ntfy ntfy token add --label devices subscriber
    ```
 
    In the fallback case, write the publisher token into `~/.config/ntfy/notify-env`
-   as `NTFY_TOKEN='tk_…'` (keep the file 0600), and store the subscriber token in
-   the item's `subscriber-token` field. Note: `ntfy token add` echoes tokens into
-   terminal scrollback — clear it after storing the values.
-5. **Subscribe devices** — ntfy app (iOS/Android) → *Use another server* with the
-   `base-url` endpoint, the subscriber token from 1Password, and the two topics.
+   as `NTFY_TOKEN='tk_…'` (keep the file 0600), and store the subscriber
+   username/password in the `Dotfiles - ntfy` item's `subscriber-username`/
+   `subscriber-password` fields. Note: `ntfy token add` echoes the token into
+   terminal scrollback — clear it after storing the value.
+4. **Subscribe devices** — ntfy app (iOS/Android) → *Use another server* → the
+   server URL (`ntfy-setup` prints it; or derive it yourself with
+   `tailscale status --json | jq -r .Self.DNSName`, strip the trailing dot,
+   prepend `https://`) → log in with username `subscriber` and the password from
+   the `Dotfiles - ntfy` 1Password item → subscribe to the two topics.
 
 ## Smoke test
 
-Tokens never go on the command line (`-H` would expose them in `ps` and shell
-history — the same rule the wrapper enforces); feed curl a header config via
-process substitution instead:
+Tokens and passwords never go on the command line (`-H`/`-u` would expose them in
+`ps` and shell history — the same rule the wrapper enforces); feed curl a config via
+process substitution instead. The server URL is derived on the spot, not stored:
 
 ```bash
-BASE="$(op read 'op://kryota.dev/Dotfiles - ntfy/base-url')"
-ro() { printf 'header = "Authorization: Bearer %s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/subscriber-token')"; }
+DNS="$(tailscale status --json | jq -r .Self.DNSName)"
+BASE="https://${DNS%.}"
+ro() { printf 'user = "subscriber:%s"\n' "$(op read 'op://kryota.dev/Dotfiles - ntfy/subscriber-password')"; }
 # The publisher token is not in 1Password — source it from notify-env instead.
 wo() { ( . ~/.config/ntfy/notify-env; printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" ); }
 # anonymous publish must be denied (401/403)
 curl -s -o /dev/null -w '%{http_code}\n' -d test "$BASE/claude-test"
-# read-only token must be denied for publish (403)
+# read-only user/password must be denied for publish (403)
 curl -s -o /dev/null -w '%{http_code}\n' -K <(ro) -d test "$BASE/claude-test"
 # publisher token succeeds (200); phones should receive it
 curl -s -o /dev/null -w '%{http_code}\n' -K <(wo) -d test "$BASE/claude-test"
@@ -146,27 +163,37 @@ tailnet-only server is unverified upstream — see the PRD).
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| Local alert sound, no phone notification | Wrapper publish failed — server down. Check `~/Library/Logs/ntfy-notify.log`, then `docker compose -f ~/.config/ntfy/compose.yaml up -d` |
-| No notifications right after login | Docker Desktop still starting; the fail-open window is expected. Enable start-at-login (runbook step 2) |
-| `chezmoi apply` prints `[ntfy] Docker Desktop is not running` | Intentional warn-and-skip (deviation from lifecycle convention #6): notifications must not block apply. **Recover with the printed `docker compose up -d` command** — re-running `chezmoi apply` alone does NOT retry (the exit-0 run records the `run_onchange` state; the script only re-fires when the compose/server templates change) |
-| Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — re-run `tailscale serve --bg http://127.0.0.1:2586` (also asserted by every re-triggered apply) |
+| Local alert sound, no phone notification | Wrapper publish failed — server down. Check `~/Library/Logs/ntfy-notify.log`, then run `ntfy-setup` |
+| No notifications right after login | Docker Desktop still starting; the fail-open window is expected. Enable start-at-login (runbook step 1) |
+| `chezmoi apply` prints `[ntfy] Docker Desktop is not running` | Intentional warn-and-skip (deviation from lifecycle convention #6): notifications must not block apply. **Recover by running `ntfy-setup` once Docker is running** — re-running `chezmoi apply` alone does NOT retry (the exit-0 run records the `run_onchange` state; the script only re-fires when the compose/server/lib templates change) |
+| Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — run `ntfy-setup` (re-asserts `tailscale serve --bg`; also asserted by every re-triggered apply) |
 | Old messages missing | `cache-duration` (168h, `[ntfy]` in `.chezmoidata.toml`) elapsed |
 | Notifications on the wrong account badge | `CLAUDE_CONFIG_DIR` unset in that session; account falls back to `default` |
 
-## Recovery: user.db (auth) lost or corrupted, or token rotation
+## Recovery: user.db (auth) lost or corrupted, or credential rotation
 
 A **clean install self-heals**: with no prior `run_onchange` state the setup
 script runs, finds `~/.config/ntfy/notify-env` absent, and re-provisions the
-publisher token into it.
+publisher token and the subscriber user/password into it.
 
-On an **existing machine**, deleting notify-env is not enough on its own —
-`run_onchange_after_31-setup-ntfy` records exit-0 and only re-fires when the
-compose/server templates change, so `chezmoi apply` alone will not rewrite it.
-Re-provision with the manual fallback (runbook step 4): issue a fresh
-`ntfy token add … publisher` and write it into notify-env as `NTFY_TOKEN='tk_…'`
-(0600). If `user.db` was lost or corrupted, delete it first. **Re-issuing tokens
-invalidates every existing token**, so also re-enter the subscriber token on every
-subscribed device.
+On an **existing machine**, `run_onchange_after_31-setup-ntfy` records exit-0 and
+only re-fires when the compose/server/lib templates change, so `chezmoi apply`
+alone will not repair a downed container, a lost `user.db`, or rotate a
+credential. **`ntfy-setup` is the single recovery command** for all of these:
+
+- **Downed container / lost `tailscale serve` mapping** — `ntfy-setup` restarts
+  the container and re-asserts `tailscale serve --bg`.
+- **Lost or corrupted `user.db`** — delete it, then run `ntfy-setup`; it
+  recreates both users and re-applies the known password/token.
+- **Leaked or rotating credential** — `ntfy-setup --rotate publisher|subscriber|all`.
+  `ntfy token add` is additive (each user can hold multiple tokens; issuing a new
+  one does **not** invalidate existing ones), so publisher rotation reads the
+  current token from notify-env first, issues the new one, writes it, then
+  revokes the old one (`ntfy token remove`) — only deleting `user.db` invalidates
+  every credential at once. Subscriber rotation uses `ntfy user change-pass`
+  (preserves the user and its ACLs, no del/re-add gap) and updates the
+  `subscriber-password` field in 1Password. **Every subscribed device must
+  re-enter the new password after a subscriber rotation.**
 
 ## Rollback (one step)
 
