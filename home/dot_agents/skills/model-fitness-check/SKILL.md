@@ -23,14 +23,14 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 | `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus 5 | high（既定。ゲートは言及しない） | **floor**（blocking） |
 | large tier / PRD 審議 / adversarial verification / 横断設計 | Opus 5 | xhigh | **floor**（blocking） |
 | trivial / small tier のみ | Sonnet 5 | medium | **cost hint**（non-blocking FYI） |
-| Fable-orchestrator セッション（`cldf` 系） | Fable 5 | セッション既定 | 常に pass（monotonic ルール） |
+| Fable-orchestrator セッション（`cldf` 系） | Fable 5 | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
 
 ## capability 順序（monotonic）
 
 能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。判定は「現在の tier ≥ 行が要求する tier」なら**無条件で silent pass**（プロンプトを出さない）。
 
-- **Fable / cldf セッションはどの行に対しても switch 提案を受けない**。Fable は全行の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に無理に合わせる提案は構造的に矛盾する。
-- over-provisioning（Fable で trivial をこなす等）は停止対象にしない（user が cldf を起動した時点で下せない決定であり、指摘しても是正不能）。
+- **Fable / cldf セッションは floor 行（上方向）の switch 提案を受けない**。Fable は全 floor の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に合わせる上方向の提案は構造的に矛盾する。下方向（過剰スペックの解消）は「over-provision 閾値ゲート」の対象で、**Fable セッションも免除されない**。
+- over-provisioning（Fable で trivial をこなす等）は毎回は停止しないが、累積が閾値を超えたら 1 回だけ blocking する（「over-provision 閾値ゲート」参照）。cldf でも exit → `cld --continue` で orchestrator 契約ごと降りられるため、「是正不能」ではない。
 
 ## model の検出
 
@@ -58,15 +58,59 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 3. **abort**: 作業を中止する。
 
 - **effort は xhigh を要求する行でのみ言及する**。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
-- effort はセッション内から確実には読めないため、**推論せず提示して確認する**（`effortLevel` は settings.json から読めるが、`/effort` によるセッション内状態と乖離しうるため）。
+- effort はセッション内から確実には読めないため、**推論せず提示して確認する**（`effortLevel` は settings.json から読めるが、`/effort` によるセッション内状態と乖離しうるため）。statusline snapshot（「over-provision 閾値ゲート」参照）の `effort` は harness 実出力由来の参考値として使えるが、描画タイミングにより stale がありうるため、これも確定値としては扱わない。
 
 ### trivial / small 行
 
 **non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
 
+FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
+
 ### 検出不能時の fallback
 
 model 検出が主経路・副経路とも失敗した場合、**silent skip せず**、常にチェック内容（要求水準と現在の不確実性）を提示する（fail-safe）。
+
+## over-provision 閾値ゲート
+
+trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「カウンタ × 実測 quota 圧力」の 2 シグナルで監視し、閾値超過時のみ 1 回 blocking する。サブスクリプション（Max / Team）では over-provision の実害は金額ではなく **quota（全モデル共有プール）のクラウドアウト**——Fable / Opus で軽作業を続けると、重作業に必要な quota が先に尽きる——なので、圧力シグナルと組み合わせ、quota に余裕がある間は止めない（alert fatigue の回避。blocking の希少性が floor 停止の信頼性を支える）。
+
+### シグナル 1: over-provision カウンタ（セッション内）
+
+- 「現在の tier が行の要求より上位」と判定するたび（trivial/small FYI を出すたび）にカウンタを +1 する。
+- セッション内でのみ保持する（永続化しない）。**floor 判定の idempotency とは別カウンタ**（idempotency は同一判定の再提示の抑制、本カウンタは累積の検出で、性質が逆）。
+- ゲート発火時、および continue anyway 選択時にリセットする。
+
+### シグナル 2: 実測 quota 圧力（statusline snapshot）
+
+`~/.cache/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。`five_hour.used_percentage` を圧力として使う。
+
+- **staleness ガード**: `ts` が 15 分より古い、またはファイルが無い場合は quota 不明として count-only fallback（下表）に切り替える。silent skip はしない（fail-safe）。
+
+### 発火条件（named constants）
+
+帯域は statusline `pct_color` の色閾値（50 / 80）と一致させる:
+
+| 5h used_percentage | 帯域 | 発火閾値（カウンタ） |
+|---|---|---|
+| < 50 | green | 発火しない（FYI のみ） |
+| 50–79 | yellow | `OVERPROVISION_GATE_YELLOW = 5` 件 |
+| ≥ 80 | red | `OVERPROVISION_GATE_RED = 2` 件 |
+| snapshot 無し / stale | 不明 | `OVERPROVISION_GATE_FALLBACK = 5` 件（count-only） |
+
+### 発火時の提示（`AskUserQuestion` で 1 回 blocking）
+
+文面には snapshot の実測値をそのまま載せる（例: 「5h ウィンドウ 62% 消費（↻14:00 リセット）。直近 5 件は Sonnet で足りる軽作業でした。このペースだと重作業の前に上限に当たる見込みです」）。選択肢はセッション種別で分岐する:
+
+- **cld 系（通常セッション）**:
+  1. `/model sonnet` に下げて続行（推奨）
+  2. continue anyway（カウンタをリセットし、次の閾値まで沈黙）
+  3. abort
+- **cldf 系（Fable orchestrator）**:
+  1. exit → `cld --continue` で再開（推奨。orchestrator prompt は argv 注入のため再起動で契約ごと降りられ、会話文脈は保持される）
+  2. `/model opus` 等でセッション内切替（**注記必須**: system-prompt の自己申告 model identity が古い値を残すため、以後の本 skill の主経路検出を信用せず、切替済みであることをセッション内に記録する）
+  3. continue anyway（カウンタをリセット）
+
+このゲートは **Fable / cldf セッションにも適用される**（floor 免除は上方向の switch 提案に限る）。
 
 ## 呼び出し規約
 
