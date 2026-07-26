@@ -150,7 +150,6 @@
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
@@ -158,7 +157,7 @@
             "timeout": 5
           }
         ],
-        "description": "Detect optimization-worthy (long, task-shaped) prompts and inject additionalContext suggesting $prompt-conform before execution (task #367). Tunable via PROMPT_CONFORM_SUGGEST_MIN_LENGTH / PROMPT_CONFORM_SUGGEST_TASK_REGEX / PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX env vars; falls back to built-in defaults on invalid overrides. Fail-open: never blocks prompt submission.",
+        "description": "Detect optimization-worthy (long, task-shaped) prompts and inject additionalContext suggesting $prompt-conform before execution (task #367). No `matcher` field: UserPromptSubmit does not support matchers per the official Hooks reference and always fires on every prompt. Tunable via PROMPT_CONFORM_SUGGEST_MIN_LENGTH / PROMPT_CONFORM_SUGGEST_TASK_REGEX / PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX env vars; falls back to built-in defaults on invalid overrides. Fail-open: never blocks prompt submission.",
         "id": "user-prompt-submit:prompt-conform-suggest"
       }
     ],
