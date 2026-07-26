@@ -77,24 +77,33 @@ parse_ssot() {
   ' "$SSOT"
 }
 
-# Replay the SSOT's defaults-write lines against per-domain scratch plist
-# paths under $1 (a fresh mktemp -d), so the "expected" value for each
-# managed key can be read back with the exact same `defaults read` call used
-# on the real domain -- see the header comment for why this beats hand
-# type-coercion. Domain names are safe to use as bare filenames (no `/`, no
-# reserved characters on APFS). The unquoted $value in the array branch is
-# deliberate word-splitting so a multi-element array replays as multiple
-# `defaults write` arguments.
+# Replay parse_ssot's TSV rows (read from stdin -- the caller passes the same
+# parsed lines it also loops over, so the SSOT is only parsed once per run)
+# against per-domain scratch plist paths under $1 (a fresh mktemp -d), so the
+# "expected" value for each managed key can be read back with the exact same
+# `defaults read` call used on the real domain -- see the header comment for
+# why this beats hand type-coercion. Domain names are safe to use as bare
+# filenames (no `/`, no reserved characters on APFS). The unquoted $value in
+# the array branch is deliberate word-splitting so a multi-element array
+# replays as multiple `defaults write` arguments.
 build_expected() {
   local tmp_dir="$1" domain key type value scratch
   while IFS=$'\t' read -r domain key type value; do
     scratch="$tmp_dir/$domain"
     case "$type" in
       string) defaults write "$scratch" "$key" -string "$value" >/dev/null 2>&1 ;;
-      array) defaults write "$scratch" "$key" -array $value >/dev/null 2>&1 ;;
+      array)
+        # Word-split $value into separate `defaults write` arguments
+        # (deliberate, unquoted), but suppress pathname expansion so a
+        # value containing a glob metacharacter can't pull in filenames
+        # from $tmp_dir's cwd instead.
+        set -f
+        defaults write "$scratch" "$key" -array $value >/dev/null 2>&1
+        set +f
+        ;;
       *) defaults write "$scratch" "$key" "-$type" "$value" >/dev/null 2>&1 ;;
     esac
-  done < <(parse_ssot)
+  done
 }
 
 # Print the trimmed `defaults read` output for <domain-or-path> <key>, or the
@@ -131,18 +140,27 @@ is_excluded() {
 # one array-typed key today, and `defaults read`'s multi-line parenthesized
 # form isn't worth round-tripping generically for a single key -- the
 # candidate line says so and points at a manual `defaults read` instead.
+# "Manual inspection needed" lines use a "NOTE:" prefix rather than a leading
+# `#`: the notification body is published with markdown:true, and a `#`
+# at the start of a line is a CommonMark ATX heading, so it would render as
+# an oversized heading in the ntfy web app instead of as a comment.
 build_candidate() {
   local domain="$1" key="$2" type="$3" actual="$4"
+  if [ "$actual" = "(unset)" ]; then
+    printf 'NOTE: %s %s is no longer set locally -- inspect manually (defaults delete %s %s?)' \
+      "$domain" "$key" "$domain" "$key"
+    return
+  fi
   case "$type" in
     bool)
       case "$actual" in
         1) printf 'defaults write %s %s -bool true' "$domain" "$key" ;;
         0) printf 'defaults write %s %s -bool false' "$domain" "$key" ;;
-        *) printf '# %s %s: unexpected bool value %s -- inspect manually' "$domain" "$key" "$actual" ;;
+        *) printf 'NOTE: %s %s has an unexpected bool value %s -- inspect manually' "$domain" "$key" "$actual" ;;
       esac
       ;;
     array)
-      printf '# %s %s is array-typed -- inspect manually: defaults read %s %s' "$domain" "$key" "$domain" "$key"
+      printf 'NOTE: %s %s is array-typed -- inspect manually: defaults read %s %s' "$domain" "$key" "$domain" "$key"
       ;;
     string)
       printf 'defaults write %s %s -string %q' "$domain" "$key" "$actual"
@@ -197,6 +215,14 @@ ntfy_publish() {
 main() {
   [ "$(uname)" = "Darwin" ] || exit 0
 
+  # launchd provides a minimal PATH that excludes Homebrew/mise, so build one
+  # explicitly (mirrors executable_morning-radar.sh, including the
+  # $HOME/.local/launchers component that lets tests substitute stubs by
+  # sandboxing HOME). `jq` happens to also be bundled at /usr/bin on recent
+  # macOS, but don't rely on that undocumented coincidence for the
+  # notification path's only failure point.
+  export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
   mkdir -p "$(dirname "$LOG_FILE")"
 
   # Rotate the log once it exceeds 1 MiB (weekly appends stay tiny; this is
@@ -214,7 +240,12 @@ main() {
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/macos-defaults-drift.XXXXXX")"
   trap 'rm -rf "$tmp_dir"' EXIT
 
-  build_expected "$tmp_dir"
+  # Parse the SSOT once and feed the same lines to build_expected and the
+  # comparison loop below, rather than re-invoking parse_ssot (and re-reading
+  # the SSOT file) twice per run.
+  local ssot_lines
+  ssot_lines="$(parse_ssot)"
+  printf '%s\n' "$ssot_lines" | build_expected "$tmp_dir"
 
   local domain key type value expected actual candidate
   local drift_lines="" drift_count=0
@@ -231,7 +262,7 @@ ${candidate}
 
 "
     fi
-  done < <(parse_ssot)
+  done <<<"$ssot_lines"
 
   if [ "$drift_count" -eq 0 ]; then
     log "no drift detected"

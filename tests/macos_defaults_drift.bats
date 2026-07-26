@@ -94,6 +94,13 @@ run_fn() {
   ! grep -qE '>[[:space:]]*"\$SSOT"' "$WRAPPER"
 }
 
+@test "main() builds an explicit PATH so jq/curl resolve under launchd's minimal PATH" {
+  # launchd doesn't inherit a login shell's PATH, so mise/Homebrew-installed
+  # jq would otherwise be unresolvable (silently breaking ntfy_publish's
+  # `command -v jq` guard). Mirrors executable_morning-radar.sh's export.
+  grep -qE 'export PATH="\$HOME/\.local/launchers:\$HOME/\.local/share/mise/shims' "$WRAPPER"
+}
+
 @test "parse_ssot extracts domain/key/type/value for bool/int/float/string/array" {
   run_fn parse_ssot
   [ "$status" -eq 0 ]
@@ -104,6 +111,19 @@ run_fn() {
   printf '%s\n' "$output" | grep -qF "$(printf '%s\tTestString\tstring\tHello World' "$TEST_DOMAIN")"
   # Array keeps its space-separated tokens raw (build_expected word-splits them).
   printf '%s\n' "$output" | grep -qF "$(printf '%s\tTestArray\tarray\t1 2 3' "$TEST_DOMAIN")"
+  # Exactly 6 rows -- no comment/template line is misparsed as extra output.
+  [ "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" -eq 6 ]
+}
+
+@test "parse_ssot runs cleanly against this repo's real run_onchange_after_20-macos-defaults.sh.tmpl" {
+  run env PATH="${STUB_DIR}:${PATH}" MACOS_DEFAULTS_DRIFT_REPO_DIR="${HOME_DIR}/.." \
+    bash -c 'source "$1"; parse_ssot' _ "$WRAPPER"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  # Every row has exactly 4 tab-separated fields.
+  while IFS= read -r line; do
+    [ "$(printf '%s' "$line" | awk -F'\t' '{print NF}')" -eq 4 ]
+  done <<<"$output"
 }
 
 @test "is_excluded matches domain:key entries from .chezmoidata.toml" {
@@ -119,25 +139,59 @@ run_fn() {
   [ "$status" -ne 0 ]
 }
 
+@test "is_excluded is fail-open (not excluded) when .chezmoidata.toml has no [macos_defaults_drift] section" {
+  cat >"${FIXTURE_REPO}/home/.chezmoidata.toml" <<'EOF'
+[ntfy]
+  port = 2586
+EOF
+  run_fn is_excluded "$TEST_DOMAIN" "TestNoisy"
+  [ "$status" -ne 0 ]
+}
+
 @test "build_candidate reconstructs a defaults write line per type" {
+  run_fn build_candidate "$TEST_DOMAIN" "TestBool" "bool" "1"
+  [ "$output" = "defaults write ${TEST_DOMAIN} TestBool -bool true" ]
+
   run_fn build_candidate "$TEST_DOMAIN" "TestBool" "bool" "0"
   [ "$output" = "defaults write ${TEST_DOMAIN} TestBool -bool false" ]
+
+  run_fn build_candidate "$TEST_DOMAIN" "TestBool" "bool" "maybe"
+  [[ "$output" == "NOTE: ${TEST_DOMAIN} TestBool has an unexpected bool value maybe"* ]]
 
   run_fn build_candidate "$TEST_DOMAIN" "TestInt" "int" "7"
   [ "$output" = "defaults write ${TEST_DOMAIN} TestInt -int 7" ]
 
+  run_fn build_candidate "$TEST_DOMAIN" "TestFloat" "float" "1.5"
+  [ "$output" = "defaults write ${TEST_DOMAIN} TestFloat -float 1.5" ]
+
   run_fn build_candidate "$TEST_DOMAIN" "TestString" "string" "changed"
   [ "$output" = "defaults write ${TEST_DOMAIN} TestString -string changed" ]
+
+  # A value containing a space must stay a single argv token when pasted.
+  run_fn build_candidate "$TEST_DOMAIN" "TestString" "string" "New Value"
+  [ "$output" = "defaults write ${TEST_DOMAIN} TestString -string New\\ Value" ]
 }
 
 @test "build_candidate does not auto-regenerate array types (documented limitation)" {
   run_fn build_candidate "$TEST_DOMAIN" "TestArray" "array" "1 2 9"
-  [[ "$output" == "# ${TEST_DOMAIN} TestArray is array-typed"* ]]
+  [[ "$output" == "NOTE: ${TEST_DOMAIN} TestArray is array-typed"* ]]
   [[ "$output" == *"defaults read ${TEST_DOMAIN} TestArray" ]]
 }
 
+@test "build_candidate flags an unset key instead of emitting an invalid defaults write" {
+  run_fn build_candidate "$TEST_DOMAIN" "TestInt" "int" "(unset)"
+  [[ "$output" == "NOTE: ${TEST_DOMAIN} TestInt is no longer set locally"* ]]
+  ! [[ "$output" == *"(unset)"* ]]
+}
+
+@test "build_candidate's manual-inspection lines never start with # (markdown heading collision)" {
+  run_fn build_candidate "$TEST_DOMAIN" "TestArray" "array" "1 2 9"
+  [[ "$output" != "#"* ]]
+  run_fn build_candidate "$TEST_DOMAIN" "TestBool" "bool" "unexpected"
+  [[ "$output" != "#"* ]]
+}
+
 @test "ntfy_publish sends to topic_attention with the drift count and body (token via -K, never logged)" {
-  [ "$(uname)" = "Darwin" ] || skip "ntfy_publish's stat -f is BSD-only"
   run_fn ntfy_publish 2 "domain key: expected [1] actual [0]"
   [ "$status" -eq 0 ]
   [ -f "${STUB_DIR}/curl_stdin" ]
@@ -149,8 +203,15 @@ run_fn() {
   grep -qE -- '-K' "${STUB_DIR}/curl_args"
 }
 
+@test "ntfy_publish caps the body at BODY_LIMIT (3000) characters" {
+  local long_body
+  long_body="$(printf 'x%.0s' $(seq 1 4000))"
+  run_fn ntfy_publish 1 "$long_body"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .message <"${STUB_DIR}/curl_stdin" | wc -c | tr -d ' ')" -eq 3001 ] # 3000 chars + trailing newline from jq -r
+}
+
 @test "ntfy_publish is fail-open: no env file -> silent no-op" {
-  MACOS_DEFAULTS_DRIFT_NTFY_ENV_FILE_ORIG="$ENV_FILE"
   ENV_FILE="${BATS_TEST_TMPDIR}/does-not-exist"
   run_fn ntfy_publish 1 "drift body"
   [ "$status" -eq 0 ]
@@ -158,7 +219,6 @@ run_fn() {
 }
 
 @test "ntfy_publish is fail-open: curl failure returns 0, token never logged" {
-  [ "$(uname)" = "Darwin" ] || skip "ntfy_publish's stat -f is BSD-only"
   NTFY_TEST_CURL_EXIT=1
   run_fn ntfy_publish 1 "drift body"
   [ "$status" -eq 0 ]
@@ -182,7 +242,8 @@ run_fn() {
     source "$1"
     tmp_dir="$(mktemp -d)"
     trap "rm -rf \"$tmp_dir\"" EXIT
-    build_expected "$tmp_dir"
+    ssot_lines="$(parse_ssot)"
+    printf "%s\n" "$ssot_lines" | build_expected "$tmp_dir"
     while IFS=$'"'"'\t'"'"' read -r domain key type value; do
       expected="$(read_value "$tmp_dir/$domain" "$key")"
       actual="$(read_value "$domain" "$key")"
@@ -190,11 +251,44 @@ run_fn() {
         echo "MISMATCH: $domain $key expected=[$expected] actual=[$actual]"
         exit 1
       fi
-    done < <(parse_ssot)
+    done <<<"$ssot_lines"
     echo "all matched"
   ' _ "$WRAPPER"
   [ "$status" -eq 0 ]
   [ "$output" = "all matched" ]
+}
+
+@test "build_expected separates multiple domains into distinct scratch plists (no cross-domain leakage)" {
+  [ "$(uname)" = "Darwin" ] || skip "defaults(1) is macOS-only"
+  local domain_a="${TEST_DOMAIN}.a" domain_b="${TEST_DOMAIN}.b"
+  local multi_repo="${BATS_TEST_TMPDIR}/multi-domain-repo"
+  mkdir -p "${multi_repo}/home"
+  cat >"${multi_repo}/home/run_onchange_after_20-macos-defaults.sh.tmpl" <<EOF
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/bash
+set -euo pipefail
+defaults write ${domain_a} SharedKeyName -int 1
+defaults write ${domain_b} SharedKeyName -int 2
+{{ end -}}
+EOF
+  defaults write "$domain_a" SharedKeyName -int 1
+  defaults write "$domain_b" SharedKeyName -int 2
+
+  run env MACOS_DEFAULTS_DRIFT_REPO_DIR="$multi_repo" bash -c '
+    source "$1"
+    tmp_dir="$(mktemp -d)"
+    trap "rm -rf \"$tmp_dir\"" EXIT
+    parse_ssot | build_expected "$tmp_dir"
+    a="$(read_value "$tmp_dir/'"$domain_a"'" SharedKeyName)"
+    b="$(read_value "$tmp_dir/'"$domain_b"'" SharedKeyName)"
+    printf "a=%s b=%s\n" "$a" "$b"
+  ' _ "$WRAPPER"
+  defaults delete "$domain_a" >/dev/null 2>&1 || true
+  defaults delete "$domain_b" >/dev/null 2>&1 || true
+  [ "$status" -eq 0 ]
+  # Each domain's scratch plist holds its OWN value for the same key name --
+  # they must not collide into a single shared scratch file.
+  [ "$output" = "a=1 b=2" ]
 }
 
 @test "read_value returns (unset) for a key that does not exist" {
@@ -214,8 +308,14 @@ run_fn() {
   defaults write "$TEST_DOMAIN" TestArray -array 1 2 3
   defaults write "$TEST_DOMAIN" TestNoisy -bool true
 
-  run env \
-    PATH="${STUB_DIR}:${PATH}" \
+  # main() rebuilds PATH from $HOME (mirrors executable_morning-radar.sh, to
+  # survive launchd's minimal PATH), so stub curl is substituted by sandboxing
+  # HOME and placing it under $HOME/.local/launchers -- prefixing PATH alone
+  # would be overridden by that rebuild.
+  local fake_home="${BATS_TEST_TMPDIR}/home-no-drift"
+  mkdir -p "${fake_home}/.local/launchers"
+  cp "${STUB_DIR}/curl" "${fake_home}/.local/launchers/curl"
+  run env -i HOME="$fake_home" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" \
     MACOS_DEFAULTS_DRIFT_REPO_DIR="$FIXTURE_REPO" \
     MACOS_DEFAULTS_DRIFT_NTFY_ENV_FILE="$ENV_FILE" \
@@ -237,8 +337,10 @@ run_fn() {
   # Also drifted, but excluded -- must not appear in the notification.
   defaults write "$TEST_DOMAIN" TestNoisy -bool false
 
-  run env \
-    PATH="${STUB_DIR}:${PATH}" \
+  local fake_home="${BATS_TEST_TMPDIR}/home-drift"
+  mkdir -p "${fake_home}/.local/launchers"
+  cp "${STUB_DIR}/curl" "${fake_home}/.local/launchers/curl"
+  run env -i HOME="$fake_home" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" \
     MACOS_DEFAULTS_DRIFT_REPO_DIR="$FIXTURE_REPO" \
     MACOS_DEFAULTS_DRIFT_NTFY_ENV_FILE="$ENV_FILE" \

@@ -140,6 +140,10 @@ load helpers/setup
   [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 1 ]
   [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 1 ]
   [ "$(grep -c '<key>Minute</key>' "$plist")" -eq 1 ]
+  # Sunday 10:00, not just "some" values -- pin the actual schedule.
+  grep -A1 '<key>Weekday</key>' "$plist" | grep -q '<integer>0</integer>'
+  grep -A1 '<key>Hour</key>' "$plist" | grep -q '<integer>10</integer>'
+  grep -A1 '<key>Minute</key>' "$plist" | grep -q '<integer>0</integer>'
 }
 
 @test "macos-defaults-drift plist template renders to valid plist XML" {
