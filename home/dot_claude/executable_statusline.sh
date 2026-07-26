@@ -299,7 +299,76 @@ write_harness_cost() {
     rm -f "$tmpf" 2>/dev/null
   fi
 }
+# Rate-limits snapshot contract: persist the harness-reported quota pressure
+# (five_hour/seven_day used_percentage + resets_at) and the current effort
+# level to a per-profile cache file, the same "statusline -> file -> reader"
+# contract write_harness_cost uses above. model-fitness-check reads this to
+# gate on measured quota pressure instead of guessing from session length.
+write_rate_limits_snapshot() {
+  local fh_pct="$1" fh_reset="$2" sd_pct="$3" sd_reset="$4" effort="$5"
+  # rate_limits is absent on stdin for API-key auth sessions, and also for
+  # subscription sessions before the first API response lands. Either way, skip
+  # silently and leave any prior snapshot in place (the reader ages it out via
+  # ts) rather than clobbering a still-fresh window with an empty one.
+  [ -n "$fh_pct" ] || [ -n "$sd_pct" ] || return 0
+  # Same JSON-number regex as write_harness_cost. Reject each field
+  # independently so one malformed value can't sink the other window.
+  local num_re='^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$'
+  [[ "$fh_pct" =~ $num_re ]] || fh_pct=""
+  [[ "$fh_reset" =~ $num_re ]] || fh_reset=""
+  [[ "$sd_pct" =~ $num_re ]] || sd_pct=""
+  [[ "$sd_reset" =~ $num_re ]] || sd_reset=""
+  # Both windows may have been invalidated above; re-check before writing.
+  [ -n "$fh_pct" ] || [ -n "$sd_pct" ] || return 0
+
+  # ~/.claude and ~/.claude-r06 share this script and CACHE_DIR, so the
+  # profile (derived from CLAUDE_CONFIG_DIR, same as the line-1 badge) must
+  # be baked into the filename to keep the two accounts' snapshots apart.
+  local profile=${CLAUDE_CONFIG_DIR##*/}
+  [ -n "$profile" ] || profile=".claude"
+  profile=$(printf '%s' "$profile" | tr -c 'A-Za-z0-9._-' '_')
+  local effort_out
+  effort_out=$(printf '%s' "$effort" | tr -c 'A-Za-z0-9_-' '_')
+
+  # Build each window fragment only from validated fields; an empty fragment
+  # omits the whole window object rather than emit a null/garbage value.
+  local fh_json="" sd_json=""
+  if [ -n "$fh_pct" ]; then
+    if [ -n "$fh_reset" ]; then
+      fh_json="\"five_hour\":{\"used_percentage\":${fh_pct},\"resets_at\":${fh_reset}},"
+    else
+      fh_json="\"five_hour\":{\"used_percentage\":${fh_pct}},"
+    fi
+  fi
+  if [ -n "$sd_pct" ]; then
+    if [ -n "$sd_reset" ]; then
+      sd_json="\"seven_day\":{\"used_percentage\":${sd_pct},\"resets_at\":${sd_reset}},"
+    else
+      sd_json="\"seven_day\":{\"used_percentage\":${sd_pct}},"
+    fi
+  fi
+
+  # Match write_harness_cost: umask 077 so the temp file is 0600 regardless of
+  # the caller's umask. CACHE_DIR is already chmod 700, but that chmod swallows
+  # errors (2>/dev/null), so a pre-existing loosely-permissioned XDG_CACHE_HOME
+  # would otherwise leak quota/effort data to group/other. Belt and suspenders.
+  local target="$CACHE_DIR/rate_limits_${profile}.json" tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "$CACHE_DIR/rate_limits_${profile}.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
+  if printf '{"ts":%s,"profile":"%s",%s%s"effort":"%s"}' \
+    "$(date +%s)" "$profile" "$fh_json" "$sd_json" "$effort_out" >"$tmpf" 2>/dev/null; then
+    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  else
+    rm -f "$tmpf" 2>/dev/null
+  fi
+}
 write_harness_cost "$cost" "$session_id"
+write_rate_limits_snapshot "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset" "$effort"
 
 # ---------------------------------------------------------------------------
 # Line 1: host | dir | branch *dirty ⇡ahead⇣behind | worktree

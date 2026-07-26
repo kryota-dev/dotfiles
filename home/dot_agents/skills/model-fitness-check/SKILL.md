@@ -23,19 +23,24 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 | `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus 5 | high（既定。ゲートは言及しない） | **floor**（blocking） |
 | large tier / PRD 審議 / adversarial verification / 横断設計 | Opus 5 | xhigh | **floor**（blocking） |
 | trivial / small tier のみ | Sonnet 5 | medium | **cost hint**（non-blocking FYI） |
-| Fable-orchestrator セッション（`cldf` 系） | Fable 5 | セッション既定 | 常に pass（monotonic ルール） |
+| Fable-orchestrator セッション（`cldf` 系） | Fable 5 | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
 
 ## capability 順序（monotonic）
 
-能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。判定は「現在の tier ≥ 行が要求する tier」なら**無条件で silent pass**（プロンプトを出さない）。
+能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。
 
-- **Fable / cldf セッションはどの行に対しても switch 提案を受けない**。Fable は全行の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に無理に合わせる提案は構造的に矛盾する。
-- over-provisioning（Fable で trivial をこなす等）は停止対象にしない（user が cldf を起動した時点で下せない決定であり、指摘しても是正不能）。
+判定は **2 パス**で構成する（詳細は「判定と出力」）。**floor パス（上方向）を通過しても判定は終わらず、必ず over-provision パス（下方向）に進む**——ここが over-provision ゲートに到達する唯一の経路なので、floor パスを「無条件 silent pass」で早期 return してはならない:
+
+1. **floor パス**: 「現在の tier ≥ 行が要求する tier」なら floor をパスする（floor の switch 提案は出さず、プロンプトも出さない）。下回る場合のみ floor 行で blocking する。
+2. **over-provision パス**: floor 通過後、「現在の tier が行の要求より上位（過剰）」かつ trivial/small なら、FYI + カウンタ + 閾値ゲートに進む（「over-provision 閾値ゲート」）。floor と要求が同 tier（過剰でない）なら何もせず終了する。
+
+- **Fable / cldf セッションは floor 行（上方向）の switch 提案を受けない**。Fable は全 floor の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に合わせる上方向の提案は構造的に矛盾する。下方向（過剰スペックの解消）は over-provision パスの対象で、**Fable セッションも免除されない**。
+- over-provisioning（Fable で trivial をこなす等）は毎回は停止しないが、累積が閾値を超えたら 1 回だけ blocking する（「over-provision 閾値ゲート」参照）。cldf でも exit → profile に応じた `cld` / `cld-r06` の `--continue` で orchestrator 契約ごと降りられるため、「是正不能」ではない。
 
 ## model の検出
 
 1. **主経路**: セッションの system-prompt に埋め込まれた model identity（自己申告。「You are powered by ...」等）を読む。
-   **主経路が Fable と解決したら、この時点で silent pass し副経路の cross-check も行わない**。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
+   **主経路が Fable と解決したら、副経路の cross-check はスキップする**（floor 判定を pass にするだけで、判定は終了せず over-provision パスに進む —— Fable も over-provision ゲートの対象だから）。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
 2. **副経路（cross-check）**: **主経路が Fable 以外のときのみ実行する**。`~/.claude/settings.json` の `model` を Read で読む（`cld-r06` セッションでも同じパスでよい —— `~/.claude-r06/settings.json` は `~/.claude/settings.json` への symlink であり、両アカウントは 1 つの settings.json を共有する。chezmoi source: `dot_claude-r06/symlink_settings.json.tmpl`）。これは `/model` によるセッション内変更を反映しない可能性があるため、**主経路と乖離したら silent に解決せず surface する**（どちらが有効かを user に提示して確認）。
 
 ### 正規化ルール
@@ -47,7 +52,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ## 判定と出力
 
-作業の行種別に応じて分岐する:
+判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
 ### floor 行（Opus 5 @ high / Opus 5 @ xhigh）で mismatch
 
@@ -58,15 +63,61 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 3. **abort**: 作業を中止する。
 
 - **effort は xhigh を要求する行でのみ言及する**。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
-- effort はセッション内から確実には読めないため、**推論せず提示して確認する**（`effortLevel` は settings.json から読めるが、`/effort` によるセッション内状態と乖離しうるため）。
+- effort はセッション内から確実には読めないため、**推論せず提示して確認する**（`effortLevel` は settings.json から読めるが、`/effort` によるセッション内状態と乖離しうるため）。statusline snapshot（「over-provision 閾値ゲート」参照）の `effort` は harness 実出力由来の参考値として使えるが、描画タイミングにより stale がありうるため、これも確定値としては扱わない。
 
 ### trivial / small 行
 
-**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+
+FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
 ### 検出不能時の fallback
 
 model 検出が主経路・副経路とも失敗した場合、**silent skip せず**、常にチェック内容（要求水準と現在の不確実性）を提示する（fail-safe）。
+
+## over-provision 閾値ゲート
+
+trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「カウンタ × 実測 quota 圧力」の 2 シグナルで監視し、閾値超過時のみ 1 回 blocking する。サブスクリプション（Max / Team）では over-provision の実害は金額ではなく **quota（全モデル共有プール）のクラウドアウト**——Fable / Opus で軽作業を続けると、重作業に必要な quota が先に尽きる——なので、圧力シグナルと組み合わせ、quota に余裕がある間は止めない（alert fatigue の回避。blocking の希少性が floor 停止の信頼性を支える）。
+
+### シグナル 1: over-provision カウンタ（セッション内）
+
+- 「現在の tier が行の要求より上位」と判定するたび（trivial/small FYI を出すたび）にカウンタを +1 する。
+- セッション内でのみ保持する（永続化しない）。**floor 判定の idempotency とは別カウンタ**（idempotency は同一判定の再提示の抑制、本カウンタは累積の検出で、性質が逆）。
+- ゲート発火時、および continue anyway 選択時にリセットする。
+- **compaction 対策**: カウンタを会話記憶だけに置くと context compaction で黙って 0 に戻り、特に red 帯（2 件）でゲートが実質死ぬ。カウンタを更新するたびに現在値を可視な形で残し（例: FYI 行末に `[over-provision: N]`）、compaction 後はその最新値を継承する。idempotency（二値の pass/continue-anyway）より復元が難しいため、この明示記録が必要。
+
+### シグナル 2: 実測 quota 圧力（statusline snapshot）
+
+`${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。**パスは writer と同じ XDG フォールバック式で解決し、`~/.cache` 決め打ちにしない** —— `XDG_CACHE_HOME` を設定した環境で誤って「snapshot 無し」と誤判定しないため。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。**圧力値は `five_hour` と `seven_day` の `used_percentage` の大きい方（`max(5h, 7d)`）を使う**——ゲートが framing する harm は週次共有プールのクラウドアウト（`seven_day`）だが、短期バースト枯渇（`five_hour`）も捕捉したいので、圧力の高い方で発火判定する。片方のウィンドウが欠落していれば残る一方を使う。
+
+- **staleness / 欠損ガード**: 次のいずれかで quota 不明として count-only fallback（下表）に切り替える —— (a) ファイルが無い、(b) `ts` が 15 分より古い、(c) `five_hour` と `seven_day` の `used_percentage` が**どちらも**欠落・非数値（writer は無効なウィンドウを省くため、fresh でも片方だけ／両方無いことがある）。**片方でも有効なら count-only にせず、有効な側の値で圧力を評価する**。silent skip はしない（fail-safe）。
+- **Team プランの rate_limits（`cld-r06` で live 検証済み）**: 公式ドキュメント（`code.claude.com/docs/en/statusline`）は `rate_limits` を「Claude.ai subscribers (Pro/Max) が最初の API 応答後」にのみ現れると明記し Team / Enterprise を列挙しない。しかし **`cld-r06`（Team premium seat）の実 stdin では `five_hour` / `seven_day` とも populate されることを実機確認済み**（docs の Pro/Max-only 列挙は Team premium に対して不完全）。よって cld-r06 でもシグナル 2（実測圧力）は利用可能で、yellow/red 帯に到達する（count-only 固定ではない）。count-only fallback は真の欠損時——最初の API 応答前・stale snapshot・両ウィンドウ欠落（docs: 各ウィンドウは独立に absent になりうる）——のための fallback として維持する。
+
+### 発火条件（named constants）
+
+帯域は statusline `pct_color` の色閾値（50 / 80）と一致させる:
+
+| 圧力 = max(5h, 7d) | 帯域 | 発火閾値（カウンタ） |
+|---|---|---|
+| < 50 | green | 発火しない（FYI のみ） |
+| 50–79 | yellow | `OVERPROVISION_GATE_YELLOW = 5` 件 |
+| ≥ 80 | red | `OVERPROVISION_GATE_RED = 2` 件 |
+| snapshot 無し / stale / 両窓欠落 | 不明 | `OVERPROVISION_GATE_FALLBACK = 5` 件（count-only） |
+
+### 発火時の提示（`AskUserQuestion` で 1 回 blocking）
+
+文面には snapshot の実測値をそのまま載せ、**帯域を決めたウィンドウ（5h / 7d のうち圧力の高い方）を明示する**（例: 「7d ウィンドウ 63% 消費（↻07/30 07:00 リセット）。直近 5 件は Sonnet で足りる軽作業でした。このペースだと重作業の前に週次上限に当たる見込みです」）。選択肢はセッション種別で分岐する:
+
+- **cld 系（通常セッション）**:
+  1. `/model sonnet` に下げて続行（推奨）
+  2. continue anyway（カウンタをリセットし、次の閾値まで沈黙）
+  3. abort
+- **cldf 系（Fable orchestrator）**:
+  1. exit → profile に応じた `cld` / `cld-r06` で `--continue` 再開（推奨。orchestrator prompt は argv 注入のため再起動で契約ごと降りられ、会話文脈は保持される）。**アカウントを取り違えない**: `cldf-r06`（`CLAUDE_CONFIG_DIR` が `*.claude-r06`）なら `cld-r06 --continue`、それ以外は `cld --continue`。両アカウントはセッション状態が分離しており、誤ると無関係な default セッションを再開してしまう
+  2. `/model opus` 等でセッション内切替（**注記必須**: system-prompt の自己申告 model identity が古い値を残すため、以後の本 skill の主経路検出を信用せず、切替済みであることをセッション内に記録する）
+  3. continue anyway（カウンタをリセット）
+
+このゲートは **Fable / cldf セッションにも適用される**（floor 免除は上方向の switch 提案に限る）。
 
 ## 呼び出し規約
 
