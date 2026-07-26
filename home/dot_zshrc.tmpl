@@ -43,6 +43,10 @@ if command -v zoxide &>/dev/null; then eval "$(zoxide init zsh)"; fi
 # mise-managed binary, in interactive shells (#345).
 _launcher_path_precmd() { path=("$HOME/.local/launchers" "${(@)path:#$HOME/.local/launchers}"); }
 autoload -Uz add-zsh-hook && add-zsh-hook precmd _launcher_path_precmd
+# Also assert the order once synchronously (mirrors mise's own `_mise_hook` pattern): `zsh -ic
+# '<cmd>'` runs the command before the first prompt, so the precmd hook alone would not have fired
+# yet and bare `claude`/`codex` would resolve to the mise/brew binary instead of the wrapper (#345).
+_launcher_path_precmd
 
 # ========== sheldon (deferred plugins) ==========
 if command -v sheldon &>/dev/null; then eval "$(sheldon source)"; fi

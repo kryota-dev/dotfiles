@@ -10,14 +10,21 @@
 # codex skill's inline account-selection prelude is no longer needed (#345).
 set -eu
 
-case "${0##*/}" in
+# Lowercase the invoked name before dispatching (case-insensitive FS: `CDX-R06` resolves to the
+# same symlink but $0 keeps the typed case, which would miss the override branch — #345 review).
+name="$(printf '%s' "${0##*/}" | tr '[:upper:]' '[:lower:]')"
+case "$name" in
   cdx-r06)
     # -r06 name: work account, unconditional override.
     CODEX_HOME="$HOME/.codex-r06"
     ;;
   *)
-    # codex / cdx: CLAUDE_CONFIG_DIR is authoritative for the account when set.
-    if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    # codex / cdx: CLAUDE_CONFIG_DIR is authoritative when it is *set* (present, even if empty).
+    # An empty CLAUDE_CONFIG_DIR means the personal account (Claude Code treats unset/empty as
+    # ~/.claude), so the case below maps it to personal rather than letting a stray inherited
+    # CODEX_HOME survive via the else branch. Only a genuinely unset CLAUDE_CONFIG_DIR (no Claude
+    # account in scope) respects an explicit CODEX_HOME.
+    if [ -n "${CLAUDE_CONFIG_DIR+x}" ]; then
       case "$CLAUDE_CONFIG_DIR" in
         *.claude-r06) CODEX_HOME="$HOME/.codex-r06" ;;
         *) CODEX_HOME="$HOME/.codex" ;;
@@ -48,10 +55,20 @@ if [ "$has_profile" -eq 0 ]; then
   set -- --profile shared "$@"
 fi
 
-# CODEX_LAUNCHER_BIN overrides the brew location for tests and non-standard prefixes.
-real="${CODEX_LAUNCHER_BIN:-/opt/homebrew/bin/codex}"
-if [ ! -x "$real" ]; then
-  echo "codex launcher: $real is not executable (is the codex cask installed?)." >&2
+# Resolve the brew-managed codex without going through PATH (which would re-resolve this wrapper).
+# Try the Apple-Silicon prefix first, then the Intel prefix, so a wrapped invocation works on both
+# Mac architectures. CODEX_LAUNCHER_BIN overrides for tests and non-standard prefixes.
+real="${CODEX_LAUNCHER_BIN:-}"
+if [ -z "$real" ]; then
+  for cand in /opt/homebrew/bin/codex /usr/local/bin/codex; do
+    if [ -x "$cand" ]; then
+      real="$cand"
+      break
+    fi
+  done
+fi
+if [ -z "$real" ] || [ ! -x "$real" ]; then
+  echo "codex launcher: no executable codex found (is the codex cask installed?)." >&2
   exit 127
 fi
 exec "$real" "$@"

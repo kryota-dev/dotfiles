@@ -10,7 +10,11 @@
 # (#345). claude stays mise-managed; the ~/.local/bin/claude native-install symlink is untouched.
 set -eu
 
-case "${0##*/}" in
+# Lowercase the invoked name before dispatching: on a case-insensitive filesystem (macOS APFS
+# default) a symlink invoked as e.g. `CLD-R06` resolves to the same file but $0 carries the typed
+# case, which would miss the override branch and silently fall through to the personal account.
+name="$(printf '%s' "${0##*/}" | tr '[:upper:]' '[:lower:]')"
+case "$name" in
   cld-r06)
     # -r06 name: select the work account unconditionally (override).
     CLAUDE_CONFIG_DIR="$HOME/.claude-r06"
@@ -26,7 +30,8 @@ esac
 # .claude-* -> the suffix, anything else -> strip a leading dot. Do NOT name an account dir
 # ".claude-default": its slug would collide with ~/.claude's and silently merge two accounts'
 # observations.
-account_dir_name="${CLAUDE_CONFIG_DIR##*/}"
+account_dir_name="${CLAUDE_CONFIG_DIR%/}"
+account_dir_name="${account_dir_name##*/}"
 case "$account_dir_name" in
   .claude) homunculus_slug=default ;;
   .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;

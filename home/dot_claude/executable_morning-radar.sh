@@ -8,7 +8,8 @@ set -euo pipefail
 
 # launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
 # mise-managed binaries, and gh resolve. ~/.local/launchers is first so `claude` hits the
-# per-account wrapper (#345); the mise shims dir follows (same trick as statusline.sh).
+# per-account wrapper (#345); the mise shims dir follows so gh/jq resolve headless, the same
+# hand-built-PATH approach statusline.sh uses for its own headless launchd/hook context.
 export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 LABEL="dev.kryota.morning-radar"

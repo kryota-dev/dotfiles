@@ -126,6 +126,17 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "launcher dir reaches interactive (precmd+sync) and login (zprofile) shells (#345)" {
+  local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
+  local zprofile="${HOME_DIR}/dot_zprofile.tmpl"
+  # Interactive: the reorder is registered as a precmd hook AND called once synchronously, so
+  # `zsh -ic '<cmd>'` (which runs before the first prompt fires precmd) still gets the wrapper.
+  grep -qF 'add-zsh-hook precmd _launcher_path_precmd' "$zshrc"
+  [ "$(grep -c '^_launcher_path_precmd$' "$zshrc")" -ge 1 ]
+  # Login shells do NOT source ~/.zshrc, so the launcher dir is also prepended in ~/.zprofile.
+  grep -qF '.local/launchers:$PATH' "$zprofile"
+}
+
 @test "launcher wrappers and account symlinks exist with the expected shape (#345)" {
   local ldir="${HOME_DIR}/dot_local/launchers"
   [ -f "${ldir}/executable_claude" ]

@@ -198,6 +198,31 @@ EOF
   printf '%s\n' "$output" | grep -qFx "CODEX_HOME=$BATS_TEST_TMPDIR/.codex-r06"
 }
 
+@test "codex wrapper: an empty CLAUDE_CONFIG_DIR maps to personal, not a stray CODEX_HOME (#345 review)" {
+  _launchers
+  # CLAUDE_CONFIG_DIR set-but-empty means the personal account (Claude Code treats unset/empty as
+  # ~/.claude); a stray r06 CODEX_HOME must NOT survive. Guards the ${VAR+x} presence check.
+  run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" \
+    CLAUDE_CONFIG_DIR="" CODEX_HOME="$BATS_TEST_TMPDIR/.codex-r06" "$LDIR/codex"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "CODEX_HOME=$BATS_TEST_TMPDIR/.codex"
+}
+
+@test "wrappers: the -r06 override survives a case-insensitive filesystem (\$0 case, #345 review)" {
+  _launchers
+  # On a case-insensitive FS (macOS APFS default) a symlink invoked as CLD-R06/CDX-R06 resolves to
+  # the same file but \$0 keeps the typed case; the wrapper lowercases \$0 so the override still
+  # fires. Skip on a case-sensitive FS (e.g. Linux CI), where the uppercase path does not resolve.
+  touch "$BATS_TEST_TMPDIR/ci_probe"
+  [ -e "$BATS_TEST_TMPDIR/CI_PROBE" ] || skip "case-sensitive filesystem"
+  run env HOME="$BATS_TEST_TMPDIR" CLAUDE_LAUNCHER_BIN="$STUB" "$LDIR/CLD-R06"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "CLAUDE_CONFIG_DIR=$BATS_TEST_TMPDIR/.claude-r06"
+  run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" "$LDIR/CDX-R06"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "CODEX_HOME=$BATS_TEST_TMPDIR/.codex-r06"
+}
+
 # ---------- codex wrapper: --profile injection ----------
 
 @test "codex wrapper: injects --profile shared only when argv carries no profile flag" {
@@ -247,7 +272,7 @@ EOF
 @test "codex wrapper: fails loudly when the real binary cannot be resolved" {
   _launchers
   run -127 env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$BATS_TEST_TMPDIR/nope" "$LDIR/codex"
-  [[ "$output" == *"is not executable"* ]]
+  [[ "$output" == *"no executable codex found"* ]]
 }
 
 # ---------- residual zsh helpers in claude.zsh ----------

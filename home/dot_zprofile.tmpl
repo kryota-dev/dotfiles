@@ -18,6 +18,15 @@ export LANG=ja_JP.UTF-8
 # PATH deduplication
 typeset -gU path
 
+# Per-account agent launchers (~/.local/launchers): also prepend here, in a login-sourced file, so
+# a non-interactive login shell (`zsh -lc '<cmd>'`) — which does not source ~/.zshrc — still
+# resolves the claude/codex wrappers rather than the bare mise/brew binary (#345). Interactive
+# shells additionally get a precmd hook in ~/.zshrc to stay ahead of mise's per-prompt re-prepend.
+case ":$PATH:" in
+  *":$HOME/.local/launchers:"*) ;;
+  *) export PATH="$HOME/.local/launchers:$PATH" ;;
+esac
+
 # Less settings
 export LESS='-R -M -i -W -z-4'
 export LESSCHARSET=utf-8
