@@ -1,11 +1,9 @@
-# Codex CLI multi-account helpers (shared by ~/.codex and ~/.codex-r06).
-# Personal account uses the default ~/.codex (no CODEX_HOME set); the work
-# account sets CODEX_HOME=~/.codex-r06 for that invocation only.
-# `--profile shared` layers $CODEX_HOME/shared.config.toml (chezmoi-managed SSOT)
-# on top of the dynamically-written config.toml.
+# Codex CLI multi-account helpers.
 #
-# NOTE: Running bare `codex` (without these aliases) does NOT load
-#       shared.config.toml, so the SSOT static config is not applied.
-#       Always use `cdx` / `cdx-r06` to pick an account with the SSOT config.
-alias cdx='codex --profile shared'
-alias cdx-r06='CODEX_HOME=$HOME/.codex-r06 codex --profile shared'
+# Account selection (~/.codex vs ~/.codex-r06) and `--profile shared` injection now live in the
+# codex wrapper at ~/.local/launchers/codex, reached as `codex` / `cdx` / `cdx-r06` (the latter two
+# are symlinks to it; it dispatches on $0). Being a real file on PATH, it works from any shell —
+# interactive, hook, Claude's Bash tool — so bare `codex` now loads shared.config.toml too, and the
+# codex skill's inline account-selection prelude is gone (#345). No aliases are defined here; this
+# module is kept so the sheldon plugin entry stays valid and as the home for any future codex-only
+# interactive helpers.

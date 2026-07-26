@@ -6,9 +6,10 @@
 # macOS notification. Detection + notify only: no downstream skill dispatch.
 set -euo pipefail
 
-# launchd provides a minimal environment; build PATH ourselves so the
-# mise-managed claude/gh binaries resolve (same trick as statusline.sh).
-export PATH="$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
+# mise-managed binaries, and gh resolve. ~/.local/launchers is first so `claude` hits the
+# per-account wrapper (#345); the mise shims dir follows (same trick as statusline.sh).
+export PATH="$HOME/.local/launchers:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 LABEL="dev.kryota.morning-radar"
 LOG_FILE="$HOME/Library/Logs/${LABEL}.log"
@@ -108,27 +109,19 @@ CLAUDE_ARGS+=(--allowedTools "$ALLOWED_TOOLS")
 
 log "start: claude -p /morning-brief (model=$CLAUDE_MODEL, max-turns=$MAX_TURNS)"
 
-# Keep in sync with _claude_with_home in dot_config/zsh/claude.zsh: same
-# per-account isolation env for the personal account (intent-gate decision on
-# #257), minus the MCP web-search keys — the brief does not need them and the
-# MCP servers tolerate missing keys. Headless launch + watchdog mirror the
-# CLV2 observer-loop.sh pattern.
-# CLV2_HOMUNCULUS_DIR carries the "default" slug that _claude_with_home derives for
-# ~/.claude, and deliberately sits outside the config dir: Claude Code treats paths under it
-# as sensitive files, which no headless session can approve a write to (#336).
-# The observer knobs have to be mirrored here as well, not just the storage path: this session
-# lazy-starts a CLV2 observer through the PreToolUse hook, and that observer inherits this
-# environment for its whole lifetime. Omitting them would leave the brief's observer on the
-# upstream clock gate and the auto-scaled turn floor that #336 exists to get past.
+# Launch through the claude wrapper (~/.local/launchers/claude, first on PATH above). It injects
+# the personal account's isolation env — CLAUDE_CONFIG_DIR/ECC_AGENT_DATA_HOME, the
+# CLV2_HOMUNCULUS_DIR that deliberately sits outside the config dir (Claude Code treats paths under
+# it as sensitive files that no headless session can approve a write to, #336), and the observer
+# knobs (clock gate off, turn ceiling 100 — the lazy-started PreToolUse observer inherits this env
+# for its whole lifetime). That injection used to be hand-copied here and could drift (#345); now
+# there is one source. Setting CLAUDE_CONFIG_DIR explicitly pins the personal account (the wrapper
+# keeps an explicit value via its fill-gaps rule). Exporting empty EXA/FIRECRAWL keys opts out of
+# web search — the wrapper's `+x` guard then skips sourcing the MCP-keys file — since the brief
+# does not need them and the MCP servers tolerate missing keys.
 CLAUDE_CONFIG_DIR="$HOME/.claude" \
-  ECC_AGENT_DATA_HOME="$HOME/.claude" \
-  CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-default" \
-  ECC_MCP_HEALTH_STATE_PATH="$HOME/.claude/mcp-health-cache.json" \
-  GATEGUARD_STATE_DIR="$HOME/.claude/.gateguard" \
-  ECC_OBSERVER_TIMEOUT_SECONDS="${ECC_OBSERVER_TIMEOUT_SECONDS:-300}" \
-  OBSERVER_ACTIVE_HOURS_START="${OBSERVER_ACTIVE_HOURS_START:-0}" \
-  OBSERVER_ACTIVE_HOURS_END="${OBSERVER_ACTIVE_HOURS_END:-0}" \
-  ECC_OBSERVER_MAX_TURNS="${ECC_OBSERVER_MAX_TURNS:-100}" \
+  EXA_API_KEY="" \
+  FIRECRAWL_API_KEY="" \
   claude "${CLAUDE_ARGS[@]}" -p "$PROMPT" >"$STDOUT_FILE" 2>>"$LOG_FILE" &
 CLAUDE_PID=$!
 

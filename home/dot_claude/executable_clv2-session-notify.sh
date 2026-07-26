@@ -16,7 +16,7 @@
 # in settings.json means this adds zero latency to session start.
 #
 # Per-account: the homunculus dir is selected by CLV2_HOMUNCULUS_DIR, set per account by
-# _claude_with_home (cld -> ~/.local/share/ecc-homunculus-default, cld-r06 ->
+# the claude wrapper (cld -> ~/.local/share/ecc-homunculus-default, cld-r06 ->
 # ~/.local/share/ecc-homunculus-r06 — outside the config dir, whose contents Claude Code
 # treats as sensitive files that a headless write cannot get approved (#336)), so the cache
 # and throttle files are naturally isolated between accounts.
