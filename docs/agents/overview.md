@@ -13,8 +13,8 @@ The result is a 2 × 2 matrix of harness × account combinations, all wired from
 
 | | Personal (default) | Work (r06) |
 |---|---|---|
-| **Claude Code** | `~/.claude` — alias `cld` | `~/.claude-r06` — alias `cld-r06` |
-| **Codex CLI** | `~/.codex` — alias `cdx` | `~/.codex-r06` — alias `cdx-r06` |
+| **Claude Code** | `~/.claude` — launcher `cld` | `~/.claude-r06` — launcher `cld-r06` |
+| **Codex CLI** | `~/.codex` — launcher `cdx` | `~/.codex-r06` — launcher `cdx-r06` |
 
 Each cell represents a fully isolated runtime environment: its own session history, governance database, continuous-learning instincts, bash-command audit log, and MCP state. The config, however, is shared — both accounts within a harness point at the same deployed config files via symlinks.
 
@@ -82,9 +82,9 @@ Adding or updating a skill in `~/.agents/skills/` is immediately visible to all 
 
 ## Account isolation at runtime
 
-Although config is shared, runtime state is isolated per account via environment variables injected by the zsh alias wrappers. The wrappers — `_claude_with_home` for Claude Code and the `cdx`/`cdx-r06` aliases for Codex — set per-process env vars that direct each tool to its own state directories. (`cdx-r06` sets `CODEX_HOME=$HOME/.codex-r06`; `cdx` leaves `CODEX_HOME` unset so Codex defaults to `~/.codex`.) No state variable is exported into the general shell environment.
+Although config is shared, runtime state is isolated per account via environment variables injected by two launcher wrapper scripts at `~/.local/launchers/{claude,codex}`, reached as `claude`/`cld`/`cld-r06` and `codex`/`cdx`/`cdx-r06`. Each wrapper dispatches on `$0` and sets per-process env vars that direct its tool to the right state directories. (`cdx-r06` sets `CODEX_HOME=$HOME/.codex-r06` unconditionally; `codex`/`cdx` follow `CLAUDE_CONFIG_DIR` when it is set, else default to `~/.codex`.) Being real files on PATH rather than interactive-zsh-only aliases, the wrappers work identically from any shell. No state variable is exported into the general shell environment beyond the wrapper's own short-lived process.
 
-Details of every env var and alias are in [account-isolation.md](account-isolation.md).
+Details of every env var and launcher command are in [account-isolation.md](account-isolation.md).
 
 ---
 
@@ -92,7 +92,7 @@ Details of every env var and alias are in [account-isolation.md](account-isolati
 
 | Topic | Doc |
 |---|---|
-| Per-account env var table, alias matrix | [account-isolation.md](account-isolation.md) |
+| Per-account env var table, launcher command matrix | [account-isolation.md](account-isolation.md) |
 | Claude Code harness: hooks, ECC, CLV2, statusline | [claude-code.md](claude-code.md) |
 | Codex CLI harness: profile config, hooks, account setup | [codex.md](codex.md) |
 | Skill taxonomy, curated inventory, external fetching, provenance enforcement | [skills-provenance.md](skills-provenance.md) |

@@ -93,18 +93,20 @@ cd "$(mktemp -d)" && git init && git commit --allow-empty -m "signing test"
 
 If a 1Password dialog appears and the commit succeeds, signing is wired correctly.
 
-## 7. Agent launcher aliases load (zsh)
+## 7. Agent launcher commands resolve (zsh)
 
 Start a new interactive zsh session (or `exec zsh`) and verify:
 
 ```bash
-type cld       # should resolve to a function or alias
+type cld       # should resolve to a file (symlink to ~/.local/launchers/claude)
 type cld-r06   # same
 type cdx       # Codex default account launcher
 type cdx-r06   # Codex r06 account launcher
+type claude    # bare name resolves to the same wrapper as cld
+type codex     # bare name resolves to the same wrapper as cdx
 ```
 
-These aliases are defined in `~/.config/zsh/claude.zsh` and loaded by sheldon. If they are missing, check that the zsh module was deployed (step 2) and that sheldon ran successfully.
+`cld`, `cld-r06`, `cdx`, and `cdx-r06` are symlinks to the two wrapper scripts at `~/.local/launchers/{claude,codex}` (deployed by chezmoi); `claude` and `codex` resolve to the same scripts because `~/.local/launchers` is kept ahead of mise's and Homebrew's directories on PATH (a static prepend in `dot_zshrc.tmpl` plus a `precmd` hook). If any of these are missing, confirm `~/.zshrc` was applied (step 1) and that `~/.local/launchers/claude`, `~/.local/launchers/codex`, and their symlinks exist.
 
 ---
 
@@ -117,7 +119,7 @@ These aliases are defined in `~/.config/zsh/claude.zsh` and loaded by sheldon. I
 | `command not found` in zsh stderr | Missing dependency or sheldon not locked | Run `sheldon lock` then `exec zsh` |
 | `ghq.root` mismatch | `~/.gitconfig` not fully applied | Run `chezmoi apply -v` and check `dot_gitconfig.tmpl` |
 | Signing test fails with 1Password error | SSH agent not running or not unlocked | Open 1Password desktop, unlock, retry |
-| `cld` / `cdx` aliases missing | `claude.zsh` not loaded by sheldon | Confirm `~/.config/zsh/claude.zsh` exists; run `sheldon lock` |
+| `cld` / `cdx` / `claude` / `codex` not found | `~/.local/launchers` missing from PATH | Confirm `~/.zshrc` was applied and `~/.local/launchers/{claude,codex}` exist; `exec zsh` |
 
 ---
 

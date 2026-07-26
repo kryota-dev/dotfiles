@@ -17,30 +17,11 @@ Codex CLI を使用してコードレビュー・分析を実行するスキル�
 
 本 skill は **Codex CLI 経由のレビュー・分析実行の Single Source of Truth**。`multi-review` skill から並列呼び出しされる場合も、本ファイルの実行コマンド・stdin パイプ問題への対処・プロンプトのルール・使用例に従う。multi-review 側で重複定義しない。
 
-## codex アカウントの選択（cdx / cdx-r06 の再現）
+## codex アカウントの選択（wrapper が自動注入、#345）
 
-起動中の Claude セッションに合わせて codex のアカウント（`CODEX_HOME`）を切り替える。
+bare `codex`/`cdx`/`cdx-r06` を叩けば、`~/.local/launchers/codex`（`cld`/`cld-r06` と同じく PATH 上の実ファイル）が起動中のアカウントに応じて `CODEX_HOME` と `--profile shared` を自動注入する。非対話 Bash（Claude の Bash ツール・hooks・launchd）でも PATH 上の wrapper がそのまま効くため、以前の「`CODEX_HOME` prelude をコマンド冒頭に前置する」対応は不要になった。
 
-| 起動した Claude | 相当するエイリアス | `CODEX_HOME` | profile |
-|----------------|------------------|-------------|---------|
-| `cld-r06`（`CLAUDE_CONFIG_DIR` が `*.claude-r06`） | `cdx-r06` | `$HOME/.codex-r06` | `shared` |
-| それ以外（`cld` など。`CLAUDE_CONFIG_DIR` 未設定/別値） | `cdx` | デフォルト（`~/.codex`） | `shared` |
-
-**重要（エイリアスを直接呼べない理由）**: `cdx` / `cdx-r06` は zsh インタラクティブ設定のエイリアスで、Claude が叩く非対話 Bash には**ロードされない**（`type cdx` が `not found`）。そのため本 skill はエイリアスの中身（`CODEX_HOME` の設定 + `--profile shared` の付与）を**インラインで再現**する。
-
-**重要（同一 Bash ブロック内に前置すること）**: Bash ツールは呼び出しごとに**別シェル**を起動するため、`export CODEX_HOME` は `codex exec` の実行と**同一の Bash コマンド内**に書かないと効かない。特に `run_in_background: true` の単発実行では、下記 prelude を heredoc ブロックと同じ Bash 呼び出しに必ず含める。
-
-### アカウント選択 prelude
-
-以降の**すべての `codex exec` 実行例の冒頭**に、次の 1 行（prelude）を同一ブロックで前置する:
-
-```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
-```
-
-- 条件が真（`cld-r06` セッション）のとき `CODEX_HOME=$HOME/.codex-r06` を export（= `cdx-r06` 相当）。
-- 偽のときは何もせず、デフォルトの `~/.codex` が使われる（= `cdx` 相当）。
-- **profile は用途で使い分ける**: レビュー・分析（read-only）用途は `--profile shared`（`shared.config.toml` を適用。`cdx`/`cdx-r06` と等価）。実装・CI 修正など workspace-write 委任は `--profile agent`（後述「agent profile（workspace-write 実行）」参照）。
+- **profile は用途で使い分ける**: レビュー・分析（read-only）用途は `--profile shared`（`shared.config.toml` を適用。wrapper が既定で付与）。実装・CI 修正など workspace-write 委任は `--profile agent`（後述「agent profile（workspace-write 実行）」参照。`--profile` が明示されている場合 wrapper は上書きしない）。
 
 ## 実行コマンド
 
@@ -49,7 +30,6 @@ if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME
 ### 推奨形式: stdin から prompt を渡し、結果のみをファイルに出力する
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 codex exec --profile shared --sandbox read-only --cd <project_directory> --color never -o <RESULT_FILE> - <<'PROMPT' >/tmp/codex-run.log 2>&1
 <request>
 PROMPT
@@ -68,7 +48,6 @@ PROMPT
 引数で渡すときは、バックグラウンド・パイプ環境で stdin が「piped 状態」と判定され二重入力扱いになる。明示的に stdin を切ること:
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 codex exec --profile shared --sandbox read-only --cd <project_directory> "<request>" </dev/null
 ```
 
@@ -78,7 +57,7 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> "<reque
 
 | オプション | 値 | 理由 |
 |------------|-----|------|
-| `CODEX_HOME`（環境変数 / prelude で設定） | `$HOME/.codex-r06`（`cld-r06` 時のみ） | 起動した Claude セッションに合わせてアカウントを切り替え（`cdx-r06` 相当）。上記「codex アカウントの選択」参照 |
+| `CODEX_HOME`（wrapper が自動注入） | `$HOME/.codex-r06`（`cld-r06` 時のみ） | 起動した Claude セッションに合わせてアカウントを切り替え（`cdx-r06` 相当）。上記「codex アカウントの選択」参照 |
 | `--profile shared` | - | `shared.config.toml`（SSOT 静的設定）を適用。**read-only / レビュー用途**で使う（`cdx`/`cdx-r06` と等価）。workspace-write 委任では代わりに `--profile agent` を使う（後述） |
 | `--sandbox read-only` | - | 読み取り専用。レビュー用途では十分 |
 | `--cd <dir>` | プロジェクトディレクトリ | 対象プロジェクトのルートを指定 |
@@ -95,7 +74,6 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> "<reque
 ### 呼び出し形
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 # --- worktree ガード（必須・fail-closed）---
 TARGET_DIR=<worktree_directory>
 GD=$(git -C "$TARGET_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null) &&
@@ -178,7 +156,6 @@ Codex が書いたテスト・Makefile・設定はホスト（sandbox 外）で�
 ### コードレビュー
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 cat <<'PROMPT' | codex exec --profile shared --sandbox read-only --cd /path/to/project -
 このプロジェクトのコードをレビューして、改善点を指摘してください。
 確認や質問は不要です。具体的な修正案とコード例まで自主的に出力してください。
@@ -191,7 +168,6 @@ PROMPT
 **ローカルに base ブランチがある場合は、first-class サブコマンドの `codex exec review` を推奨**する（read-only で動作し、差分の heredoc 埋め込みが不要になる）:
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 codex exec --profile shared --sandbox read-only --cd <project_directory> --color never \
   -o <RESULT_FILE> review --base <base_branch>   # base ブランチとの差分をレビュー
 # ほか: review --uncommitted（未コミット差分） / review --commit <SHA>（特定コミット）
@@ -204,7 +180,6 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> --color
 **stdin 堅牢化（推奨）**: heredoc 内に `$(gh pr diff <PR番号>)` をインラインで埋め込むと、`run_in_background: true` 環境で稀に `No prompt provided via stdin.` で失敗することがある（コマンド置換と stdin 供給の競合）。**差分を事前に変数へ確保してから heredoc に展開する**ことで安定する:
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 RESULT=/tmp/codex-review-<PR番号>.txt
 DIFF=$(gh pr diff <PR番号>)
 codex exec --profile shared --sandbox read-only --cd "$(pwd)" --color never -o "$RESULT" - <<PROMPT >/tmp/codex-run.log 2>&1
@@ -248,7 +223,6 @@ PROMPT
 ### バグ調査
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 cat <<'PROMPT' | codex exec --profile shared --sandbox read-only --cd /path/to/project -
 認証処理でエラーが発生する原因を調査してください。
 確認や質問は不要です。原因の特定と具体的な修正案まで自主的に出力してください。
@@ -258,7 +232,6 @@ PROMPT
 ### アーキテクチャ分析
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 cat <<'PROMPT' | codex exec --profile shared --sandbox read-only --cd /path/to/project -
 このプロジェクトのアーキテクチャを分析して説明してください。
 確認や質問は不要です。改善提案まで自主的に出力してください。
@@ -268,7 +241,6 @@ PROMPT
 ### リファクタリング提案
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 cat <<'PROMPT' | codex exec --profile shared --sandbox read-only --cd /path/to/project -
 技術的負債を特定し、リファクタリング計画を提案してください。
 確認や質問は不要です。具体的なコード例まで自主的に出力してください。
@@ -278,7 +250,6 @@ PROMPT
 ### デザイン相談（UI/UX）
 
 ```bash
-if [[ "${CLAUDE_CONFIG_DIR:-}" == *.claude-r06 ]]; then export CODEX_HOME="$HOME/.codex-r06"; fi
 cat <<'PROMPT' | codex exec --profile shared --sandbox read-only --cd /path/to/project -
 あなたは世界トップクラスのUIデザイナーです。以下の観点からこのプロジェクトのUIを評価してください:
 (1) 視覚的階層構造とタイポグラフィ
@@ -296,7 +267,7 @@ PROMPT
 2. **プロジェクトディレクトリを特定する**: 現在のワーキングディレクトリ（`pwd`）またはユーザー指定のパス
 3. **`codex` コマンドの存在を確認する**: 見つからない場合はインストールを案内
 4. **プロンプトを構築する**: 依頼内容 + 「確認不要」指示を末尾に追加
-5. **codex を実行する**（Bash の timeout は **300000ms = 5分** に設定）。実行する Bash コマンドの冒頭に「codex アカウントの選択」の prelude を同一ブロックで前置する。profile は用途で選ぶ: レビュー・分析（read-only）は `--profile shared`、実装・CI 修正など workspace-write 委任は `--profile agent`（「agent profile（workspace-write 実行）」節の worktree ガードを必ず通す）
+5. **codex を実行する**（Bash の timeout は **300000ms = 5分** に設定）。`CODEX_HOME`/`--profile shared` は wrapper（`~/.local/launchers/codex`）が自動注入するため前置不要。profile は用途で選ぶ: レビュー・分析（read-only）は既定の `--profile shared`、実装・CI 修正など workspace-write 委任は明示的に `--profile agent`（「agent profile（workspace-write 実行）」節の worktree ガードを必ず通す）
 6. **結果をユーザーに報告する**
 
 ## 注意事項

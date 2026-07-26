@@ -43,10 +43,10 @@ flowchart TD
 | chezmoi エンジン | 名前デコード、テンプレートデータ、`includeTemplate`、OS 分岐、`chezmoiignore`/`chezmoiremove` | [chezmoi-engine.ja.md](chezmoi-engine.ja.md) |
 | Externals & ピン固定 | SHA ピン固定アーカイブ取得、シングルタール URL キャッシュ、`range .ecc.skills` ファンアウト、Renovate バンプモデル | [externals-and-pinning.ja.md](externals-and-pinning.ja.md) |
 | ライフサイクルスクリプト | 2 フェーズ（before/after）順序（00→90）、`run_once` vs `run_onchange`、1Password ゲート | [lifecycle-scripts.ja.md](lifecycle-scripts.ja.md) |
-| シェル環境 | `.zshrc` ロード順序、sheldon 遅延ロード、starship、per-account zsh エイリアス | [shell-environment.ja.md](shell-environment.ja.md) |
+| シェル環境 | `.zshrc` ロード順序、sheldon 遅延ロード、starship、per-account ランチャーラッパー | [shell-environment.ja.md](shell-environment.ja.md) |
 | 開発ツールチェーン | mise バージョンピン、`Brewfile` + `.brewfile-linux-exclude`、git 1Password 署名、gitleaks | [dev-tooling.ja.md](dev-tooling.ja.md) |
 | AI エージェント層（概要） | デュアルハーネス × デュアルアカウントマトリクス、SSOT スキルライブラリ、共有ルール層 | [agents/overview.ja.md](../agents/overview.ja.md) |
-| アカウント分離 | per-account 環境変数、`_claude_with_home`、Codex `CODEX_HOME` | [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) |
+| アカウント分離 | per-account 環境変数、`claude`/`codex` ランチャーラッパー、Codex `CODEX_HOME` | [agents/account-isolation.ja.md](../agents/account-isolation.ja.md) |
 | Claude Code ハーネス | `settings.json`、ECC フック、CLV2 オブザーバー、statusline、レビューサブエージェント | [agents/claude-code.ja.md](../agents/claude-code.ja.md) |
 | Codex CLI ハーネス | デュアル `CODEX_HOME`、`shared.config.toml`、`hooks.json`、gateguard | [agents/codex.ja.md](../agents/codex.ja.md) |
 | スキルプロベナンス | 5 カテゴリ分類、curated vs ECC スキルの追加方法、`skill_provenance.bats` | [agents/skills-provenance.ja.md](../agents/skills-provenance.ja.md) |
@@ -86,7 +86,7 @@ flowchart TD
 
 ### シェル環境
 
-インタラクティブな zsh スタック: `.zprofile` が Homebrew を有効化し、`.zshrc` が mise、direnv、starship を同期的に初期化し、sheldon に遅延評価でプラグインロードを委譲します。per-account ランチャーエイリアス（`cld`/`cld-r06`、`cdx`/`cdx-r06`）は sheldon がロードする `~/.config/zsh/*.zsh` モジュール内で定義されています。
+インタラクティブな zsh スタック: `.zprofile` が Homebrew を有効化し、`.zshrc` が mise、direnv、starship を同期的に初期化し、sheldon に遅延評価でプラグインロードを委譲します。`.zshrc` はまた `~/.local/launchers` を mise のシムより前の PATH に配置します。ここに per-account の `claude`/`codex` ラッパースクリプトがあり、`cld`/`cld-r06` と `cdx`/`cdx-r06`（シンボリックリンク）、またはベアのバイナリ名としてアクセスされます。
 
 [shell-environment.ja.md](shell-environment.ja.md) を参照してください。
 

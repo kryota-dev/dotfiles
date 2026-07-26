@@ -458,9 +458,9 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 | `commands/` | `~/.claude/commands/` |
 | `skills` | `~/.claude/skills`（→ `~/.agents/skills`） |
 
-設定は 1 つの SSOT；ランタイム状態は `cld-r06` zsh エイリアス（`_claude_with_home`）で設定される環境変数で分離されます：
+設定は 1 つの SSOT；ランタイム状態は `claude` ラッパー（`~/.local/launchers/claude`、`claude`/`cld`/`cld-r06` としてアクセス）が設定する環境変数で分離されます：
 
-| 環境変数 | `cld` の値 | `cld-r06` の値 |
+| 環境変数 | `claude` / `cld` の値 | `cld-r06` の値 |
 |---|---|---|
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | `~/.claude-r06` |
 | `ECC_AGENT_DATA_HOME` | `~/.claude` | `~/.claude-r06` |
@@ -471,7 +471,7 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 
 `CLV2_HOMUNCULUS_DIR` だけは意図的に config dir の**外**に置き、アカウントをパスのサフィックスで表現しています。Claude Code は config dir 配下の全パスを sensitive file として扱い、書き込み前に対話承認を要求します。一方 CLV2 の分析パスは headless（`claude --model haiku --print`）で承認者がいないため、この変数が `<account>/ecc-homunculus` を指していた間は本能の書き込みが一度も成功しませんでした。observer は承認交渉で turn を使い切り "Reached max turns" で終了し、本能の生成数はゼロのままでした（#336）。他の 3 変数が config dir 配下のままなのは、それらを書くコード（node フック、シェルスクリプト）が Claude Code の Write ツールを経由せず直接書き込むため、sensitive-file ゲートの対象にならないからです。
 
-`cld`/`cld-r06` エイリアスを使わない素の `claude` 呼び出しはこれらの変数がセットされず、`~/.claude` と `$XDG_DATA_HOME/ecc-homunculus` にフォールバックします — エイリアスとは異なる状態の場所です。
+`claude` は `cld` と同じラッパースクリプトに解決されるため（`~/.local/launchers/claude` は PATH 上で mise のシムより前に維持されています — [アカウント分離](account-isolation.ja.md#ベア呼び出しはもはやギャップではない) を参照）、素の `claude` 呼び出しも `cld`/`cld-r06` と同一の per-account 環境注入を経由するようになりました。別のフォールバックへ落ちることはありません。ラッパーの fill-gaps ルール（`CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"`）により `claude` と `cld` は同一に振る舞います：どちらもすでに設定済みの `CLAUDE_CONFIG_DIR` を維持し（フック起動の子プロセスが親セッションのアカウントに留まるため）、それ以外は個人アカウントにデフォルトします。異なるのは `cld-r06` のみで、`CLAUDE_CONFIG_DIR=$HOME/.claude-r06` を無条件に強制します。
 
 ---
 
@@ -486,12 +486,12 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = 品質ゲートがブロックする代わりにファイルを自動修正 |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | 追加の破壊的コマンドパターンの正規表現；Codex ゲートと SSOT 共有 |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | `~/.agents/skills/ecc` に固定；ECC のプラグインフォールバック走査をスキップ |
-| `CLAUDE_CONFIG_DIR` | `cld`/`cld-r06` エイリアス | Claude Code が使用する `~/.claude*` ディレクトリを選択 |
-| `ECC_AGENT_DATA_HOME` | `cld`/`cld-r06` エイリアス | ECC（とフック fork）が状態を書き込む場所 |
-| `CLV2_HOMUNCULUS_DIR` | `cld`/`cld-r06` エイリアス | CLV2 本能/クラスターの homunculus データディレクトリ。`~/.local/share/ecc-homunculus-<アカウント slug>` に置き、config dir の外に出すことで headless な本能書き込みが sensitive-file ゲートに阻まれないようにしている（#336） |
-| `ECC_OBSERVER_TIMEOUT_SECONDS` | `cld`/`cld-r06` エイリアス | 既定 300。CLV2 observer の watchdog を引き上げ、Haiku 分析が 120s で SIGTERM されるのを防ぐ（#256）。`:-` 形式のため明示 override が優先 |
-| `OBSERVER_ACTIVE_HOURS_START` / `OBSERVER_ACTIVE_HOURS_END` | `cld`/`cld-r06` エイリアス | 両方の既定を `0` にして CLV2 session-guardian の時刻ゲート（upstream 既定 800-2300）を無効化する。この環境ではセッションが深夜帯に及ぶため、時刻ゲートが分析サイクルを丸ごと skip していた。guardian の cooldown ゲートと idle ゲートは引き続きサイクルを抑制する（#336） |
-| `ECC_OBSERVER_MAX_TURNS` | `cld`/`cld-r06` エイリアス | 既定 100（upstream の上限値）。自動スケールの下限 20 では Read → 重複チェック → Write の途中で打ち切られていた。サイクルの実際の上限は turn 数ではなく上記の watchdog が決める（#336） |
+| `CLAUDE_CONFIG_DIR` | claude ラッパー | Claude Code が使用する `~/.claude*` ディレクトリを選択 |
+| `ECC_AGENT_DATA_HOME` | claude ラッパー | ECC（とフック fork）が状態を書き込む場所 |
+| `CLV2_HOMUNCULUS_DIR` | claude ラッパー | CLV2 本能/クラスターの homunculus データディレクトリ。`~/.local/share/ecc-homunculus-<アカウント slug>` に置き、config dir の外に出すことで headless な本能書き込みが sensitive-file ゲートに阻まれないようにしている（#336） |
+| `ECC_OBSERVER_TIMEOUT_SECONDS` | claude ラッパー | 既定 300。CLV2 observer の watchdog を引き上げ、Haiku 分析が 120s で SIGTERM されるのを防ぐ（#256）。`:-` 形式のため明示 override が優先 |
+| `OBSERVER_ACTIVE_HOURS_START` / `OBSERVER_ACTIVE_HOURS_END` | claude ラッパー | 両方の既定を `0` にして CLV2 session-guardian の時刻ゲート（upstream 既定 800-2300）を無効化する。この環境ではセッションが深夜帯に及ぶため、時刻ゲートが分析サイクルを丸ごと skip していた。guardian の cooldown ゲートと idle ゲートは引き続きサイクルを抑制する（#336） |
+| `ECC_OBSERVER_MAX_TURNS` | claude ラッパー | 既定 100（upstream の上限値）。自動スケールの下限 20 では Read → 重複チェック → Write の途中で打ち切られていた。サイクルの実際の上限は turn 数ではなく上記の watchdog が決める（#336） |
 
 ---
 

@@ -93,18 +93,20 @@ cd "$(mktemp -d)" && git init && git commit --allow-empty -m "signing test"
 
 1Password ダイアログが表示されてコミットが成功すれば、署名が正しく設定されています。
 
-## 7. エージェントランチャーエイリアスの確認（zsh）
+## 7. エージェントランチャーコマンドの解決確認（zsh）
 
 新しいインタラクティブ zsh セッション（または `exec zsh`）を開始して確認します:
 
 ```bash
-type cld       # 関数またはエイリアスに解決されるはず
+type cld       # ファイル（~/.local/launchers/claude へのシンボリックリンク）に解決されるはず
 type cld-r06   # 同様
 type cdx       # Codex デフォルトアカウントランチャー
 type cdx-r06   # Codex r06 アカウントランチャー
+type claude    # ベアの名前も cld と同じラッパーに解決される
+type codex     # ベアの名前も cdx と同じラッパーに解決される
 ```
 
-これらのエイリアスは `~/.config/zsh/claude.zsh` で定義され、sheldon によって読み込まれます。欠落している場合は、zsh モジュールがデプロイされているか（ステップ 2）、sheldon が正常に実行されたかを確認してください。
+`cld`、`cld-r06`、`cdx`、`cdx-r06` は `~/.local/launchers/{claude,codex}`（chezmoi がデプロイ）にある 2 つのラッパースクリプトへのシンボリックリンクです。`claude` と `codex` が同じスクリプトに解決されるのは、`~/.local/launchers` が PATH 上で mise と Homebrew のディレクトリより前に維持されているためです（`dot_zshrc.tmpl` での静的な prepend に加え `precmd` フック）。いずれかが欠落している場合は、`~/.zshrc` が適用されているか（ステップ 1）、`~/.local/launchers/claude`、`~/.local/launchers/codex`、およびそれらのシンボリックリンクが存在するかを確認してください。
 
 ---
 
@@ -117,7 +119,7 @@ type cdx-r06   # Codex r06 アカウントランチャー
 | zsh stderr に `command not found` | 依存関係の欠落または sheldon ロック未実行 | `sheldon lock` を実行してから `exec zsh` |
 | `ghq.root` の不一致 | `~/.gitconfig` が完全に適用されていない | `chezmoi apply -v` を実行して `dot_gitconfig.tmpl` を確認 |
 | 署名テストで 1Password エラー | SSH エージェントが未起動またはロック済み | 1Password デスクトップを開いてアンロックし、再試行 |
-| `cld` / `cdx` エイリアスが欠落 | sheldon が `claude.zsh` を読み込んでいない | `~/.config/zsh/claude.zsh` の存在を確認し `sheldon lock` を実行 |
+| `cld` / `cdx` / `claude` / `codex` が見つからない | `~/.local/launchers` が PATH にない | `~/.zshrc` が適用されているか、`~/.local/launchers/{claude,codex}` が存在するかを確認し `exec zsh` |
 
 ---
 

@@ -4,7 +4,7 @@
 
 ← [ドキュメント目次](../README.ja.md)
 
-このドキュメントは、本 dotfiles リポジトリがデプロイする OpenAI Codex CLI ハーネスの設定を説明します。ハーネスは 2 つの分離された `CODEX_HOME` アカウント（`~/.codex` と `~/.codex-r06`）をプロビジョニングし、chezmoi テンプレートでフックと shared プロファイル設定の同期を保ち、エイリアスと PATH シムで SSOT プロファイルを適用し、Claude Code と共有するクロスハーネスゲートガードで破壊的 Bash コマンドをゲーティングします。
+このドキュメントは、本 dotfiles リポジトリがデプロイする OpenAI Codex CLI ハーネスの設定を説明します。ハーネスは 2 つの分離された `CODEX_HOME` アカウント（`~/.codex` と `~/.codex-r06`）をプロビジョニングし、chezmoi テンプレートでフックと shared プロファイル設定の同期を保ち、PATH で解決されるランチャーラッパーで SSOT プロファイルを適用し、Claude Code と共有するクロスハーネスゲートガードで破壊的 Bash コマンドをゲーティングします。
 
 ---
 
@@ -17,8 +17,8 @@
 - [agent.config.toml — agent プロファイル](#agentconfigtoml--agent-プロファイル)
 - [テンプレート SSOT — アカウントドリフト防止](#テンプレート-ssot--アカウントドリフト防止)
 - [--profile shared の仕組み](#--profile-shared-の仕組み)
-  - [cdx / cdx-r06 エイリアス](#cdx--cdx-r06-エイリアス)
-  - [素の codex は SSOT 設定をスキップする](#素の-codex-は-ssot-設定をスキップする)
+  - [codex / cdx / cdx-r06 — ラッパー](#codex--cdx--cdx-r06--ラッパー)
+  - [素の codex も SSOT 設定をロードするようになった](#素の-codex-も-ssot-設定をロードするようになった)
 - [管理外ベース設定とプロジェクト trust](#管理外ベース設定とプロジェクト-trust)
 - [ゲートガード](#ゲートガード)
 - [共有ルールとスキルレイヤー](#共有ルールとスキルレイヤー)
@@ -44,12 +44,14 @@
 
 ## 2 アカウントモデル
 
-個人アカウントは Codex のデフォルト `CODEX_HOME=~/.codex` をそのまま使用し、ワークアカウントは `cdx-r06` エイリアスが明示的に設定する `CODEX_HOME=~/.codex-r06` を使用します。`cdx`/`cdx-r06` zsh エイリアスはアクティブアカウントを選択します：
+個人アカウントは Codex のデフォルト `CODEX_HOME=~/.codex` をそのまま使用し、ワークアカウントは `CODEX_HOME=~/.codex-r06` を使用します。アカウント選択は `~/.local/launchers/codex`（ソース: `home/dot_local/launchers/executable_codex`）という 1 つのラッパー *スクリプト* に集約されており、`codex` / `cdx` / `cdx-r06` としてアクセスされます — 後者 2 つはこのスクリプトへのシンボリックリンクで、`$0` で分岐します：
 
 ```
-cdx      → codex --profile shared "$@"                              (個人 — CODEX_HOME 未設定、Codex は ~/.codex をデフォルト使用)
-cdx-r06  → CODEX_HOME=~/.codex-r06 codex --profile shared "$@"    (ワーク / r06)
+codex / cdx  → CODEX_HOME は設定済みの CLAUDE_CONFIG_DIR に追従（未設定なら ~/.codex）、その後 --profile shared "$@"
+cdx-r06      → CODEX_HOME=~/.codex-r06（無条件 override）、その後 --profile shared "$@"
 ```
+
+インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、このラッパーはインタラクティブシェル・フック・Claude Code 自身の Bash ツールなど、どのシェルからでも同一に動作します — つまり個人アカウントに関しては `codex` と `cdx` は文字通り同じ挙動です。完全な分岐ロジック（`CLAUDE_CONFIG_DIR` から外側の Claude Code セッションのアカウントがどう伝播するかを含む）は後述の [codex / cdx / cdx-r06 — ラッパー](#codex--cdx--cdx-r06--ラッパー) を参照してください。
 
 両方のホームは共有テンプレートからレンダリングされた `hooks.json` と `shared.config.toml` のコピーをそれぞれ受け取るため、各アカウントは同一のフックと設定ロジックを実行しながら、認証トークンと会話状態を別々のディレクトリに分離します。
 
@@ -155,23 +157,42 @@ network_access = false
 
 ## --profile shared の仕組み
 
-`shared.config.toml` は named Codex CLI プロファイルです。Codex が `--profile shared` で呼び出された場合にのみ、Codex の動的に書き込まれる `config.toml` の上にレイヤーとして適用されます。このフラグなしでは SSOT 設定はサイレントに無視されます。
+`shared.config.toml` は named Codex CLI プロファイルです。Codex が `--profile shared` で呼び出された場合にのみ、Codex の動的に書き込まれる `config.toml` の上にレイヤーとして適用されます。このフラグなしでは、素の `codex` バイナリは SSOT 設定をサイレントに無視します — ただし #345 以降、ラッパーはほぼすべての呼び出しでこのフラグを注入するため、実際に問題になるのはラッパーを完全にバイパスする稀な呼び出しだけです（後述）。
 
-`--profile shared` を自動的に注入するメカニズムは 1 つだけです：
+`--profile shared` を自動的に注入するメカニズムはラッパースクリプトのみです：
 
-### cdx / cdx-r06 エイリアス
+### codex / cdx / cdx-r06 — ラッパー
 
-`cdx` と `cdx-r06` zsh エイリアス（`home/dot_config/zsh/codex.zsh` で定義）は標準のユーザー向けエントリポイントです。どちらも `--profile shared` を注入しますが、`CODEX_HOME` を設定するのは `cdx-r06` のみです。`cdx` は `CODEX_HOME` を未設定のままにし、Codex はデフォルトの `~/.codex` を使用します：
+`~/.local/launchers/codex`（ソース: `home/dot_local/launchers/executable_codex`）が実際の per-account ランチャーです。`cdx` と `cdx-r06` はこれへのシンボリックリンクで、`$0`（呼び出された名前）で分岐します。zsh エイリアスではなく PATH 上の実ファイルであるため、インタラクティブ zsh・フック・launchd・Claude Code 自身の Bash ツールなど、どのシェルからでも同一に動作します。
 
-```zsh
-# 実際の形（codex.zsh より）
-cdx      → codex --profile shared "$@"                              # CODEX_HOME 未設定 → Codex は ~/.codex をデフォルト使用
-cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
-```
+すべての呼び出しで次の 2 つが行われます：
 
-### 素の codex は SSOT 設定をスキップする
+1. **アカウント選択。** `cdx-r06` は `CODEX_HOME=$HOME/.codex-r06` を無条件に強制します（override）。`codex` / `cdx` は設定済みの `CLAUDE_CONFIG_DIR` に追従します — `CLAUDE_CONFIG_DIR` が `.claude-r06` で終わっていれば `~/.codex-r06`、それ以外は `~/.codex` — `CLAUDE_CONFIG_DIR` が未設定のときのみ、すでに設定済みの `CODEX_HOME`（または `~/.codex`）にフォールバックします：
 
-エイリアスなしの直接 `codex` 呼び出しは `shared.config.toml` を**ロードしません**。`--profile shared` フラグが適用する唯一のメカニズムです。これは意図的なもの（Codex ではプロファイルはオプトイン）ですが、`codex` を直接呼び出すスクリプト、CI、またはエディタ統合では気づきにくい落とし穴です。
+   ```bash
+   case "${0##*/}" in
+     cdx-r06) CODEX_HOME="$HOME/.codex-r06" ;;
+     *)
+       if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+         case "$CLAUDE_CONFIG_DIR" in
+           *.claude-r06) CODEX_HOME="$HOME/.codex-r06" ;;
+           *) CODEX_HOME="$HOME/.codex" ;;
+         esac
+       else
+         CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+       fi
+       ;;
+   esac
+   ```
+
+   `CLAUDE_CONFIG_DIR` が authoritative であるということは、`cld-r06` Claude Code セッション内から呼ばれた `codex`（例：`codex` skill の Bash ツール経由、またはフック経由）は、たとえ何らかの継承済み `CODEX_HOME` が別のことを示していても r06 の Codex アカウントに着地するということです — これは #345 以前に存在していたクロスアカウントのリークを塞ぎます。明示的な `CODEX_HOME` が尊重されるのは、Claude Code セッションがスコープにない（`CLAUDE_CONFIG_DIR` 未設定の）場合のみです。
+2. **`--profile shared` の注入。** ラッパーは argv をトークンごとに走査し（`--profile`、`--profile=…`、`-p`、`-p<value>` を認識、リテラルの `--` で走査を停止）、プロファイルフラグがまだ存在しない場合にのみ `--profile shared` を注入します。したがって `codex --profile agent …` は変更されずそのまま `agent` プロファイルに解決され、注入されるフラグはどのサブコマンド（`exec`、`exec review`）よりも前に置かれるため、どの呼び出し形でもパースされます。
+
+`real="${CODEX_LAUNCHER_BIN:-/opt/homebrew/bin/codex}"` は brew 管理のバイナリを直接解決します — `claude` ラッパーと異なり、Codex は mise 管理ではなく brew 管理のままです。`CODEX_LAUNCHER_BIN` はテスト用にこれを上書きします。本物のバイナリが解決できない場合、ラッパーはサイレントに何もしない代わりに大きく失敗します。
+
+### 素の codex も SSOT 設定をロードするようになった
+
+`cdx`/`cdx-r06` エイリアスを使わない直接の `codex` 呼び出しは、#345 以前は `shared.config.toml` を**ロードしませんでした**。`--profile shared` を注入するのはエイリアスだけで、`codex` を直接呼び出すスクリプト・CI・エディタ統合では気づきにくい落とし穴でした。このギャップは解消されています：`codex` は PATH 上で `cdx` と同じラッパーに解決されるため（ランチャーディレクトリは `dot_zshrc.tmpl` の静的な PATH prepend と、`mise activate` 後に再度優先順位を主張する `precmd` フック、そして launchd の morning-radar スクリプトのハードコードされた prepend によって Homebrew の `bin` より前に維持されます）、呼び出し元がすでに明示的な `--profile` を渡していない限り、ベアの `codex` 呼び出しも `cdx` とまったく同じように `--profile shared` が注入されます。ラップされていない本当に素のバイナリに到達する唯一の方法は、絶対パス（`/opt/homebrew/bin/codex`）で直接呼び出すことです — ほとんどの呼び出し元はそうしません。
 
 ---
 
@@ -185,7 +206,7 @@ cdx-r06  → CODEX_HOME=$HOME/.codex-r06 codex --profile shared "$@"
 - `chezmoi apply` がユーザー承認済みの `[projects.*] trust_level` エントリを戻してしまいます。
 - コミットすると無関係なプロジェクトの絶対パスが public リポジトリに漏れます。
 
-コストは、既知の許容されたドリフト源が残ることです：ベース設定は SSOT pin とは独立に古くなる model 設定の独自コピーを持ちます。プロファイルベースの呼び出し（`--profile shared` / `--profile agent`）はその上にレイヤーされるため影響を受けません。素の `codex` 実行は管理外ベース設定だけで解決されます（[素の codex は SSOT 設定をスキップする](#素の-codex-は-ssot-設定をスキップする) を参照）。
+コストは、既知の許容されたドリフト源が残ることです：ベース設定は SSOT pin とは独立に古くなる model 設定の独自コピーを持ちます。プロファイルベースの呼び出し（`--profile shared` / `--profile agent`）はその上にレイヤーされるため影響を受けません。#345 以降はラッパーがデフォルトで `--profile shared` を注入するため、素の `codex` 呼び出しもこれに含まれます（[素の codex も SSOT 設定をロードするようになった](#素の-codex-も-ssot-設定をロードするようになった) を参照）。ラッパーを完全にバイパスする呼び出し（brew バイナリの絶対パス）のみが、管理外ベース設定だけで解決されます。
 
 ### プロジェクト trust ポリシー
 

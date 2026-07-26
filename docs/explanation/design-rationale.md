@@ -64,27 +64,27 @@ See [claude-code.md](../agents/claude-code.md) for the hook graph and the `ECC_D
 
 ## Config shared, state isolated, for the dual-account model
 
-**Decision:** The r06 work account (`~/.claude-r06`) is implemented as six symlinks pointing back to `~/.claude` for all configuration files (settings, statusline, agents, commands, skills, CLAUDE.md). Runtime state diverges via per-account environment variables set in the zsh launcher aliases.
+**Decision:** The r06 work account (`~/.claude-r06`) is implemented as six symlinks pointing back to `~/.claude` for all configuration files (settings, statusline, agents, commands, skills, CLAUDE.md). Runtime state diverges via per-account environment variables set by the `claude`/`codex` launcher wrapper scripts.
 
 **Why:** The alternative — maintaining two parallel config directories — would require every settings change to be applied twice and would inevitably create drift between accounts. Since the only thing that legitimately differs between personal and work sessions is runtime state (session history, governance database, ECC state, CLV2 instincts, caches), the right split is: one SSOT for config, two isolated trees for state.
 
 The env var mechanism (`CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `CLV2_HOMUNCULUS_DIR`, `GATEGUARD_STATE_DIR`) is the lightest possible seam: it requires no changes to Claude Code itself, no per-account copy of any config file, and no runtime config-merging logic.
 
-The one risk of this model is that two places define the per-account env set (`_claude_with_home` in `claude.zsh` and `cdx-r06` in `codex.zsh`). This is accepted duplication — the alternative (a shared env-building function called by both) would add indirection for a set that changes rarely.
+Until #345, the one risk of this model was that two places defined the per-account env set by hand (`_claude_with_home` in `claude.zsh` and `cdx-r06` in `codex.zsh`) — accepted duplication at the time, since the alternative (a shared env-building function called by both) would have added indirection for a set that changes rarely. #345 removed the duplication instead: each harness's env set is now defined once, in its wrapper script (`~/.local/launchers/claude`, `~/.local/launchers/codex`), reached identically from every short name and from the bare binary name.
 
-See [account-isolation.md](../agents/account-isolation.md) for the reference table of all per-account env vars and the full alias matrix.
+See [account-isolation.md](../agents/account-isolation.md) for the reference table of all per-account env vars and the full launcher command matrix.
 
 ---
 
-## Secrets sourced-not-exported, then re-exported scoped to the subprocess
+## Secrets sourced-not-exported, then exported scoped to the subprocess
 
-**Decision:** The 1Password-rendered key file (`~/.config/zsh/claude-secrets.zsh`) is sourced into the interactive shell without `export`. The launcher function (`_claude_with_home`) then re-exports the keys inline, scoped to the specific subprocess invocation.
+**Decision:** The 1Password-rendered key file (`~/.config/zsh/claude-secrets.zsh`) is sourced without `export`. The `claude` launcher wrapper sources it inside its own short-lived process (not the interactive shell) and then exports the keys inline, scoped to the specific invocation it is about to `exec`.
 
-**Why:** An `export` in a sourced file leaks the key into every child process of the interactive shell — every subshell, every external command, every background job — for the lifetime of the session. If a rogue process or accidental `env` log captures the process environment, the key is exposed.
+**Why:** An `export` in a file sourced by the interactive shell would leak the key into every child process — every subshell, every external command, every background job — for the lifetime of the session. If a rogue process or accidental `env` log captures the process environment, the key is exposed.
 
-Sourcing without export keeps the variable in the shell's local scope (accessible by name in the same shell process) without propagating it to child processes. The subprocess-scoped re-export (`EXA_API_KEY="${EXA_API_KEY:-}" claude`) means the key is available exactly where Claude Code needs it (to resolve MCP server env placeholders) and nowhere else.
+Sourcing without export keeps the variable in local scope without propagating it to child processes. The subprocess-scoped export (`export EXA_API_KEY="${EXA_API_KEY:-}"` right before the wrapper `exec`s the real binary) means the key is available exactly where Claude Code needs it (to resolve MCP server env placeholders) and nowhere else — the wrapper process itself is replaced by `exec`, not left running as a parent.
 
-The `${VAR:-}` default in each re-export is the runtime graceful-degradation path: if `chezmoi apply` has not yet been run on the machine (so the secrets file does not exist), the MCP servers launch without a key rather than the wrapper function erroring out.
+The `${VAR:-}` default on each export is the runtime graceful-degradation path: if `chezmoi apply` has not yet been run on the machine (so the secrets file does not exist), the MCP servers launch without a key rather than the wrapper erroring out.
 
 See [secrets-and-isolation.md](secrets-and-isolation.md) for the full secrets lifecycle, and [secrets-1password.md](../getting-started/secrets-1password.md) for the onboarding how-to.
 

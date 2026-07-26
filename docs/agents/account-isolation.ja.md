@@ -29,25 +29,27 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 
 ---
 
-## エイリアスマトリクス
+## ランチャーコマンドマトリクス
 
-以下はユーザー向けのエントリポイントです。基底は「ハーネス × アカウント」の 2 × 2 マトリクス（Claude Code / Codex × 個人 / 業務）で、Claude Code 側にはさらに用途別のバリアントが重なります。
+以下はユーザー向けのエントリポイントです。`claude`/`cld` と `codex`/`cdx` はいずれも `~/.local/launchers/{claude,codex}` にある同じ 2 つのラッパー *スクリプト* に解決されます — `cld`、`cld-r06`、`cdx`、`cdx-r06` はそれらのスクリプトへのシンボリックリンクであり、各ラッパーは `$0`（呼び出された名前）でアカウント選択ロジックを分岐します。インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、インタラクティブシェル・フック・launchd・Claude Code 自身の Bash ツールなど、どのシェルからでも同一に振る舞います。
 
-| エイリアス | ハーネス | アカウント | 効果 |
+| コマンド | ハーネス | アカウント | 効果 |
 |---|---|---|---|
-| `cld` | Claude Code | 個人 | デフォルトアカウントの環境セットで `claude` を実行 |
-| `cld-r06` | Claude Code | 業務（r06） | r06 環境セットで `claude` を実行 |
-| `claude-config` | Claude Code | 個人 | ECC config-protection + gateguard-fact-force ゲートを無効化；意図的な設定編集用 |
-| `cldf` | Claude Code | 個人 | `claude --model claude-fable-5` を [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで実行 — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
+| `claude` / `cld` | Claude Code | 個人（fill-gaps） | per-account 環境セットで mise 管理の `claude` バイナリを実行；すでに設定済みの `CLAUDE_CONFIG_DIR` を維持（フック起動の子プロセスが親セッションのアカウントに留まるため）、未設定なら `~/.claude` にデフォルト |
+| `cld-r06` | Claude Code | 業務（r06） | 同じラッパー；`CLAUDE_CONFIG_DIR` を無条件に `~/.claude-r06` に強制（override） |
+| `claude-config` | Claude Code | 個人 | zsh ヘルパー：ECC config-protection + gateguard-fact-force ゲートを無効化してから `claude` ラッパーを呼ぶ；意図的な設定編集用 |
+| `cldf` | Claude Code | 個人 | zsh ヘルパー：`claude` ラッパーを `--model claude-fable-5` と [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで呼ぶ — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
 | `cldf-r06` | Claude Code | 業務（r06） | r06 アカウントでの `cldf` |
-| `cdx` | Codex CLI | 個人 | `codex --profile shared`（デフォルト `~/.codex`）を実行 |
-| `cdx-r06` | Codex CLI | 業務（r06） | `CODEX_HOME=$HOME/.codex-r06 codex --profile shared` を実行 |
+| `codex` / `cdx` | Codex CLI | `CLAUDE_CONFIG_DIR` に追従（fill-gaps） | brew 管理の `codex` バイナリを実行し、argv に `--profile` がなければ `--profile shared` を注入；`CODEX_HOME` は `CLAUDE_CONFIG_DIR` が設定されていればそれに追従（`.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）、未設定なら明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |
+| `cdx-r06` | Codex CLI | 業務（r06） | 同じラッパー；`CODEX_HOME` を無条件に `~/.codex-r06` に強制（override）；`--profile shared` は引き続き注入 |
+
+個人アカウントについては、`claude` と `cld` は文字通り同じファイルに 2 つの名前でアクセスしているだけです — ラッパーの `$0` 分岐には `cld-r06` 用の分岐しかなく `cld` 専用の分岐はありません — したがって両者に分離上の違いはありません。`codex`/`cdx` も同様です。短縮名が存在するのは `-r06` 系との対称性と手癖のためであり、ベアの名前に何かが欠けているからではありません（[ベア呼び出しはもはやギャップではない](#ベア呼び出しはもはやギャップではない) を参照）。
 
 ---
 
 ## Fable 5 オーケストレーター（`cldf` 系）
 
-`cldf` / `cldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `_claude_with_home`（`cld` 系と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
+`cldf` / `cldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `claude` ラッパー（ベアの `claude`/`cld` と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
 
 - main モデルをフル ID `--model claude-fable-5`（`fable` エイリアスではない）で pin する。委譲プロンプトの Sonnet 5 世代前提と main モデル世代が silently ずれないようにするためで、モデル世代交代時にはプロンプトとセットで意識的に更新する。
 - `home/dot_claude/fable-orchestrator-prompt.md`（デプロイ先: `~/.claude/fable-orchestrator-prompt.md`）を、readable なときのみ `--append-system-prompt-file <path>` で指定する。渡すのは **path** で、CLI 側が process 起動時にファイルを読む — プロンプトが伸びても argv には載らない。ファイル不在時（`chezmoi apply` 前 / 手動削除後）でもセッションは正常起動し、オーケストレーター誘導だけが効かない。
@@ -56,57 +58,66 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 
 `CLAUDE_CODE_SUBAGENT_MODEL` は**意図的に未設定**にしています。この環境変数は per-invocation `model` param と agent frontmatter より最優先で全 subagent を固定するため、設定してしまうと「難タスクだけ Fable に escalate する」経路が消えます。代わりにオーケストレータープロンプトが subagent のモデル選択を誘導します（既定 `model: sonnet`、難検証のみ `fable` に上げる、`subagent_type: "fork"` は常に親モデルを継承する点に注意）。
 
-ソース: `home/dot_config/zsh/claude.zsh`（`_claude_fable` ヘルパー）。
+ソース: `home/dot_config/zsh/claude.zsh`（`_claude_fable` ヘルパー。`CLAUDE_CONFIG_DIR` を明示的に設定してから `claude` ラッパーを呼ぶ）。
 
 ---
 
-## `_claude_with_home`：Claude Code のアカウント選択の仕組み
+## claude ラッパー：Claude Code のアカウント選択の仕組み
 
-Claude Code のエイリアスはすべて `_claude_with_home` という 1 つの zsh ヘルパー関数を呼び出します。
+Claude Code の per-account 環境注入は `~/.local/launchers/claude`（ソース: `home/dot_local/launchers/executable_claude`）という 1 つのスクリプトに集約されており、`claude` / `cld` / `cld-r06` としてアクセスされます — 後者 2 つはこのスクリプトへのシンボリックリンクで、ラッパーは `$0` で分岐します：
 
-```zsh
-_claude_with_home() {
-  local home_dir="$1"
-  shift
-  (($#)) || set -- claude
-  local account_dir_name="${home_dir:t}"
-  local homunculus_slug
-  case "$account_dir_name" in
-    .claude) homunculus_slug=default ;;
-    .claude-*) homunculus_slug="${account_dir_name#.claude-}" ;;
-    *) homunculus_slug="${account_dir_name#.}" ;;
-  esac
-  CLAUDE_CONFIG_DIR="$home_dir" \
-    ECC_AGENT_DATA_HOME="$home_dir" \
-    CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}" \
-    ECC_MCP_HEALTH_STATE_PATH="$home_dir/mcp-health-cache.json" \
-    GATEGUARD_STATE_DIR="$home_dir/.gateguard" \
-    EXA_API_KEY="${EXA_API_KEY:-}" \
-    FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}" \
-    "$@"
-}
+```bash
+case "${0##*/}" in
+  cld-r06)
+    # -r06 name: select the work account unconditionally (override).
+    CLAUDE_CONFIG_DIR="$HOME/.claude-r06"
+    ;;
+  *)
+    # claude / cld: fill-gaps only, so an inherited account survives.
+    CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    ;;
+esac
+
+# ... config dir のベースネームから homunculus_slug を導出 ...
+# ... 呼び出し元が EXA_API_KEY をすでに決めていなければ claude-secrets.zsh をソース ...
+# ... `mise which claude` で pin 正しい mise 管理バイナリを解決 ...
+
+export CLAUDE_CONFIG_DIR
+export ECC_AGENT_DATA_HOME="$CLAUDE_CONFIG_DIR"
+export CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}"
+export ECC_MCP_HEALTH_STATE_PATH="$CLAUDE_CONFIG_DIR/mcp-health-cache.json"
+export GATEGUARD_STATE_DIR="$CLAUDE_CONFIG_DIR/.gateguard"
+export EXA_API_KEY="${EXA_API_KEY:-}"
+export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
+
+exec "$real" "$@"
 ```
 
 主な特性：
 
-- 環境変数は `"$@"` サブプロセスにのみ**インラインスコープ**されます。親シェルにはエクスポートされません。
-- `EXA_API_KEY` と `FIRECRAWL_API_KEY` はサブプロセスにスコープして再エクスポートされ、Claude Code の MCP サーバーがプロセス環境から `${EXA_API_KEY}` プレースホルダーを展開できるようにします。ソース値は `~/.config/zsh/claude-secrets.zsh`（`chezmoi apply` 時に 1Password からレンダリングされる 0600 ファイル。ソースされるがエクスポートされない）から取得されます。
-- `cld` は `home_dir` として `"$HOME/.claude"` を渡し、`cld-r06` は `"$HOME/.claude-r06"` を渡します。
+- ラッパーは短命なスクリプトプロセスです：環境変数を自分自身のプロセスにエクスポートしてから、その場で本物の `claude` バイナリへ `exec` します — ラッパープロセス自体が置き換わるだけで子プロセスを生成しないため、起動元のインタラクティブシェルには何も漏れません。
+- homunculus slug は config dir のベースネームから `run_onchange_after_14` と同じ 3 分岐で導出されます：`.claude` → `default`、`.claude-*` → サフィックス、それ以外 → 先頭のドットを除去。
+- `EXA_API_KEY` と `FIRECRAWL_API_KEY` はラッパー自身が `~/.config/zsh/claude-secrets.zsh`（`chezmoi apply` 時に 1Password からレンダリングされる 0600 ファイル）からソースします — ただし呼び出し元がそのキーをすでに決めている場合（空文字であっても）はソースしません。これにより `morning-radar` は空の `EXA_API_KEY` を export することで web 検索をオプトアウトできます。`claude.zsh` はこのファイルを自分ではソースしなくなりました。
+- `real` は（このラッパー自身を再解決してしまう PATH 経由ではなく）`mise which claude` で解決されるため、pin 正しい mise 管理バイナリが常に実行されます。`CLAUDE_LAUNCHER_BIN` はテスト用にこれを上書きします。本物のバイナリが解決できない場合、ラッパーは誤ったバイナリをサイレントに実行する代わりに大きく失敗します（exit 127）。
 
-ソース：`home/dot_config/zsh/claude.zsh`
+ソース：`home/dot_local/launchers/executable_claude`
 
 ---
 
-## 重要：必ずエイリアスを使用すること
+## ベア呼び出しはもはやギャップではない
 
-ベアバイナリ名での実行はアカウント機構を完全にバイパスします。
+ベアのバイナリ名（`claude`、`codex`）での実行は、#345 より前はアカウント機構を完全にバイパスしていました — per-account 環境と（Codex の場合）`--profile shared` を注入するのは zsh エイリアス（`cld`、`cdx` など）だけでした。このギャップは解消されています：`claude` と `codex` は PATH 上で `cld`/`cld-r06`、`cdx`/`cdx-r06` と同じラッパースクリプトに解決されます。これが機能するのは `~/.local/launchers` が mise のシムディレクトリと Homebrew の `bin` の両方より PATH 上で前に来るよう維持されているためです — `dot_zshrc.tmpl` での静的な prepend に加え、`mise activate` の**後**に登録される `precmd` フック（mise は自身の `precmd` フックで毎プロンプトごとに自分のシムディレクトリを再 prepend するため、こちらは mise の後に実行されて勝つ必要がある）、そして launchd の morning-radar スクリプトが自身のハードコードされた PATH の先頭に同じディレクトリを prepend します。
 
-| ベア呼び出し | 欠落するもの |
+インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、ラッパーはエイリアスが届かなかった文脈——フックプロセス、launchd ジョブ、Claude Code 自身の Bash ツールが実行するコマンド——からも動作します。アカウント選択ロジックのコピーが 1 つしかないため、呼び出し元ごとのエイリアス定義が必要としていたであろう手コピーの環境ブロックが、呼び出し箇所間でドリフトすることがありません。
+
+残る唯一の違いは「ラップされているか / ベアか」ではなく fill-gaps か override かです：
+
+| 呼び出し | 挙動 |
 |---|---|
-| `claude` | `CLAUDE_CONFIG_DIR` なし — `~/.claude` にフォールバック；`ECC_AGENT_DATA_HOME` 未設定 |
-| `codex` | `--profile shared` なし — `$CODEX_HOME/shared.config.toml` がロードされない |
-
-ベアの `claude` 呼び出しはエラーではありませんが、デフォルトアカウントのディレクトリを使用し、エイリアスが提供する ECC/CLV2/gateguard の状態分離が無効になります。`codex` の場合、ベア呼び出しでは SSOT のモデル、パーソナリティ、マルチエージェント機能の設定がすべて失われます。
+| `claude` / `cld` | fill-gaps：すでに設定済みの `CLAUDE_CONFIG_DIR`（例：親の `cld-r06` セッションから継承）を維持し、なければ個人アカウントにデフォルト |
+| `cld-r06` | override：継承した値に関わらず業務アカウントを強制 |
+| `codex` / `cdx` | fill-gaps：`CODEX_HOME` は設定済みの `CLAUDE_CONFIG_DIR` に追従（authoritative — 不一致な継承済み `CODEX_HOME` すら上書き）、なければ明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |
+| `cdx-r06` | override：継承した値に関わらず `CODEX_HOME=~/.codex-r06` を強制 |
 
 ---
 
