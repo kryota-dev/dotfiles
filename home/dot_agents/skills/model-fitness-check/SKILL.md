@@ -91,7 +91,7 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 `${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。**パスは writer と同じ XDG フォールバック式で解決し、`~/.cache` 決め打ちにしない** —— `XDG_CACHE_HOME` を設定した環境で誤って「snapshot 無し」と誤判定しないため。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。`five_hour.used_percentage` を圧力として使う。
 
 - **staleness / 欠損ガード**: 次のいずれかで quota 不明として count-only fallback（下表）に切り替える —— (a) ファイルが無い、(b) `ts` が 15 分より古い、(c) `five_hour.used_percentage` が欠落・非数値（writer は `five_hour` が無効でも `seven_day` だけの snapshot を書くため、fresh でも 5h が無いことがある）。silent skip はしない（fail-safe）。
-- **Team プランの rate_limits**: 公式ドキュメント（`code.claude.com/docs/en/statusline`）で **`rate_limits` は「Claude.ai subscribers (Pro/Max) が最初の API 応答後」にのみ現れると明記され、Team / Enterprise は列挙されていない**ことを確認済み。Team premium seat（`cld-r06`）で実際に populate されるかの live 検証は未実施（列挙外なので欠落前提で扱う）。欠落時はシグナル 2（実測圧力）が常に不在となり、本ゲートは count-only fallback（`OVERPROVISION_GATE_FALLBACK`）で動く——red 帯（2 件）への感度上げはできないが、カウンタベースのゲート自体は機能する。
+- **Team プランの rate_limits（`cld-r06` で live 検証済み）**: 公式ドキュメント（`code.claude.com/docs/en/statusline`）は `rate_limits` を「Claude.ai subscribers (Pro/Max) が最初の API 応答後」にのみ現れると明記し Team / Enterprise を列挙しない。しかし **`cld-r06`（Team premium seat）の実 stdin では `five_hour` / `seven_day` とも populate されることを実機確認済み**（docs の Pro/Max-only 列挙は Team premium に対して不完全）。よって cld-r06 でもシグナル 2（実測圧力）は利用可能で、yellow/red 帯に到達する（count-only 固定ではない）。count-only fallback は真の欠損時——最初の API 応答前・stale snapshot・`five_hour` 欠落（docs: 各ウィンドウは独立に absent になりうる）——のための fallback として維持する。
 
 ### 発火条件（named constants）
 
