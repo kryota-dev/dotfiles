@@ -126,6 +126,32 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "macos-defaults-drift launchd agent source files exist (#365)" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh" ]
+  bash -n "${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh"
+}
+
+@test "macos-defaults-drift plist schedules exactly one weekly run and never runs at load" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl"
+  run grep -q '<key>RunAtLoad</key>' "$plist"
+  [ "$status" -ne 0 ]
+  # Weekly: exactly one Weekday/Hour/Minute entry, not one per weekday.
+  [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Minute</key>' "$plist")" -eq 1 ]
+}
+
+@test "macos-defaults-drift plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
 @test "launcher dir reaches interactive (precmd+sync) and login (zprofile) shells (#345)" {
   local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
   local zprofile="${HOME_DIR}/dot_zprofile.tmpl"
@@ -220,12 +246,17 @@ load helpers/setup
   [ "$status" -eq 0 ]
 }
 
-@test "launchd registration script embeds the plist hash and guards CI" {
+@test "launchd registration script embeds both plist hashes and guards CI (#365)" {
   local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
-  # Re-registration is keyed to the plist content (embedded-hash trick).
+  # Re-registration is keyed to each plist's content (embedded-hash trick).
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" | sha256sum }}' "$script"
   # CI runners have no gui launchd domain; the script must self-skip there.
   grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
+  # Both agents are registered through the shared function, not duplicated inline.
+  [ "$(grep -c '^register_agent "' "$script")" -eq 2 ]
+  grep -Fq 'register_agent "dev.kryota.morning-radar" "dev.kryota.morning-radar.plist"' "$script"
+  grep -Fq 'register_agent "dev.kryota.macos-defaults-drift" "dev.kryota.macos-defaults-drift.plist"' "$script"
   # Template-stripped body must be valid bash (same strip trick as make lint).
   bash -n <(sed '/{{/d' "$script")
 }
