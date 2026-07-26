@@ -27,15 +27,20 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ## capability 順序（monotonic）
 
-能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。判定は「現在の tier ≥ 行が要求する tier」なら**無条件で silent pass**（プロンプトを出さない）。
+能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。
 
-- **Fable / cldf セッションは floor 行（上方向）の switch 提案を受けない**。Fable は全 floor の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に合わせる上方向の提案は構造的に矛盾する。下方向（過剰スペックの解消）は「over-provision 閾値ゲート」の対象で、**Fable セッションも免除されない**。
-- over-provisioning（Fable で trivial をこなす等）は毎回は停止しないが、累積が閾値を超えたら 1 回だけ blocking する（「over-provision 閾値ゲート」参照）。cldf でも exit → `cld --continue` で orchestrator 契約ごと降りられるため、「是正不能」ではない。
+判定は **2 パス**で構成する（詳細は「判定と出力」）。**floor パス（上方向）を通過しても判定は終わらず、必ず over-provision パス（下方向）に進む**——ここが over-provision ゲートに到達する唯一の経路なので、floor パスを「無条件 silent pass」で早期 return してはならない:
+
+1. **floor パス**: 「現在の tier ≥ 行が要求する tier」なら floor をパスする（floor の switch 提案は出さず、プロンプトも出さない）。下回る場合のみ floor 行で blocking する。
+2. **over-provision パス**: floor 通過後、「現在の tier が行の要求より上位（過剰）」かつ trivial/small なら、FYI + カウンタ + 閾値ゲートに進む（「over-provision 閾値ゲート」）。floor と要求が同 tier（過剰でない）なら何もせず終了する。
+
+- **Fable / cldf セッションは floor 行（上方向）の switch 提案を受けない**。Fable は全 floor の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に合わせる上方向の提案は構造的に矛盾する。下方向（過剰スペックの解消）は over-provision パスの対象で、**Fable セッションも免除されない**。
+- over-provisioning（Fable で trivial をこなす等）は毎回は停止しないが、累積が閾値を超えたら 1 回だけ blocking する（「over-provision 閾値ゲート」参照）。cldf でも exit → profile に応じた `cld` / `cld-r06` の `--continue` で orchestrator 契約ごと降りられるため、「是正不能」ではない。
 
 ## model の検出
 
 1. **主経路**: セッションの system-prompt に埋め込まれた model identity（自己申告。「You are powered by ...」等）を読む。
-   **主経路が Fable と解決したら、この時点で silent pass し副経路の cross-check も行わない**。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
+   **主経路が Fable と解決したら、副経路の cross-check はスキップする**（floor 判定を pass にするだけで、判定は終了せず over-provision パスに進む —— Fable も over-provision ゲートの対象だから）。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
 2. **副経路（cross-check）**: **主経路が Fable 以外のときのみ実行する**。`~/.claude/settings.json` の `model` を Read で読む（`cld-r06` セッションでも同じパスでよい —— `~/.claude-r06/settings.json` は `~/.claude/settings.json` への symlink であり、両アカウントは 1 つの settings.json を共有する。chezmoi source: `dot_claude-r06/symlink_settings.json.tmpl`）。これは `/model` によるセッション内変更を反映しない可能性があるため、**主経路と乖離したら silent に解決せず surface する**（どちらが有効かを user に提示して確認）。
 
 ### 正規化ルール
@@ -47,7 +52,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ## 判定と出力
 
-作業の行種別に応じて分岐する:
+判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
 ### floor 行（Opus 5 @ high / Opus 5 @ xhigh）で mismatch
 
@@ -62,7 +67,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ### trivial / small 行
 
-**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
 
 FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
@@ -79,12 +84,14 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 - 「現在の tier が行の要求より上位」と判定するたび（trivial/small FYI を出すたび）にカウンタを +1 する。
 - セッション内でのみ保持する（永続化しない）。**floor 判定の idempotency とは別カウンタ**（idempotency は同一判定の再提示の抑制、本カウンタは累積の検出で、性質が逆）。
 - ゲート発火時、および continue anyway 選択時にリセットする。
+- **compaction 対策**: カウンタを会話記憶だけに置くと context compaction で黙って 0 に戻り、特に red 帯（2 件）でゲートが実質死ぬ。カウンタを更新するたびに現在値を可視な形で残し（例: FYI 行末に `[over-provision: N]`）、compaction 後はその最新値を継承する。idempotency（二値の pass/continue-anyway）より復元が難しいため、この明示記録が必要。
 
 ### シグナル 2: 実測 quota 圧力（statusline snapshot）
 
-`~/.cache/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。`five_hour.used_percentage` を圧力として使う。
+`${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/rate_limits_<profile>.json` を Read する（statusline が stdin の `rate_limits` を書き出す snapshot。**パスは writer と同じ XDG フォールバック式で解決し、`~/.cache` 決め打ちにしない** —— `XDG_CACHE_HOME` を設定した環境で誤って「snapshot 無し」と誤判定しないため。`<profile>` は `CLAUDE_CONFIG_DIR` の basename、既定 `.claude`）。`five_hour.used_percentage` を圧力として使う。
 
-- **staleness ガード**: `ts` が 15 分より古い、またはファイルが無い場合は quota 不明として count-only fallback（下表）に切り替える。silent skip はしない（fail-safe）。
+- **staleness / 欠損ガード**: 次のいずれかで quota 不明として count-only fallback（下表）に切り替える —— (a) ファイルが無い、(b) `ts` が 15 分より古い、(c) `five_hour.used_percentage` が欠落・非数値（writer は `five_hour` が無効でも `seven_day` だけの snapshot を書くため、fresh でも 5h が無いことがある）。silent skip はしない（fail-safe）。
+- **（要検証）Team プランの rate_limits**: `rate_limits` が statusline stdin に現れるのは公式には **Pro/Max のみ明記**（Team premium seat での populate は未確認）。Team で欠落する場合、本ゲートは常に count-only fallback で動く（実測圧力シグナルは使えないが、カウンタベースのゲートは機能する）。
 
 ### 発火条件（named constants）
 
@@ -106,7 +113,7 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
   2. continue anyway（カウンタをリセットし、次の閾値まで沈黙）
   3. abort
 - **cldf 系（Fable orchestrator）**:
-  1. exit → `cld --continue` で再開（推奨。orchestrator prompt は argv 注入のため再起動で契約ごと降りられ、会話文脈は保持される）
+  1. exit → profile に応じた `cld` / `cld-r06` で `--continue` 再開（推奨。orchestrator prompt は argv 注入のため再起動で契約ごと降りられ、会話文脈は保持される）。**アカウントを取り違えない**: `cldf-r06`（`CLAUDE_CONFIG_DIR` が `*.claude-r06`）なら `cld-r06 --continue`、それ以外は `cld --continue`。両アカウントはセッション状態が分離しており、誤ると無関係な default セッションを再開してしまう
   2. `/model opus` 等でセッション内切替（**注記必須**: system-prompt の自己申告 model identity が古い値を残すため、以後の本 skill の主経路検出を信用せず、切替済みであることをセッション内に記録する）
   3. continue anyway（カウンタをリセット）
 
