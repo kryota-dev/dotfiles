@@ -103,10 +103,10 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 |------------|---------------|--------------------------------|
 | Test | `test-reviewer` | テストファイルの追加・変更（`*.test.*` / `*.spec.*` / `*_test.*` / `tests/` 配下 / `__tests__/` 配下 / `*.bats`） |
 | UX | `ux-reviewer` | UI ファイルの変更（`.tsx` / `.jsx` / `.vue` / `.svelte` / `.astro` / `.css` / `.scss` / `.sass` / `.less` / `.html`） |
-| Performance | `performance-reviewer` | データ層 / hot-path（`*.sql` / `migrations/` 配下 / `schema.prisma`）を含む、**または**呼び出し元（pr-workflow の large tier / spec-context で性能要件が明示された場合）が要請したとき |
+| Performance | `performance-reviewer` | データ層 / hot-path（`*.sql` / `migrations/` 配下 / `schema.prisma` / `*.schema.ts`）を含む、**または**呼び出し元が spec-context の `requirements.md` に性能要件（NFR）を検出して要請したとき |
 
 - **検出方法**: 言語 roster と同じく Phase 1 の手順 2 で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` のパス一覧を上表のマッチ基準で判定する。performance は差分特性に加え **caller 要請**でも spawn しうる（性能は差分の字面だけでは判定しづらいため、spec-context や large tier のヒントを併用する）。
-- **language roster と重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer / react-reviewer（言語 roster）と ux-reviewer（横断観点）が同時に立つ（観点が直交するため許容）。DB 系 PR（`*.sql` / `migrations/` / `schema.prisma`）では database-reviewer（スキーマ安全性・injection）と performance-reviewer（クエリ効率・N+1）が両方立つ —— 追加コストが最も大きい重複パターンだが、観点が異なるため意図的に許容する。
+- **language roster と重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer / react-reviewer（言語 roster）と ux-reviewer（横断観点）が同時に立つ（観点が直交するため許容）。DB 系 PR（`*.sql` / `migrations/` / `schema.prisma` / `*.schema.ts`）では database-reviewer（スキーマ安全性・injection）と performance-reviewer（クエリ効率・N+1）が両方立つ —— 追加コストが最も大きい重複パターンだが、観点が異なるため意図的に許容する。
 - **マッチ 0 件なら spawn しない**: 非対象の変更（例: shell/zsh のみの dotfiles PR）では横断観点 specialist を spawn しない。
 - **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/{performance,test,ux}-reviewer.md`）に内蔵。multi-review は cc-code-review と同じく「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context があればそのパス）」のみ渡し、観点を再掲しない。
 
@@ -123,7 +123,8 @@ diff 起動の specialist roster とは **別レイヤ**の reviewer。常設 3 
 `--spec-context <dir>`（手順 0 で抽出）が渡されたとき、`<dir>` は spec ドキュメント（`requirements.md` / `design.md` / `tasks.md`）を含むディレクトリ（例: `.spec-workflow/specs/<name>/`）を指す。sdd の内蔵レビューを廃止（single-pass 化, #347）したことで失われる **spec-implementation 整合チェック**（実装が要件・設計・タスクに整合しているか）を multi-review 側で補うための入力。
 
 - **未指定時は従来動作**（spec 整合チェックなし・差分のみのレビュー）を完全に維持する。opt-in。
-- **指定時の扱い**: Phase 2 で各 reviewer（常設 3 ツール + specialist）のプロンプトに、spec ドキュメントの**絶対パス**（`<dir>/requirements.md` 等）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する。**spec ドキュメント本文は埋め込まず、パスを渡して reviewer に Read させる**（`.spec-workflow/` は gitignore されうるため、reviewer は絶対パスで Read する）。`<dir>` が相対パスで渡された場合は、Phase 1 で確定した作業ディレクトリの絶対パスと結合して解決してから reviewer に渡す。
+- **指定時の扱い**: Phase 2 で各 reviewer（常設 3 ツール + specialist）のプロンプトに、spec ドキュメントの**絶対パス**（`<dir>/requirements.md` 等）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する。**spec ドキュメント本文は埋め込まず、パスを渡して reviewer に Read させる**（`.spec-workflow/` は gitignore されうるため、reviewer は絶対パスで Read する）。`<dir>` が相対パスで渡された場合は、呼び出し元セッションの作業ディレクトリ（cwd）の絶対パスと結合して解決する。**解決後のパスは作業ディレクトリ配下に収まり `..` を含まないことを検証してから reviewer に渡す**（外部の任意パスを spec の「正」として読ませない）。
+- **codex leg への spec-context 反映**: codex の primary path（promptless の `review --base`）はカスタムプロンプトを持たず spec パスを受け取れないため、`--spec-context` 指定時の codex leg は heredoc プロンプト方式（`${DIFF}` + spec ドキュメントの絶対パス + spec 整合チェック指示を埋め込む）で起動する。
 - **pr-workflow からの呼び出し**: standard/large tier では sdd が生成した spec ディレクトリのパスが `--spec-context` として渡される（pr-workflow Phase 6 のオーバーライド指示参照）。
 
 ## 実行手順
@@ -200,7 +201,7 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 
 常設 3 ツール + マッチした動的 specialist を **同一メッセージ内で並列起動**する。cc-code-review / cc-security-review および各 specialist は **Agent ツール**（`run_in_background: true`）、codex は **バックグラウンド Bash**（`run_in_background: true`）。
 
-**Phase 2 開始前**: 「動的 specialist roster」節（言語ベース）と「横断観点 specialist roster」節（変更特性ベース）の検出方法（Phase 1 手順 2 で確保した `${DIFF}` のヘッダ行 `diff --git a/<path> b/<path>` を primary に、`${DIFF}` が空のときのみ fallback として `gh pr diff --repo <owner/repo> <番号> --name-only`）で spawn 対象 specialist を確定する。performance-reviewer は差分特性に加え caller 要請（large tier / spec-context）でも spawn しうる。fallback を先に選ぶと cross-repo で `--repo` 忘れの事故が増えるため、原則 `${DIFF}` 再利用を推奨。
+**Phase 2 開始前**: 「動的 specialist roster」節（言語ベース）と「横断観点 specialist roster」節（変更特性ベース）の検出方法（Phase 1 手順 2 で確保した `${DIFF}` のヘッダ行 `diff --git a/<path> b/<path>` を primary に、`${DIFF}` が空のときのみ fallback として `gh pr diff --repo <owner/repo> <番号> --name-only`）で spawn 対象 specialist を確定する。performance-reviewer は差分特性に加え caller 要請（spec-context の `requirements.md` に NFR 検出）でも spawn しうる。fallback を先に選ぶと cross-repo で `--repo` 忘れの事故が増えるため、原則 `${DIFF}` 再利用を推奨。
 
 #### 起動内容
 

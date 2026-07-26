@@ -2,6 +2,7 @@
 name: sdd
 description: pr-workflow の standard/large tier から呼ばれる内部コンポーネント。Spec-Driven Development（要件定義・設計・タスク分解・実装・コミット・PR作成）を完全自律で実行し、PR 作成で完了する。レビューは pr-workflow の PR 作成後パイプライン（monitor-ci → multi-review → review-resolve-loop）に一本化されているため sdd 自身はレビューを行わない。単体起動はせず pr-workflow 経由でのみ実行する。
 argument-hint: "[--prd <path>] [--plan <path>] <issue-url-or-feature-description>"
+user-invocable: false
 disable-model-invocation: true
 ---
 

@@ -431,9 +431,10 @@ load helpers/setup
   # Phases are renumbered and contiguous after the removal.
   grep -q '^## Phase 5: コミット & PR' "$skill"
   grep -q '^## Phase 6: 完了報告' "$skill"
-  # No longer standalone user-invocable: invoked only via pr-workflow standard/large.
-  ! grep -q '^user-invocable: true$' "$skill"
-  # Model-invocation is disabled so semantic matching cannot auto-run it outside pr-workflow.
+  # Hidden from the / menu (user-invocable: false) AND model-invocation disabled, so it
+  # runs only when pr-workflow invokes it via the Skill tool. user-invocable defaults to
+  # true when absent, so the false must be explicit (verified against the CC docs).
+  grep -q '^user-invocable: false$' "$skill"
   grep -q '^disable-model-invocation: true$' "$skill"
 }
 
