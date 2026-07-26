@@ -47,6 +47,15 @@ ntfy_placeholder="REPLACE_ME"
 ntfy_brief_port="{{ .ntfy.brief_port }}"
 ntfy_brief_serve_https="8443"
 
+# Notification-history dashboard (kryota-dev/dotfiles#371). A native Deno
+# server (not containerized — it shells out to the personal-account `claude`
+# CLI, which depends on host-only state a container would need to replicate).
+# Both ports are SSOT'd in .chezmoidata.toml (unlike the brief-page pair
+# above, where 8443 is a literal here rather than in the TOML).
+ntfy_dashboard_port="{{ .ntfy_dashboard.port }}"
+ntfy_dashboard_serve_https="{{ .ntfy_dashboard.serve_https }}"
+ntfy_dashboard_env_file="$HOME/.config/ntfy-dashboard/dashboard-env"
+
 ntfy_log() { echo "[ntfy] $*"; }
 ntfy_warn() { echo "[ntfy] $*" >&2; }
 
@@ -157,6 +166,20 @@ ntfy_assert_brief_serve() {
   "$b" serve --bg --https "${ntfy_brief_serve_https:-}" "http://127.0.0.1:${ntfy_brief_port:-}"
 }
 
+# Front the notification-history dashboard on the tailnet (#371). Same PORT
+# proxy shape as the brief front above, on its own dedicated HTTPS port so
+# neither clobbers the ntfy root (443) or the brief front (8443). NEVER
+# funnel (tailnet-only — the dashboard has no auth layer of its own).
+ntfy_assert_dashboard_serve() {
+  local b
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || {
+    ntfy_warn "tailscale CLI not found; cannot assert the dashboard serve front."
+    return 1
+  }
+  "$b" serve --bg --https "${ntfy_dashboard_serve_https:-}" "http://127.0.0.1:${ntfy_dashboard_port:-}"
+}
+
 ntfy_exec() {
   docker compose -f "$ntfy_compose_cfg" exec -T ntfy ntfy "$@"
 }
@@ -261,6 +284,32 @@ EOF
   )
 }
 
+# Write the dashboard's runtime-state credential file (#371), 0600 via umask,
+# mirroring notify-env's shape. Unlike the publisher token above, this is a
+# username+password Basic Auth pair (ntfy's subscriber auth mode) — the
+# dashboard is an unattended process with no precedent for a live, possibly
+# biometric-gated `op read` at request time, so the resolved password is
+# written here once by ntfy_provision_subscriber instead.
+ntfy_write_dashboard_env() {
+  local user="$1" password="$2"
+  mkdir -p "$(dirname "$ntfy_dashboard_env_file")"
+  (
+    umask 077
+    cat >"$ntfy_dashboard_env_file" <<EOF
+# ntfy subscriber credentials for the notification-history dashboard
+# (kryota-dev/dotfiles#371). Runtime state written 0600 by
+# ~/.config/ntfy/lib.sh — NOT a chezmoi target. The dashboard process reads
+# this at request time instead of calling \`op read\` (unattended, no 1Password
+# session to rely on).
+NTFY_URL='${ntfy_serve_target}'
+NTFY_DASHBOARD_SUBSCRIBER_USER='${user}'
+NTFY_DASHBOARD_SUBSCRIBER_PASSWORD='${password}'
+NTFY_TOPIC_ATTENTION='${ntfy_topic_attention}'
+NTFY_TOPIC_DONE='${ntfy_topic_done}'
+EOF
+  )
+}
+
 ntfy_read_notify_env_token() {
   [ -f "$ntfy_env_file" ] || return 1
   sed -n "s/^NTFY_TOKEN='\{0,1\}\(tk_[A-Za-z0-9]*\).*/\1/p" "$ntfy_env_file" | head -n 1
@@ -359,6 +408,7 @@ ntfy_provision_subscriber() {
       return 1
     }
     ntfy_grant_acl "$ntfy_sub_user" read-only
+    ntfy_write_dashboard_env "$ntfy_sub_user" "$stored" || ntfy_warn "failed to write the dashboard credential file."
     ntfy_log "subscriber user reconciled with the password in 1Password."
     return 0
   fi
@@ -372,6 +422,7 @@ ntfy_provision_subscriber() {
     ntfy_warn "failed to store the subscriber password in 1Password."
     return 1
   }
+  ntfy_write_dashboard_env "$ntfy_sub_user" "$pw" || ntfy_warn "failed to write the dashboard credential file."
   ntfy_log "subscriber user provisioned; username/password stored in 1Password."
 }
 
@@ -425,6 +476,7 @@ ntfy_rotate_subscriber() {
   ntfy_ensure_user_with_password "$ntfy_sub_user" "$pw" || return 1
   ntfy_grant_acl "$ntfy_sub_user" read-only
   ntfy_store_subscriber_password "$pw" || return 1
+  ntfy_write_dashboard_env "$ntfy_sub_user" "$pw" || ntfy_warn "failed to write the dashboard credential file."
   ntfy_log "subscriber password rotated and updated in 1Password."
   ntfy_log "Re-enter the new password in the ntfy app on every subscribed device."
 }
