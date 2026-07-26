@@ -126,22 +126,31 @@ notify_error() {
 }
 
 # Render the brief markdown as a mobile-readable HTML page at $2. Pandoc
-# converts the body to an HTML fragment; `markdown-raw_html` escapes any raw
-# HTML in the brief (GitHub issue titles etc. are untrusted) while keeping GFM
-# pipe tables and bare-URI autolinking, so a `<script>` in brief content can
-# never execute on the served page. The leading `# ...` line is dropped before
-# conversion -- brief_page_shell supplies its own masthead heading, so
-# pandoc's document h1 would otherwise duplicate it. On pandoc absence/
-# failure, fall back to a self-contained shell that shows the markdown
-# verbatim in a wrapping <pre>, HTML-escaping & < >. Returns non-zero if no
-# page could be produced.
+# converts the body to an HTML fragment. Three reader extensions are
+# disabled relative to plain `markdown`: `-raw_html` escapes literal HTML
+# tags in the brief (GitHub issue titles etc. are untrusted); `-raw_attribute`
+# closes a separate default-on escape hatch (`` `<script>`{=html} `` survives
+# `-raw_html` alone -- verified against pinned pandoc 3.10.1); `-smart`
+# stops literal `--flags` and straight quotes from being mangled into en
+# dashes/curly quotes, since the morning-brief skill surfaces exact CLI flags
+# in its next-action section. GFM pipe tables are unaffected by any of the
+# three (pipe_tables is a separate default-on extension). Bare URIs are
+# deliberately left un-autolinked: an earlier revision added
+# `+autolink_bare_uris`, but pandoc applies no scheme allowlist, so untrusted
+# brief text like a bare `javascript:...` string became a clickable,
+# script-executing link -- plain text is safer than that convenience. The
+# leading `# ...` line is dropped before conversion -- brief_page_shell
+# supplies its own masthead heading, so pandoc's document h1 would otherwise
+# duplicate it. On pandoc absence/failure, fall back to a self-contained
+# shell that shows the markdown verbatim in a wrapping <pre>, HTML-escaping
+# & < >. Returns non-zero if no page could be produced.
 render_brief_html() {
   local md="$1" html="$2" title="$3"
   [ -s "$md" ] || return 1
   if command -v pandoc >/dev/null 2>&1; then
     local fragment
     if fragment="$(sed -e '1{' -e '/^# /d' -e '}' "$md" |
-      pandoc -f markdown-raw_html+autolink_bare_uris -t html 2>>"$LOG_FILE")"; then
+      pandoc -f markdown-raw_html-raw_attribute-smart -t html 2>>"$LOG_FILE")"; then
       brief_page_shell "$title" "$fragment" >"$html" 2>/dev/null && return 0
     fi
   fi
@@ -149,13 +158,20 @@ render_brief_html() {
     printf '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
     printf '<meta name="viewport" content="width=device-width, initial-scale=1">'
     printf '<meta name="color-scheme" content="light dark">'
-    printf '<title>%s</title>' "$title"
+    printf '<title>%s</title>' "$(html_escape "$title")"
     printf '%s' '<style>body{margin:0;padding:1.25rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#20242c;background:#f7f8fa}@media(prefers-color-scheme:dark){body{color:#f2f3f5;background:#20242c}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0;font:15px/1.7 ui-monospace,"SF Mono",Menlo,monospace}</style>'
     printf '</head><body><pre>'
     sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$md"
     printf '</pre></body></html>'
   } >"$html" 2>/dev/null || return 1
   return 0
+}
+
+# HTML-escape a single value for safe embedding outside of brief_page_shell's
+# printf '%s' fragment path (used for $title, which unlike the pandoc
+# fragment is not pre-escaped by pandoc).
+html_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
 }
 
 # Build the full HTML shell around a pandoc-rendered fragment. Every static
@@ -171,18 +187,19 @@ render_brief_html() {
 # so it reads as calm, not heavy (this is a one-shot static page with no
 # theme toggle). System sans (-apple-system) carries the masthead, section
 # headings, and body copy -- weight and size carry the hierarchy instead of a
-# second typeface; system mono carries only the kicker label and tabular data
-# (times, table cells) via font-variant-numeric. No web fonts are fetched --
+# second typeface; system mono carries only the kicker label and table
+# headers, while table cell digits (times) get font-variant-numeric without
+# a font-family change. No web fonts are fetched --
 # the page is served entirely tailnet-local.
 brief_page_shell() {
   local title="$1" fragment="$2"
   printf '%s' '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
   printf '%s' '<meta name="viewport" content="width=device-width, initial-scale=1">'
   printf '%s' '<meta name="color-scheme" content="light dark">'
-  printf '<title>%s</title>' "$title"
+  printf '<title>%s</title>' "$(html_escape "$title")"
   printf '%s' '<style>'
-  printf '%s' ':root{--bg:#f7f8fa;--surface:#fff;--ink:#20242c;--ink-soft:#666e7a;--line:#e4e7ec;--accent:#c1710f;--accent-soft:#fbe7cd;--crit:#c0392b;--ok:#2f8558}'
-  printf '%s' '@media (prefers-color-scheme:dark){:root{--bg:#20242c;--surface:#2b3038;--ink:#f2f3f5;--ink-soft:#aab1bd;--line:#3c424c;--accent:#f0ac5c;--accent-soft:#3c2c14;--crit:#e8897c;--ok:#6fcb9e}}'
+  printf '%s' ':root{--bg:#f7f8fa;--surface:#fff;--ink:#20242c;--ink-soft:#666e7a;--line:#e4e7ec;--accent:#9c5b0c;--accent-soft:#fbe7cd}'
+  printf '%s' '@media (prefers-color-scheme:dark){:root{--bg:#20242c;--surface:#2b3038;--ink:#f2f3f5;--ink-soft:#aab1bd;--line:#3c424c;--accent:#f0ac5c;--accent-soft:#3c2c14}}'
   printf '%s' '*{box-sizing:border-box}'
   printf '%s' 'body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}'
   printf '%s' '.wrap{max-width:38rem;margin:0 auto;padding:2.25rem 1.25rem 4rem}'
@@ -201,18 +218,18 @@ brief_page_shell() {
   printf '%s' 'main ol li{position:relative;counter-increment:step;padding:.75rem .9rem .75rem 2.7rem;background:var(--surface);border:1px solid var(--line);border-radius:.5rem}'
   printf '%s' 'main ol li::before{position:absolute;left:.85rem;top:.72rem;content:counter(step,decimal-leading-zero);font:700 1.05rem/1 -apple-system,"SF Pro Display",system-ui,sans-serif;color:var(--accent);font-variant-numeric:tabular-nums}'
   printf '%s' 'main table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:.92rem;margin:.75rem 0}'
-  printf '%s' 'main th,main td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;white-space:nowrap}'
+  printf '%s' 'main th,main td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}'
+  printf '%s' 'main td:first-child{white-space:nowrap}'
   printf '%s' 'main th{font:600 .7rem/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft)}'
   printf '%s' 'main strong{color:var(--ink);font-weight:700}'
   printf '%s' 'footer.meta{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--ink-soft);font:.75rem/1.5 ui-monospace,monospace}'
-  printf '%s' '@media (prefers-reduced-motion:no-preference){main a{transition:opacity .15s ease}}'
   printf '%s' '</style></head><body><div class="wrap">'
-  printf '%s' '<span class="kicker">Morning Radar</span>'
-  printf '<h1 class="masthead">%s</h1>' "$title"
+  printf '%s' '<span class="kicker" lang="en">Morning Radar</span>'
+  printf '<h1 class="masthead">%s</h1>' "$(html_escape "$title")"
   printf '%s' '<main>'
   printf '%s' "$fragment"
   printf '%s' '</main>'
-  printf '%s' '<footer class="meta">tailnet-only &middot; self-hosted</footer>'
+  printf '%s' '<footer class="meta" lang="en">tailnet-only &middot; self-hosted</footer>'
   printf '%s' '</div></body></html>'
 }
 
