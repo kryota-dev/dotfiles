@@ -95,10 +95,10 @@ wtp list                # 作成結果とパスの確認
 1. cd <worktree絶対パス> し、以降すべての操作をこの worktree 内で行う
 2. Issue の要求を実装する。既存コードの流儀（命名・構成・テスト規範）に合わせる
 3. プロジェクトの lint / test があれば実行して通す
-4. commit する（メッセージは英語・Conventional Commits。1Password 署名エラーが出たら
-   commit を中断し、エラー内容をそのまま報告して終了する）
+4. commit する（メッセージは Conventional Commits。type/scope は英語、subject/body は日本語。
+   1Password 署名エラーが出たら commit を中断し、エラー内容をそのまま報告して終了する）
 5. push し、draft PR を作成する:
-   gh pr create --draft --title "<英語タイトル>" --body "<英語本文。Closes #<番号> を含める>"
+   gh pr create --draft --title "<日本語タイトル>" --body "<日本語本文。Closes #<番号> を含める>"
 6. **絶対にマージしない。main に push しない。**
 
 ## 返答形式（最終メッセージ）
