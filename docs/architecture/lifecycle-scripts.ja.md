@@ -178,9 +178,10 @@ tailnet の MagicDNS 名は保存されず、必要な都度その場で導出�
 ControlCenter` で即時反映します。`joinPath .chezmoi.sourceDir` を使った自己ハッシュにより、
 スクリプト本文の任意の編集で再トリガーされます。
 
-**管理対象ドメイン**: `NSGlobalDomain`（キーボード/Full Keyboard Access、スクロールバー、
-スプリングローディング、トラックパッドのフォースクリックと追跡速度、音量変更時の
-サウンドフィードバック）、`com.apple.desktopservices`（ネットワーク/USB ボリュームでの
+**管理対象ドメイン**: `com.apple.HIToolbox`（Fn キーの用途）、`NSGlobalDomain`
+（キーボード/Full Keyboard Access、スクロールバー、スプリングローディング、
+トラックパッドのフォースクリックと追跡速度、音量変更時のサウンドフィードバック）、
+`com.apple.desktopservices`（ネットワーク/USB ボリュームでの
 `.DS_Store` 抑制）、`com.apple.dock`（自動非表示、アイコンサイズ、Spaces の並び替え、
 最近使ったアプリの表示）、`com.apple.finder`（隠しファイル、デスクトップのドライブ
 アイコン、ステータス/パスバー、既定の表示スタイル）、`com.apple.menuextra.clock`

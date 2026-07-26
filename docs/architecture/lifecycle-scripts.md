@@ -173,9 +173,10 @@ Applies `defaults write` across the managed domains below, then runs `killall Do
 SystemUIServer ControlCenter` to apply them immediately. Self-hashes using `joinPath
 .chezmoi.sourceDir` so any edit to the script body re-triggers it.
 
-**Managed domains**: `NSGlobalDomain` (keyboard/Full Keyboard Access, scroll bars, spring
-loading, trackpad force-click and tracking speed, volume-change sound feedback),
-`com.apple.desktopservices` (suppress `.DS_Store` on network/USB volumes),
+**Managed domains**: `com.apple.HIToolbox` (Fn key usage), `NSGlobalDomain` (keyboard/Full
+Keyboard Access, scroll bars, spring loading, trackpad force-click and tracking speed,
+volume-change sound feedback), `com.apple.desktopservices` (suppress `.DS_Store` on
+network/USB volumes),
 `com.apple.dock` (auto-hide, icon size, Spaces reordering, recent-apps display),
 `com.apple.finder` (hidden files, desktop drive icons, status/path bar, default view
 style), `com.apple.menuextra.clock` (menu bar clock display format via the discrete

@@ -5,7 +5,7 @@ set -euo pipefail
 # defaults hash: {{ include (joinPath .chezmoi.sourceDir "run_onchange_after_20-macos-defaults.sh.tmpl") | sha256sum }}
 echo "Applying macOS defaults..."
 
-# Base
+# Base (keyboard)
 defaults write com.apple.HIToolbox AppleFnUsageType -int 2
 # AppleKeyboardUIMode: value semantics changed in Sonoma — 3 ("Enabled on older
 # macOS versions") stopped enabling Full Keyboard Access; 2 is the Sonoma+ value
@@ -17,10 +17,16 @@ defaults write NSGlobalDomain com.apple.keyboard.fnState -bool true
 defaults write NSGlobalDomain KeyRepeat -int 2
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain InitialKeyRepeat -int 25
+
+# Finder spring loading
 defaults write NSGlobalDomain com.apple.springing.enabled -bool true
 defaults write NSGlobalDomain com.apple.springing.delay -float 0.5
+
+# Trackpad
 defaults write NSGlobalDomain com.apple.trackpad.forceClick -bool true
 defaults write NSGlobalDomain com.apple.trackpad.scaling -float 2
+
+# Sound feedback
 defaults write NSGlobalDomain com.apple.sound.beep.feedback -bool true
 defaults write NSGlobalDomain com.apple.sound.beep.flash -bool false
 
@@ -45,7 +51,7 @@ defaults write com.apple.finder ShowStatusBar -bool true
 defaults write com.apple.finder ShowPathbar -bool true
 defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
 
-# SystemUIServer
+# Clock (com.apple.menuextra.clock; reload target: ControlCenter)
 # menuextra.clock DateFormat stopped being honored once the Big Sur+ Control
 # Center redesign replaced it with these discrete keys (tech-otaku/menu-bar-clock).
 defaults write com.apple.menuextra.clock IsAnalog -bool false
