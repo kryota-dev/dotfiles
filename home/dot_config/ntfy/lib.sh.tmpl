@@ -38,6 +38,15 @@ ntfy_sub_user="subscriber"
 # Placeholder marker the 1Password bootstrap password carries until provisioned.
 ntfy_placeholder="REPLACE_ME"
 
+# Morning-brief page (kryota-dev/dotfiles#361). A loopback nginx sidecar (the
+# brief-page service in compose.yaml) serves the brief dir on ntfy_brief_port,
+# fronted on the tailnet by `tailscale serve --https` on ntfy_brief_serve_https.
+# macOS Tailscale can proxy ports but not serve files directly, so this is a
+# PORT proxy (which works) rather than a directory serve. Tailnet-only: never
+# funnel. A dedicated HTTPS port keeps it independent of the ntfy root (443).
+ntfy_brief_port="{{ .ntfy.brief_port }}"
+ntfy_brief_serve_https="8443"
+
 ntfy_log() { echo "[ntfy] $*"; }
 ntfy_warn() { echo "[ntfy] $*" >&2; }
 
@@ -134,6 +143,20 @@ ntfy_assert_serve() {
   "$b" serve --bg "${ntfy_serve_target:-}"
 }
 
+# Front the brief static-file sidecar on the tailnet (#361). This is a PORT
+# proxy on a dedicated HTTPS port (macOS cannot serve files/directories), so it
+# is independent of the ntfy root mount on 443 and neither clobbers the other.
+# NEVER funnel (tailnet-only).
+ntfy_assert_brief_serve() {
+  local b
+  b="$(ntfy_tailscale_bin)"
+  [ -n "$b" ] || {
+    ntfy_warn "tailscale CLI not found; cannot assert the brief serve front."
+    return 1
+  }
+  "$b" serve --bg --https "${ntfy_brief_serve_https:-}" "http://127.0.0.1:${ntfy_brief_port:-}"
+}
+
 ntfy_exec() {
   docker compose -f "$ntfy_compose_cfg" exec -T ntfy ntfy "$@"
 }
@@ -208,6 +231,13 @@ ntfy_issue_token() {
 # Write notify-env 0600 via umask; the token reaches the file only through the
 # heredoc (never echoed or traced). Reuses the exact format the wrapper sources.
 ntfy_write_notify_env() {
+  # Derive the tailnet base URL for the brief page (#361): MagicDNS host + the
+  # dedicated serve port. Empty when MagicDNS is not derivable at provision time,
+  # in which case morning-radar degrades to a link-less notification. Non-secret.
+  local brief_base dns
+  dns="$(ntfy_magicdns || true)"
+  brief_base=""
+  [ -n "$dns" ] && brief_base="https://${dns}:${ntfy_brief_serve_https:-}"
   (
     umask 077
     cat >"$ntfy_env_file" <<EOF
@@ -223,6 +253,10 @@ NTFY_TOKEN='$1'
 NTFY_TOPIC_ATTENTION='${ntfy_topic_attention}'
 NTFY_TOPIC_DONE='${ntfy_topic_done}'
 NTFY_TOPIC_BRIEF='${ntfy_topic_brief}'
+# Tailnet base URL for the brief page (#361); the wrapper appends /<date>.html.
+# Empty when MagicDNS was not derivable at provision time (wrapper then notifies
+# without a link).
+NTFY_BRIEF_BASE_URL='${brief_base}'
 EOF
   )
 }

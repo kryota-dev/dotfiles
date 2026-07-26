@@ -183,3 +183,7 @@ ghq_user = "kryota-dev"
   # agent-completed stream so the daily brief can be muted/subscribed on its own;
   # the notification's click opens the brief page served on the tailnet.
   topic_brief = "claude-brief"
+  # Loopback port for the brief static-file sidecar (#361), fronted on the
+  # tailnet by `tailscale serve --https=8443` (a port proxy — macOS cannot serve
+  # files/directories directly). Distinct from the ntfy port above.
+  brief_port = 2587

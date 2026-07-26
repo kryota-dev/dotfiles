@@ -119,6 +119,19 @@
       depNameTemplate: 'binwiederhier/ntfy',
       datasourceTemplate: 'docker',
     },
+    {
+      // Brief-page static-file sidecar image (#361), pinned literally in the
+      // same compose template — tracked with a regex manager like ntfy above.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
+      ],
+      matchStrings: [
+        'image: nginx:(?<currentValue>[0-9.]+-alpine)@(?<currentDigest>sha256:[a-f0-9]+)',
+      ],
+      depNameTemplate: 'nginx',
+      datasourceTemplate: 'docker',
+    },
   ],
   mise: {
     managerFilePatterns: [

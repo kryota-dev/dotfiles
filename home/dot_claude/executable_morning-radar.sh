@@ -2,13 +2,13 @@
 # Weekday-morning radar wrapper (kryota-dev/dotfiles#257, delivery #361).
 # Launched by the dev.kryota.morning-radar LaunchAgent on weekday mornings.
 # Runs /morning-brief headless (degraded mode) on the personal Claude Code
-# account, saves the brief to a dated file, and delivers it as a Markdown ntfy
-# message (#361): the brief's full text is the message body (rendered as
-# Markdown in the ntfy web app; the mobile apps show it as raw-but-readable
-# Markdown for now), the HEADLINE is the notification title. Detection + notify
-# only: no downstream skill dispatch. Delivery is tailnet-only — the brief is
-# published to the self-hosted ntfy server (loopback), never to a third party
-# (no Artifact/claude.ai path).
+# account, saves the brief to a dated file, renders a mobile-readable HTML page,
+# and sends an ntfy notification whose click opens that page over the tailnet
+# (#361). The page is served by a loopback nginx sidecar fronted by
+# `tailscale serve --https` (a port proxy — macOS cannot serve files directly);
+# a mobile browser renders the HTML natively (the ntfy apps do not render
+# Markdown). Detection + notify only: no downstream skill dispatch. Delivery is
+# tailnet-only — the page never leaves the tailnet, no Artifact/claude.ai path.
 #
 # Source-safe: side effects live in main(), guarded by the BASH_SOURCE check at
 # the end, so tests can source this file and exercise ntfy_publish without
@@ -64,7 +64,7 @@ log() {
 # The env file must be owner-only (0600/0400) — sourcing it is code execution,
 # so a group/other-accessible file fails open (same guard as ntfy-notify.sh).
 ntfy_publish() {
-  local kind="$1" priority="$2" title="$3" message="$4"
+  local kind="$1" priority="$2" title="$3" message="$4" click="${5:-}"
   local env_mode
   [ -f "$ENV_FILE" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
@@ -93,13 +93,21 @@ ntfy_publish() {
       *) exit 0 ;;
     esac
     [ -n "$topic" ] || exit 0
-    # markdown:true renders the body as Markdown in the ntfy web app (the mobile
-    # apps currently show raw Markdown, still readable). tags carry the emoji.
-    payload="$(jq -n --arg topic "$topic" --arg title "$title" \
-      --arg message "$message" --arg emoji "$emoji" \
-      --argjson priority "$priority" \
-      '{topic: $topic, title: $title, message: $message, priority: $priority,
-        markdown: true, tags: [$emoji, "morning-radar"]}')" || exit 0
+    # click (when present) opens the rendered brief page on the tailnet; omit it
+    # when unavailable so a broken link is never sent (graceful degradation).
+    if [ -n "$click" ]; then
+      payload="$(jq -n --arg topic "$topic" --arg title "$title" \
+        --arg message "$message" --arg emoji "$emoji" --arg click "$click" \
+        --argjson priority "$priority" \
+        '{topic: $topic, title: $title, message: $message, priority: $priority,
+          click: $click, tags: [$emoji, "morning-radar"]}')" || exit 0
+    else
+      payload="$(jq -n --arg topic "$topic" --arg title "$title" \
+        --arg message "$message" --arg emoji "$emoji" \
+        --argjson priority "$priority" \
+        '{topic: $topic, title: $title, message: $message, priority: $priority,
+          tags: [$emoji, "morning-radar"]}')" || exit 0
+    fi
     curl_cfg="$(mktemp "${TMPDIR:-/tmp}/morning-radar-ntfy.XXXXXX")" || exit 0
     # EXIT alone misses signal deaths (the watchdog may kill us); cover the
     # catchable signals so the token file never lingers.
@@ -112,9 +120,52 @@ ntfy_publish() {
   ) || true
 }
 
-# Error notification helper: high-priority attention topic, no brief body.
+# Error notification helper: high-priority attention topic, no link.
 notify_error() {
   ntfy_publish attention 5 "Morning Radar" "$1"
+}
+
+# Render the brief markdown as a mobile-readable HTML page at $2. Prefer pandoc;
+# `-f markdown-raw_html` escapes any raw HTML in the brief (GitHub issue titles
+# etc. are untrusted) while keeping GFM pipe tables, so a `<script>` in brief
+# content cannot execute on the served page. On pandoc absence/failure, fall
+# back to a self-contained shell that shows the markdown verbatim in a wrapping
+# <pre>, HTML-escaping & < >. Returns non-zero if no page could be produced.
+render_brief_html() {
+  local md="$1" html="$2" title="$3"
+  [ -s "$md" ] || return 1
+  if command -v pandoc >/dev/null 2>&1 &&
+    pandoc -s -f markdown-raw_html -t html --metadata title="$title" \
+      --metadata lang=ja -o "$html" "$md" 2>>"$LOG_FILE"; then
+    return 0
+  fi
+  {
+    printf '<!doctype html><html lang="ja"><head><meta charset="utf-8">'
+    printf '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    printf '<meta name="color-scheme" content="light dark">'
+    printf '<title>%s</title>' "$title"
+    printf '<style>body{margin:0;padding:1rem;font:16px/1.6 -apple-system,system-ui,sans-serif;color:#1a1a1a;background:#fff}@media(prefers-color-scheme:dark){body{color:#e6e6e6;background:#111}}pre{white-space:pre-wrap;word-wrap:break-word;margin:0}</style>'
+    printf '</head><body><pre>'
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$md"
+    printf '</pre></body></html>'
+  } >"$html" 2>/dev/null || return 1
+  return 0
+}
+
+# Build the tailnet click URL for the given date, or empty when the brief base
+# URL was not provisioned (MagicDNS underivable). Sourced in a subshell so only
+# the (non-secret) base URL is read out — the token never enters this env.
+ntfy_brief_url() {
+  local today="$1" base
+  [ -f "$ENV_FILE" ] || return 0
+  [ -O "$ENV_FILE" ] || return 0
+  base="$(
+    # shellcheck source=/dev/null
+    . "$ENV_FILE" 2>/dev/null || true
+    printf '%s' "${NTFY_BRIEF_BASE_URL:-}"
+  )"
+  [ -n "$base" ] || return 0
+  printf '%s/%s.html' "$base" "$today"
 }
 
 main() {
@@ -248,11 +299,19 @@ EOF
   # day can be retried manually (the approved budget is one successful run/day).
   printf '%s\n' "$TODAY" >"$STATE_DIR/last-run"
 
-  # Deliver the brief as a Markdown ntfy message: HEADLINE is the notification
-  # title (preview), the full brief markdown is the body (rendered on open).
+  # Render the mobile page and build the tailnet click URL. If either is
+  # unavailable, the notification still carries the HEADLINE (no link).
   # publish is fail-open, so a delivery failure never affects the stamp above.
+  click=""
+  if render_brief_html "$BRIEF_FILE" "$BRIEF_DIR/$TODAY.html" "Morning brief — $TODAY"; then
+    click="$(ntfy_brief_url "$TODAY")"
+    [ -n "$click" ] || log "warn: brief base URL unavailable; notifying without a link"
+  else
+    log "warn: brief HTML render failed; notifying without a link"
+  fi
+
   log "done: $HEADLINE"
-  ntfy_publish brief 3 "$HEADLINE" "$(cat "$BRIEF_FILE")"
+  ntfy_publish brief 3 "Morning brief" "$HEADLINE" "$click"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
