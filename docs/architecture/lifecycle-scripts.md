@@ -132,14 +132,15 @@ Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Br
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
-Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> required vault references:
+Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> required vault references:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
 - `op://kryota.dev/Dotfiles - ntfy/base-url`
-- `op://kryota.dev/Dotfiles - ntfy/credential`
+
+(The ntfy publisher token is intentionally absent: script 31 writes it straight into `~/.config/ntfy/notify-env` as runtime state, so 1Password never holds it and the gate has nothing to check.)
 
 For the `Dotfiles - Redact Patterns` item the script goes further than a simple existence check: it also verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal in `private_gitleaks-own.toml.tmpl`), and compiles as a valid regex. A broken pattern would otherwise allow `chezmoi apply` to succeed while silently disabling the client-identifier gitleaks rule on every commit in own-namespace repos.
 
@@ -182,6 +183,13 @@ Starts the self-hosted ntfy notification server (kryota-dev/dotfiles#337; see
 (`~/Library/Application Support/ntfy`, 0700, outside the chezmoi target tree), runs
 `docker compose up -d` on `~/.config/ntfy/compose.yaml`, and asserts the
 `tailscale serve --bg` mapping so the server stays reachable tailnet-wide over HTTPS.
+It then auto-provisions auth idempotently: creates the publisher/subscriber users
+and per-topic ACLs, writes the write-only publisher token straight into
+`~/.config/ntfy/notify-env` (0600 runtime state, no 1Password round-trip and no
+second apply), and stores the read-only subscriber token in the `Dotfiles - ntfy`
+1Password item (that half needs the `op` CLI). A clean install self-heals because
+notify-env is absent and gets rewritten; on an existing machine the exit-0 run means
+`chezmoi apply` alone will not re-fire it (see the Notifications recovery section).
 Re-triggered by the embedded hashes of the compose template and the server config.
 Skips in CI (no services, no network). **Intentional deviation from convention #6**:
 when Docker Desktop is not running (or the tailscale CLI is missing) it warns and

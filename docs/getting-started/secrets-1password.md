@@ -44,7 +44,7 @@ Before running `chezmoi apply` on macOS:
 1. **1Password desktop app** installed and signed in.
 2. **CLI integration enabled**: 1Password → Settings → Developer → "Integrate with 1Password CLI".
 3. **1Password CLI (`op`)** installed: `brew install --cask 1password-cli`.
-4. All <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> vault item references listed below exist in the `kryota.dev` vault.
+4. All <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> vault item references listed below exist in the `kryota.dev` vault.
 
 ---
 
@@ -110,12 +110,12 @@ Store the client/employer identifier pattern as a `name1|name2|...` alternation 
 |-----------|-------|
 | Vault | `kryota.dev` |
 | Item title | `Dotfiles - ntfy` |
-| Field references | `base-url`, `credential` |
-| op:// URIs | `op://kryota.dev/Dotfiles - ntfy/base-url`, `op://kryota.dev/Dotfiles - ntfy/credential` |
-| Rendered to | `~/.config/ntfy/server.yml` (`base-url`) and `~/.config/ntfy/notify-env` (`credential`) |
+| Field references | `base-url` (validated), `subscriber-token` (device-entered) |
+| op:// URIs | `op://kryota.dev/Dotfiles - ntfy/base-url` |
+| Rendered to | `~/.config/ntfy/server.yml` (`base-url`) |
 | File mode | `0600` (via `private_` prefix) |
 
-One item, two validated fields, for the self-hosted ntfy notification server (#337; see [Notifications](../architecture/notifications.md)). `base-url` is the `tailscale serve` HTTPS endpoint (`https://<host>.<tailnet>.ts.net`) — stored in 1Password so the tailnet's MagicDNS name never lands in this public repo. `credential` is the **write-only** publisher token issued by `ntfy token add` (see the notifications setup runbook). The read-only subscriber token also lives in this item but is entered on devices manually, so the validation gate does not check it.
+One item for the self-hosted ntfy notification server (#337; see [Notifications](../architecture/notifications.md)). `base-url` is the `tailscale serve` HTTPS endpoint (`https://<host>.<tailnet>.ts.net`) — stored in 1Password so the tailnet's MagicDNS name never lands in this public repo, and it is the only field the validation gate checks. `subscriber-token` starts as a bootstrap placeholder (`tk_REPLACE…`) that the setup script fills with the **read-only** device token; you enter it on each phone by hand, so the gate does not check it. The **write-only** publisher token is not stored here at all — the setup script writes it straight into `~/.config/ntfy/notify-env` (runtime state, like `user.db`), with no 1Password round-trip.
 
 ---
 
@@ -127,9 +127,9 @@ One item, two validated fields, for the self-hosted ntfy notification server (#3
 | `Dotfiles - Exa API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; exa MCP server starts but fails to authenticate |
 | `Dotfiles - Firecrawl API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; firecrawl MCP server starts but fails to authenticate |
 | `Dotfiles - Redact Patterns` | `chezmoi apply` exits 1 at the validation gate | `gitleaks-own.toml` not rendered; client-identifier gitleaks rule inactive in own-namespace repos |
-| `Dotfiles - ntfy` | `chezmoi apply` exits 1 at the validation gate | `~/.config/ntfy/server.yml` / `notify-env` not rendered; ntfy server unconfigured and the hook wrapper stays a no-op |
+| `Dotfiles - ntfy` | `chezmoi apply` exits 1 at the validation gate (missing `base-url`) | `~/.config/ntfy/server.yml` not rendered; ntfy server has no tailnet endpoint configured and the hook wrapper stays a no-op |
 
-Because the gate checks all six references before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
+Because the gate checks all five references before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
 
 ---
 

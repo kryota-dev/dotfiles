@@ -1929,6 +1929,13 @@ _gate_decision() {
   # tailscale serve with --bg (persists across reboots); funnel is forbidden
   grep -qF 'serve --bg' "$s"
   ! grep -qE '^[^#]*tailscale.*funnel' "$s"
+  # The publisher token is written straight into notify-env (runtime state),
+  # 0600 via umask, with no 1Password round-trip. Pin the write so it cannot
+  # silently regress back to `op item edit` for the publisher credential.
+  grep -qF 'write_notify_env' "$s"
+  grep -qF 'umask 077' "$s"
+  grep -qF '.config/ntfy/notify-env' "$s"
+  ! grep -qF 'credential[concealed]' "$s"
 }
 
 @test "settings.json disables stop:desktop-notify and wires the ntfy hooks (#337)" {
@@ -1958,13 +1965,16 @@ _gate_decision() {
   ' "$s" >/dev/null
 }
 
-@test "CI excludes the ntfy onepasswordRead templates in both jobs" {
+@test "CI excludes the ntfy onepasswordRead template in both jobs" {
   local w="${REPO_ROOT}/.github/workflows/setup-validation.yml"
   [ -f "$w" ]
-  # The CI precedent is the hardcoded mv list (NOT .chezmoiignore): each
-  # onepasswordRead template must appear once per job (macOS + Ubuntu).
+  # The CI precedent is the hardcoded mv list (NOT .chezmoiignore): the sole
+  # remaining onepasswordRead template (server.yml) must appear once per job
+  # (macOS + Ubuntu).
   [ "$(grep -cF 'home/dot_config/ntfy/private_server.yml.tmpl' "$w")" -eq 2 ]
-  [ "$(grep -cF 'home/dot_config/ntfy/private_notify-env.tmpl' "$w")" -eq 2 ]
+  # notify-env is no longer a chezmoi target — the setup script writes it as
+  # runtime state — so it must not linger in the exclude list.
+  ! grep -qF 'private_notify-env' "$w"
 }
 
 @test "renovate tracks the ntfy image tag via the compose regex manager" {
@@ -1975,11 +1985,12 @@ _gate_decision() {
 
 @test "1password ITEMS covers the ntfy item fields" {
   _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/base-url'
-  _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/credential'
-  # The templates must consume exactly the URIs the gate validates — a typo on
-  # either side would otherwise pass both checks independently.
-  grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/credential"' \
-    "${HOME_DIR}/dot_config/ntfy/private_notify-env.tmpl"
+  # The publisher token is no longer stored in 1Password — the setup script
+  # writes it straight into notify-env — so the gate must not validate a
+  # credential field for this item.
+  ! _onepassword_item_list | grep -qF 'op://kryota.dev/Dotfiles - ntfy/credential'
+  # The server.yml template must consume exactly the URI the gate validates — a
+  # typo on either side would otherwise pass both checks independently.
   grep -qF 'onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url"' \
     "${HOME_DIR}/dot_config/ntfy/private_server.yml.tmpl"
 }

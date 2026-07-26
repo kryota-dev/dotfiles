@@ -44,7 +44,7 @@ macOS で `chezmoi apply` を実行する前に:
 1. **1Password デスクトップアプリ**がインストールされ、サインイン済みであること。
 2. **CLI 統合が有効**: 1Password → 設定 → デベロッパー → "1Password CLI と統合"。
 3. **1Password CLI（`op`）**がインストール済み: `brew install --cask 1password-cli`。
-4. 以下に示す <!-- FACT:onepassword-vault-item-count -->6<!-- /FACT --> つの Vault アイテム参照すべてが `kryota.dev` Vault に存在すること。
+4. 以下に示す <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> つの Vault アイテム参照すべてが `kryota.dev` Vault に存在すること。
 
 ---
 
@@ -110,12 +110,12 @@ macOS で `chezmoi apply` を実行する前に:
 |-----|---|
 | Vault | `kryota.dev` |
 | アイテムタイトル | `Dotfiles - ntfy` |
-| フィールド参照 | `base-url`, `credential` |
-| op:// URI | `op://kryota.dev/Dotfiles - ntfy/base-url`, `op://kryota.dev/Dotfiles - ntfy/credential` |
-| レンダリング先 | `~/.config/ntfy/server.yml`（`base-url`）と `~/.config/ntfy/notify-env`（`credential`） |
+| フィールド参照 | `base-url`（検証対象）, `subscriber-token`（デバイス手入力） |
+| op:// URI | `op://kryota.dev/Dotfiles - ntfy/base-url` |
+| レンダリング先 | `~/.config/ntfy/server.yml`（`base-url`） |
 | ファイルモード | `0600`（`private_` プレフィックスによる） |
 
-自己ホスト ntfy 通知サーバー（#337; [Notifications](../architecture/notifications.ja.md) 参照）用に、1 アイテムで 2 つのフィールドを検証します。`base-url` は `tailscale serve` の HTTPS エンドポイント（`https://<host>.<tailnet>.ts.net`）です——tailnet の MagicDNS 名がこの公開リポジトリに残らないよう 1Password に保存しています。`credential` は `ntfy token add` で発行される**書き込み専用**の publisher トークンです（notifications のセットアップ手順を参照）。読み取り専用の subscriber トークンも同じアイテムに保存しますが、各デバイスへ手動で入力するため検証ゲートはチェックしません。
+自己ホスト ntfy 通知サーバー（#337; [Notifications](../architecture/notifications.ja.md) 参照）用の 1 アイテムです。`base-url` は `tailscale serve` の HTTPS エンドポイント（`https://<host>.<tailnet>.ts.net`）です——tailnet の MagicDNS 名がこの公開リポジトリに残らないよう 1Password に保存しており、検証ゲートがチェックする唯一のフィールドです。`subscriber-token` はブートストラップ用プレースホルダー（`tk_REPLACE…`）として作成し、セットアップスクリプトが**読み取り専用**のデバイストークンを書き込みます。各スマホへ手入力するためゲートはチェックしません。**書き込み専用**の publisher トークンはここには一切保存しません——セットアップスクリプトが `~/.config/ntfy/notify-env` へ直接書き出します（`user.db` と同様のランタイム状態で、1Password を経由しません）。
 
 ---
 
@@ -127,9 +127,9 @@ macOS で `chezmoi apply` を実行する前に:
 | `Dotfiles - Exa API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、exa MCP サーバーが認証失敗 |
 | `Dotfiles - Firecrawl API` | 検証ゲートで `chezmoi apply` が exit 1 | `claude-secrets.zsh` がレンダリングされない、firecrawl MCP サーバーが認証失敗 |
 | `Dotfiles - Redact Patterns` | 検証ゲートで `chezmoi apply` が exit 1 | `gitleaks-own.toml` がレンダリングされない、自社名前空間リポジトリでクライアント識別子 gitleaks ルールが無効化 |
-| `Dotfiles - ntfy` | 検証ゲートで `chezmoi apply` が exit 1 | `~/.config/ntfy/server.yml` / `notify-env` がレンダリングされない、ntfy サーバーが未設定のままフックラッパーが no-op のまま |
+| `Dotfiles - ntfy` | 検証ゲートで `chezmoi apply` が exit 1（`base-url` 欠落） | `~/.config/ntfy/server.yml` がレンダリングされない、ntfy サーバーに tailnet エンドポイントが設定されずフックラッパーが no-op のまま |
 
-ゲートはすべての 6 参照を成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
+ゲートはすべての 5 参照を成功前にチェックするため、1 つのアイテムが欠落するだけでライフサイクルスクリプトの after フェーズ全体がブロックされます。
 
 ---
 
