@@ -140,5 +140,14 @@
       matchDepNames: ['jgraph/drawio-mcp', 'supabase/agent-skills'],
       automerge: false,
     },
+    {
+      // claude-code-action runs an AI agent with Bash + a long-lived OAuth token in the
+      // renovate-triage workflow: the largest blast radius in the repo. It tracks the
+      // moving `v1` tag pinned to a digest, so a `digest` PR would otherwise inherit the
+      // pin-automerge lane. Force manual review of every bump so a compromised upstream
+      // cannot ride automerge into a run that holds secrets.
+      matchDepNames: ['anthropics/claude-code-action'],
+      automerge: false,
+    },
   ],
 }
