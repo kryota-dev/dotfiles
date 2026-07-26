@@ -56,7 +56,7 @@ LIB="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
   ntfy_topic_attention="claude-attention"
   ntfy_topic_done="claude-done"
 
-  ntfy_write_dashboard_env "subscriber" "s3cr3t-pw"
+  ntfy_write_dashboard_env "subscriber" "bats-fixture-value-not-a-real-secret"
 
   [ -f "$ntfy_dashboard_env_file" ]
   local mode
@@ -68,7 +68,7 @@ LIB="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
   [ "$mode" = "600" ]
   grep -qF "NTFY_URL='http://127.0.0.1:2586'" "$ntfy_dashboard_env_file"
   grep -qF "NTFY_DASHBOARD_SUBSCRIBER_USER='subscriber'" "$ntfy_dashboard_env_file"
-  grep -qF "NTFY_DASHBOARD_SUBSCRIBER_PASSWORD='s3cr3t-pw'" "$ntfy_dashboard_env_file"
+  grep -qF "NTFY_DASHBOARD_SUBSCRIBER_PASSWORD='bats-fixture-value-not-a-real-secret'" "$ntfy_dashboard_env_file"
   grep -qF "NTFY_TOPIC_ATTENTION='claude-attention'" "$ntfy_dashboard_env_file"
   grep -qF "NTFY_TOPIC_DONE='claude-done'" "$ntfy_dashboard_env_file"
 }
