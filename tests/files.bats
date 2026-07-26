@@ -1223,6 +1223,7 @@ FAKE_CLAUDE
 }
 
 @test "prompt-conform-suggest triggers on a long JP task-shaped prompt" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
   local prompt='ユーザー認証機能を実装してください。要件は以下の通りです。メールアドレスとパスワードでログインできること。セッションはJWTで管理すること。パスワードはbcryptでハッシュ化すること。ログイン失敗時は適切なエラーメッセージを返すこと。既存のミドルウェアとの統合方法も検討し、テストも一緒に書いてください。ドキュメントの更新も忘れずにお願いします。'
   local out
@@ -1232,11 +1233,20 @@ FAKE_CLAUDE
 }
 
 @test "prompt-conform-suggest triggers on a long EN task-shaped prompt" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
   local prompt='Please implement a new caching layer for the API responses. It should support TTL-based eviction, be pluggable so we can swap Redis for an in-memory store in tests, and include unit tests covering the eviction edge cases as well as documentation for future maintainers.'
   local out
   out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
   [ "$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
+}
+
+@test "prompt-conform-suggest triggers on a long prompt matching only the keyword regex (no task verb)" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='新しい SKILL.md の設計について相談したいです。プロンプトエンジニアリングの観点から、既存のエージェント定義との整合性やシステムプロンプトとの重複をどう避けるか、指示文の粒度をどう決めるか、命名規則をどう統一するかなど、検討すべき論点が多くあります。実装方針が固まる前に一度目線を揃えたいです。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -n "$out" ]
 }
 
 @test "prompt-conform-suggest is silent on a short conversational prompt" {
@@ -1253,11 +1263,41 @@ FAKE_CLAUDE
   [ -z "$out" ]
 }
 
-@test "prompt-conform-suggest fails open on malformed stdin JSON" {
+# Regression guard for a false positive found in review: a bare \b(verb)\b match
+# anywhere in the string fired on ordinary questions that merely contain a task
+# verb mid-sentence, not as an imperative directive.
+@test "prompt-conform-suggest is silent on a long EN question that merely contains a task verb" {
   local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
-  run bash -c "printf 'not json' | node \"$hook\""
+  local prompt='How should I write a good commit message for a large refactor that touches many files across the repository and changes the public API surface in several places, while keeping the history readable for future maintainers?'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -z "$out" ]
+}
+
+# Regression guard for a false positive found in review: a standalone politeness
+# marker ("お願いします") is not a task-request shape and must not fire on a long
+# question that has no imperative verb.
+@test "prompt-conform-suggest is silent on a long JP question closed with a bare politeness marker" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='先日リリースしたバージョンでユーザーからいくつか問い合わせが来ているのですが、ログを見る限り原因の切り分けが難しく、どこから調査を始めるのが良さそうか、これまでの経験に基づいたアドバイスをいただけると非常に助かります。あくまで一般論としての意見で構いませんので、お忙しいところ大変恐縮ですが、何卒よろしくお願いします。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest is silent when the prompt field is missing" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest fails open on malformed stdin JSON and logs to stderr" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  run --separate-stderr bash -c "printf 'not json' | node \"$hook\""
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+  [[ "$stderr" == *"failed to parse stdin"* ]]
 }
 
 @test "prompt-conform-suggest honours a PROMPT_CONFORM_SUGGEST_MIN_LENGTH override" {
@@ -1266,6 +1306,16 @@ FAKE_CLAUDE
   out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"直してください"}))' \
     | PROMPT_CONFORM_SUGGEST_MIN_LENGTH=5 node "$hook")
   [ -n "$out" ]
+}
+
+@test "prompt-conform-suggest falls back to the default min length on a non-integer override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out err
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"skill"}))' \
+    | PROMPT_CONFORM_SUGGEST_MIN_LENGTH=0.5 node "$hook" 2>"${BATS_TEST_TMPDIR}/stderr.log")
+  err=$(cat "${BATS_TEST_TMPDIR}/stderr.log")
+  [ -z "$out" ]
+  [[ "$err" == *"ignoring invalid PROMPT_CONFORM_SUGGEST_MIN_LENGTH"* ]]
 }
 
 @test "prompt-conform-suggest falls back to the built-in task regex on an invalid override" {
@@ -1279,14 +1329,29 @@ FAKE_CLAUDE
   [[ "$err" == *"ignoring invalid PROMPT_CONFORM_SUGGEST_TASK_REGEX regex"* ]]
 }
 
+@test "prompt-conform-suggest applies a valid PROMPT_CONFORM_SUGGEST_TASK_REGEX override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  # "hogehoge" matches neither the default task nor keyword regex, so this proves
+  # the override — not the built-in default — is what triggers the match.
+  local prompt="hogehoge $(printf 'x%.0s' {1..150})"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" \
+    | PROMPT_CONFORM_SUGGEST_TASK_REGEX='hogehoge' node "$hook")
+  [ -n "$out" ]
+}
+
 @test "settings.json wires the prompt-conform-suggest UserPromptSubmit hook" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local settings="${HOME_DIR}/dot_claude/settings.json"
   local hook
   hook=$(jq -r '.hooks.UserPromptSubmit[]? | select(.id == "user-prompt-submit:prompt-conform-suggest")' "$settings")
   [ -n "$hook" ]
-  [ "$(echo "$hook" | jq -r '.matcher')" = "*" ]
+  # UserPromptSubmit does not support `matcher` (silently ignored per the
+  # official Hooks reference), so this entry intentionally omits it.
+  [ "$(echo "$hook" | jq -r '.matcher')" = "null" ]
   [ "$(echo "$hook" | jq -r '.hooks[0].command')" = 'node "$HOME/.claude/hooks-fork/prompt-conform-suggest.js"' ]
-  [ "$(echo "$hook" | jq -r '.hooks[0].timeout')" -le 30 ]
+  [ "$(echo "$hook" | jq -r '.hooks[0].timeout')" -eq 5 ]
+  [[ "$(echo "$hook" | jq -r '.description')" == *"PROMPT_CONFORM_SUGGEST_MIN_LENGTH"* ]]
 }
 
 @test "1password-backed secret template exists" {
