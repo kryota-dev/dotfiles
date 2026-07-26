@@ -102,3 +102,11 @@
 # skill discovery picks it up. On case-sensitive filesystems the old lowercase copy
 # would otherwise stay behind. Deployed path is ~/.agents/skills/github-projects/.
 .agents/skills/github-projects/skill.md
+
+# Curated skill inventory cleanup (2026-07-27 stocktake, #369). One skill retired from
+# the source tree: cleanup-plan — a 62-line wrapper over a single `> <plan-file>` shell
+# redirect with no non-obvious logic, unreferenced by any skill/agent/test/CLAUDE.md and
+# unused in the transcript window. The same need (start a fresh plan in-session) is met by
+# a manual redirect or re-entering plan mode. Removing it from source alone would not
+# delete an already-deployed copy, hence here.
+.agents/skills/cleanup-plan

@@ -64,9 +64,9 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->46<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->45<!-- /FACT --> スキル）
 
-`home/dot_agents/skills/` の 46 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 45 スキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（13 スキル）
 
@@ -86,11 +86,11 @@
 
 `planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 
-### セッションとコンテキスト管理（6 スキル）
+### セッションとコンテキスト管理（5 スキル）
 
 会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。
 
-`session-summary`、`prune-session-transcript`、`compact-docs`、`cleanup-plan`、`retrospective-codify`、`knowledge-distill`
+`session-summary`、`prune-session-transcript`、`compact-docs`、`retrospective-codify`、`knowledge-distill`
 
 ### ワークツリーと dotfiles ツール（4 スキル）
 
