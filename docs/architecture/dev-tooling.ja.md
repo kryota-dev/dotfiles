@@ -53,6 +53,7 @@ ruby.compile = false
 制約:
 - Brewfile に `brew "chezmoi"` を追加しないでください。chezmoi 自体はスタンドアロンの `curl get.chezmoi.io` ブートストラップでインストールされます（PR #22）。Brewfile に追加すると mise 管理バージョンと競合します。
 - Brewfile の変更は `run_onchange_before_10-brew-bundle.sh.tmpl` の埋め込み sha256 を通じて次回の `chezmoi apply` で自動適用されます。
+- `cask "docker-desktop"` は場当たり的なコンテナ作業にとどまらず load-bearing です: 自己ホストの ntfy 通知サーバーがこの上で動作しており、`run_onchange_after_31-setup-ntfy` は apply 時に Docker Desktop が起動していることに依存します（起動していない場合は warn-and-skip。サインイン時起動はランブックの前提条件です — [notifications.ja.md](notifications.ja.md) 参照）。
 
 ### `.brewfile-linux-exclude`
 

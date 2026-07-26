@@ -7,9 +7,12 @@
 # Renovate regex manager in .github/renovate.json5 tracks the pinned tag, and
 # tests/files.bats asserts the pin format. Everything else templated here comes
 # from the [ntfy] SSOT block in home/.chezmoidata.toml.
+# Explicit project name so `--remove-orphans` can never touch containers from
+# another compose project that happens to share the default (dirname) name.
+name: ntfy-dotfiles
 services:
   ntfy:
-    image: binary/ntfy:v2.26.0
+    image: binwiederhier/ntfy:v2.26.0@sha256:a6d335064ae927c4dbef118e1fa39656b3d2e01472b2a82af5915d5cebfe815f
     command: serve
     restart: unless-stopped
     ports:

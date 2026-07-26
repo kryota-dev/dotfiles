@@ -114,9 +114,9 @@
         '/home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
       ],
       matchStrings: [
-        'image: binary/ntfy:(?<currentValue>v[0-9.]+)',
+        'image: binwiederhier/ntfy:(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]+)',
       ],
-      depNameTemplate: 'binary/ntfy',
+      depNameTemplate: 'binwiederhier/ntfy',
       datasourceTemplate: 'docker',
     },
   ],

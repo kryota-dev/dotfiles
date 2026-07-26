@@ -56,7 +56,7 @@ scrub_body() {
     printf '%s' "$body"
     return 0
   fi
-  if scrubbed="$(printf '%s' "$body" | NTFY_REDACT_PATTERN="$pattern" perl -pe 's/$ENV{NTFY_REDACT_PATTERN}/[redacted]/gi' 2>/dev/null)"; then
+  if scrubbed="$(printf '%s' "$body" | NTFY_REDACT_PATTERN="$pattern" perl -pe 'BEGIN { $SIG{ALRM} = sub { die }; alarm 2 } s/$ENV{NTFY_REDACT_PATTERN}/[redacted]/gi' 2>/dev/null)"; then
     printf '%s' "$scrubbed"
   else
     printf '%s' "$body"
@@ -71,8 +71,9 @@ truncate_body() {
   printf '%s' "$1" | tr '\n' ' ' | jq -Rrs --argjson n "$BODY_LIMIT" '.[0:$n]'
 }
 
-# CLAUDE_CONFIG_DIR -> account slug (same derivation as statusline.sh):
-# ~/.claude -> default, ~/.claude-r06 -> r06.
+# CLAUDE_CONFIG_DIR -> account slug: ~/.claude -> default, ~/.claude-r06 -> r06.
+# Intentionally self-contained (hook scripts stay dependency-free); statusline.sh
+# derives the same slug for display — keep the two in sync on changes.
 account_slug() {
   local base="${CLAUDE_CONFIG_DIR:-}"
   base="${base##*/}"
@@ -106,6 +107,17 @@ main() {
   # No env file / no jq -> silent no-op (unprovisioned machine or Linux).
   [ -f "$ENV_FILE" ] || exit 0
   command -v jq >/dev/null 2>&1 || exit 0
+  # Sourcing is code execution: only accept a file we own with no group/other
+  # permissions (the chezmoi-deployed private_ file is 0600). Anything else —
+  # including an env-var override pointing at hostile content — fails open.
+  [ -O "$ENV_FILE" ] || exit 0
+  local env_mode
+  if stat --version >/dev/null 2>&1; then
+    env_mode="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || true)"
+  else
+    env_mode="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || true)"
+  fi
+  case "$env_mode" in 600 | 400) ;; *) exit 0 ;; esac
   # shellcheck source=/dev/null
   . "$ENV_FILE"
   { [ -n "${NTFY_URL:-}" ] && [ -n "${NTFY_TOKEN:-}" ]; } || exit 0
@@ -153,11 +165,20 @@ main() {
   repo="$(repo_name "$cwd")"
   branch="$(branch_name "$cwd")"
 
+  # Attribution fields go through the client-identifier scrub too: repo and
+  # branch names are where client names are most likely to appear, and on
+  # Notification events they are the only published content.
+  repo="$(scrub_body "$repo")"
+  branch="$(scrub_body "$branch")"
   title="[${account}] ${repo}@${branch} — ${event}"
   body=""
   if [ "$event" = "Stop" ]; then
     body="$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2>/dev/null || true)"
-    body="$(scrub_body "$(truncate_body "$body")")"
+    # Scrub BEFORE truncating so an identifier straddling the 200-char boundary
+    # cannot survive with its tail cut off; the byte pre-cap bounds the perl
+    # input so pathological messages cannot stall the hook.
+    body="$(printf '%s' "$body" | head -c 8192)"
+    body="$(truncate_body "$(scrub_body "$body")")"
   fi
 
   payload="$(jq -n \
@@ -176,8 +197,9 @@ main() {
   # Token travels via a 0600 curl config file, never argv.
   umask 077
   curl_cfg="$(mktemp "${TMPDIR:-/tmp}/ntfy-notify.XXXXXX")"
-  # shellcheck disable=SC2064
-  trap "rm -f '$curl_cfg'" EXIT
+  # EXIT alone misses signal deaths (the hook runs under a 10s timeout that
+  # may kill us) — cover the catchable signals so the token file never lingers.
+  trap 'rm -f "$curl_cfg"' EXIT INT TERM HUP
   printf 'header = "Authorization: Bearer %s"\n' "$NTFY_TOKEN" >"$curl_cfg"
 
   if ! printf '%s' "$payload" | curl -fs -K "$curl_cfg" --max-time 3 \

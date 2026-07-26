@@ -27,6 +27,8 @@ NTFY_TOKEN='tk_bats_secret'
 NTFY_TOPIC_ATTENTION='claude-attention'
 NTFY_TOPIC_DONE='claude-done'
 EOF
+  # The wrapper refuses env files that are not owner-only (0600/0400)
+  chmod 600 "$ENV_FILE"
 
   LOG_FILE="${BATS_TEST_TMPDIR}/ntfy-notify.log"
   REDACT_TOML="${BATS_TEST_TMPDIR}/gitleaks-own.toml"
@@ -110,9 +112,37 @@ run_wrapper() {
 NTFY_URL='http://127.0.0.1:9'
 NTFY_TOKEN='tk_bats_secret'
 EOF
+  chmod 600 "$ENV_FILE"
   run_wrapper '{"hook_event_name":"Stop","session_id":"abc","cwd":"/tmp"}'
   [ "$status" -eq 0 ]
   [ ! -f "${STUB_DIR}/curl_args" ]
+}
+
+@test "group/other-readable env file fails open without publishing" {
+  chmod 644 "$ENV_FILE"
+  run_wrapper '{"hook_event_name":"Stop","session_id":"abc","cwd":"/tmp"}'
+  [ "$status" -eq 0 ]
+  [ ! -f "${STUB_DIR}/curl_args" ]
+}
+
+@test "identifier straddling the truncation boundary is scrubbed (scrub before truncate)" {
+  command -v perl >/dev/null 2>&1 || skip "perl not available"
+  printf "regex = '''(?i)(acmecorp)'''\n" >"$REDACT_TOML"
+  long_msg="$(printf 'a%.0s' $(seq 1 195))acmecorp$(printf 'b%.0s' $(seq 1 50))"
+  run_wrapper "{\"hook_event_name\":\"Stop\",\"session_id\":\"abc\",\"cwd\":\"/tmp\",\"last_assistant_message\":\"${long_msg}\"}"
+  [ "$status" -eq 0 ]
+  msg="$(jq -r '.message' "${STUB_DIR}/curl_stdin")"
+  [[ "$msg" != *"acme"* ]]
+  [ "$(jq -r '.message | length' "${STUB_DIR}/curl_stdin")" -le 200 ]
+}
+
+@test "redact extraction understands the real gitleaks-own template format" {
+  # Integration guard against silent format drift: the wrapper's sed contract
+  # must keep matching the actual chezmoi source template's regex line.
+  run env NTFY_NOTIFY_REDACT_TOML="${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl" \
+    bash -c "source '$WRAPPER'; extract_redact_pattern"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
 }
 
 @test "Stop without last_assistant_message publishes an empty message" {

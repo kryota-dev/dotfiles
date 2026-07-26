@@ -26,9 +26,16 @@ mkdir -p "$state_dir"
 chmod 700 "$state_dir"
 
 # Intentional deviation from the launchctl exit-1 convention (lifecycle
-# convention #6): a closed Docker Desktop must not block `chezmoi apply` —
-# notifications are not setup-critical. Recovery: start Docker Desktop and
-# re-run `chezmoi apply`, or run the compose command below manually.
+# convention #6): notification setup must never block `chezmoi apply` —
+# notifications are not setup-critical. NOTE the run_onchange consequence:
+# exit 0 records this script as done, so re-running `chezmoi apply` does NOT
+# retry until the compose/server templates change. The printed manual command
+# is the recovery path that actually works.
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[ntfy] docker CLI not found; skipping server start." >&2
+  echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
+  exit 0
+fi
 if ! docker info >/dev/null 2>&1; then
   echo "[ntfy] Docker Desktop is not running; skipping server start." >&2
   echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
@@ -36,7 +43,11 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "[ntfy] starting ntfy server (docker compose up -d)..."
-docker compose -f "$HOME/.config/ntfy/compose.yaml" up -d --remove-orphans
+if ! docker compose -f "$HOME/.config/ntfy/compose.yaml" up -d --remove-orphans; then
+  echo "[ntfy] docker compose up failed; notifications will fail open." >&2
+  echo "[ntfy] Recover with: docker compose -f ~/.config/ntfy/compose.yaml up -d" >&2
+  exit 0
+fi
 
 # Assert the tailnet HTTPS front. `--bg` persists the mapping across reboots
 # and tailscaled restarts (tailscale.com/kb/1242); re-running is idempotent.

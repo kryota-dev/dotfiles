@@ -1658,10 +1658,14 @@ _gate_decision() {
 @test "ntfy compose pins an exact image tag, stays loopback-only, and restarts" {
   local c="${HOME_DIR}/dot_config/ntfy/compose.yaml.tmpl"
   [ -f "$c" ]
-  # Exact version pin — Renovate's regex manager tracks this line; `latest`
-  # (or any non-vX.Y.Z tag) would make the deployment unauditable.
-  grep -qE '^    image: binary/ntfy:v[0-9]+\.[0-9]+\.[0-9]+$' "$c"
+  # Exact version pin + digest — Renovate's regex manager tracks this line;
+  # `latest` (or any non-vX.Y.Z tag) would make the deployment unauditable.
+  # The namespace is asserted literally: `binwiederhier` is the official ntfy
+  # publisher (a wrong namespace once shipped as `binary/ntfy`, which does not
+  # exist upstream and would trust an unrelated Docker Hub account).
+  grep -qE '^    image: binwiederhier/ntfy:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[a-f0-9]{64}$' "$c"
   ! grep -q 'image:.*latest' "$c"
+  ! grep -q 'binary/ntfy' "$c"
   grep -q 'restart: unless-stopped' "$c"
   # Host exposure must be loopback-only; tailnet access goes through
   # `tailscale serve`, never a direct bind.
@@ -1737,7 +1741,7 @@ _gate_decision() {
 
 @test "renovate tracks the ntfy image tag via the compose regex manager" {
   local r="${REPO_ROOT}/.github/renovate.json5"
-  grep -qF 'binary/ntfy' "$r"
+  grep -qF 'binwiederhier/ntfy' "$r"
   grep -qF "compose\\\\.yaml\\\\.tmpl" "$r"
 }
 

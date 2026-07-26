@@ -8,9 +8,12 @@
 # lands in this public repo.
 base-url: "{{ onepasswordRead "op://kryota.dev/Dotfiles - ntfy/base-url" | trim }}"
 
-# iOS instant push relay (user-approved at the #337 PRD gate): forwards poll
-# requests (topic metadata only, never message bodies) through ntfy.sh/APNs.
-# The sole approved metadata egress beyond the tailnet.
+# iOS instant push relay (user-approved at the #337 PRD gate). NOTE: per
+# docs.ntfy.sh/config this publishes a poll request to ntfy.sh for EVERY
+# incoming message (topic metadata only, never message bodies), regardless of
+# whether any iOS device subscribes. The sole approved metadata egress beyond
+# the tailnet; remove this key to bring egress to zero if the smoke test shows
+# iOS instant push does not work on the tailnet-only setup.
 upstream-base-url: "https://ntfy.sh"
 
 # Container-internal listener; host exposure is limited to 127.0.0.1 by the

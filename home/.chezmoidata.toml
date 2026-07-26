@@ -173,7 +173,9 @@ ghq_user = "kryota-dev"
   # 7 days of reviewable history vs. plaintext SQLite residency on disk.
   cache_duration = "168h"
   # Fixed urgency-based topics; attribution (repo/branch/account/session/event)
-  # travels in tags and titles, never in topic names.
+  # travels in tags and titles, never in topic names. The ad-hoc smoke-test
+  # topic (claude-test) is a runbook-only convention in
+  # docs/architecture/notifications.md, not rendered config, so it is
+  # intentionally not declared here.
   topic_attention = "claude-attention"
   topic_done = "claude-done"
-  topic_test = "claude-test"

@@ -53,6 +53,7 @@ ruby.compile = false
 Constraints:
 - Do not add `brew "chezmoi"` to the Brewfile. chezmoi itself is installed via the standalone `curl get.chezmoi.io` bootstrap (PR #22); adding it to the Brewfile would conflict with the mise-managed version.
 - Brewfile changes are auto-applied on the next `chezmoi apply` via the embedded sha256 in `run_onchange_before_10-brew-bundle.sh.tmpl`.
+- `cask "docker-desktop"` is load-bearing beyond ad-hoc container work: the self-hosted ntfy notification server runs under it, and `run_onchange_after_31-setup-ntfy` depends on Docker Desktop being running at apply time (warn-and-skip otherwise; start-at-login is a runbook prerequisite — see [notifications.md](notifications.md)).
 
 ### `.brewfile-linux-exclude`
 
