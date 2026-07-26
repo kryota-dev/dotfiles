@@ -429,7 +429,7 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 - **スケジュール挙動。** スリープ中に跨いだ発火は復帰時に 1 回へ coalesce され、電源オフの日はスキップされます。`~/.local/state/morning-radar/` の日付マーカーで課金実行を 1 日 1 回に制限し、手動再実行は `~/.claude/morning-radar.sh --force` で行います。
 - **縮退モード。** claude.ai の Gmail/Calendar コネクタは headless で OAuth を完了できないため、brief は取得失敗を明記して GitHub + ローカルコンテキストへ縮退します（morning-brief SKILL.md に記載の挙動）。
 - **権限とコスト。** wrapper は明示的な `--allowedTools` allowlist（read-only の `gh`/`git` とファイル読み取り、`Write` は brief 出力先のみ）を渡し、`--dangerously-skip-permissions` は使いません。モデルは `sonnet` に固定、`--max-turns` でターン上限、600 秒の watchdog が課金バックストップです。平日 5 回/週の費用は #257 で事前承認済みです。
-- **出力契約。** brief は `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md` に保存され、最終応答は `HEADLINE:` の 1 行のみ。wrapper がそれを ntfy 通知のタイトルとし、brief 全文の markdown をメッセージ本文として publish します（tailnet-only、#361 — [notifications](../architecture/notifications.ja.md#朝ブリーフの配信-361) 参照）。
+- **出力契約。** brief は `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md` に保存され、最終応答は `HEADLINE:` の 1 行のみ。wrapper がそれを ntfy 通知に載せ、click で tailnet 上に serve された brief ページを開きます（tailnet-only、#361 — [notifications](../architecture/notifications.ja.md#朝ブリーフの配信-361) 参照）。
 
 ---
 

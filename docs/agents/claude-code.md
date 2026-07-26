@@ -431,7 +431,7 @@ Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headl
 - **Schedule semantics.** launchd coalesces fires missed while asleep into one run on wake; days the Mac is powered off are skipped. A date marker under `~/.local/state/morning-radar/` caps execution at one billed run per day; `~/.claude/morning-radar.sh --force` bypasses it for manual reruns.
 - **Degraded mode.** The claude.ai Gmail/Calendar connectors cannot complete OAuth headless, so the brief degrades to GitHub + local context with an explicit fetch-failure note — the behavior documented in morning-brief SKILL.md.
 - **Permissions & cost.** The wrapper passes an explicit `--allowedTools` allowlist (read-only `gh`/`git` and file reads; `Write` scoped to the brief output dir) and never uses `--dangerously-skip-permissions`. The model is pinned to `sonnet`, turns are capped with `--max-turns`, and a 600 s watchdog is the billing backstop. The weekday 5-runs/week spend was pre-approved on #257.
-- **Output contract.** The brief lands in `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md`; the final response is a single `HEADLINE:` line the wrapper uses as the ntfy notification title, publishing the full brief markdown as the message body (tailnet-only, #361 — see [notifications](../architecture/notifications.md#morning-brief-delivery-361)).
+- **Output contract.** The brief lands in `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md`; the final response is a single `HEADLINE:` line the wrapper puts in an ntfy notification whose click opens the rendered brief page served on the tailnet (tailnet-only, #361 — see [notifications](../architecture/notifications.md#morning-brief-delivery-361)).
 
 ---
 

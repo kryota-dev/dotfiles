@@ -16,7 +16,7 @@ ntfy への経路に加え、平日朝ブリーフの配信（#361）です。�
 （SessionStart、instinct クラスターのレビュー促し）と `notify` zsh エイリアス（可聴チャイム。
 本システムの wrapper も失敗時のアラート音として再利用しています）。`morning-radar.sh`
 （launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、現在はブリーフを
-Markdown の ntfy メッセージとして publish します —— 下記
+tailnet の HTML ページにレンダリングし、それにリンクする ntfy 通知を送ります —— 下記
 [朝ブリーフの配信](#朝ブリーフの配信-361)を参照。
 
 ## アーキテクチャ
@@ -82,37 +82,43 @@ phones/tablets on the tailnet (username/password login)
 
 平日の `morning-radar.sh` wrapper（launchd `dev.kryota.morning-radar`、#257）は、以前は
 ローカル `osascript` 通知でブリーフを知らせていましたが、この通知は文書を運べず、モバイルにも
-届きませんでした。現在はブリーフを **Markdown の ntfy メッセージ**として、本システムと同じ
-tailnet-only の境界で配信します —— **ブリーフ内容が tailnet 外へ出ることはありません**。2 つの
+届きませんでした。現在はブリーフをモバイル可読な HTML ページにレンダリングし、その**ページを開く
+click** を持つ ntfy 通知を送ります —— **ブリーフ内容が tailnet 外へ出ることはありません**。2 つの
 代替案は却下しました（`.claude/prds/361-brief-url-ntfy.prd.md` の決定ログ参照）: Artifact/claude.ai
-ページ（内容が第三者へ出る）と、`tailscale serve` の静的ページ（macOS の standalone/App 版
-Tailscale は **ポートは serve できてもファイル/ディレクトリは serve できない**ため、この Mac では
-ディレクトリマウントが機能しない）。
+ページ（内容が第三者へ出る）と、ブリーフを ntfy **メッセージ**として配信する案（ntfy の iOS/Android
+アプリは Markdown をレンダリングせず web app のみ対応のため、モバイルでは raw Markdown 表示になる）。
+serve した HTML ページはブラウザがネイティブにレンダリングします。
 
-- **配信**: 成功時、wrapper は `claude-brief` トピックへ、1 行の `HEADLINE` を通知タイトル、
-  **ブリーフ全文の Markdown をメッセージ本文**（`markdown: true`）として publish します。通知を
-  開くとブリーフが表示され、ntfy の **web app は Markdown をレンダリング**します（iOS/Android
-  アプリは現状 raw Markdown 表示ですが可読です）。エラー経路（claude 不在 / timeout / 非 0 exit /
-  ブリーフファイル欠落）は `claude-attention` へ高 priority で publish します。headless の claude
-  セッションには `Artifact` ツールを**付与しません**。
-- **メッセージサイズ**: ブリーフは 1 メッセージなので、`server.yml` の `message-size-limit` を
-  32 KB に引き上げます —— 上限超過のメッセージは ntfy が黙って添付ファイルに変換し、アプリは
-  インライン描画しないためです。
-- **token hygiene**: write-only publisher トークンは `curl -K` config file 経由で渡され
-  （argv には出ません）、subshell 内でのみ source するため claude の環境にも入りません。env
-  ファイルは owner-only（0600/0400）でなければ fail-open します（`ntfy-notify.sh` と同じガード）。
-- **fail-open**: publish の失敗は log に残すだけで、実行や同日 stamp を中断しません（stamp は
-  ブリーフ成功時、配信の前に書かれます）。
+- **レンダリング**: `render_brief_html` が `~/dotfiles/.kryota-dev/morning-brief/<date>.html` を
+  pandoc（`-f markdown-raw_html`。未信頼のブリーフ内容中の **raw HTML をエスケープ**し —— GitHub
+  タイトル由来の `<script>` がページ上で実行されない —— GFM テーブルは保持）または self-contained
+  でモバイル可読な `<pre>` フォールバックで生成します。headless の claude セッションには `Artifact`
+  ツールを**付与しません**。
+- **serve**: loopback の **nginx sidecar**（`compose.yaml` の `brief-page` サービス）が brief dir を
+  `ntfy_brief_port` で配信し、tailnet 側は `tailscale serve --https 8443` の**ポートプロキシ**が front
+  します —— macOS の standalone/App 版 Tailscale は**ポートは proxy できてもファイル/ディレクトリは
+  serve できない**ためです。専用 HTTPS ポートで ntfy root（443）と独立。tailnet-only、`funnel` は
+  使いません。`NTFY_BRIEF_BASE_URL`（`https://<magicdns>:8443`）はプロビジョニング時に導出され
+  notify-env に書かれ、wrapper が `/<date>.html` を付加します。
+- **通知**: 成功時、wrapper は `claude-brief` へ `HEADLINE` とページ URL を `click` として publish
+  します。エラー経路（claude 不在 / timeout / 非 0 exit / ブリーフファイル欠落）は `claude-attention`
+  へ高 priority で publish。publisher トークンは `curl -K` config file 経由（argv には出ず）、subshell
+  内でのみ source。env ファイルは owner-only（0600/0400）でなければ fail-open します。
+- **fail-open / 縮退**: publish の失敗は log に残すだけで、実行や同日 stamp を中断しません（stamp は
+  ブリーフ成功時、配信の前に書かれます）。render やベース URL が使えない場合でも通知は `HEADLINE` を
+  届けます（リンクなし）。
 
 既存トピック（`claude-attention`/`claude-done`）も `markdown: true` で publish するようになり、
-本文が web app でレンダリングされます。
+本文が ntfy web app でレンダリングされます。
 
 Smoke test（オンデマンドでブリーフを publish）:
 
 ```bash
-~/.claude/morning-radar.sh --force   # 課金される実行 1 回。claude-brief へ publish
-# subscribe 済みデバイスで claude-brief トピックを開いてブリーフを読む。
-tailscale funnel status              # 期待: 何も serve していない（tailnet-only）
+~/.claude/morning-radar.sh --force   # 課金される実行 1 回。claude-brief にリンク付きで通知
+# tailnet デバイスで通知のリンクを開く（または）:
+BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8443"
+curl -sI "$BASE/$(date +%F).html" | head -1   # 期待: HTTP/… 200
+tailscale funnel status                        # 期待: 何も serve していない（tailnet-only）
 ```
 
 ## セットアップ手順（初回のみ）

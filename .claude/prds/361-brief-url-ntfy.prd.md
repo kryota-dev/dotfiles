@@ -28,21 +28,19 @@ spike も**スコープ外**（配信手段として使わないため検証不�
 
 # Acceptance Criteria
 
-- **AC-001**: 平日朝の成功実行が、**モバイルから読める tailnet ntfy メッセージ**として brief を
-  配信する（`claude-brief` topic、`markdown: true`、本文＝brief 全文。ntfy web app が Markdown を
-  レンダリング、モバイルアプリは raw Markdown 表示）。通知を開けば brief 全文が読める。brief 内容は
-  tailnet 外へ出ない。〔改訂: 当初は tailscale serve 静的ページ = URL 配信だったが、macOS の
-  standalone/App 版 tailscale がディレクトリ配信不可（ポートのみ）とレビューで判明し、ntfy
-  メッセージ配信へ pivot（下記 decision log 参照）。〕
+- **AC-001**: 平日朝の成功実行が、**モバイルから到達可能な tailnet URL**（`https://<magicdns>:8443/<date>.html`）
+  を `click` に持つ ntfy 通知（`claude-brief` topic）を配信する。通知タップでモバイルブラウザが brief の
+  HTML ページをネイティブレンダリングする。brief 内容は tailnet 外へ出ない。〔改訂 2 段階（decision log
+  参照）: tailscale serve ディレクトリ配信（macOS 不可）→ ntfy メッセージ（モバイル未レンダリング）→
+  **静的サーバー sidecar を port-proxy した HTML ページ配信**に確定。〕
 - **AC-002**: `executable_morning-radar.sh` に **osascript 通知経路が一切残らない**（成功・
   各エラー経路すべて）。`osascript` / `display notification` の文字列が wrapper に存在しない
   ことを bats で検証する。
 - **AC-003**: 通知配信は **fail-open**。ntfy サーバー / tailscale serve が不達でも wrapper は
   クラッシュせず、失敗を log に残す（既存 ntfy-notify.sh と同じ許容度）。同日 guard の
   `last-run` stamp は「成功時のみ」書く既存挙動を壊さない。
-- **AC-004**: brief は 1 通の Markdown メッセージ（title=HEADLINE、body=brief 全文）として配信する。
-  message-size-limit を引き上げ、上限超過による添付ファイル化を避ける。〔改訂: 旧「URL 縮退」は
-  ntfy メッセージ配信への pivot で不要になった。配信失敗時の挙動は AC-003 の fail-open が担保する。〕
+- **AC-004**: **graceful degradation** — HTML render 失敗またはベース URL 未設定（MagicDNS 導出不可）
+  の場合でも、ntfy 通知は少なくとも `HEADLINE` を届ける（`click` は付けられるときだけ付与）。
 - **AC-005**: エラー経路（claude 不在 / timeout / 非 0 exit / brief ファイル欠落）は ntfy の
   **attention 系 topic**（高 priority）で通知する。成功の brief 配信とは topic / priority で区別する。
 - **AC-006**: publisher token は **argv に露出しない**（`curl -K` config file 経由。既存
@@ -55,25 +53,36 @@ spike も**スコープ外**（配信手段として使わないため検証不�
 
 # Considered Alternatives / Rejection Rationale
 
-> **改訂（post-review pivot, #379 レビュー）**: 当初 tailscale serve 静的ページ（URL 配信）を採用し
-> 実装したが、multi-review で codex が「macOS の standalone/App 版 tailscale はディレクトリ/ファイルを
-> serve できない（ポートのみ）」と指摘。一次ソース（[Tailscale Serve KB 1242](https://tailscale.com/kb/1242/tailscale-serve)）で
-> 確定し、当マシンが system-extension 版であることも確認。→ **tailscale serve 静的ページを却下し、
-> 下記「ntfy message body(markdown)」を採用**（当初 sidecar port-proxy 案も検討したが、user が最も
-> シンプルな ntfy メッセージ配信を選択）。これにより pandoc raw-HTML XSS リスクも同時に消滅した。
+> **改訂（post-review pivot, #379 レビュー — 2 段階）**:
+> 1. 当初 **tailscale serve 静的ページ（ディレクトリ serve）** を採用・実装したが、multi-review で
+>    codex が「macOS の standalone/App 版 tailscale はディレクトリ/ファイルを serve できない（ポート
+>    のみ）」と指摘。一次ソース（[Tailscale Serve KB 1242](https://tailscale.com/kb/1242/tailscale-serve)）
+>    で確定（当マシンが system-extension 版）。→ ディレクトリ serve を却下。
+> 2. 次に **ntfy message body(markdown)** に一旦 pivot したが、一次ソース（docs.ntfy.sh: Markdown は
+>    "web app only for now"、リリースノートにもモバイルアプリの Markdown レンダリング追加なし）で
+>    **iOS/Android アプリは Markdown 非レンダリング = モバイル UX 不良**と判明。→ message 案も却下。
+> 3. **最終採用: 静的サーバー sidecar を port-proxy した HTML ページ配信**（下記）。loopback の
+>    nginx sidecar を `tailscale serve --https`（ポートプロキシ = macOS でも動作）で front し、通知の
+>    click でモバイルブラウザが HTML をネイティブレンダリング。pandoc は `-f markdown-raw_html` で
+>    raw HTML をエスケープし XSS を封じる。
 
 - **[却下] Artifact(claude.ai) を primary 配信**（Issue #361 原案）: brief 内容が tailnet 外の
   第三者クラウドへ出る。Artifact tool 仕様上「削除してもキャッシュ/インデックスされうる」。
   既存 ntfy の tailnet-only posture・client 固有名を publish しないポリシーと衝突。**user が
   tailnet-only 維持を選択**したため却下。付随して headless Artifact spike も不要（AC-001 で担保する
   配信手段に Artifact を使わない）。
-- **[採用（post-review pivot）] brief を ntfy message body(markdown) で配信**: brief 全文を
-  `markdown: true` の 1 メッセージ本文として publish。web app が Markdown をレンダリング（モバイル
-  アプリは raw Markdown 表示だが可読）。`message-size-limit` を 32KB に引き上げ 4KB 超の添付化を回避。
-  serve マウント・HTML 生成・URL・pandoc をすべて排し最もシンプル。tailnet-only を維持し、
-  brief は ntfy の cache.db（既存の 168h plaintext residency、#337 で承認済み）に載る。当初は
-  「URL でない/168h で消える」を理由に却下候補としたが、macOS serve 制約の判明で URL 前提が崩れ、
-  user 判断で本案を採用した。
+- **[却下（一旦採用→撤回）] brief を ntfy message body(markdown) で配信**: serve/HTML/URL を排せる
+  最もシンプルな案として一旦採用したが、一次ソース（docs.ntfy.sh「Markdown は web app only for now」、
+  リリースノートにモバイルアプリの Markdown 対応追加なし）で **iOS/Android アプリは Markdown を
+  レンダリングせず raw 表示**と判明。モバイルで読む前提だと UX 不良のため撤回。
+- **[採用（最終）] 静的サーバー sidecar を port-proxy した HTML ページ配信**: loopback の nginx
+  sidecar（ntfy compose に `brief-page` サービス追加、brief dir を read-only mount）を
+  `tailscale serve --https 8443`（**ポートプロキシは macOS でも動作**）で front。通知 click →
+  `https://<magicdns>:8443/<date>.html` → モバイルブラウザが HTML をネイティブレンダリング（ntfy
+  認証不要）。pandoc `-f markdown-raw_html` で未信頼 brief 内容の raw HTML をエスケープし XSS を封じる
+  （fallback は `<pre>` エスケープ）。専用 HTTPS ポートで serve の path-strip 曖昧性を回避（ntfy root
+  443 と独立）。Docker は ntfy で既に必須なので追加インフラは container 1 つのみ。nginx image は
+  Renovate regex manager で pin。
 - **[却下候補/要確認] brief を ntfy attachment で配信**: 既存 serve マッピング（ntfy root）を
   そのまま再利用でき `https://<magicdns>/file/…` が得られる利点。ただし server.yml に
   `attachment-cache-dir` 追加（現在未設定＝添付無効）＋ cache disk 常駐が増える。HTML 添付の
