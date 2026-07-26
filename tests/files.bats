@@ -126,6 +126,48 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "ntfy-dashboard launchd agent source files exist" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_config/ntfy-dashboard/server.ts" ]
+  [ -f "${HOME_DIR}/dot_config/ntfy-dashboard/server_test.ts" ]
+}
+
+@test "ntfy-dashboard plist runs at load and stays alive (unlike morning-radar)" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl"
+  # This is the repo's first persistent LaunchAgent (#371): unlike morning-radar,
+  # RunAtLoad + KeepAlive must both be present so the dashboard is reachable at
+  # any time, not just at a scheduled fire.
+  grep -q '<key>RunAtLoad</key>' "$plist"
+  grep -q '<key>KeepAlive</key>' "$plist"
+  # Never a scheduled one-shot job.
+  run grep -q '<key>StartCalendarInterval</key>' "$plist"
+  [ "$status" -ne 0 ]
+}
+
+@test "ntfy-dashboard plist scopes Deno permission flags (no --allow-all)" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl"
+  grep -q -- '--allow-net=' "$plist"
+  grep -q -- '--allow-run=' "$plist"
+  grep -q -- '--allow-read=' "$plist"
+  run grep -qE -- '--allow-all|-A\b|--allow-run=claude<' "$plist"
+  [ "$status" -ne 0 ]
+  # --allow-run must be scoped to a path ending in /claude, not the bare
+  # command name (which would need PATH resolution the unattended daemon
+  # should not rely on). The value is a chezmoi template expression here
+  # ({{ .chezmoi.homeDir }}/.../claude), not yet a literal absolute path.
+  grep -qE -- '--allow-run=.+/claude<' "$plist"
+}
+
+@test "ntfy-dashboard plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed -E 's|\{\{[^}]*\.ntfy_dashboard\.([a-z_]+)[^}]*\}\}|1|g; s|\{\{[^}]*\.ntfy\.port[^}]*\}\}|1|g; s|\{\{ \.chezmoi\.homeDir \}\}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
 @test "launcher dir reaches interactive (precmd+sync) and login (zprofile) shells (#345)" {
   local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
   local zprofile="${HOME_DIR}/dot_zprofile.tmpl"
@@ -222,12 +264,20 @@ load helpers/setup
 
 @test "launchd registration script embeds the plist hash and guards CI" {
   local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
-  # Re-registration is keyed to the plist content (embedded-hash trick).
+  # Re-registration is keyed to each plist's own content (embedded-hash trick,
+  # one per agent so each is tracked independently, #371).
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl" | sha256sum }}' "$script"
   # CI runners have no gui launchd domain; the script must self-skip there.
   grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
   # Template-stripped body must be valid bash (same strip trick as make lint).
   bash -n <(sed '/{{/d' "$script")
+}
+
+@test "launchd registration script registers both LaunchAgents" {
+  local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
+  grep -qF '"dev.kryota.morning-radar"' "$script"
+  grep -qF '"dev.kryota.ntfy-dashboard"' "$script"
 }
 
 @test "prerequisites installs Rosetta 2 behind an arm64 guard" {
