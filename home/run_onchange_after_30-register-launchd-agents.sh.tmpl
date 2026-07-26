@@ -1,10 +1,11 @@
 {{ if eq .chezmoi.os "darwin" -}}
 #!/bin/bash
-# Register repo-managed launchd LaunchAgents (kryota-dev/dotfiles#257).
-# Re-runs whenever a managed plist changes (embedded hash below). Wrapper
+# Register repo-managed launchd LaunchAgents (kryota-dev/dotfiles#257, #368).
+# Re-runs whenever any managed plist changes (embedded hashes below). Wrapper
 # script changes need no re-registration: launchd execs the file fresh on
 # every fire.
 # dev.kryota.morning-radar plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}
+# dev.kryota.knowledge-distill plist hash: {{ include "Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" | sha256sum }}
 set -euo pipefail
 
 # CI runners have no gui launchd domain, so bootstrap can never succeed there.
@@ -16,15 +17,21 @@ if [ -n "${CI:-}" ]; then
   exit 0
 fi
 
-plist="$HOME/Library/LaunchAgents/dev.kryota.morning-radar.plist"
-label="dev.kryota.morning-radar"
 domain="gui/$(id -u)"
+labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill)
 
-echo "[launchd-agents] registering ${label}..."
-launchctl bootout "${domain}/${label}" 2>/dev/null || true
-if ! launchctl bootstrap "${domain}" "${plist}"; then
-  echo "[launchd-agents] bootstrap failed (no GUI session?). Re-run 'chezmoi apply' from a GUI terminal." >&2
-  exit 1
-fi
-echo "[launchd-agents] ${label} registered."
+status=0
+for label in "${labels[@]}"; do
+  plist="$HOME/Library/LaunchAgents/${label}.plist"
+  echo "[launchd-agents] registering ${label}..."
+  launchctl bootout "${domain}/${label}" 2>/dev/null || true
+  if ! launchctl bootstrap "${domain}" "${plist}"; then
+    echo "[launchd-agents] bootstrap failed for ${label} (no GUI session?). Re-run 'chezmoi apply' from a GUI terminal." >&2
+    status=1
+    continue
+  fi
+  echo "[launchd-agents] ${label} registered."
+done
+
+exit "$status"
 {{ end -}}
