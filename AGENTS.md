@@ -9,14 +9,17 @@ The chezmoi source directory is `home/` (configured via `.chezmoiroot`).
 
 ## Language policy
 
-All written artifacts in this repository must be in English:
-- Commit messages
-- Pull request titles and descriptions
+Written artifacts in this repository follow one of two rules:
+
+**English required:**
 - Code review comments
 - Documentation and markdown files
 
-Exceptions — the following must be written in Japanese:
-- Agent skill files (`SKILL.md`) and their script comments
+**Japanese required:**
+- Commit messages — Conventional Commits with an English `type(scope):` prefix and a Japanese subject/body, e.g. `feat(ntfy): 認証を自動プロビジョニングする` (matches the existing `commit` / `sdd` skill defaults)
+- Pull request titles and descriptions
+- GitHub Issue titles and bodies
+- Agent skill files (`SKILL.md`) and their script comments — except `agent-browser`, which stays English: it is an upstream-synced discovery stub whose specialized skills are fetched live via `agent-browser skills get <name>` rather than vendored (see `home/AGENTS.md.tmpl:19`)
 - Agent definition files (`home/dot_claude/agents/*.md`) — their system prompts steer Japanese-speaking review output
 - The Fable 5 orchestrator system prompt (`home/dot_claude/fable-orchestrator-prompt.md`) — appended to Fable 5 sessions launched via `cldf` / `cldf-r06`, so it must steer Japanese-speaking session output
 - The global agent instructions deployed from this repo (`home/AGENTS.md.tmpl`, `home/dot_claude/CLAUDE.md`, `home/.chezmoitemplates/coding-standards.md`)
