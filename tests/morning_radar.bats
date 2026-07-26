@@ -167,6 +167,53 @@ EOF
   grep -qF 'white-space:pre-wrap' "$html"
 }
 
+@test "render_brief_html closes the raw_attribute bypass (script stays inert)" {
+  command -v pandoc >/dev/null 2>&1 || skip "pandoc not on PATH"
+  local md="${BATS_TEST_TMPDIR}/rawattr.md" html="${BATS_TEST_TMPDIR}/rawattr.html"
+  printf '%s\n' '# Brief' '' '`<script>alert(1)</script>`{=html}' >"$md"
+  run_fn render_brief_html "$md" "$html" "Morning brief — test"
+  [ "$status" -eq 0 ]
+  [ -s "$html" ]
+  # raw_attribute ({=html}) is a separate pandoc extension from raw_html and
+  # bypasses it unless also disabled -- verify no live <script> tag survives.
+  ! grep -qF '<script>' "$html"
+}
+
+@test "render_brief_html leaves a bare javascript: URI as inert plain text" {
+  command -v pandoc >/dev/null 2>&1 || skip "pandoc not on PATH"
+  local md="${BATS_TEST_TMPDIR}/jsuri.md" html="${BATS_TEST_TMPDIR}/jsuri.html"
+  printf '%s\n' '# Brief' '' '- P1: javascript:alert(1) bare' >"$md"
+  run_fn render_brief_html "$md" "$html" "Morning brief — test"
+  [ "$status" -eq 0 ]
+  # autolink_bare_uris is deliberately not enabled: a dangerous scheme must
+  # never become a clickable <a href>.
+  ! grep -qF '<a href="javascript' "$html"
+  grep -qF 'javascript:alert(1) bare' "$html"
+}
+
+@test "render_brief_html preserves literal --flags and straight quotes (smart disabled)" {
+  command -v pandoc >/dev/null 2>&1 || skip "pandoc not on PATH"
+  local md="${BATS_TEST_TMPDIR}/flags.md" html="${BATS_TEST_TMPDIR}/flags.html"
+  printf '%s\n' '# Brief' '' 'run --apply now, not "later"' >"$md"
+  run_fn render_brief_html "$md" "$html" "Morning brief — test"
+  [ "$status" -eq 0 ]
+  grep -qF -- '--apply' "$html"
+  ! grep -qF '–apply' "$html"
+}
+
+@test "render_brief_html renders a GFM pipe table and drops the duplicate leading H1" {
+  command -v pandoc >/dev/null 2>&1 || skip "pandoc not on PATH"
+  local md="${BATS_TEST_TMPDIR}/table.md" html="${BATS_TEST_TMPDIR}/table.html"
+  printf '%s\n' '# Brief' '' '| 時刻 | 件名 |' '|---|---|' '| 09:00 | 会議 |' >"$md"
+  run_fn render_brief_html "$md" "$html" "Morning brief — test"
+  [ "$status" -eq 0 ]
+  grep -qF '<table>' "$html"
+  # brief_page_shell supplies its own masthead <h1>; pandoc's document h1 for
+  # the dropped leading "# Brief" line must not also appear.
+  [ "$(grep -c '<h1' "$html")" -eq 1 ]
+  grep -qF 'class="masthead"' "$html"
+}
+
 # --- main() integration (Darwin-only; the wrapper's uname guard exits early) --
 
 @test "main(): success writes the last-run stamp and publishes with a click URL (AC-003)" {
