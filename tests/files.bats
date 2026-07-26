@@ -126,6 +126,20 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "launcher wrappers and account symlinks exist with the expected shape (#345)" {
+  local ldir="${HOME_DIR}/dot_local/launchers"
+  [ -f "${ldir}/executable_claude" ]
+  [ -f "${ldir}/executable_codex" ]
+  bash -n "${ldir}/executable_claude"
+  bash -n "${ldir}/executable_codex"
+  # chezmoi symlink_ sources: the file content is the (relative) symlink target, so bare `claude`
+  # / `codex` and the -r06 / short names all resolve to the two dispatch-on-$0 wrappers.
+  [ "$(cat "${ldir}/symlink_cld")" = "claude" ]
+  [ "$(cat "${ldir}/symlink_cld-r06")" = "claude" ]
+  [ "$(cat "${ldir}/symlink_cdx")" = "codex" ]
+  [ "$(cat "${ldir}/symlink_cdx-r06")" = "codex" ]
+}
+
 @test "morning-radar wrapper keeps the explicit permission allowlist" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   bash -n "$wrapper"
@@ -144,38 +158,27 @@ load helpers/setup
   grep -q 'on run argv' "$wrapper"
 }
 
-@test "morning-radar wrapper points CLV2 state at the dir _claude_with_home derives (#336)" {
-  # The wrapper duplicates this value by hand ("Keep in sync with _claude_with_home"), so a
-  # revert to <account>/ecc-homunculus here alone would silently reintroduce #336 for the
-  # launchd brief: Claude Code treats the config dir as sensitive, and a headless session has
-  # nobody to approve the instinct write. Derive the expectation from the zsh helper instead of
-  # repeating the literal, so the two can only ever drift together.
-  command -v zsh >/dev/null || skip "zsh not available"
+@test "morning-radar delegates account env to the claude wrapper instead of hand-copying it (#336, #345)" {
+  # The per-account isolation env — including the #336-critical CLV2_HOMUNCULUS_DIR that must sit
+  # OUTSIDE the config dir (Claude Code treats paths under it as sensitive files that no headless
+  # session can approve a write to) — now lives solely in the claude launcher wrapper, which the
+  # brief reaches through PATH. The brief must NOT re-copy those assignments, or the copy could
+  # drift (the exact failure #341 hit). The wrapper's own #336 guarantee is pinned in
+  # zsh_aliases.bats; here we pin that the brief delegates instead of duplicating.
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
-  local vals
-  vals=$(zsh -fc "
-    export HOME='$BATS_TEST_TMPDIR'
-    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
-    claude() { print -r -- \"\$CLV2_HOMUNCULUS_DIR|\$OBSERVER_ACTIVE_HOURS_START|\$OBSERVER_ACTIVE_HOURS_END|\$ECC_OBSERVER_MAX_TURNS\"; }
-    _claude_with_home \"\$HOME/.claude\"
-  ")
-  [ -n "$vals" ]
-  local dir start end turns
-  dir=$(printf '%s' "$vals" | cut -d'|' -f1)
-  start=$(printf '%s' "$vals" | cut -d'|' -f2)
-  end=$(printf '%s' "$vals" | cut -d'|' -f3)
-  turns=$(printf '%s' "$vals" | cut -d'|' -f4)
-  # The wrapper keeps $HOME unexpanded, so compare on the $HOME-relative tail.
-  grep -qF "CLV2_HOMUNCULUS_DIR=\"\$HOME${dir#"$BATS_TEST_TMPDIR"}\"" "$wrapper"
-  run grep -qF '.claude/ecc-homunculus' "$wrapper"
+  # No per-account env assignments (comments naming the vars are fine; assignments are not).
+  run grep -qE 'CLV2_HOMUNCULUS_DIR=|ECC_AGENT_DATA_HOME=|GATEGUARD_STATE_DIR=|ECC_MCP_HEALTH_STATE_PATH=' "$wrapper"
   [ "$status" -ne 0 ]
-  # The observer knobs have to be mirrored too, not just the storage path: this session
-  # lazy-starts an observer that inherits its environment for the whole process lifetime, so a
-  # wrapper missing these would run the brief's observer on the upstream clock gate and turn
-  # floor. Derived from the helper as well, so changing a default in claude.zsh forces it here.
-  grep -qF "OBSERVER_ACTIVE_HOURS_START=\"\${OBSERVER_ACTIVE_HOURS_START:-${start}}\"" "$wrapper"
-  grep -qF "OBSERVER_ACTIVE_HOURS_END=\"\${OBSERVER_ACTIVE_HOURS_END:-${end}}\"" "$wrapper"
-  grep -qF "ECC_OBSERVER_MAX_TURNS=\"\${ECC_OBSERVER_MAX_TURNS:-${turns}}\"" "$wrapper"
+  run grep -q 'ecc-homunculus' "$wrapper"
+  [ "$status" -ne 0 ]
+  # It reaches the wrapper by putting the launcher dir first on its hand-built launchd PATH,
+  # pins the personal account (the wrapper keeps an explicit CLAUDE_CONFIG_DIR via fill-gaps),
+  # and opts out of web search by exporting empty MCP keys (the wrapper's +x guard then skips
+  # sourcing the keys file), preserving the prior "brief needs no web-search keys" behavior.
+  grep -qF '$HOME/.local/launchers:' "$wrapper"
+  grep -qF 'CLAUDE_CONFIG_DIR="$HOME/.claude"' "$wrapper"
+  grep -qF 'EXA_API_KEY=""' "$wrapper"
+  grep -qF 'FIRECRAWL_API_KEY=""' "$wrapper"
 }
 
 @test "morning-radar wrapper does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
@@ -1123,21 +1126,27 @@ FAKE
   grep -q 'onepasswordRead' "$tmpl"
   grep -qE 'EXA_API_KEY=.*onepasswordRead' "$tmpl"
   grep -qE 'FIRECRAWL_API_KEY=.*onepasswordRead' "$tmpl"
-  # Not exported in the secrets file (scoping is done by _claude_with_home).
+  # Not exported in the secrets file (scoping is done by the claude wrapper when it sources this).
   ! grep -qE '^export ' "$tmpl"
 }
 
-@test "claude.zsh sources the MCP secrets and scopes the keys to the claude subprocess" {
+@test "the claude wrapper sources the MCP secrets and scopes them to its own process (#345)" {
+  # Secret injection moved out of claude.zsh into the wrapper, so it applies from any shell, not
+  # only interactive zsh. The wrapper sources the 0600 file only when the caller has not already
+  # decided the key (the ${VAR+x} guard, which lets morning-radar opt out), then exports both keys
+  # with :- defaults scoped to its own process.
+  local w="${HOME_DIR}/dot_local/launchers/executable_claude"
+  grep -qF 'claude-secrets.zsh' "$w"
+  grep -qF '${EXA_API_KEY+x}' "$w"
+  grep -qF 'export EXA_API_KEY="${EXA_API_KEY:-}"' "$w"
+  grep -qF 'export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"' "$w"
+  # claude.zsh must no longer source secrets — the wrapper is the single source of truth.
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
-  # Sourced only when present, so a machine without the 1Password items still works.
-  grep -qF 'claude-secrets.zsh' "$zsh"
-  grep -qE '\[\[ -r .* \]\] && source' "$zsh"
-  # _claude_with_home re-exports both keys (with :- defaults) into the launched command's env.
-  grep -qE 'EXA_API_KEY="\$\{EXA_API_KEY:-\}"' "$zsh"
-  grep -qE 'FIRECRAWL_API_KEY="\$\{FIRECRAWL_API_KEY:-\}"' "$zsh"
+  run grep -qE '&& source' "$zsh"
+  [ "$status" -ne 0 ]
 }
 
-@test "claude.zsh injects MCP keys into the subprocess but not the parent shell" {
+@test "claude.zsh no longer pulls the MCP keys into the shell env (#345)" {
   command -v zsh >/dev/null || skip "zsh not available"
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
   local tmp
@@ -1149,30 +1158,25 @@ EXA_API_KEY='exa-test-key'
 FIRECRAWL_API_KEY='fc-test-key'
 SECRETS
 
-  # -f: no rc files. Source claude.zsh, then check (a) the keys do NOT leak into the parent
-  # shell's exported env, and (b) they DO reach a subprocess launched via _claude_with_home.
-  # Isolate from wrapper-inherited MCP keys (#269) — the regression guard below still fires if claude.zsh leaks.
+  # -f: no rc files. Sourcing claude.zsh must NOT read or export the keys — the wrapper (a
+  # separate process, exercised in zsh_aliases.bats) is the only place they are ever read now, so
+  # they never enter the interactive shell's environment. Isolate from any inherited keys (#269).
   run env -u EXA_API_KEY -u FIRECRAWL_API_KEY zsh -fc "
     export HOME='$tmp'
     source '$zsh'
     printf 'PARENT_EXA=[%s]\n' \"\$(printenv EXA_API_KEY)\"
     printf 'PARENT_FC=[%s]\n' \"\$(printenv FIRECRAWL_API_KEY)\"
-    printf 'SUB_EXA=[%s]\n' \"\$(_claude_with_home '$tmp' printenv EXA_API_KEY)\"
-    printf 'SUB_FC=[%s]\n' \"\$(_claude_with_home '$tmp' printenv FIRECRAWL_API_KEY)\"
   "
   [ "$status" -eq 0 ]
-  # Non-exported in the parent: printenv finds nothing.
   echo "$output" | grep -qF 'PARENT_EXA=[]'
   echo "$output" | grep -qF 'PARENT_FC=[]'
-  # Exported (scoped) into the subprocess: the values come through.
-  echo "$output" | grep -qF 'SUB_EXA=[exa-test-key]'
-  echo "$output" | grep -qF 'SUB_FC=[fc-test-key]'
 }
 
 @test "claude.zsh does not carry a dead ECC_DISABLED_HOOKS alias-level default (#280)" {
   # settings.json's env block is the effective SSOT for ECC_DISABLED_HOOKS (Claude Code
   # applies it with precedence over shell-inherited env vars), so a "${ECC_DISABLED_HOOKS:-...}"
-  # default in _claude_with_home would be dead code that never actually takes effect.
+  # default in claude.zsh or the claude wrapper's env injection would be dead code that never
+  # actually takes effect.
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
   [ -f "$zsh" ]
   run grep -qF 'ECC_DISABLED_HOOKS="${ECC_DISABLED_HOOKS:-' "$zsh"
