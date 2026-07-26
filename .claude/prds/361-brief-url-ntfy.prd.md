@@ -28,43 +28,62 @@ spike も**スコープ外**（配信手段として使わないため検証不�
 
 # Acceptance Criteria
 
-- **AC-001**: 平日朝の成功実行が、**モバイルから到達可能な tailnet URL**（`https://<magicdns>/…`）
-  を含む ntfy 通知を配信する。通知タップで brief 全文が読める。brief 内容は tailnet 外へ出ない。
+- **AC-001**: 平日朝の成功実行が、**モバイルから読める tailnet ntfy メッセージ**として brief を
+  配信する（`claude-brief` topic、`markdown: true`、本文＝brief 全文。ntfy web app が Markdown を
+  レンダリング、モバイルアプリは raw Markdown 表示）。通知を開けば brief 全文が読める。brief 内容は
+  tailnet 外へ出ない。〔改訂: 当初は tailscale serve 静的ページ = URL 配信だったが、macOS の
+  standalone/App 版 tailscale がディレクトリ配信不可（ポートのみ）とレビューで判明し、ntfy
+  メッセージ配信へ pivot（下記 decision log 参照）。〕
 - **AC-002**: `executable_morning-radar.sh` に **osascript 通知経路が一切残らない**（成功・
   各エラー経路すべて）。`osascript` / `display notification` の文字列が wrapper に存在しない
   ことを bats で検証する。
 - **AC-003**: 通知配信は **fail-open**。ntfy サーバー / tailscale serve が不達でも wrapper は
   クラッシュせず、失敗を log に残す（既存 ntfy-notify.sh と同じ許容度）。同日 guard の
   `last-run` stamp は「成功時のみ」書く既存挙動を壊さない。
-- **AC-004**: **graceful degradation** — brief ページ URL が用意できない場合でも、ntfy 通知は
-  少なくとも `HEADLINE`（既存の 1 行サマリー）を届ける（URL は click として付けられるときだけ付与）。
+- **AC-004**: brief は 1 通の Markdown メッセージ（title=HEADLINE、body=brief 全文）として配信する。
+  message-size-limit を引き上げ、上限超過による添付ファイル化を避ける。〔改訂: 旧「URL 縮退」は
+  ntfy メッセージ配信への pivot で不要になった。配信失敗時の挙動は AC-003 の fail-open が担保する。〕
 - **AC-005**: エラー経路（claude 不在 / timeout / 非 0 exit / brief ファイル欠落）は ntfy の
   **attention 系 topic**（高 priority）で通知する。成功の brief 配信とは topic / priority で区別する。
 - **AC-006**: publisher token は **argv に露出しない**（`curl -K` config file 経由。既存
   ntfy-notify.sh と同じ hygiene）。bats で argv 非露出を検証する。
-- **AC-007**: 新規 serve マウント / topic / runtime state は既存 ntfy の provisioning・serve
-  マッピング（443 root = ntfy）と**衝突しない**。`tailscale funnel` は使わない（tailnet-only 維持）。
+- **AC-007**: 新規 topic / runtime state（notify-env）は既存 ntfy の provisioning と**衝突しない**。
+  serve マッピングは変更しない（tailscale serve は既存の ntfy root proxy のみ）。`tailscale funnel`
+  は使わない（tailnet-only 維持）。既存インストールの upgrade でも notify-env に新 topic が反映される。
 - **AC-008**: 変更で追加/改名した chezmoi 管理ファイルは `tests/files.bats` に宣言し、
   `make lint` / `make test` が green。docs（notifications.md ＋ `.ja.md`）に brief 配信経路を追記。
 
 # Considered Alternatives / Rejection Rationale
+
+> **改訂（post-review pivot, #379 レビュー）**: 当初 tailscale serve 静的ページ（URL 配信）を採用し
+> 実装したが、multi-review で codex が「macOS の standalone/App 版 tailscale はディレクトリ/ファイルを
+> serve できない（ポートのみ）」と指摘。一次ソース（[Tailscale Serve KB 1242](https://tailscale.com/kb/1242/tailscale-serve)）で
+> 確定し、当マシンが system-extension 版であることも確認。→ **tailscale serve 静的ページを却下し、
+> 下記「ntfy message body(markdown)」を採用**（当初 sidecar port-proxy 案も検討したが、user が最も
+> シンプルな ntfy メッセージ配信を選択）。これにより pandoc raw-HTML XSS リスクも同時に消滅した。
 
 - **[却下] Artifact(claude.ai) を primary 配信**（Issue #361 原案）: brief 内容が tailnet 外の
   第三者クラウドへ出る。Artifact tool 仕様上「削除してもキャッシュ/インデックスされうる」。
   既存 ntfy の tailnet-only posture・client 固有名を publish しないポリシーと衝突。**user が
   tailnet-only 維持を選択**したため却下。付随して headless Artifact spike も不要（AC-001 で担保する
   配信手段に Artifact を使わない）。
-- **[却下候補/要確認] brief を ntfy message body(markdown) で配信**: ntfy app の markdown 描画に
-  依存。default `message-size-limit`(4KB) を brief が超えうる。durable な URL にならない
-  （履歴 168h で消える）。→ 「URL 配信」という AC-001 の要件に対し弱い。**推奨: 却下**。
+- **[採用（post-review pivot）] brief を ntfy message body(markdown) で配信**: brief 全文を
+  `markdown: true` の 1 メッセージ本文として publish。web app が Markdown をレンダリング（モバイル
+  アプリは raw Markdown 表示だが可読）。`message-size-limit` を 32KB に引き上げ 4KB 超の添付化を回避。
+  serve マウント・HTML 生成・URL・pandoc をすべて排し最もシンプル。tailnet-only を維持し、
+  brief は ntfy の cache.db（既存の 168h plaintext residency、#337 で承認済み）に載る。当初は
+  「URL でない/168h で消える」を理由に却下候補としたが、macOS serve 制約の判明で URL 前提が崩れ、
+  user 判断で本案を採用した。
 - **[却下候補/要確認] brief を ntfy attachment で配信**: 既存 serve マッピング（ntfy root）を
   そのまま再利用でき `https://<magicdns>/file/…` が得られる利点。ただし server.yml に
   `attachment-cache-dir` 追加（現在未設定＝添付無効）＋ cache disk 常駐が増える。HTML 添付の
   in-app 描画挙動が不確実。→ 次善。**採用は sdd 設計で再評価**。
-- **[採用（推奨）] brief を `tailscale serve` の静的ページとして配信**（Issue #361 の fallback を
-  実質 primary 化）: 既存 tailscale（ntfy 用に稼働中）と MagicDNS 派生 helper（`ntfy_magicdns`）を
-  再利用。durable な tailnet URL。マウント衝突を避けるため **専用パス（`--set-path /brief`）or
-  専用ポート（例 `--https=8443`）**で ntfy root（443）と分離する（どちらにするかは Open Questions）。
+- **[却下（当初採用→撤回）] brief を `tailscale serve` の静的ページとして配信**: MagicDNS 由来の
+  durable な tailnet URL が得られる利点で当初採用・実装した。しかし **macOS の standalone/App 版
+  tailscale はディレクトリ/ファイルを serve できない**（KB 1242、当マシンが該当）ため `--set-path
+  /brief <dir>` が機能せず撤回。ポートプロキシする static server sidecar 案（compose にコンテナ追加）
+  も検討したが、user が ntfy メッセージ配信を選択したため不採用。付随して pandoc raw-HTML XSS
+  （`-f gfm` が `<script>` 素通し）と mount 失敗時の縮退不整合も pivot で解消された。
 - **[却下] 送信ロジックを ntfy-notify.sh から共有 helper へ即リファクタ**: 稼働中の hook wrapper を
   触るリスク＋スコープ拡大。house rule「重複が実在してから DRY 化」に反する先回り抽象化。
   → morning-radar 側に **self-contained な publish**（ntfy-notify.sh の token hygiene を踏襲）を

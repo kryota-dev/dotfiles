@@ -14,8 +14,8 @@ independent local-only notification paths are deliberately left untouched:
 `clv2-session-notify.sh` (SessionStart, instinct-cluster review nudge) and the
 `notify` zsh alias (audible chime, also reused by this system's wrapper as its
 failure alert sound). `morning-radar.sh` (launchd, weekday brief) used to notify
-via local `osascript`; it now publishes to ntfy and serves the brief page over
-the tailnet — see [Morning-brief delivery](#morning-brief-delivery-361) below.
+via local `osascript`; it now publishes the brief as a Markdown ntfy message —
+see [Morning-brief delivery](#morning-brief-delivery-361) below.
 
 ## Architecture
 
@@ -82,40 +82,41 @@ the 200-char window — general secret detection is explicitly out of scope.
 
 The weekday `morning-radar.sh` wrapper (launchd `dev.kryota.morning-radar`, #257)
 used to announce the brief with a local `osascript` notification that could not
-link to the document and never reached mobile. It now delivers over the same
-tailnet-only boundary as the rest of this system — **no brief content ever leaves
-the tailnet** (the Artifact/claude.ai path was considered and rejected; see the
-`.claude/prds/361-brief-url-ntfy.prd.md` decision log):
+carry the document and never reached mobile. It now delivers the brief as a
+**Markdown ntfy message** over the same tailnet-only boundary as the rest of this
+system — **no brief content ever leaves the tailnet**. Two alternatives were
+rejected (see the `.claude/prds/361-brief-url-ntfy.prd.md` decision log): an
+Artifact/claude.ai page (moves brief content to a third party), and a
+`tailscale serve` static page (the macOS standalone/App Tailscale variant can serve
+**ports but not files or directories**, so the directory mount would never work on
+this Mac).
 
-- **Serve mount**: `ntfy_assert_brief_serve` (in `~/.config/ntfy/lib.sh`, asserted
-  by both `run_onchange_after_31-setup-ntfy` and `ntfy-setup`) adds a second
-  `tailscale serve --bg --set-path /brief` handler that serves the brief directory
-  (`~/dotfiles/.kryota-dev/morning-brief/`) as static files. `tailscale serve`
-  path handlers are additive and independent, so `/brief` coexists with the root
-  `/` → ntfy proxy and neither re-assert clobbers the other. Still tailnet-only —
-  never `funnel`.
-- **URL**: the tailnet base URL (`https://<magicdns>/brief`) is derived at provision
-  time and written to `~/.config/ntfy/notify-env` as `NTFY_BRIEF_BASE_URL`; the
-  wrapper appends `/<date>.html`. The brief markdown is rendered to that HTML by the
-  wrapper (pandoc when available, else a self-contained mobile-readable `<pre>`
-  fallback) — the headless claude session is **not** granted the `Artifact` tool.
-- **Notification**: on success the wrapper publishes the 1-line `HEADLINE` to the
-  `claude-brief` topic with the page URL as the ntfy `click` action; error paths
-  (claude missing / timeout / non-zero exit / brief file missing) publish to
-  `claude-attention` at high priority with no link. The publisher token travels via
-  a `curl -K` config file (never argv), exactly as `ntfy-notify.sh` does.
-- **Fail-open / degradation**: any publish failure is logged and never aborts the
-  run or the same-day stamp; if the HTML render or the base URL is unavailable, the
-  notification still carries the `HEADLINE` (no click).
+- **Delivery**: on success the wrapper publishes to the `claude-brief` topic with
+  the 1-line `HEADLINE` as the notification title and the **full brief Markdown as
+  the message body** (`markdown: true`). Opening the notification shows the brief:
+  the ntfy **web app renders the Markdown**, while the iOS/Android apps currently
+  show it as raw (still readable) Markdown. Error paths (claude missing / timeout /
+  non-zero exit / brief file missing) publish to `claude-attention` at high priority.
+  The headless claude session is **not** granted the `Artifact` tool.
+- **Message size**: the brief is one message, so `server.yml` raises
+  `message-size-limit` to 32 KB — ntfy silently converts an over-limit message to a
+  downloadable attachment, which the apps do not render inline.
+- **Token hygiene**: the write-only publisher token travels via a `curl -K` config
+  file (never argv), sourced in a subshell so it never enters the claude env; the
+  env file must be owner-only (0600/0400) or delivery fails open (same guard as
+  `ntfy-notify.sh`).
+- **Fail-open**: any publish failure is logged and never aborts the run or the
+  same-day stamp (the stamp is written on brief success, before delivery).
 
-Smoke test (run the brief on demand and confirm the tailnet page + notification):
+Existing topics (`claude-attention`/`claude-done`) also now publish with
+`markdown: true`, so their bodies render in the web app too.
+
+Smoke test (publish the current brief on demand):
 
 ```bash
-~/.claude/morning-radar.sh --force          # one billed run; publishes to claude-brief
-# From a tailnet device, open the printed URL (or):
-BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//')"
-curl -sI "$BASE/brief/$(date +%F).html" | head -1   # expect: HTTP/… 200
-tailscale funnel status                              # expect: nothing served (tailnet-only)
+~/.claude/morning-radar.sh --force   # one billed run; publishes to claude-brief
+# On a subscribed device, open the claude-brief topic to read the brief.
+tailscale funnel status              # expect: nothing served (tailnet-only)
 ```
 
 ## Setup runbook (one-time)
