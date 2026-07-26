@@ -24,6 +24,9 @@ ntfy_topic_done="{{ .ntfy.topic_done }}"
 
 ntfy_compose_cfg="$HOME/.config/ntfy/compose.yaml"
 ntfy_env_file="$HOME/.config/ntfy/notify-env"
+# docker-compose .env (auto-loaded): carries NTFY_BASE_URL (the tailnet MagicDNS
+# URL), derived at start and never committed — runtime state like notify-env.
+ntfy_compose_env_file="$HOME/.config/ntfy/.env"
 ntfy_state_dir="$HOME/Library/Application Support/ntfy"
 ntfy_serve_target="http://127.0.0.1:${ntfy_port:-}"
 ntfy_op_item="Dotfiles - ntfy"
@@ -88,8 +91,33 @@ ntfy_magicdns() {
 
 # --- Server bring-up ---------------------------------------------------------
 
+# Write the docker-compose .env (0600 via umask) carrying NTFY_BASE_URL. ntfy
+# REQUIRES base-url whenever upstream-base-url (the iOS instant-push relay) is
+# set, and base-url is the tailnet MagicDNS URL — kept out of the repo, derived
+# here and written as runtime state that compose auto-loads.
+ntfy_write_compose_env() {
+  (
+    umask 077
+    printf 'NTFY_BASE_URL=%s\n' "$1" >"$ntfy_compose_env_file"
+  )
+}
+
 ntfy_start_server() {
   ntfy_ensure_state_dir
+  # base-url must be set (upstream-base-url is configured), and it is the tailnet
+  # MagicDNS URL, so the server cannot start until Tailscale is up. Derive it,
+  # write the compose .env, then start. Failing here is the correct two-phase
+  # behaviour: the caller (fail-open apply / fail-clear ntfy-setup) reports it.
+  local dns
+  dns="$(ntfy_magicdns || true)"
+  if [ -z "$dns" ]; then
+    ntfy_warn "cannot derive the tailnet MagicDNS name (is Tailscale up?); not starting ntfy — base-url is required."
+    return 1
+  fi
+  ntfy_write_compose_env "https://${dns}" || {
+    ntfy_warn "failed to write the compose .env (base-url)."
+    return 1
+  }
   docker compose -f "$ntfy_compose_cfg" up -d --remove-orphans
 }
 

@@ -14,6 +14,23 @@ services:
   ntfy:
     image: binwiederhier/ntfy:v2.26.3@sha256:081b53dbb20674fcfe05fdb4eb8af9036a2645ef979543d16f7f80803af467b1
     command: serve
+    environment:
+      # The `ntfy user`/`access`/`token` MANAGEMENT subcommands (run via
+      # `docker compose exec` from ~/.config/ntfy/lib.sh) do NOT read
+      # /etc/ntfy/server.yml — only `serve` does. They read the auth backend
+      # from these env vars, so provisioning / rotation fails with
+      # "auth-file not set" without them. Keep in sync with server.yml's
+      # auth-file / auth-default-access.
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      # ntfy REQUIRES base-url when upstream-base-url (the iOS instant-push
+      # relay) is set. base-url is the tailnet MagicDNS HTTPS URL, which must
+      # not be committed to this repo — the lib derives it at server start and
+      # writes it to ~/.config/ntfy/.env (runtime state, docker-compose auto-
+      # loads it). Empty until derived: on a fresh machine where Tailscale is
+      # not up yet, the server simply is not started (two-phase; ntfy-setup
+      # completes it).
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-}
     restart: unless-stopped
     ports:
       # Loopback-only on the host; tailnet exposure happens exclusively via

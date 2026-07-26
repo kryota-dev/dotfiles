@@ -1899,6 +1899,17 @@ _gate_decision() {
   # `tailscale serve`, never a direct bind.
   grep -qF '"127.0.0.1:{{ .ntfy.port }}:80"' "$c"
   ! grep -q '0\.0\.0\.0' "$c"
+  # The `ntfy user`/`access`/`token` management subcommands (run via
+  # `docker compose exec` from lib.sh) read the auth backend from env, NOT from
+  # the mounted server.yml — without these, provisioning fails "auth-file not
+  # set". Pin them so that regression can't return.
+  grep -qF 'NTFY_AUTH_FILE: /var/lib/ntfy/user.db' "$c"
+  grep -qF 'NTFY_AUTH_DEFAULT_ACCESS: deny-all' "$c"
+  # base-url is REQUIRED (upstream-base-url is set) and is the tailnet MagicDNS
+  # URL — injected at runtime via this env from ~/.config/ntfy/.env, never a
+  # repo literal. The value must stay an env reference, not a hardcoded URL.
+  grep -qF 'NTFY_BASE_URL: ${NTFY_BASE_URL:-}' "$c"
+  ! grep -qE 'NTFY_BASE_URL:.*https://' "$c"
 }
 
 @test "ntfy server config enforces deny-all auth and persistent cache" {
@@ -1976,6 +1987,12 @@ _gate_decision() {
   # op read failures must be distinguished from an empty value (a swallowed
   # error must not overwrite a real subscriber password → device lockout).
   grep -qF 'op error' "$l"
+  # base-url is required (upstream-base-url) and is the tailnet MagicDNS URL:
+  # derived at server start and written to the compose .env as runtime state,
+  # never a repo literal (no *.ts.net in the source).
+  grep -qF 'ntfy_write_compose_env' "$l"
+  grep -qF 'NTFY_BASE_URL' "$l"
+  ! grep -qE '\.ts\.net' "$l"
 }
 
 @test "ntfy-setup: deploys under ~/.local/bin, sources the lib, prompts before rotating, rotates" {
