@@ -437,7 +437,7 @@ Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headl
 
 ## Review subagents
 
-<!-- FACT:claude-agent-count -->10<!-- /FACT --> subagent definition files live in `home/dot_claude/agents/` and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
+<!-- FACT:claude-agent-count -->13<!-- /FACT --> subagent definition files live in `home/dot_claude/agents/` and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
 
 Every agent pins both `model` and `effort` in its frontmatter — nothing inherits the caller's session model, so a standalone invocation runs at the pinned tier too. The frontmatter is the single source of truth for these values; the table below is descriptive.
 
@@ -451,10 +451,13 @@ Every agent pins both `model` and `effort` in its frontmatter — nothing inheri
 | `python-reviewer.md` | Python-specific review | sonnet / high |
 | `react-reviewer.md` | React/frontend review | sonnet / high |
 | `database-reviewer.md` | Database schema and query review | sonnet / high |
+| `performance-reviewer.md` | Performance review (N+1, hot paths, memory, caching) | sonnet / high |
+| `test-reviewer.md` | Test coverage, isolation, and reliability review | sonnet / high |
+| `ux-reviewer.md` | UI/UX and accessibility review | sonnet / high |
 | `renovate-analyzer.md` | Renovate dependency-update analysis | sonnet / high |
 | `fact-check-worker.md` | Verifies one finding against primary sources (read-only, no write/exec) | sonnet / high |
 
-The `multi-review` skill dynamically spawns the language/domain reviewers based on detected file types. `architecture-reviewer` is gated behind `--arch` or the pr-workflow large tier; `adversarial-verifier` and `fact-check-worker` are spawned per finding rather than per PR.
+The `multi-review` skill dynamically spawns the language/domain reviewers based on detected file types, plus the cross-cutting `performance`/`test`/`ux` reviewers based on change characteristics. `architecture-reviewer` is gated behind `--arch` or the pr-workflow large tier; `adversarial-verifier` and `fact-check-worker` are spawned per finding rather than per PR.
 
 ---
 
