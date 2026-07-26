@@ -44,13 +44,19 @@
 
 ### Apply-strict: `run_once_after_11-validate-1password.sh.tmpl`
 
-このライフサイクルスクリプトは macOS 上で一度だけ実行され、<!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> つの必要な 1Password アイテム参照のいずれかが見つからないか到達不能な場合、ゼロ以外の終了コードで `chezmoi apply` を中断します。確認される参照は以下のとおりです:
+このライフサイクルスクリプトは macOS 上で一度だけ実行され、<!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> つの必要な 1Password アイテム参照のいずれかが見つからないか到達不能な場合、ゼロ以外の終了コードで `chezmoi apply` を中断します。確認される参照は以下のとおりです:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
-- `op://kryota.dev/Dotfiles - ntfy/base-url`
+
+`Dotfiles - ntfy` アイテム（自己ホスト通知、#337）は意図的にこのゲートの対象外です:
+保持するのは read-only の `subscriber-username`/`subscriber-password` デバイスログイン用
+クレデンシャルのみで、`chezmoi apply` の後、Tailscale/Docker が起動した後——この検証スクリプトより
+後のフェーズで `ntfy-setup` が自動作成・充填します。もう `base-url` フィールドはありません;
+tailnet の MagicDNS 名は 1Password に保存されず、必要な都度その場で導出されます。
+[Notifications](../architecture/notifications.ja.md) を参照してください。
 
 `op` がインストールされていない、認証されていない、またはアイテムが読み取れない場合、`chezmoi apply` はフェイルファストします。注意点として、`run_once_after_11` は AFTER フェーズのスクリプトであり、実行時点ではホームディレクトリはすでに変更されています。実際のフェイルファストパスは次の 2 つです: (1) `.tmpl` ファイル内の `onepasswordRead` がテンプレートレンダリング中に apply を中断する（当該ファイルが書き込まれる前）; (2) `run_once_after_11` が後続の重い after フェーズプロビジョニング（mise、MCP、CLV2 等）の前のフェイルファストゲートとして機能する。シークレットが欠落した状態で途中までプロビジョニングされたマシンは、これらいずれかの時点でのクリーンな中断よりも悪い結果をもたらすという考えに基づいています。スクリプトは macOS のみです（`{{ if ne .chezmoi.os "darwin" }}` で早期終了）。CI は 1Password インストールなしで Ubuntu 上で実行されるためです。
 

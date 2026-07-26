@@ -44,7 +44,7 @@ Before running `chezmoi apply` on macOS:
 1. **1Password desktop app** installed and signed in.
 2. **CLI integration enabled**: 1Password → Settings → Developer → "Integrate with 1Password CLI".
 3. **1Password CLI (`op`)** installed: `brew install --cask 1password-cli`.
-4. All <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> vault item references listed below exist in the `kryota.dev` vault.
+4. All <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> vault item references listed below exist in the `kryota.dev` vault.
 
 ---
 
@@ -104,18 +104,18 @@ Used by the `firecrawl` user-scope Claude Code MCP server. Sets `FIRECRAWL_API_K
 
 Store the client/employer identifier pattern as a `name1|name2|...` alternation (regex-escaped where needed; no `'''`, no newlines). chezmoi renders it into the owner-scoped gitleaks config at apply time. The `run_once_after_11` script additionally smoke-tests this value — it verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal), and compiles as a valid regex. A broken pattern would silently disable the client-identifier rule on every commit in own-namespace repos.
 
-### 5. `Dotfiles - ntfy`
+### 5. `Dotfiles - ntfy` (not validated by the gate)
 
 | Attribute | Value |
 |-----------|-------|
 | Vault | `kryota.dev` |
 | Item title | `Dotfiles - ntfy` |
-| Field references | `base-url` (validated), `subscriber-token` (device-entered) |
-| op:// URIs | `op://kryota.dev/Dotfiles - ntfy/base-url` |
-| Rendered to | `~/.config/ntfy/server.yml` (`base-url`) |
-| File mode | `0600` (via `private_` prefix) |
+| Field references | `subscriber-username` (value `subscriber`), `subscriber-password` (concealed) |
+| op:// URIs | `op://kryota.dev/Dotfiles - ntfy/subscriber-username`, `op://kryota.dev/Dotfiles - ntfy/subscriber-password` |
+| Rendered to | Not rendered by chezmoi templates — read/written by `~/.local/bin/ntfy-setup` (and the shared `~/.config/ntfy/lib.sh` it sources) |
+| File mode | n/a (1Password item, not a rendered file) |
 
-One item for the self-hosted ntfy notification server (#337; see [Notifications](../architecture/notifications.md)). `base-url` is the `tailscale serve` HTTPS endpoint (`https://<host>.<tailnet>.ts.net`) — stored in 1Password so the tailnet's MagicDNS name never lands in this public repo, and it is the only field the validation gate checks. `subscriber-token` starts as a bootstrap placeholder (`tk_REPLACE…`) that the setup script fills with the **read-only** device token; you enter it on each phone by hand, so the gate does not check it. The **write-only** publisher token is not stored here at all — the setup script writes it straight into `~/.config/ntfy/notify-env` (runtime state, like `user.db`), with no 1Password round-trip.
+One item for the self-hosted ntfy notification server (#337; see [Notifications](../architecture/notifications.md)) — holding the **read-only** device-login credential only. `ntfy-setup` auto-creates this item (as a Secure Note) the first time it is absent, after `chezmoi apply` and after Tailscale/Docker are up — a later phase than the `run_once_after_11` validation gate, so **the gate does not validate this item at all**; a missing `Dotfiles - ntfy` item never fails `chezmoi apply`. The **write-only** publisher token is not stored in 1Password either — `ntfy-setup` writes it straight into `~/.config/ntfy/notify-env` (runtime state, like `user.db`). There is no `base-url` field: the tailnet's MagicDNS name is never stored, only derived on demand (device login, smoke test) via `tailscale status --json | jq -r .Self.DNSName`.
 
 ---
 
@@ -127,9 +127,9 @@ One item for the self-hosted ntfy notification server (#337; see [Notifications]
 | `Dotfiles - Exa API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; exa MCP server starts but fails to authenticate |
 | `Dotfiles - Firecrawl API` | `chezmoi apply` exits 1 at the validation gate | `claude-secrets.zsh` not rendered; firecrawl MCP server starts but fails to authenticate |
 | `Dotfiles - Redact Patterns` | `chezmoi apply` exits 1 at the validation gate | `gitleaks-own.toml` not rendered; client-identifier gitleaks rule inactive in own-namespace repos |
-| `Dotfiles - ntfy` | `chezmoi apply` exits 1 at the validation gate (missing `base-url`) | `~/.config/ntfy/server.yml` not rendered; ntfy server has no tailnet endpoint configured and the hook wrapper stays a no-op |
+| `Dotfiles - ntfy` | **`chezmoi apply` does not fail** — this item is outside the validation gate | No device-login credential in 1Password until `ntfy-setup` is run; phones cannot log in until then. `ntfy-setup` auto-creates the item on first run. |
 
-Because the gate checks all five references before any succeeds, a single missing item blocks the entire after-phase of lifecycle scripts.
+Because the gate checks all four references above it before any succeeds, a single missing item among those four blocks the entire after-phase of lifecycle scripts; `Dotfiles - ntfy` is deliberately outside that gate.
 
 ---
 
@@ -159,7 +159,7 @@ Key points:
 
 ## CI exclusions
 
-`setup-validation.yml` excludes all 1Password-dependent files before running `chezmoi apply` in CI. The following 6 files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
+`setup-validation.yml` excludes all 1Password-dependent files, plus files that install/interact rather than merely render, before running `chezmoi apply` in CI. The following <!-- FACT:ci-both-exclusion-count -->7<!-- /FACT --> files are moved to `/tmp/chezmoi-excluded/` in **both** jobs (macOS and Ubuntu):
 
 ```
 home/private_dot_aws/config.tmpl
@@ -168,7 +168,10 @@ home/run_once_before_00-install-prerequisites.sh.tmpl
 home/run_onchange_before_10-brew-bundle.sh.tmpl
 home/run_once_after_11-validate-1password.sh.tmpl
 home/dot_config/git/private_gitleaks-own.toml.tmpl
+home/dot_config/ntfy/private_server.yml.tmpl
 ```
+
+`home/dot_config/ntfy/private_server.yml.tmpl` is no longer 1Password-backed (it dropped its `base-url`/`onepasswordRead` call — see [Notifications](../architecture/notifications.md)), but it stays on the exclusion list: it renders a 0600 config full of container-only paths that would only ever apply inside the ntfy Docker container, and excluding it minimizes churn (see [CI and tests](../contributing/ci-and-tests.md)).
 
 The **macOS job** additionally excludes `home/run_once_after_90-other-apps.sh.tmpl` (and a stale reference to `home/run_once_after_30-setup-fonts.sh.tmpl` that no longer exists — tolerated by an `if [ -f ]` guard).
 

@@ -80,7 +80,7 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
 | `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` |
-| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` |
+| `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` + `dot_config/ntfy/lib.sh.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
 
@@ -132,15 +132,14 @@ Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Br
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
-Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->5<!-- /FACT --> required vault references:
+Hard gate. Verifies `op` is installed and authenticated, then calls `op read` on each of the <!-- FACT:onepassword-vault-item-count -->4<!-- /FACT --> required vault references:
 
 - `op://kryota.dev/Dotfiles - AWS Config/notesPlain`
 - `op://kryota.dev/Dotfiles - Exa API/credential`
 - `op://kryota.dev/Dotfiles - Firecrawl API/credential`
 - `op://kryota.dev/Dotfiles - Redact Patterns/pattern`
-- `op://kryota.dev/Dotfiles - ntfy/base-url`
 
-(The ntfy publisher token is intentionally absent: script 31 writes it straight into `~/.config/ntfy/notify-env` as runtime state, so 1Password never holds it and the gate has nothing to check.)
+(The `Dotfiles - ntfy` item is intentionally absent from this list: it is outside the validation gate entirely, not just one field of it. It holds only the read-only `subscriber-username`/`subscriber-password` device-login credential, and `ntfy-setup` — not this script — auto-creates and fills it after `chezmoi apply`, once Tailscale/Docker are up. There is no `base-url` field any more: the tailnet MagicDNS name is never stored, only derived on demand. The write-only publisher token also never touches 1Password — script 31 writes it straight into `~/.config/ntfy/notify-env` as runtime state.)
 
 For the `Dotfiles - Redact Patterns` item the script goes further than a simple existence check: it also verifies the pattern is non-empty, contains no `'''` (which would break the TOML raw-string literal in `private_gitleaks-own.toml.tmpl`), and compiles as a valid regex. A broken pattern would otherwise allow `chezmoi apply` to succeed while silently disabling the client-identifier gitleaks rule on every commit in own-namespace repos.
 
@@ -179,22 +178,29 @@ Registers the repo-managed launchd LaunchAgents — currently one, `dev.kryota.m
 ### 31 — setup-ntfy (`run_onchange`, after, macOS only)
 
 Starts the self-hosted ntfy notification server (kryota-dev/dotfiles#337; see
-[Notifications](notifications.md)): creates the runtime-state dir
+[Notifications](notifications.md)) by sourcing the shared library
+`~/.config/ntfy/lib.sh` (also deployed by chezmoi) — the single source of truth for
+the whole ntfy lifecycle, so this apply-time path and the on-demand `ntfy-setup`
+command can never drift. The library creates the runtime-state dir
 (`~/Library/Application Support/ntfy`, 0700, outside the chezmoi target tree), runs
-`docker compose up -d` on `~/.config/ntfy/compose.yaml`, and asserts the
-`tailscale serve --bg` mapping so the server stays reachable tailnet-wide over HTTPS.
-It then auto-provisions auth idempotently: creates the publisher/subscriber users
-and per-topic ACLs, writes the write-only publisher token straight into
+`docker compose up -d --remove-orphans` on `~/.config/ntfy/compose.yaml`, and asserts
+the `tailscale serve --bg` mapping so the server stays reachable tailnet-wide over
+HTTPS. It then auto-provisions auth idempotently: creates the publisher/subscriber
+users and per-topic ACLs, writes the write-only publisher token straight into
 `~/.config/ntfy/notify-env` (0600 runtime state, no 1Password round-trip and no
-second apply), and stores the read-only subscriber token in the `Dotfiles - ntfy`
-1Password item (that half needs the `op` CLI). A clean install self-heals because
-notify-env is absent and gets rewritten; on an existing machine the exit-0 run means
-`chezmoi apply` alone will not re-fire it (see the Notifications recovery section).
-Re-triggered by the embedded hashes of the compose template and the server config.
-Skips in CI (no services, no network). **Intentional deviation from convention #6**:
-when Docker Desktop is not running (or the tailscale CLI is missing) it warns and
-exits 0 instead of hard-failing — notifications are not setup-critical and must never
-block `chezmoi apply`; each skip path prints its manual recovery command.
+second apply), and — when the `op` CLI is present — creates (or repairs) the
+read-only `subscriber` user with a generated password and stores it in the
+`Dotfiles - ntfy` 1Password item (auto-created if absent). There is no `base-url`
+any more; the tailnet MagicDNS name is never stored. A clean install self-heals
+because notify-env is absent and gets rewritten; on an existing machine the exit-0
+run means `chezmoi apply` alone will not re-fire it, restart a downed container, or
+rotate a credential — recover with `ntfy-setup` (see the Notifications recovery
+section). Re-triggered by the embedded hashes of the compose template, the server
+config, and the library itself. Skips in CI (no services, no network).
+**Intentional deviation from convention #6**: when Docker Desktop is not running (or
+the tailscale CLI is missing) it warns and exits 0 instead of hard-failing —
+notifications are not setup-critical and must never block `chezmoi apply`; each skip
+path prints `ntfy-setup` as the recovery command.
 
 ### 40 — setup-sheldon (`run_onchange`, after)
 
