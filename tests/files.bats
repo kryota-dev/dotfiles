@@ -165,8 +165,13 @@ load helpers/setup
   grep -q -- '--model' "$wrapper"
   # Personal-account isolation must stay explicit (R2.1).
   grep -q 'CLAUDE_CONFIG_DIR' "$wrapper"
-  # AppleScript injection guard: notification text passes via argv (R3.3).
-  grep -q 'on run argv' "$wrapper"
+  # Delivery migrated osascript -> ntfy (#361): no osascript path may remain
+  # (AC-002), and the publisher token must never reach curl argv (AC-006; it
+  # travels via a `curl -K` config file, as ntfy-notify.sh does).
+  run grep -qE 'osascript|display notification' "$wrapper"
+  [ "$status" -ne 0 ]
+  run grep -E -- '(-H|--header)["'"'"'[:space:]]*"?Authorization' "$wrapper"
+  [ "$status" -ne 0 ]
 }
 
 @test "morning-radar delegates account env to the claude wrapper instead of hand-copying it (#336, #345)" {
@@ -1999,6 +2004,27 @@ _gate_decision() {
   # (ntfy_user_created), not a fragile pre-check.
   grep -qF 'already exists' "$l"
   grep -qF 'ntfy_user_created' "$l"
+}
+
+@test "ntfy library provisions the morning-brief tailnet mount and URL (#361)" {
+  local l="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
+  # Dedicated brief topic is SSOT-declared and threaded into the library.
+  grep -qF 'topic_brief = "claude-brief"' "${HOME_DIR}/.chezmoidata.toml"
+  grep -qF '{{ .ntfy.topic_brief }}' "$l"
+  # A second serve mount fronts the brief dir on the tailnet via --set-path; it
+  # must be tailnet-only (never funnel, already asserted globally) and additive
+  # to the root ntfy mount.
+  grep -qF 'ntfy_assert_brief_serve' "$l"
+  grep -qF 'serve --bg --set-path' "$l"
+  # notify-env carries the brief topic + the (non-secret) tailnet base URL the
+  # morning-radar wrapper reads to build the click link.
+  grep -qF 'NTFY_TOPIC_BRIEF' "$l"
+  grep -qF 'NTFY_BRIEF_BASE_URL' "$l"
+  # Publisher gets write access to the brief topic through the shared ACL grant.
+  grep -qF 'ntfy_topic_brief' "$l"
+  # Both setup entry points assert the mount so it self-heals on apply / ntfy-setup.
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/run_onchange_after_31-setup-ntfy.sh.tmpl"
+  grep -qF 'ntfy_assert_brief_serve' "${HOME_DIR}/dot_local/bin/executable_ntfy-setup"
 }
 
 @test "ntfy-setup: deploys under ~/.local/bin, sources the lib, prompts before rotating, rotates" {
