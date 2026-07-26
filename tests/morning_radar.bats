@@ -125,6 +125,7 @@ run_fn() {
 # state dir, and env file.
 
 @test "main(): success writes the last-run stamp and publishes the brief body (AC-003)" {
+  [ "$(uname)" = "Darwin" ] || skip "morning-radar main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-ok"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
   cat >"${home}/.local/launchers/claude" <<'EOF'
@@ -153,6 +154,7 @@ EOF
 }
 
 @test "main(): a failed run notifies attention and leaves no last-run stamp (AC-003/005)" {
+  [ "$(uname)" = "Darwin" ] || skip "morning-radar main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-fail"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
   printf '%s\n' '#!/bin/bash' 'exit 1' >"${home}/.local/launchers/claude"
