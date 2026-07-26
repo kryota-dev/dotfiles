@@ -1,10 +1,11 @@
 {{ if eq .chezmoi.os "darwin" -}}
 #!/bin/bash
 # Register repo-managed launchd LaunchAgents (kryota-dev/dotfiles#257).
-# Re-runs whenever a managed plist changes (embedded hash below). Wrapper
+# Re-runs whenever a managed plist changes (embedded hashes below). Wrapper
 # script changes need no re-registration: launchd execs the file fresh on
 # every fire.
 # dev.kryota.morning-radar plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}
+# dev.kryota.macos-defaults-drift plist hash: {{ include "Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" | sha256sum }}
 set -euo pipefail
 
 # CI runners have no gui launchd domain, so bootstrap can never succeed there.
@@ -16,15 +17,24 @@ if [ -n "${CI:-}" ]; then
   exit 0
 fi
 
-plist="$HOME/Library/LaunchAgents/dev.kryota.morning-radar.plist"
-label="dev.kryota.morning-radar"
 domain="gui/$(id -u)"
 
-echo "[launchd-agents] registering ${label}..."
-launchctl bootout "${domain}/${label}" 2>/dev/null || true
-if ! launchctl bootstrap "${domain}" "${plist}"; then
-  echo "[launchd-agents] bootstrap failed (no GUI session?). Re-run 'chezmoi apply' from a GUI terminal." >&2
-  exit 1
-fi
-echo "[launchd-agents] ${label} registered."
+# register_agent <label> <plist-filename>: bootout any stale registration
+# (idempotent — a missing prior registration is not an error) then bootstrap
+# the current plist. A bootstrap failure hard-fails the whole script
+# (lifecycle convention #6) rather than continuing to the next agent, so
+# chezmoi retries this script on the next apply.
+register_agent() {
+  local label="$1" plist="$HOME/Library/LaunchAgents/$2"
+  echo "[launchd-agents] registering ${label}..."
+  launchctl bootout "${domain}/${label}" 2>/dev/null || true
+  if ! launchctl bootstrap "${domain}" "${plist}"; then
+    echo "[launchd-agents] bootstrap failed (no GUI session?). Re-run 'chezmoi apply' from a GUI terminal." >&2
+    return 1
+  fi
+  echo "[launchd-agents] ${label} registered."
+}
+
+register_agent "dev.kryota.morning-radar" "dev.kryota.morning-radar.plist" || exit 1
+register_agent "dev.kryota.macos-defaults-drift" "dev.kryota.macos-defaults-drift.plist" || exit 1
 {{ end -}}
