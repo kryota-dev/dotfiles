@@ -9,18 +9,21 @@ persistent, remotely subscribable notifications. The finalized decision record l
 in `.claude/prds/337-ntfy-tailscale.prd.md`.
 
 **Scope boundary**: this page covers the Claude Code `Notification`/`Stop`
-hook → ntfy path plus the weekday morning-brief delivery (#361) and the
-notification-history dashboard (#371). Two other independent local-only
-notification paths are deliberately left untouched:
-`clv2-session-notify.sh` (SessionStart, instinct-cluster review nudge) and the
-`notify` zsh alias (audible chime, also reused by this system's wrapper as its
-failure alert sound). `morning-radar.sh` (launchd, weekday brief) used to notify
-via local `osascript`; it now renders the brief to a tailnet HTML page and sends
-an ntfy notification that links to it —
-see [Morning-brief delivery](#morning-brief-delivery-361) below. A separate,
-always-on dashboard lets you browse the cached `claude-attention`/`claude-done`
-history and generate on-demand LLM summaries — see
-[Notification dashboard](#notification-dashboard-371) below.
+hook → ntfy path plus the weekday morning-brief delivery (#361), the weekly
+knowledge-distill delivery (#368), and the notification-history dashboard
+(#371). Two other independent local-only notification paths are deliberately
+left untouched: `clv2-session-notify.sh` (SessionStart, instinct-cluster
+review nudge) and the `notify` zsh alias (audible chime, also reused by these
+wrappers as their failure alert sound). `morning-radar.sh` (launchd, weekday
+brief) used to notify via local `osascript`; it now renders the brief to a
+tailnet HTML page and sends an ntfy notification that links to it —
+see [Morning-brief delivery](#morning-brief-delivery-361) below.
+`knowledge-distill-radar.sh` (launchd, weekly) sends a plain-text ntfy
+notification with no rendered page —
+see [Weekly knowledge-distill delivery](#weekly-knowledge-distill-delivery-368)
+below. A separate, always-on dashboard lets you browse the cached
+`claude-attention`/`claude-done` history and generate on-demand LLM summaries —
+see [Notification dashboard](#notification-dashboard-371) below.
 
 ## Architecture
 
@@ -70,7 +73,7 @@ phones/tablets on the tailnet (username/password login)
 
 | Topic | Events | Priority | Intended device setting |
 |-------|--------|----------|------------------------|
-| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input | high (4) | sound/vibrate on |
+| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input, weekly knowledge-distill radar (#368), weekly macOS defaults drift (macos-defaults-drift-check, #365) | high (4) | sound/vibrate on |
 | `claude-done` | agent_completed, Stop | default (3) | silent delivery |
 | `claude-brief` | weekday morning brief (morning-radar, #361) | default (3) | mute optional |
 | `claude-test` | manual smoke tests | — | mute after testing |
@@ -131,6 +134,51 @@ Smoke test (publish the current brief on demand):
 BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8443"
 curl -sI "$BASE/$(date +%F).html" | head -1   # expect: HTTP/… 200
 tailscale funnel status                        # expect: nothing served (tailnet-only)
+```
+
+## Weekly knowledge-distill delivery (#368)
+
+The `knowledge-distill` skill (`home/dot_agents/skills/knowledge-distill/SKILL.md`)
+diagnoses the CLV2 continuous-learning loop weekly and proposes promotions
+(evolved skills, curated-skill fixes, memory entries, rules). Cron automation
+was explicitly scoped out of the skill pending user approval; approval was
+given on 2026-07-26 (weekly cadence), and the `dev.kryota.knowledge-distill`
+LaunchAgent (Friday 18:00 local time) now runs it headless, following the
+`dev.kryota.morning-radar` pattern (#257) but simpler: no rendered page, no
+click URL — just a text summary published to the existing `claude-attention`
+topic (no dedicated topic was added).
+
+- **Precheck**: before invoking claude at all, the wrapper counts accumulated
+  instincts under `$CLV2_HOMUNCULUS_DIR/instincts/personal/` (same fallback as
+  the skill's own Phase 0, `~/.local/share/ecc-homunculus-default`) and
+  compares against the skill's own `--min-instincts` default (10). This dry/
+  healthy determination is made **independently of claude's own free-text
+  response**, so a week with an under-accumulated pipeline is never silently
+  reported as a normal week — the notification always says so explicitly
+  (`[縮退] instinct N/10 — ...`).
+- **Report**: the skill still runs either way (a dry week still gets the
+  skill's own Phase 0/1 degraded diagnostic report) and writes to
+  `~/dotfiles/.kryota-dev/knowledge-distill/<YYYY-Www>.md`. The wrapper
+  verifies the report file is non-empty before stamping the week done — the
+  same-week guard, watchdog, and stamp semantics all mirror morning-radar's
+  same-day guard.
+- **Permissions**: headless `--allowedTools` is confined to
+  `Skill(knowledge-distill)`, read-only Bash prefixes matching the skill's own
+  Phase 0/2 diagnostics (`ls`/`cat`/`date`/`jq`/`grep`/`find`/`head`/`tail`/
+  `wc`/`ghq list`/the `instinct-cli.py evolve` invocation), and
+  `Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)`. Proposal application
+  remains manual — neither the wrapper nor the skill ever applies its own
+  promotions.
+- **Notification**: on success, `claude-attention` receives the `HEADLINE` at
+  priority 3 (default), prefixed with `[縮退]` and the instinct count when the
+  precheck found a dry pipeline. Error paths (claude missing / timeout /
+  non-zero exit / report file missing) publish at priority 5, the same
+  convention morning-radar uses for errors.
+
+Smoke test (publish the current week's report on demand):
+
+```bash
+~/.claude/knowledge-distill-radar.sh --force   # one billed run; notifies claude-attention
 ```
 
 ## Notification dashboard (#371)

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly knowledge-distill radar (kryota-dev/dotfiles#368).
+  Fires the knowledge-distill headless wrapper at 18:00 local time on
+  Fridays. Local time is assumed to be JST on this machine. launchd coalesces
+  fires missed while asleep into one run on wake; the wrapper's own same-week
+  guard then keeps a later manual/coalesced run from double-billing.
+  Registered/reloaded by run_onchange_after_30-register-launchd-agents.sh.tmpl.
+  RunAtLoad is intentionally absent (defaults to false) so registration itself
+  never triggers a billed run.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.kryota.knowledge-distill</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.claude/knowledge-distill-radar.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>5</integer>
+    <key>Hour</key>
+    <integer>18</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>{{ .chezmoi.homeDir }}/dotfiles</string>
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.knowledge-distill.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.knowledge-distill.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

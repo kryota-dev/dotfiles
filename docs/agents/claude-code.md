@@ -15,6 +15,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 - [Permissions allow/deny surface](#permissions-allowdeny-surface)
 - [Hooks graph](#hooks-graph)
   - [SessionStart](#sessionstart)
+  - [UserPromptSubmit](#userpromptsubmit)
   - [PreCompact](#precompact)
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
@@ -47,6 +48,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
+| `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md` (appended by `cldf`/`cldf-r06` via `--append-system-prompt-file`) |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (symlink) |
@@ -144,6 +146,8 @@ flowchart TD
     SS[SessionStart] --> SS1[ECC session-start-bootstrap]
     SS --> SS2[clv2-session-notify async]
 
+    UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nno matcher]
+
     PC[PreCompact] --> PC1[ECC pre-compact]
 
     PTU[PreToolUse] --> PTU1[suggest-compact\nEdit Write]
@@ -182,6 +186,12 @@ flowchart TD
 |---|---|---|
 | `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | Loads previous context; detects package manager |
 | `session:start:clv2-notify` | `clv2-session-notify.sh` (async, timeout 10 s) | Caches review-ready cluster count; fires 7-day-throttled desktop notification |
+
+### UserPromptSubmit
+
+| Hook ID | Matcher | Command | Notes |
+|---|---|---|---|
+| `user-prompt-submit:prompt-conform-suggest` | none | `node hooks-fork/prompt-conform-suggest.js` (timeout 5 s) | Detects long, task-shaped prompts and injects `additionalContext` suggesting `$prompt-conform` (task #367). Not an ECC fork — a standalone script, documented separately from [ECC hook forks](#ecc-hook-forks-hooks-fork) below. `UserPromptSubmit` does not support `matcher` per the [official Hooks reference](https://code.claude.com/docs/en/hooks) (silently ignored), so the entry omits it. Fail-open: a malformed payload, an invalid env-tuned regex, or any other exception all degrade to no output and exit 0. See [Env vars reference](#env-vars-reference) for the tuning knobs. |
 
 ### PreCompact
 
@@ -286,6 +296,8 @@ The `run-with-flags.js` wrapper self-gates: it reads `ECC_HOOK_PROFILE` and `ECC
 ## ECC hook forks (hooks-fork/)
 
 Three hooks could not be satisfied by ECC's upstream implementations and were forked into `home/dot_claude/hooks-fork/`. All three are invoked directly as `node <file>` rather than through `ecc-hook.sh`, because `run-with-flags.js` rejects scripts outside the plugin root (path-traversal guard). Each fork resolves the ECC runtime via a plugin-root fallback probe and `require()`s ECC modules from the chezmoi external — reuse over reimplementation.
+
+`home/dot_claude/hooks-fork/` also holds `prompt-conform-suggest.js` (the [UserPromptSubmit](#userpromptsubmit) hook above), which is **not** an ECC fork — it has no ECC upstream, requires no `require()` of ECC modules, and is stateless (no persistence layer). It is colocated here because it is invoked the same way (`node <file>`, direct) as the three forks below.
 
 ### governance-capture.js
 
@@ -501,6 +513,9 @@ Because `claude` resolves to the same wrapper script as `cld` (`~/.local/launche
 | `ECC_DISABLED_HOOKS_EXTRA` | shell (`claude-config` alias, prefix invocation) | Per-session additive opt-out: `ecc-hook.sh` comma-joins it into `ECC_DISABLED_HOOKS`, since settings.json env overrides the base variable (#281) |
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = quality-gate auto-fixes files instead of blocking |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | Regex of additional destructive command patterns; SSOT shared with Codex gate |
+| `PROMPT_CONFORM_SUGGEST_MIN_LENGTH` | unset by default (operator-tunable) | Overrides the character-length floor (default 150) that `prompt-conform-suggest.js` requires before it inspects a prompt further. Must be a non-negative integer; other values fall back to the default |
+| `PROMPT_CONFORM_SUGGEST_TASK_REGEX` | unset by default (operator-tunable) | Overrides the imperative task-verb regex `prompt-conform-suggest.js` uses (default covers JP/EN task phrasing). An invalid pattern falls back to the built-in default |
+| `PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX` | unset by default (operator-tunable) | Overrides the skill/prompt-authoring keyword regex `prompt-conform-suggest.js` uses. An invalid pattern falls back to the built-in default |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | Fixed to `~/.agents/skills/ecc`; skips ECC's plugin fallback scan |
 | `CLAUDE_CONFIG_DIR` | the claude wrapper | Selects which `~/.claude*` directory Claude Code uses |
 | `ECC_AGENT_DATA_HOME` | the claude wrapper | Governs where ECC (and the hook forks) write state |

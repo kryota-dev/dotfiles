@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly macOS defaults drift check (kryota-dev/dotfiles#365).
+  Fires the drift-check wrapper at 10:00 local time every Sunday, comparing
+  the live values of domains/keys managed by
+  run_onchange_after_20-macos-defaults.sh.tmpl (#364) against what that
+  script would set, and notifying via ntfy (topic_attention) when they
+  differ. No repo write-back — a human decides whether to adopt the drift.
+  Registered/reloaded by run_onchange_after_30-register-launchd-agents.sh.tmpl.
+  RunAtLoad is intentionally absent (defaults to false) so registration itself
+  never triggers a run.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.kryota.macos-defaults-drift</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.claude/macos-defaults-drift-check.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Weekday</key>
+      <integer>0</integer>
+      <key>Hour</key>
+      <integer>10</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{ .chezmoi.homeDir }}/dotfiles</string>
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.macos-defaults-drift.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.macos-defaults-drift.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
