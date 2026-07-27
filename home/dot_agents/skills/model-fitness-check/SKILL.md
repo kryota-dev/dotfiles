@@ -16,14 +16,14 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ## §4 contract（Model/effort テーブル）
 
-テーブルが規定するのは**セッション自身**の model / effort であり、**委譲先 worker の tier は各 agent 定義の frontmatter が SSOT**（例: adversarial verification 行は「その作業を主導するセッション」に Opus 5 @ xhigh を要求するのであって、`adversarial-verifier` agent が Opus であるべきという意味ではない）。
+テーブルが規定するのは**セッション自身**の model / effort であり、**委譲先 worker の tier は各 agent 定義の frontmatter が SSOT**（例: adversarial verification 行は「その作業を主導するセッション」に Opus @ xhigh を要求するのであって、`adversarial-verifier` agent が Opus であるべきという意味ではない）。
 
 | 作業 | Model | Effort | 行種別 |
 |------|-------|--------|--------|
-| `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus 5 | high（既定。ゲートは言及しない） | **floor**（blocking） |
-| large tier / PRD 審議 / adversarial verification / 横断設計 | Opus 5 | xhigh | **floor**（blocking） |
-| trivial / small tier のみ | Sonnet 5 | medium | **cost hint**（non-blocking FYI） |
-| Fable-orchestrator セッション（`cldf` 系） | Fable 5 | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
+| `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus | high（既定。ゲートは言及しない） | **floor**（blocking） |
+| large tier / PRD 審議 / adversarial verification / 横断設計 | Opus | xhigh | **floor**（blocking） |
+| trivial / small tier のみ | Sonnet | medium | **cost hint**（non-blocking FYI） |
+| Fable-orchestrator セッション（`cldf` 系） | Fable | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
 
 ## capability 順序（monotonic）
 
@@ -54,7 +54,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
-### floor 行（Opus 5 @ high / Opus 5 @ xhigh）で mismatch
+### floor 行（Opus @ high / Opus @ xhigh）で mismatch
 
 `AskUserQuestion` で **blocking** し、次の 3 択を提示する:
 
@@ -67,7 +67,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ### trivial / small 行
 
-この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet 5 @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
 
 FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
