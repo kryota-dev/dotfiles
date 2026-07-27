@@ -187,3 +187,20 @@ ghq_user = "kryota-dev"
   # tailnet by `tailscale serve --https=8443` (a port proxy — macOS cannot serve
   # files/directories directly). Distinct from the ntfy port above.
   brief_port = 2587
+
+[macos_defaults_drift]
+  # Keys excluded from the weekly drift check (kryota-dev/dotfiles#365),
+  # "domain:key" formatted. Read by executable_macos-defaults-drift-check.sh.
+  # Only keys managed by run_onchange_after_20-macos-defaults.sh.tmpl are ever
+  # compared in the first place, and #364 already curated that list down to
+  # stable, intentional settings — so nothing there is expected to be noisy
+  # yet. This list exists as a safety valve for a future managed key that
+  # turns out to fluctuate on its own (window position, cache, timestamp, or
+  # other machine-specific value), not because a current key needs it.
+  #
+  # One "domain:key" string per line (matches the multi-line-array parsing
+  # convention _ecc_skill_list() in tests/helpers/setup.bash already
+  # established for [ecc].skills — keep this in that same shape so both the
+  # bash reader and any future bats helper can use the same awk pattern).
+  exclude_keys = [
+  ]

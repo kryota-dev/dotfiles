@@ -70,7 +70,7 @@ phones/tablets on the tailnet (username/password login)
 
 | Topic | Events | Priority | Intended device setting |
 |-------|--------|----------|------------------------|
-| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input, weekly knowledge-distill radar (#368) | high (4) | sound/vibrate on |
+| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input, weekly knowledge-distill radar (#368), weekly macOS defaults drift (macos-defaults-drift-check, #365) | high (4) | sound/vibrate on |
 | `claude-done` | agent_completed, Stop | default (3) | silent delivery |
 | `claude-brief` | weekday morning brief (morning-radar, #361) | default (3) | mute optional |
 | `claude-test` | manual smoke tests | — | mute after testing |

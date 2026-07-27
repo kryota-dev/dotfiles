@@ -156,6 +156,36 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "macos-defaults-drift launchd agent source files exist (#365)" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh" ]
+  bash -n "${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh"
+}
+
+@test "macos-defaults-drift plist schedules exactly one weekly run and never runs at load" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl"
+  run grep -q '<key>RunAtLoad</key>' "$plist"
+  [ "$status" -ne 0 ]
+  # Weekly: exactly one Weekday/Hour/Minute entry, not one per weekday.
+  [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Minute</key>' "$plist")" -eq 1 ]
+  # Sunday 10:00, not just "some" values -- pin the actual schedule.
+  grep -A1 '<key>Weekday</key>' "$plist" | grep -q '<integer>0</integer>'
+  grep -A1 '<key>Hour</key>' "$plist" | grep -q '<integer>10</integer>'
+  grep -A1 '<key>Minute</key>' "$plist" | grep -q '<integer>0</integer>'
+}
+
+@test "macos-defaults-drift plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
 @test "launcher dir reaches interactive (precmd+sync) and login (zprofile) shells (#345)" {
   local zshrc="${HOME_DIR}/dot_zshrc.tmpl"
   local zprofile="${HOME_DIR}/dot_zprofile.tmpl"
@@ -250,14 +280,15 @@ load helpers/setup
   [ "$status" -eq 0 ]
 }
 
-@test "launchd registration script embeds the plist hash and guards CI" {
+@test "launchd registration script embeds all plist hashes and guards CI (#365, #368)" {
   local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
-  # Re-registration is keyed to the plist content (embedded-hash trick), one
-  # hash line per managed agent (#368 generalized this to a label loop).
+  # Re-registration is keyed to each plist's content (embedded-hash trick), one
+  # hash line per managed agent.
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" | sha256sum }}' "$script"
-  # Both labels must be registered via the shared loop, not hardcoded once.
-  grep -Fq 'labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill)' "$script"
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" | sha256sum }}' "$script"
+  # All three labels must be registered via the shared loop, not hardcoded once.
+  grep -Fq 'labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill dev.kryota.macos-defaults-drift)' "$script"
   grep -Fq 'for label in "${labels[@]}"; do' "$script"
   # CI runners have no gui launchd domain; the script must self-skip there.
   grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
