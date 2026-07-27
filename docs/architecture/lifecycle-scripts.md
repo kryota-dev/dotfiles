@@ -79,7 +79,7 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 | `12-setup-mise` | `dot_config/mise/config.toml` |
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
-| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` + `Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl` |
+| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` + `Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl` + `Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl` |
 | `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` + `dot_config/ntfy/lib.sh.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | its own source file (any edit re-triggers) |
@@ -211,17 +211,21 @@ this script or touches git.
 
 ### 30 — register-launchd-agents (`run_onchange`, after, macOS only)
 
-Registers the repo-managed launchd LaunchAgents: `dev.kryota.morning-radar`, which fires
-the weekday-morning brief (kryota-dev/dotfiles#257; see [Scheduled morning radar](../agents/claude-code.md)
-in the Claude Code harness doc), and `dev.kryota.macos-defaults-drift`, which fires the
-weekly `20-macos-defaults` drift check described above (kryota-dev/dotfiles#365). A shared
-`register_agent <label> <plist>` function performs `launchctl bootout || true` then
-`launchctl bootstrap gui/$UID` for each, so a changed plist is reloaded idempotently; each
-plist template's embedded hash is the re-trigger key (wrapper-script edits need no
-re-registration — launchd execs the current file on every fire). Skips registration when
-`$CI` is set: headless runners have no gui launchd domain, and the in-script guard keeps
-the render/apply path CI-validated (unlike excluding the file in the workflow). Outside CI
-a bootstrap failure hard-fails so chezmoi retries on the next apply (convention #6).
+Registers the repo-managed launchd LaunchAgents via a `labels=(...)` array and a shared
+loop: `dev.kryota.morning-radar` (weekday-morning brief, kryota-dev/dotfiles#257; see
+[Scheduled morning radar](../agents/claude-code.md) in the Claude Code harness doc),
+`dev.kryota.knowledge-distill` (weekly knowledge-distill radar, kryota-dev/dotfiles#368),
+and `dev.kryota.macos-defaults-drift` (weekly `20-macos-defaults` drift check described
+above, kryota-dev/dotfiles#365). For each label the loop performs `launchctl bootout ||
+true` then `launchctl bootstrap gui/$UID`, so a changed plist is reloaded idempotently;
+each plist template's embedded hash is the re-trigger key (wrapper-script edits need no
+re-registration — launchd execs the current file on every fire). A bootstrap failure for
+one label sets a non-zero exit status but continues registering the remaining labels
+(`continue` in the loop), rather than aborting the whole script on the first failure.
+Skips registration when `$CI` is set: headless runners have no gui launchd domain, and
+the in-script guard keeps the render/apply path CI-validated (unlike excluding the file
+in the workflow). Outside CI a bootstrap failure hard-fails so chezmoi retries on the
+next apply (convention #6).
 
 ### 31 — setup-ntfy (`run_onchange`, after, macOS only)
 

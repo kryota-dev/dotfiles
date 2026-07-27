@@ -15,6 +15,7 @@
 - [permissions allow/deny サーフェス](#permissions-allowdeny-サーフェス)
 - [フックグラフ](#フックグラフ)
   - [SessionStart](#sessionstart)
+  - [UserPromptSubmit](#userpromptsubmit)
   - [PreCompact](#precompact)
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
@@ -47,6 +48,7 @@
 | `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
+| `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md`（`cldf`/`cldf-r06` が `--append-system-prompt-file` で読み込む） |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (シンボリックリンク) |
@@ -142,6 +144,8 @@ flowchart TD
     SS[SessionStart] --> SS1[ECC session-start-bootstrap]
     SS --> SS2[clv2-session-notify async]
 
+    UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nmatcherなし]
+
     PC[PreCompact] --> PC1[ECC pre-compact]
 
     PTU[PreToolUse] --> PTU1[suggest-compact\nEdit Write]
@@ -180,6 +184,12 @@ flowchart TD
 |---|---|---|
 | `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | 前回コンテキスト読み込み、パッケージマネージャー検出 |
 | `session:start:clv2-notify` | `clv2-session-notify.sh` (async、タイムアウト 10 秒) | レビュー待ちクラスター数をキャッシュ；7 日スロットルのデスクトップ通知 |
+
+### UserPromptSubmit
+
+| フック ID | Matcher | コマンド | 備考 |
+|---|---|---|---|
+| `user-prompt-submit:prompt-conform-suggest` | なし | `node hooks-fork/prompt-conform-suggest.js`（タイムアウト 5 秒） | 長くタスク性の強いプロンプトを検知し、`$prompt-conform` の実行提案を `additionalContext` として注入する（task #367）。ECC フォークではなく独立スクリプト — 下記の [ECC hook forks](#ecc-フック-fork-hooks-fork) とは別に文書化している。`UserPromptSubmit` は[公式 Hooks reference](https://code.claude.com/docs/en/hooks)上 `matcher` 非サポート（silently ignored）のため、このエントリでは省略している。fail-open: 不正な payload・env でチューニングした不正な正規表現・その他の例外はすべて no-output・exit 0 に縮退する。チューニング項目は [Env vars reference](#env-vars-reference) を参照。 |
 
 ### PreCompact
 
@@ -284,6 +294,8 @@ $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js <hook-id> <script-path
 ## ECC フック fork (hooks-fork/)
 
 3 つのフックは ECC のアップストリーム実装では要件を満たせないため、`home/dot_claude/hooks-fork/` に fork されました。いずれも `ecc-hook.sh` を経由せず `node <file>` として直接呼び出されます（`run-with-flags.js` はプラグインルート外のスクリプトをパストラバーサルガードで拒否するため）。各 fork はプラグインルートフォールバックプローブで ECC ランタイムを解決し、chezmoi external から ECC モジュールを `require()` します — 再実装より再利用を優先。
+
+`home/dot_claude/hooks-fork/` には [UserPromptSubmit](#userpromptsubmit) フックである `prompt-conform-suggest.js` も置かれていますが、これは ECC フォーク**ではありません** — ECC 側の対応実装がなく、ECC モジュールの `require()` も行わず、永続化層も持たないステートレスなスクリプトです。呼び出し方法（`node <file>` の直接呼び出し）が下記の 3 つの fork と同じであるため、同じディレクトリに配置されています。
 
 ### governance-capture.js
 
@@ -499,6 +511,9 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 | `ECC_DISABLED_HOOKS_EXTRA` | シェル（`claude-config` エイリアス、prefix 起動） | セッション単位の追加 opt-out：settings.json env が基底変数を上書きするため、`ecc-hook.sh` がこれを `ECC_DISABLED_HOOKS` へカンマ結合でマージする（#281） |
 | `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = 品質ゲートがブロックする代わりにファイルを自動修正 |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | 追加の破壊的コマンドパターンの正規表現；Codex ゲートと SSOT 共有 |
+| `PROMPT_CONFORM_SUGGEST_MIN_LENGTH` | 既定未設定（運用者がチューニング可能） | `prompt-conform-suggest.js` がプロンプトをさらに検査する前に要求する文字数閾値（既定 150）を上書きする。非負整数のみ有効、それ以外は既定値へフォールバック |
+| `PROMPT_CONFORM_SUGGEST_TASK_REGEX` | 既定未設定（運用者がチューニング可能） | `prompt-conform-suggest.js` が使う命令形タスク動詞の正規表現（既定は JP/EN のタスク文面）を上書きする。不正な正規表現は組み込み既定へフォールバック |
+| `PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX` | 既定未設定（運用者がチューニング可能） | `prompt-conform-suggest.js` が使う skill/プロンプト作成系キーワードの正規表現を上書きする。不正な正規表現は組み込み既定へフォールバック |
 | `CLAUDE_PLUGIN_ROOT` | `ecc-hook.sh` | `~/.agents/skills/ecc` に固定；ECC のプラグインフォールバック走査をスキップ |
 | `CLAUDE_CONFIG_DIR` | claude ラッパー | Claude Code が使用する `~/.claude*` ディレクトリを選択 |
 | `ECC_AGENT_DATA_HOME` | claude ラッパー | ECC（とフック fork）が状態を書き込む場所 |

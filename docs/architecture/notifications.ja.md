@@ -11,13 +11,15 @@ tailnet 上のデバイスから subscribe されます（kryota-dev/dotfiles#33
 `.claude/prds/337-ntfy-tailscale.prd.md` にあります。
 
 **スコープの境界**: このページが扱うのは Claude Code の `Notification`/`Stop` フックから
-ntfy への経路に加え、平日朝ブリーフの配信（#361）です。本システムが意図的に手を付けて
-いない独立したローカル限定の通知経路が他に2つあります: `clv2-session-notify.sh`
-（SessionStart、instinct クラスターのレビュー促し）と `notify` zsh エイリアス（可聴チャイム。
-本システムの wrapper も失敗時のアラート音として再利用しています）。`morning-radar.sh`
-（launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、現在はブリーフを
-tailnet の HTML ページにレンダリングし、それにリンクする ntfy 通知を送ります —— 下記
-[朝ブリーフの配信](#朝ブリーフの配信-361)を参照。
+ntfy への経路に加え、平日朝ブリーフの配信（#361）と週次 knowledge-distill 配信（#368）です。
+本システムが意図的に手を付けていない独立したローカル限定の通知経路が他に2つあります:
+`clv2-session-notify.sh`（SessionStart、instinct クラスターのレビュー促し）と `notify` zsh
+エイリアス（可聴チャイム。両方の wrapper も失敗時のアラート音として再利用しています）。
+`morning-radar.sh`（launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、
+現在はブリーフを tailnet の HTML ページにレンダリングし、それにリンクする ntfy 通知を送ります
+—— 下記[朝ブリーフの配信](#朝ブリーフの配信-361)を参照。`knowledge-distill-radar.sh`
+（launchd、週次）はレンダリングされたページを持たないプレーンテキストの ntfy 通知を送ります
+—— 下記[週次 knowledge-distill 配信](#週次-knowledge-distill-配信-368)を参照。
 
 ## アーキテクチャ
 
@@ -66,7 +68,7 @@ phones/tablets on the tailnet (username/password login)
 
 | Topic | Events | Priority | Intended device setting |
 |-------|--------|----------|------------------------|
-| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input, 週次 macOS defaults ドリフト検出 (macos-defaults-drift-check, #365) | high (4) | sound/vibrate on |
+| `claude-attention` | permission_prompt, idle_prompt, agent_needs_input, weekly knowledge-distill radar (#368), 週次 macOS defaults ドリフト検出 (macos-defaults-drift-check, #365) | high (4) | sound/vibrate on |
 | `claude-done` | agent_completed, Stop | default (3) | silent delivery |
 | `claude-brief` | weekday morning brief (morning-radar, #361) | default (3) | mute optional |
 | `claude-test` | manual smoke tests | — | mute after testing |
@@ -119,6 +121,44 @@ Smoke test（オンデマンドでブリーフを publish）:
 BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8443"
 curl -sI "$BASE/$(date +%F).html" | head -1   # 期待: HTTP/… 200
 tailscale funnel status                        # 期待: 何も serve していない（tailnet-only）
+```
+
+## 週次 knowledge-distill 配信 (#368)
+
+`knowledge-distill` skill（`home/dot_agents/skills/knowledge-distill/SKILL.md`）は、
+CLV2 継続学習ループを週次で診断し、昇華提案（evolved skill 化・curated skill 改修・memory
+追加・ルール化）を行います。cron 化は skill 上でユーザー承認待ちとして明示的にスコープ外に
+されていましたが、2026-07-26 に承認され（週次 cadence）、`dev.kryota.knowledge-distill`
+LaunchAgent（金曜 18:00 ローカル時刻）が現在これを headless で実行します。
+`dev.kryota.morning-radar` パターン（#257）を踏襲しつつ、よりシンプルです:
+レンダリングされたページも click URL も無く、既存の `claude-attention` トピックへの
+テキストサマリー publish のみです（専用トピックは追加していません）。
+
+- **Precheck**: claude を起動する前に、wrapper が `$CLV2_HOMUNCULUS_DIR/instincts/personal/`
+  （skill 自身の Phase 0 と同じ fallback、`~/.local/share/ecc-homunculus-default`）配下の
+  instinct 蓄積数を数え、skill 自身の `--min-instincts` 既定値（10）と比較します。この
+  dry/healthy 判定は**claude 自身の自由記述レスポンスから独立して**行われるため、instinct
+  蓄積が不足した週が静かに通常週として報告されることはありません —— 通知は常にその旨を
+  明示します（`[縮退] instinct N/10 — ...`）。
+- **レポート**: どちらの場合でも skill 自体は実行され（dry の週でも skill 自身の Phase 0/1
+  縮退診断レポートが生成されます）、`~/dotfiles/.kryota-dev/knowledge-distill/<YYYY-Www>.md`
+  に書き込まれます。wrapper はレポートファイルが空でないことを検証してから週のスタンプを
+  書き込みます —— 同週ガード・watchdog・スタンプの意味論は morning-radar の同日ガードと
+  同じです。
+- **権限**: headless の `--allowedTools` は `Skill(knowledge-distill)`、skill 自身の
+  Phase 0/2 診断に対応する read-only Bash prefix（`ls`/`cat`/`date`/`jq`/`grep`/`find`/
+  `head`/`tail`/`wc`/`ghq list`/`instinct-cli.py evolve` 呼び出し）、
+  `Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)` に限定されます。昇華提案の適用は
+  引き続き手動です —— wrapper も skill も自身の昇華提案を自動適用することはありません。
+- **通知**: 成功時、`claude-attention` は priority 3（default）で `HEADLINE` を受け取り、
+  precheck が dry pipeline と判定した場合は `[縮退]` と instinct 数のプレフィックスが
+  付きます。エラー経路（claude 不在 / timeout / 非 0 exit / レポートファイル欠損）は
+  priority 5 で publish されます（morning-radar のエラー時と同じ規約）。
+
+Smoke test（オンデマンドで今週のレポートを publish）:
+
+```bash
+~/.claude/knowledge-distill-radar.sh --force   # 課金される実行 1 回。claude-attention に通知
 ```
 
 ## セットアップ手順（初回のみ）

@@ -79,7 +79,7 @@ flowchart TD
 | `12-setup-mise` | `dot_config/mise/config.toml` |
 | `17-setup-claude-plugins` | `dot_claude/settings.json` |
 | `18-setup-agent-browser` | `dot_config/mise/config.toml` |
-| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` + `Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl` |
+| `30-register-launchd-agents` | `Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl` + `Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl` + `Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl` |
 | `31-setup-ntfy` | `dot_config/ntfy/compose.yaml.tmpl` + `dot_config/ntfy/private_server.yml.tmpl` + `dot_config/ntfy/lib.sh.tmpl` |
 | `40-setup-sheldon` | `dot_config/sheldon/plugins.toml` |
 | `20-macos-defaults` | 自分自身のソースファイル（任意の編集で再トリガー） |
@@ -216,18 +216,20 @@ LaunchAgent（kryota-dev/dotfiles#365、下記の `30-register-launchd-agents` �
 
 ### 30 — register-launchd-agents (`run_onchange`、after、macOS のみ)
 
-repo 管理の launchd LaunchAgent を登録します: 平日朝ブリーフを発火する
-`dev.kryota.morning-radar`（kryota-dev/dotfiles#257。Claude Code ハーネスドキュメントの
-[朝次レーダーのスケジュール実行](../agents/claude-code.ja.md) 参照）と、上記の週次
-`20-macos-defaults` ドリフトチェックを発火する `dev.kryota.macos-defaults-drift`
-（kryota-dev/dotfiles#365）の 2 つです。共通の `register_agent <label> <plist>` 関数が
-それぞれについて `launchctl bootout || true` → `launchctl bootstrap gui/$UID` の順で実行するため、
+repo 管理の launchd LaunchAgent を `labels=(...)` 配列と共通ループで登録します: 平日朝
+ブリーフを発火する `dev.kryota.morning-radar`（kryota-dev/dotfiles#257。Claude Code
+ハーネスドキュメントの [朝次レーダーのスケジュール実行](../agents/claude-code.ja.md) 参照）、
+週次 knowledge-distill レーダーを発火する `dev.kryota.knowledge-distill`
+（kryota-dev/dotfiles#368）、上記の週次 `20-macos-defaults` ドリフトチェックを発火する
+`dev.kryota.macos-defaults-drift`（kryota-dev/dotfiles#365）の3つです。ループは各 label に
+ついて `launchctl bootout || true` → `launchctl bootstrap gui/$UID` の順で実行するため、
 plist の変更は冪等に再読み込みされます。再トリガーのキーは各 plist テンプレートの埋め込み
 ハッシュです（wrapper script の編集は再登録不要 — launchd は発火のたびに現行ファイルを
-exec します）。`$CI` 設定時は登録をスキップします。headless runner には gui launchd domain
-が存在せず、in-script ガードならワークフローでファイルを除外する方式と異なり、レンダリング /
-apply パスが CI 検証対象に残ります。CI 外では bootstrap 失敗をハードフェイルとし、次回
-apply で chezmoi がリトライします（規約 #6）。
+exec します）。ある label の bootstrap が失敗しても、ループ全体を中断せず非ゼロの終了ステータス
+を記録しつつ残りの label の登録を継続します（`continue`）。`$CI` 設定時は登録をスキップします。
+headless runner には gui launchd domain が存在せず、in-script ガードならワークフローでファイルを
+除外する方式と異なり、レンダリング / apply パスが CI 検証対象に残ります。CI 外では bootstrap
+失敗をハードフェイルとし、次回 apply で chezmoi がリトライします（規約 #6）。
 
 ### 31 — setup-ntfy (`run_onchange`、after、macOS のみ)
 

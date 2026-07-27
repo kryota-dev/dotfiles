@@ -126,6 +126,36 @@ load helpers/setup
   plutil -lint "${tmp}/agent.plist"
 }
 
+@test "knowledge-distill launchd agent source files exist" {
+  [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" ]
+  [ -f "${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh" ]
+}
+
+@test "knowledge-distill plist schedules Friday only and never runs at load" {
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
+  # RunAtLoad must stay absent so (re-)registration never triggers a billed run.
+  run grep -q '<key>RunAtLoad</key>' "$plist"
+  [ "$status" -ne 0 ]
+  # Weekly on Friday at 18:00 local time: exactly one Weekday/Hour entry (#368).
+  [ "$(grep -c '<key>Weekday</key>' "$plist")" -eq 1 ]
+  [ "$(grep -c '<key>Hour</key>' "$plist")" -eq 1 ]
+  local weekday hour
+  weekday="$(grep -A1 '<key>Weekday</key>' "$plist" | grep -oE '[0-9]+')"
+  [ "$weekday" = "5" ]
+  hour="$(grep -A1 '<key>Hour</key>' "$plist" | grep -oE '[0-9]+')"
+  [ "$hour" = "18" ]
+}
+
+@test "knowledge-distill plist template renders to valid plist XML" {
+  command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
+  local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
+  plutil -lint "${tmp}/agent.plist"
+}
+
 @test "macos-defaults-drift launchd agent source files exist (#365)" {
   [ -f "${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" ]
   [ -f "${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh" ]
@@ -250,17 +280,18 @@ load helpers/setup
   [ "$status" -eq 0 ]
 }
 
-@test "launchd registration script embeds both plist hashes and guards CI (#365)" {
+@test "launchd registration script embeds all plist hashes and guards CI (#365, #368)" {
   local script="${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl"
-  # Re-registration is keyed to each plist's content (embedded-hash trick).
+  # Re-registration is keyed to each plist's content (embedded-hash trick), one
+  # hash line per managed agent.
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}' "$script"
+  grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" | sha256sum }}' "$script"
   grep -Fq 'plist hash: {{ include "Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" | sha256sum }}' "$script"
+  # All three labels must be registered via the shared loop, not hardcoded once.
+  grep -Fq 'labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill dev.kryota.macos-defaults-drift)' "$script"
+  grep -Fq 'for label in "${labels[@]}"; do' "$script"
   # CI runners have no gui launchd domain; the script must self-skip there.
   grep -Fq 'if [ -n "${CI:-}" ]; then' "$script"
-  # Both agents are registered through the shared function, not duplicated inline.
-  [ "$(grep -c '^register_agent "' "$script")" -eq 2 ]
-  grep -Fq 'register_agent "dev.kryota.morning-radar" "dev.kryota.morning-radar.plist"' "$script"
-  grep -Fq 'register_agent "dev.kryota.macos-defaults-drift" "dev.kryota.macos-defaults-drift.plist"' "$script"
   # Template-stripped body must be valid bash (same strip trick as make lint).
   bash -n <(sed '/{{/d' "$script")
 }
@@ -1249,6 +1280,144 @@ FAKE_CLAUDE
   [ "$has_cmd" -eq 1 ]       # command recorded
   [ "$secret_leaked" -eq 0 ] # extraRedact stripped the secret env value
   [ "$perms" = "600" ]       # owner-only permissions
+}
+
+@test "prompt-conform-suggest hook exists and passes node syntax check" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  [ -f "$hook" ]
+  node --check "$hook"
+}
+
+@test "prompt-conform-suggest triggers on a long JP task-shaped prompt" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='ユーザー認証機能を実装してください。要件は以下の通りです。メールアドレスとパスワードでログインできること。セッションはJWTで管理すること。パスワードはbcryptでハッシュ化すること。ログイン失敗時は適切なエラーメッセージを返すこと。既存のミドルウェアとの統合方法も検討し、テストも一緒に書いてください。ドキュメントの更新も忘れずにお願いします。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ "$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
+  [ -n "$(echo "$out" | jq -r '.hookSpecificOutput.additionalContext')" ]
+}
+
+@test "prompt-conform-suggest triggers on a long EN task-shaped prompt" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='Please implement a new caching layer for the API responses. It should support TTL-based eviction, be pluggable so we can swap Redis for an in-memory store in tests, and include unit tests covering the eviction edge cases as well as documentation for future maintainers.'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ "$(echo "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "UserPromptSubmit" ]
+}
+
+@test "prompt-conform-suggest triggers on a long prompt matching only the keyword regex (no task verb)" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='新しい SKILL.md の設計について相談したいです。プロンプトエンジニアリングの観点から、既存のエージェント定義との整合性やシステムプロンプトとの重複をどう避けるか、指示文の粒度をどう決めるか、命名規則をどう統一するかなど、検討すべき論点が多くあります。実装方針が固まる前に一度目線を揃えたいです。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -n "$out" ]
+}
+
+@test "prompt-conform-suggest is silent on a short conversational prompt" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"ありがとうございます、完璧です"}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest is silent on a long prompt with no task/keyword shape" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"A".repeat(300)}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+# Regression guard for a false positive found in review: a bare \b(verb)\b match
+# anywhere in the string fired on ordinary questions that merely contain a task
+# verb mid-sentence, not as an imperative directive.
+@test "prompt-conform-suggest is silent on a long EN question that merely contains a task verb" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='How should I write a good commit message for a large refactor that touches many files across the repository and changes the public API surface in several places, while keeping the history readable for future maintainers?'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -z "$out" ]
+}
+
+# Regression guard for a false positive found in review: a standalone politeness
+# marker ("お願いします") is not a task-request shape and must not fire on a long
+# question that has no imperative verb.
+@test "prompt-conform-suggest is silent on a long JP question closed with a bare politeness marker" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='先日リリースしたバージョンでユーザーからいくつか問い合わせが来ているのですが、ログを見る限り原因の切り分けが難しく、どこから調査を始めるのが良さそうか、これまでの経験に基づいたアドバイスをいただけると非常に助かります。あくまで一般論としての意見で構いませんので、お忙しいところ大変恐縮ですが、何卒よろしくお願いします。'
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest is silent when the prompt field is missing" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit"}))' | node "$hook")
+  [ -z "$out" ]
+}
+
+@test "prompt-conform-suggest fails open on malformed stdin JSON and logs to stderr" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  run --separate-stderr bash -c "printf 'not json' | node \"$hook\""
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"failed to parse stdin"* ]]
+}
+
+@test "prompt-conform-suggest honours a PROMPT_CONFORM_SUGGEST_MIN_LENGTH override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"直してください"}))' \
+    | PROMPT_CONFORM_SUGGEST_MIN_LENGTH=5 node "$hook")
+  [ -n "$out" ]
+}
+
+@test "prompt-conform-suggest falls back to the default min length on a non-integer override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local out err
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:"skill"}))' \
+    | PROMPT_CONFORM_SUGGEST_MIN_LENGTH=0.5 node "$hook" 2>"${BATS_TEST_TMPDIR}/stderr.log")
+  err=$(cat "${BATS_TEST_TMPDIR}/stderr.log")
+  [ -z "$out" ]
+  [[ "$err" == *"ignoring invalid PROMPT_CONFORM_SUGGEST_MIN_LENGTH"* ]]
+}
+
+@test "prompt-conform-suggest falls back to the built-in task regex on an invalid override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  local prompt='ユーザー認証機能を実装してください。要件は以下の通りです。メールアドレスとパスワードでログインできること。セッションはJWTで管理すること。パスワードはbcryptでハッシュ化すること。ログイン失敗時は適切なエラーメッセージを返すこと。既存のミドルウェアとの統合方法も検討し、テストも一緒に書いてください。ドキュメントの更新も忘れずにお願いします。'
+  local out err
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" \
+    | PROMPT_CONFORM_SUGGEST_TASK_REGEX='(' node "$hook" 2>"${BATS_TEST_TMPDIR}/stderr.log")
+  err=$(cat "${BATS_TEST_TMPDIR}/stderr.log")
+  [ -n "$out" ]
+  [[ "$err" == *"ignoring invalid PROMPT_CONFORM_SUGGEST_TASK_REGEX regex"* ]]
+}
+
+@test "prompt-conform-suggest applies a valid PROMPT_CONFORM_SUGGEST_TASK_REGEX override" {
+  local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
+  # "hogehoge" matches neither the default task nor keyword regex, so this proves
+  # the override — not the built-in default — is what triggers the match.
+  local prompt="hogehoge $(printf 'x%.0s' {1..150})"
+  local out
+  out=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"UserPromptSubmit",prompt:process.argv[1]}))' "$prompt" \
+    | PROMPT_CONFORM_SUGGEST_TASK_REGEX='hogehoge' node "$hook")
+  [ -n "$out" ]
+}
+
+@test "settings.json wires the prompt-conform-suggest UserPromptSubmit hook" {
+  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
+  local settings="${HOME_DIR}/dot_claude/settings.json"
+  local hook
+  hook=$(jq -r '.hooks.UserPromptSubmit[]? | select(.id == "user-prompt-submit:prompt-conform-suggest")' "$settings")
+  [ -n "$hook" ]
+  # UserPromptSubmit does not support `matcher` (silently ignored per the
+  # official Hooks reference), so this entry intentionally omits it.
+  [ "$(echo "$hook" | jq -r '.matcher')" = "null" ]
+  [ "$(echo "$hook" | jq -r '.hooks[0].command')" = 'node "$HOME/.claude/hooks-fork/prompt-conform-suggest.js"' ]
+  [ "$(echo "$hook" | jq -r '.hooks[0].timeout')" -eq 5 ]
+  [[ "$(echo "$hook" | jq -r '.description')" == *"PROMPT_CONFORM_SUGGEST_MIN_LENGTH"* ]]
 }
 
 @test "1password-backed secret template exists" {
