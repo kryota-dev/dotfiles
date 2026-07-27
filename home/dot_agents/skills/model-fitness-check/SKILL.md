@@ -27,7 +27,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 ## capability 順序（monotonic）
 
-能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**（Opus 4.8 は Opus 5 の floor を**満たさない**）。
+能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**。
 
 判定は **2 パス**で構成する（詳細は「判定と出力」）。**floor パス（上方向）を通過しても判定は終わらず、必ず over-provision パス（下方向）に進む**——ここが over-provision ゲートに到達する唯一の経路なので、floor パスを「無条件 silent pass」で早期 return してはならない:
 
@@ -47,7 +47,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 - `[1m]` などの context-window suffix を除去してから比較する。
 - alias（`opus` / `sonnet` / `haiku` / `fable`）を現行 generation に解決する。
-- **family + generation** で比較する（Opus 4.8 は Opus 5 floor を満たさない）。
+- **family + generation** で比較する。
 - 判定不能な unknown 文字列は **fail-safe**（silent pass せず、チェックを提示する）。
 
 ## 判定と出力
@@ -59,7 +59,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 `AskUserQuestion` で **blocking** し、次の 3 択を提示する:
 
 1. **switch して再実行**: literal な切り替えコマンドを表示する（例: `/model opus`、xhigh 行なら加えて `/effort xhigh`）。user が切り替えてから再開。
-2. **continue anyway**: このまま進む。**どの phase の品質が劣化する見込みか**を 1 行記録する（decision log / PR の 1 行）。
+2. **continue anyway**: このまま進む。
 3. **abort**: 作業を中止する。
 
 - **effort は xhigh を要求する行でのみ言及する**。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
