@@ -55,8 +55,16 @@ if ! ntfy_assert_brief_serve; then
   echo "[ntfy] brief serve front failed; the morning brief will notify without a link." >&2
 fi
 
+# Front the notification-history dashboard (#371). Non-fatal: a missing front
+# only means the dashboard is unreachable from the tailnet until ntfy-setup
+# re-asserts it (the dashboard's own launchd process is registered separately).
+if ! ntfy_assert_dashboard_serve; then
+  echo "[ntfy] dashboard serve front failed; recover once Tailscale is up: ntfy-setup" >&2
+fi
+
 # Provision publisher (token -> notify-env) and subscriber (username/password ->
-# 1Password). Every failure inside is warn-and-continue; recovery is ntfy-setup.
+# 1Password, plus the dashboard's runtime-state credential file, #371). Every
+# failure inside is warn-and-continue; recovery is ntfy-setup.
 ntfy_provision || echo "[ntfy] provisioning incomplete; recover with: ntfy-setup" >&2
 echo "[ntfy] ntfy setup complete."
 exit 0

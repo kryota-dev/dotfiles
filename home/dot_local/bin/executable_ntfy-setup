@@ -86,6 +86,11 @@ fi
 if ! ntfy_assert_brief_serve; then
   echo "ntfy-setup: brief serve front failed; the morning brief will notify without a link." >&2
 fi
+# Front the notification-history dashboard (#371). Non-fatal: a missing front
+# only leaves the dashboard unreachable from the tailnet until this is re-run.
+if ! ntfy_assert_dashboard_serve; then
+  echo "ntfy-setup: dashboard serve front failed; is tailscaled healthy?" >&2
+fi
 ntfy_wait_ready || echo "ntfy-setup: ntfy container is slow to become ready; continuing." >&2
 
 if [ -n "$rotate" ]; then

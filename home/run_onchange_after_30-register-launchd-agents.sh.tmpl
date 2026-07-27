@@ -1,12 +1,13 @@
 {{ if eq .chezmoi.os "darwin" -}}
 #!/bin/bash
-# Register repo-managed launchd LaunchAgents (kryota-dev/dotfiles#257, #368, #365).
-# Re-runs whenever any managed plist changes (embedded hashes below). Wrapper
-# script changes need no re-registration: launchd execs the file fresh on
-# every fire.
+# Register repo-managed launchd LaunchAgents (kryota-dev/dotfiles#257, #365, #368, #371).
+# Re-runs whenever any managed plist changes (embedded hashes below, one per
+# agent so each is tracked independently). Wrapper script changes need no
+# re-registration: launchd execs the file fresh on every fire.
 # dev.kryota.morning-radar plist hash: {{ include "Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl" | sha256sum }}
 # dev.kryota.knowledge-distill plist hash: {{ include "Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl" | sha256sum }}
 # dev.kryota.macos-defaults-drift plist hash: {{ include "Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl" | sha256sum }}
+# dev.kryota.ntfy-dashboard plist hash: {{ include "Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl" | sha256sum }}
 set -euo pipefail
 
 # CI runners have no gui launchd domain, so bootstrap can never succeed there.
@@ -19,7 +20,7 @@ if [ -n "${CI:-}" ]; then
 fi
 
 domain="gui/$(id -u)"
-labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill dev.kryota.macos-defaults-drift)
+labels=(dev.kryota.morning-radar dev.kryota.knowledge-distill dev.kryota.macos-defaults-drift dev.kryota.ntfy-dashboard)
 
 status=0
 for label in "${labels[@]}"; do

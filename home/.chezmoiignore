@@ -125,5 +125,13 @@
 {{ if ne .chezmoi.os "darwin" }}
 Library/
 .config/ntfy
+.config/ntfy-dashboard
 .local/bin/ntfy-setup
 {{ end }}
+
+# Deno unit test for the notification dashboard (#371) lives alongside
+# server.ts in the source tree (so `deno test` can find it) but is not
+# runtime code — every other test file in this repo lives under tests/, not
+# home/, and this repo-relative source layout should not leak into a real
+# machine's $HOME on any OS.
+.config/ntfy-dashboard/server_test.ts

@@ -21,6 +21,8 @@ The `Makefile` is the single source of truth for all local dev commands. The def
 | `test-bats` | `bats tests/*.bats` |
 | `benchmark` | `scripts/benchmark.sh` (cold start + 10-iteration average) |
 | `sync-ghq-completion` | Fetches the vendored `_ghq` from upstream at the mise-pinned ghq version |
+| `lint-deno` | `deno check` + `deno lint` + `deno fmt --check` on the ntfy dashboard (kryota-dev/dotfiles#371); best-effort, skips if `deno` is absent. Not part of `lint`/CI |
+| `test-deno` | `deno test` on the ntfy dashboard; same best-effort/opt-in scope as `lint-deno` |
 
 ### Why there is no `make apply`
 

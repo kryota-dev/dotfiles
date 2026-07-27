@@ -11,15 +11,18 @@ tailnet 上のデバイスから subscribe されます（kryota-dev/dotfiles#33
 `.claude/prds/337-ntfy-tailscale.prd.md` にあります。
 
 **スコープの境界**: このページが扱うのは Claude Code の `Notification`/`Stop` フックから
-ntfy への経路に加え、平日朝ブリーフの配信（#361）と週次 knowledge-distill 配信（#368）です。
+ntfy への経路に加え、平日朝ブリーフの配信（#361）、週次 knowledge-distill 配信（#368）、
+通知履歴ダッシュボード（#371）です。
 本システムが意図的に手を付けていない独立したローカル限定の通知経路が他に2つあります:
 `clv2-session-notify.sh`（SessionStart、instinct クラスターのレビュー促し）と `notify` zsh
-エイリアス（可聴チャイム。両方の wrapper も失敗時のアラート音として再利用しています）。
+エイリアス（可聴チャイム。これらの wrapper も失敗時のアラート音として再利用しています）。
 `morning-radar.sh`（launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、
 現在はブリーフを tailnet の HTML ページにレンダリングし、それにリンクする ntfy 通知を送ります
 —— 下記[朝ブリーフの配信](#朝ブリーフの配信-361)を参照。`knowledge-distill-radar.sh`
 （launchd、週次）はレンダリングされたページを持たないプレーンテキストの ntfy 通知を送ります
-—— 下記[週次 knowledge-distill 配信](#週次-knowledge-distill-配信-368)を参照。
+—— 下記[週次 knowledge-distill 配信](#週次-knowledge-distill-配信-368)を参照。常時稼働の
+ダッシュボードで、キャッシュ済みの `claude-attention`/`claude-done` 履歴を閲覧し、オンデマンドで
+LLM 要約を生成できます —— 下記[通知ダッシュボード](#通知ダッシュボード-371)を参照。
 
 ## アーキテクチャ
 
@@ -161,6 +164,62 @@ Smoke test（オンデマンドで今週のレポートを publish）:
 ~/.claude/knowledge-distill-radar.sh --force   # 課金される実行 1 回。claude-attention に通知
 ```
 
+## 通知ダッシュボード (#371)
+
+軽量な常時稼働ダッシュボードで、キャッシュ済みの `claude-attention`/`claude-done` 履歴を
+既存の `sid`/`repo`/`account` タグでグルーピングして携帯から閲覧でき、オンデマンドで LLM 要約を
+生成できます。既存の 168h キャッシュを超える履歴はなく、新規の永続化も一切ありません。
+
+- **ランタイム**: native な Deno プロセス（`home/dot_config/ntfy-dashboard/server.ts`）で、
+  コンテナ化**しません**。オンデマンド要約経路が個人アカウントの `claude` CLI
+  （`~/.local/launchers/claude`）をサブプロセス起動し、これはホスト固有の状態（mise 管理の
+  バイナリ解決、`~/.claude`）に依存するため、コンテナで複製しても隔離上の利点がありません
+  （ntfy/brief-page のコンテナ化は上記の通り別の理由によるものです）。このリポジトリで初めての
+  **常駐**型 LaunchAgent（`dev.kryota.ntfy-dashboard`、`RunAtLoad` + `KeepAlive`）としてデプロイ
+  されます —— `morning-radar` の一発実行型の平日スケジュールとは異なり、ダッシュボードは常時
+  到達可能でなければならないためです。launchd の Socket-activation は検討の上で不採用としました:
+  執筆時点で Deno/Node.js/Bun のいずれも `launch_activate_socket` のファイルディスクリプタを
+  カスタムのネイティブ実装なしに消費する手段を持ちません（Apple の XPC ドキュメント、および
+  `srvx`/Caddy の未解決 issue で確認済み）。
+- **クレデンシャル**: ntfy の **subscriber** Basic Auth ペア（username/password。publisher の
+  Bearer token とは異なる）は、`~/.config/ntfy/lib.sh` の
+  `ntfy_provision_subscriber`/`ntfy_rotate_subscriber` によって、0600 の runtime-state
+  ファイル（`~/.config/ntfy-dashboard/dashboard-env`、`notify-env` と同じ形式）へ書き込まれます。
+  ダッシュボードプロセス自身は `op read` を一切呼びません —— このシステムの他の `op` 呼び出しは
+  すべて人間立ち会いの `chezmoi apply`/`ntfy-setup` 実行時に行われており、常時稼働の無人プロセスは
+  そもそも 1Password を解錠する tty を持たないためです。
+- **serve**: `Deno.serve` がループバックポート（`.chezmoidata.toml` の
+  `[ntfy_dashboard].port`）で待受け、tailnet 側は `tailscale serve --https` の専用ポート
+  （`[ntfy_dashboard].serve_https`）が front します —— brief page と同じポートプロキシパターンで、
+  ntfy root（443）や brief front（8443）と衝突しない専用ポートです。tailnet-only、`funnel` は
+  使いません。**追加の認証レイヤーはありません** —— brief page と同じく tailnet 境界のみを
+  アクセス制御とします。ただし1点非対称性があります: brief page は副作用のない静的ファイル
+  配信ですが、本ダッシュボードの要約アクションには課金を伴う副作用があり、下記のレート制限で
+  緩和しています。
+- **要約**: オンデマンドのみ（自動/スケジュール生成はありません）。ダッシュボードは
+  `claude -p` を**空の tool allowlist**（`Bash`/`Read`/`Edit` 等を一切許可しない、純粋な
+  テキスト要約）で呼び出します。要約対象の通知本文には他セッションの `last_assistant_message`
+  由来コンテンツが含まれうるため、上記で述べた残存プロンプトインジェクションリスクと同種の
+  対策です。呼び出しはフェッチしたウィンドウのハッシュ単位でキャッシュされ（`summary_ttl_seconds`、
+  既定5分）、ローリング1日あたりの上限（`summary_daily_cap`、既定20回）が課され、同一ウィンドウへの
+  同時リクエストは単一の in-flight 呼び出しに集約されるため、複数デバイスからのアクセスが
+  重複課金呼び出しを引き起こすことはありません。タイムアウト（`claude_timeout_seconds`）が
+  各呼び出しを制限します。
+- **XSS**: 通知のタイトル/本文/タグの値はブラウザへ JSON としてのみ届き、クライアントは
+  DOM の `textContent`（`innerHTML` ではなく）で描画するため、サーバー側のエスケープ処理を
+  書き忘れる余地がありません。
+- **決定記録**: `.claude/prds/371-ntfy-notification-dashboard.prd.md` に、検討した代替案の
+  全記録があります（なぜ Bun ではなく Deno か、なぜ Docker ではなく native か、なぜ
+  Socket-activation ではなく常時稼働プロセスか）。
+
+Smoke test:
+
+```bash
+BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8444"
+curl -sI "$BASE/" | head -1   # 期待: HTTP/… 200
+tailscale funnel status        # 期待: 何も serve していない（tailnet-only）
+```
+
 ## セットアップ手順（初回のみ）
 
 これらの手順の前提として、`chezmoi apply` が compose ファイル・`~/.config/ntfy/lib.sh`・
@@ -181,6 +240,8 @@ Smoke test（オンデマンドで今週のレポートを publish）:
      **1Password アイテムは、存在しない場合に初回だけ自動作成されます**（Secure Note、
      `subscriber-username`/`subscriber-password`）— 手動での 1Password 設定は不要です。
      [secrets-1password](../getting-started/secrets-1password.ja.md) を参照してください。
+     同じパスワードはダッシュボードの `dashboard-env` runtime-state ファイルにも書き込まれ
+     （#371）、常時稼働のダッシュボードプロセス自身が `op` を呼ぶ必要はありません。
 
    `chezmoi apply` も同じプロビジョニングを apply 時に実行します
    （`run_onchange_after_31-setup-ntfy` が同じ `~/.config/ntfy/lib.sh` を source します）が、
@@ -253,6 +314,8 @@ upstream リレーは upstream 側で未検証です — PRD 参照）。
 | Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — `ntfy-setup` を実行する（`tailscale serve --bg` を再検証する。再トリガーされた apply のたびにも検証される） |
 | Old messages missing | `cache-duration` (168h, `[ntfy]` in `.chezmoidata.toml`) elapsed |
 | Notifications on the wrong account badge | `CLAUDE_CONFIG_DIR` unset in that session; account falls back to `default` |
+| ダッシュボードに tailnet から到達できない | `ntfy_assert_dashboard_serve` が失敗（tailscaled が停止） — `ntfy-setup` を実行 |
+| ダッシュボードの要約が常にエラーになる | `dashboard-env` が古い/欠落（#371 以前の subscriber ローテーション等） — `ntfy-setup` で再プロビジョニング |
 
 ## リカバリ: user.db (auth) の消失・破損、またはクレデンシャルのローテーション
 

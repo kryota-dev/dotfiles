@@ -21,6 +21,8 @@
 | `test-bats` | `bats tests/*.bats` |
 | `benchmark` | `scripts/benchmark.sh`（コールドスタート + 10 回平均） |
 | `sync-ghq-completion` | mise でピンした ghq バージョンに対応する `_ghq` をアップストリームから取得してベンダリング |
+| `lint-deno` | ntfy dashboard（kryota-dev/dotfiles#371）に対する `deno check` + `deno lint` + `deno fmt --check`。best-effort で `deno` が無ければスキップ。`lint`/CI には含まれない |
+| `test-deno` | ntfy dashboard に対する `deno test`。`lint-deno` と同じ best-effort/opt-in スコープ |
 
 ### `make apply` が存在しない理由
 

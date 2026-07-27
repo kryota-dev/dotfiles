@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Notification-history dashboard (kryota-dev/dotfiles#371).
+  Runs the Deno server (home/dot_config/ntfy-dashboard/server.ts) as an
+  always-on native process, fronted on the tailnet by `tailscale serve`
+  (ntfy_assert_dashboard_serve in ~/.config/ntfy/lib.sh). Unlike
+  dev.kryota.morning-radar (a one-shot weekday job with RunAtLoad
+  intentionally absent), this is this repo's first persistent LaunchAgent:
+  RunAtLoad + KeepAlive keep it reachable at any time, matching the
+  dashboard's always-available UX requirement. launchd Socket-activation was
+  evaluated and rejected (Deno/Node/Bun have no built-in support for
+  `launch_activate_socket`, confirmed against Apple's XPC docs and upstream
+  issues in srvx/Caddy) — see the PRD's OQ-4 resolution.
+  Registered/reloaded by run_onchange_after_30-register-launchd-agents.sh.tmpl.
+  Least-privilege Deno permission flags: network is scoped to this process's
+  own loopback port and the ntfy loopback port; --allow-run is scoped to the
+  exact absolute path of the claude launcher wrapper (not a bare name, so no
+  PATH resolution is needed for Deno's own permission check); --allow-read is
+  scoped to the dashboard's own credential file only; --allow-env is scoped to
+  PATH/HOME, which server.ts reads and re-injects into the claude subprocess
+  with clearEnv:true (Deno.Command otherwise merges the *entire* parent
+  environment into the child by default, so --allow-env alone does not
+  restrict what the child inherits).
+  EnvironmentVariables.PATH below is required: launchd's default environment
+  is minimal (roughly /usr/bin:/bin:/usr/sbin:/sbin) and does not include
+  /opt/homebrew/bin, so `~/.local/launchers/claude`'s internal
+  `mise which claude` (a bare command) could not otherwise resolve `mise`
+  itself — the exact problem morning-radar.sh already builds its own PATH to
+  avoid for the same reason (see executable_morning-radar.sh's PATH comment).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.kryota.ntfy-dashboard</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{{ .chezmoi.homeDir }}/.local/launchers:{{ .chezmoi.homeDir }}/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ .chezmoi.homeDir }}/.local/share/mise/shims/deno</string>
+    <string>run</string>
+    <string>--allow-net=127.0.0.1:{{ .ntfy_dashboard.port }},127.0.0.1:{{ .ntfy.port }}</string>
+    <string>--allow-run={{ .chezmoi.homeDir }}/.local/launchers/claude</string>
+    <string>--allow-read={{ .chezmoi.homeDir }}/.config/ntfy-dashboard/dashboard-env</string>
+    <string>--allow-env=PATH,HOME</string>
+    <string>{{ .chezmoi.homeDir }}/.config/ntfy-dashboard/server.ts</string>
+    <string>--port</string>
+    <string>{{ .ntfy_dashboard.port }}</string>
+    <string>--env-file</string>
+    <string>{{ .chezmoi.homeDir }}/.config/ntfy-dashboard/dashboard-env</string>
+    <string>--claude-bin</string>
+    <string>{{ .chezmoi.homeDir }}/.local/launchers/claude</string>
+    <string>--summary-ttl-seconds</string>
+    <string>{{ .ntfy_dashboard.summary_ttl_seconds }}</string>
+    <string>--summary-daily-cap</string>
+    <string>{{ .ntfy_dashboard.summary_daily_cap }}</string>
+    <string>--claude-timeout-seconds</string>
+    <string>{{ .ntfy_dashboard.claude_timeout_seconds }}</string>
+    <string>--claude-max-turns</string>
+    <string>{{ .ntfy_dashboard.claude_max_turns }}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>{{ .chezmoi.homeDir }}/dotfiles</string>
+  <key>StandardOutPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.ntfy-dashboard.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{ .chezmoi.homeDir }}/Library/Logs/dev.kryota.ntfy-dashboard.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

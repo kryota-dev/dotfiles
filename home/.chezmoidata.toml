@@ -188,6 +188,27 @@ ghq_user = "kryota-dev"
   # files/directories directly). Distinct from the ntfy port above.
   brief_port = 2587
 
+[ntfy_dashboard]
+  # Notification-history dashboard (kryota-dev/dotfiles#371): a native Deno
+  # server reading claude-attention/claude-done via the ntfy polling API, with
+  # on-demand LLM summaries. Both ports below are SSOT'd here — unlike the
+  # [ntfy] brief_port/8443 split above, where 8443 is a literal in
+  # ntfy/lib.sh.tmpl outside this file; this feature does not repeat that.
+  port = 2588
+  # Tailnet HTTPS port-proxy front (`tailscale serve --https`), tailnet-only —
+  # never funnel. A dedicated port keeps it independent of the ntfy root (443)
+  # and the brief-page front (8443).
+  serve_https = 8444
+  # On-demand summary rate limiting: TTL cache key is a hash of the fetched
+  # notification window, plus a rolling daily cap, so a re-tapped "summarize"
+  # button cannot re-trigger a fresh billed `claude -p` call each time.
+  summary_ttl_seconds = 300
+  summary_daily_cap = 20
+  # Bounds a single headless `claude -p` summary call (mirrors
+  # morning-radar.sh's TIMEOUT_SECONDS/MAX_TURNS watchdog).
+  claude_timeout_seconds = 60
+  claude_max_turns = 5
+
 [macos_defaults_drift]
   # Keys excluded from the weekly drift check (kryota-dev/dotfiles#365),
   # "domain:key" formatted. Read by executable_macos-defaults-drift-check.sh.

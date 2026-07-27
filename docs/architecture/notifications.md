@@ -9,18 +9,21 @@ persistent, remotely subscribable notifications. The finalized decision record l
 in `.claude/prds/337-ntfy-tailscale.prd.md`.
 
 **Scope boundary**: this page covers the Claude Code `Notification`/`Stop`
-hook → ntfy path plus the weekday morning-brief delivery (#361) and the weekly
-knowledge-distill delivery (#368). Two other independent local-only
-notification paths are deliberately left untouched: `clv2-session-notify.sh`
-(SessionStart, instinct-cluster review nudge) and the `notify` zsh alias
-(audible chime, also reused by both wrappers as their failure alert sound).
-`morning-radar.sh` (launchd, weekday brief) used to notify via local
-`osascript`; it now renders the brief to a tailnet HTML page and sends an ntfy
-notification that links to it —
+hook → ntfy path plus the weekday morning-brief delivery (#361), the weekly
+knowledge-distill delivery (#368), and the notification-history dashboard
+(#371). Two other independent local-only notification paths are deliberately
+left untouched: `clv2-session-notify.sh` (SessionStart, instinct-cluster
+review nudge) and the `notify` zsh alias (audible chime, also reused by these
+wrappers as their failure alert sound). `morning-radar.sh` (launchd, weekday
+brief) used to notify via local `osascript`; it now renders the brief to a
+tailnet HTML page and sends an ntfy notification that links to it —
 see [Morning-brief delivery](#morning-brief-delivery-361) below.
 `knowledge-distill-radar.sh` (launchd, weekly) sends a plain-text ntfy
 notification with no rendered page —
-see [Weekly knowledge-distill delivery](#weekly-knowledge-distill-delivery-368) below.
+see [Weekly knowledge-distill delivery](#weekly-knowledge-distill-delivery-368)
+below. A separate, always-on dashboard lets you browse the cached
+`claude-attention`/`claude-done` history and generate on-demand LLM summaries —
+see [Notification dashboard](#notification-dashboard-371) below.
 
 ## Architecture
 
@@ -178,6 +181,70 @@ Smoke test (publish the current week's report on demand):
 ~/.claude/knowledge-distill-radar.sh --force   # one billed run; notifies claude-attention
 ```
 
+## Notification dashboard (#371)
+
+A lightweight, always-on dashboard lets you browse the cached
+`claude-attention`/`claude-done` history from a phone — grouped by the existing
+`sid`/`repo`/`account` tags — and generate on-demand LLM summaries. No history
+beyond the existing 168h cache, and no new persistence of any kind.
+
+- **Runtime**: a native Deno process
+  (`home/dot_config/ntfy-dashboard/server.ts`), **not** containerized. Its
+  on-demand summary path shells out to the personal-account `claude` CLI
+  (`~/.local/launchers/claude`), which depends on host-only state (mise-managed
+  binary resolution, `~/.claude`) that a container would need to duplicate for
+  no isolation benefit (unlike the ntfy/brief-page containers, which exist for
+  unrelated reasons — see above). Deployed as this repo's first **persistent**
+  LaunchAgent (`dev.kryota.ntfy-dashboard`, `RunAtLoad` + `KeepAlive`) — unlike
+  `morning-radar`'s one-shot weekday schedule, the dashboard must stay
+  reachable at any time. launchd Socket-activation was evaluated and rejected:
+  as of writing, none of Deno/Node.js/Bun support consuming a
+  `launch_activate_socket` file descriptor without custom native glue
+  (confirmed against Apple's XPC documentation and open upstream issues in
+  `srvx`/Caddy).
+- **Credentials**: the ntfy **subscriber** Basic Auth pair (username/password,
+  not the publisher's Bearer token) is provisioned into a 0600 runtime-state
+  file (`~/.config/ntfy-dashboard/dashboard-env`, the same shape as
+  `notify-env`) by `ntfy_provision_subscriber`/`ntfy_rotate_subscriber` in
+  `~/.config/ntfy/lib.sh`. The dashboard process never calls `op read` itself —
+  every other `op` call in this system happens during a human-attended
+  `chezmoi apply`/`ntfy-setup` run, and an always-on unattended process has no
+  tty to unlock 1Password with anyway.
+- **Serving**: `Deno.serve` on a loopback port (`[ntfy_dashboard].port` in
+  `.chezmoidata.toml`), fronted on the tailnet by `tailscale serve --https` on
+  a dedicated port (`[ntfy_dashboard].serve_https`) — the same port-proxy
+  pattern as the brief page, on its own port so neither clobbers the ntfy root
+  (443) or the brief front (8443). Tailnet-only; never `funnel`. **No
+  additional authentication layer** — the tailnet boundary is the sole access
+  control, the same posture as the brief page, with one accepted asymmetry:
+  the brief page is a side-effect-free static file server, while this
+  dashboard's summary action has a billable side effect, mitigated by the rate
+  limits below.
+- **Summaries**: on demand only (no automatic/scheduled generation). The
+  dashboard invokes `claude -p` with an **empty tool allowlist** — pure text
+  summarization, no `Bash`/`Read`/`Edit`/etc. — because the summarized
+  notification bodies can carry `last_assistant_message` content from other
+  sessions, the same residual prompt-injection surface noted above. Calls are
+  cached per fetched-window hash (`summary_ttl_seconds`, default 5 minutes) and
+  capped per rolling day (`summary_daily_cap`, default 20), with concurrent
+  requests for the same window coalesced into a single in-flight call so
+  multi-device access cannot trigger duplicate billed calls. A timeout
+  (`claude_timeout_seconds`) bounds each call.
+- **XSS**: all notification title/body/tag values reach the browser only as
+  JSON; the client renders them via DOM `textContent` (never `innerHTML`), so
+  no server-side HTML-escaping step can be forgotten.
+- **Decision record**: `.claude/prds/371-ntfy-notification-dashboard.prd.md`
+  has the full considered-alternatives log (why Deno over Bun, why native over
+  Docker, why an always-on process over Socket-activation).
+
+Smoke test:
+
+```bash
+BASE="https://$(tailscale status --json | jq -r .Self.DNSName | sed 's/\.$//'):8444"
+curl -sI "$BASE/" | head -1   # expect: HTTP/… 200
+tailscale funnel status        # expect: nothing served (tailnet-only)
+```
+
 ## Setup runbook (one-time)
 
 `chezmoi apply` must have already deployed the compose file, `~/.config/ntfy/lib.sh`,
@@ -200,7 +267,10 @@ hand.
      `op` CLI; **the 1Password item is auto-created the first time it is
      absent** (Secure Note, `subscriber-username`/`subscriber-password`) — no
      manual 1Password setup is required. See
-     [secrets-1password](../getting-started/secrets-1password.md).
+     [secrets-1password](../getting-started/secrets-1password.md). The same
+     password is also written to the dashboard's `dashboard-env` runtime-state
+     file (#371), so the always-on dashboard process never needs a live `op`
+     call of its own.
 
    `chezmoi apply` runs the same provisioning at apply time
    (`run_onchange_after_31-setup-ntfy` sources the same `~/.config/ntfy/lib.sh`),
@@ -274,6 +344,8 @@ tailnet-only server is unverified upstream — see the PRD).
 | Phone can't reach the server | Device off the tailnet, or `tailscale serve` mapping lost — run `ntfy-setup` (re-asserts `tailscale serve --bg`; also asserted by every re-triggered apply) |
 | Old messages missing | `cache-duration` (168h, `[ntfy]` in `.chezmoidata.toml`) elapsed |
 | Notifications on the wrong account badge | `CLAUDE_CONFIG_DIR` unset in that session; account falls back to `default` |
+| Dashboard unreachable from the tailnet | `ntfy_assert_dashboard_serve` failed (tailscaled down) — run `ntfy-setup` |
+| Dashboard summaries always error | `dashboard-env` stale/missing (e.g. after a subscriber rotation that predates #371) — run `ntfy-setup` to reprovision |
 
 ## Recovery: user.db (auth) lost or corrupted, or credential rotation
 
