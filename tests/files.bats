@@ -1496,6 +1496,44 @@ FAKE_CLAUDE
   [ "$status" -eq 1 ]
 }
 
+@test ".chezmoiremove entries never collide with a managed path by case only (#351)" {
+  # On macOS's default case-insensitive APFS, a .chezmoiremove entry that
+  # differs from a real managed path only by case (e.g. skill.md vs SKILL.md)
+  # resolves to the SAME file: every apply deletes the managed file it just
+  # wrote, then the next apply re-detects it as "changed since last written"
+  # and never converges (#351, github-projects/skill.md vs SKILL.md). Cross-
+  # check every entry against `chezmoi managed` to guard against reintroducing
+  # this class of bug.
+  command -v chezmoi >/dev/null 2>&1 || skip "chezmoi unavailable"
+  local remove_file="${HOME_DIR}/.chezmoiremove"
+  local managed
+  managed="$(chezmoi managed --source "${HOME_DIR}" 2>/dev/null)"
+  [ -n "$managed" ]
+
+  local entries=()
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    entries+=("$line")
+  done <"$remove_file"
+  [ "${#entries[@]}" -gt 0 ]
+
+  local collisions="" entry lower_entry m lower_m
+  for entry in "${entries[@]}"; do
+    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+    while IFS= read -r m; do
+      [ -z "$m" ] && continue
+      [ "$m" = "$entry" ] && continue
+      lower_m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]')"
+      if [ "$lower_m" = "$lower_entry" ]; then
+        collisions+="${entry} <-> ${m}"$'\n'
+      fi
+    done <<<"$managed"
+  done
+
+  [ -z "$collisions" ] || { printf '%s' "$collisions" >&2; false; }
+}
+
 @test "mcp setup registers all servers as user scope for every account config dir" {
   local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
   [ -f "$script" ]
