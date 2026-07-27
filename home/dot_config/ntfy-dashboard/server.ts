@@ -21,50 +21,51 @@
 //     --allow-net=127.0.0.1:2588,127.0.0.1:2586 \
 //     --allow-run=/Users/you/.local/launchers/claude \
 //     --allow-read=/Users/you/.config/ntfy-dashboard/dashboard-env \
+//     --allow-env=PATH,HOME \
 //     server.ts --port 2588 --env-file /Users/you/.config/ntfy-dashboard/dashboard-env \
 //       --claude-bin /Users/you/.local/launchers/claude
 
 interface Config {
-  port: number;
-  envFile: string;
-  claudeBin: string;
-  summaryTtlSeconds: number;
-  summaryDailyCap: number;
-  claudeTimeoutSeconds: number;
-  claudeMaxTurns: number;
+  readonly port: number;
+  readonly envFile: string;
+  readonly claudeBin: string;
+  readonly summaryTtlSeconds: number;
+  readonly summaryDailyCap: number;
+  readonly claudeTimeoutSeconds: number;
+  readonly claudeMaxTurns: number;
 }
 
 interface NtfyCredentials {
-  ntfyUrl: string;
-  user: string;
-  password: string;
-  topicAttention: string;
-  topicDone: string;
+  readonly ntfyUrl: string;
+  readonly user: string;
+  readonly password: string;
+  readonly topicAttention: string;
+  readonly topicDone: string;
 }
 
 interface NotificationTags {
-  emoji: string;
-  event: string;
-  repo: string;
-  account: string;
-  sid: string;
+  readonly emoji: string;
+  readonly event: string;
+  readonly repo: string;
+  readonly account: string;
+  readonly sid: string;
 }
 
 interface Notification {
-  id: string;
-  time: number;
-  topic: string;
-  priority: number;
-  title: string;
-  message: string;
-  tags: NotificationTags;
+  readonly id: string;
+  readonly time: number;
+  readonly topic: string;
+  readonly priority: number;
+  readonly title: string;
+  readonly message: string;
+  readonly tags: NotificationTags;
 }
 
 interface SessionGroup {
-  sid: string;
-  repo: string;
-  account: string;
-  notifications: Notification[];
+  readonly sid: string;
+  readonly repo: string;
+  readonly account: string;
+  readonly notifications: Notification[];
 }
 
 // --- Config / credential loading ---------------------------------------------
@@ -74,10 +75,17 @@ function parseArgs(argv: string[]): Config {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
+  const numFlag = (flag: string, fallback: number): number => {
+    const raw = get(flag);
+    if (raw === undefined) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new Error(`invalid ${flag}: ${raw}`);
+    return n;
+  };
   const port = Number(get("--port"));
   const envFile = get("--env-file");
   const claudeBin = get("--claude-bin");
-  if (!port || !envFile || !claudeBin) {
+  if (!port || !Number.isFinite(port) || !envFile || !claudeBin) {
     throw new Error(
       "usage: server.ts --port <n> --env-file <path> --claude-bin <path> " +
         "[--summary-ttl-seconds <n>] [--summary-daily-cap <n>] " +
@@ -88,10 +96,10 @@ function parseArgs(argv: string[]): Config {
     port,
     envFile,
     claudeBin,
-    summaryTtlSeconds: Number(get("--summary-ttl-seconds") ?? 300),
-    summaryDailyCap: Number(get("--summary-daily-cap") ?? 20),
-    claudeTimeoutSeconds: Number(get("--claude-timeout-seconds") ?? 60),
-    claudeMaxTurns: Number(get("--claude-max-turns") ?? 5),
+    summaryTtlSeconds: numFlag("--summary-ttl-seconds", 300),
+    summaryDailyCap: numFlag("--summary-daily-cap", 20),
+    claudeTimeoutSeconds: numFlag("--claude-timeout-seconds", 60),
+    claudeMaxTurns: numFlag("--claude-max-turns", 5),
   };
 }
 
@@ -133,6 +141,34 @@ async function loadCredentials(path: string): Promise<NtfyCredentials> {
   };
 }
 
+// Credentials are re-read (with a short TTL cache, not held for the process's
+// whole lifetime) rather than loaded once at startup, for two reasons:
+//   1. The dashboard-env file may not exist yet the moment this always-on
+//      process starts (chezmoi's run_onchange_after_30, which registers this
+//      LaunchAgent with RunAtLoad, runs before after_31, which provisions the
+//      file — so a fresh `chezmoi apply` can start this process before its
+//      own credentials exist). Loading lazily, per request, means a missing
+//      file surfaces as a clear per-request error instead of crashing the
+//      whole process into a launchd KeepAlive restart loop.
+//   2. `ntfy-setup --rotate subscriber` rewrites this file for an already-
+//      running process; re-reading it (bounded by CREDENTIALS_TTL_MS) picks
+//      up the new password without requiring a manual process restart.
+const CREDENTIALS_TTL_MS = 60_000;
+let credentialsCache: { creds: NtfyCredentials; loadedAt: number } | null =
+  null;
+
+async function getCredentials(envFile: string): Promise<NtfyCredentials> {
+  const now = Date.now();
+  if (
+    credentialsCache && now - credentialsCache.loadedAt < CREDENTIALS_TTL_MS
+  ) {
+    return credentialsCache.creds;
+  }
+  const creds = await loadCredentials(envFile);
+  credentialsCache = { creds, loadedAt: now };
+  return creds;
+}
+
 // --- ntfy fetch + grouping ----------------------------------------------------
 
 // ntfy-notify.sh publishes tags in this fixed order (executable_ntfy-notify.sh:198):
@@ -147,6 +183,28 @@ function parseTags(tags: string[] | undefined): NotificationTags {
     repo: t[2] ?? "-",
     account: t[3] ?? "-",
     sid: t[4] ?? "-",
+  };
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+// ntfy's response is external input (a boundary): validate its shape before
+// it flows into typed fields rather than trusting JSON.parse's `any`.
+// Malformed lines are skipped rather than aborting the whole fetch.
+function parseNtfyLine(line: string): Notification | null {
+  const msg: unknown = JSON.parse(line);
+  if (!isRecord(msg) || msg.event !== "message") return null;
+  if (typeof msg.id !== "string" || typeof msg.time !== "number") return null;
+  return {
+    id: msg.id,
+    time: msg.time,
+    topic: typeof msg.topic === "string" ? msg.topic : "",
+    priority: typeof msg.priority === "number" ? msg.priority : 3,
+    title: typeof msg.title === "string" ? msg.title : "",
+    message: typeof msg.message === "string" ? msg.message : "",
+    tags: parseTags(Array.isArray(msg.tags) ? msg.tags as string[] : undefined),
   };
 }
 
@@ -165,17 +223,13 @@ async function fetchTopic(
   const notifications: Notification[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    const msg = JSON.parse(line);
-    if (msg.event !== "message") continue; // skip the "open"/keepalive events
-    notifications.push({
-      id: msg.id,
-      time: msg.time,
-      topic: msg.topic,
-      priority: msg.priority ?? 3,
-      title: msg.title ?? "",
-      message: msg.message ?? "",
-      tags: parseTags(msg.tags),
-    });
+    let parsed: Notification | null;
+    try {
+      parsed = parseNtfyLine(line);
+    } catch {
+      continue; // one malformed line must not fail the whole fetch
+    }
+    if (parsed) notifications.push(parsed);
   }
   return notifications;
 }
@@ -238,12 +292,13 @@ let fetchCache: {
 } | null = null;
 
 async function getNotifications(
-  creds: NtfyCredentials,
+  config: Config,
 ): Promise<{ notifications: Notification[]; hash: string }> {
   const now = Date.now();
   if (fetchCache && now - fetchCache.fetchedAt < FETCH_CACHE_TTL_MS) {
     return fetchCache;
   }
+  const creds = await getCredentials(config.envFile);
   const notifications = await fetchAllNotifications(creds);
   const hash = await hashNotifications(notifications);
   fetchCache = { notifications, hash, fetchedAt: now };
@@ -266,6 +321,14 @@ function pruneDailyCallTimestamps(): void {
   }
 }
 
+// Test-only: the module-level rate-limit/cache state is otherwise shared
+// across every Deno.test in this process.
+function __resetRateLimitStateForTests(): void {
+  summaryCache.clear();
+  inFlight.clear();
+  dailyCallTimestamps.length = 0;
+}
+
 function buildPrompt(notifications: Notification[]): string {
   const lines = notifications.slice(0, 200).map((n) => {
     const d = new Date(n.time * 1000).toISOString();
@@ -279,38 +342,80 @@ function buildPrompt(notifications: Notification[]): string {
   );
 }
 
-// Runs `claude -p` with an explicit empty tool allowlist (pure text
-// summarization — the notifications being summarized can carry
-// last_assistant_message content from other sessions, a documented residual
-// prompt-injection risk; see docs/architecture/notifications.md). Bounded by
-// a timeout mirroring morning-radar.sh's TERM-then-KILL watchdog.
+// Pure builder for the `claude -p` invocation, split out from
+// runClaudeSummary so the exact contract (--tools "" for zero-tool
+// summarization, --no-session-persistence so summarized notification content
+// is never written to ~/.claude) is directly unit-testable without spawning
+// a process.
+function buildClaudeArgs(config: Config, prompt: string): string[] {
+  return [
+    "--model",
+    "sonnet",
+    "--max-turns",
+    String(config.claudeMaxTurns),
+    // "--tools" (not "--allowedTools") is the documented flag for disabling
+    // every built-in tool ("" = none); --allowedTools is an allow-list whose
+    // empty-string semantics are not documented the same way. The summarized
+    // content can carry last_assistant_message text from other sessions (a
+    // documented residual prompt-injection risk, see
+    // docs/architecture/notifications.md), so this call must never be able
+    // to act on embedded instructions.
+    "--tools",
+    "",
+    // Print-mode sessions persist to ~/.claude by default; this call
+    // summarizes potentially sensitive notification content and must not
+    // leave a durable trace (AC-004).
+    "--no-session-persistence",
+    "-p",
+    prompt,
+  ];
+}
+
+// Runs `claude -p` with an explicit empty tool set (pure text summarization).
+// Bounded by a two-stage TERM-then-KILL watchdog mirroring
+// morning-radar.sh's, so a child that ignores SIGTERM cannot hang the
+// in-flight promise (and therefore every future request for the same
+// window-hash) forever.
 async function runClaudeSummary(
   config: Config,
   prompt: string,
 ): Promise<string> {
+  const home = Deno.env.get("HOME") ?? "";
   const command = new Deno.Command(config.claudeBin, {
-    args: [
-      "--model",
-      "sonnet",
-      "--max-turns",
-      String(config.claudeMaxTurns),
-      "--allowedTools",
-      "",
-      "-p",
-      prompt,
-    ],
-    env: { EXA_API_KEY: "", FIRECRAWL_API_KEY: "" },
+    args: buildClaudeArgs(config, prompt),
+    // clearEnv: Deno.Command otherwise merges the *entire* parent
+    // environment into the child by default — `--allow-env` only gates this
+    // process's own Deno.env.* calls, not what a spawned child inherits. The
+    // launcher wrapper (~/.local/launchers/claude) needs PATH (to resolve
+    // `mise which claude`) and HOME (to fill gaps like CLAUDE_CONFIG_DIR);
+    // everything else is deliberately dropped.
+    clearEnv: true,
+    env: {
+      PATH: Deno.env.get("PATH") ?? "",
+      HOME: home,
+      CLAUDE_CONFIG_DIR: `${home}/.claude`,
+      EXA_API_KEY: "",
+      FIRECRAWL_API_KEY: "",
+    },
     stdout: "piped",
     stderr: "piped",
   });
   const child = command.spawn();
-  const timeout = setTimeout(() => {
+  const killGraceMs = 10_000;
+  const termTimer = setTimeout(() => {
     try {
       child.kill("SIGTERM");
     } catch {
       // already exited
     }
   }, config.claudeTimeoutSeconds * 1000);
+  const killTimer = setTimeout(() => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // already exited
+    }
+  }, config.claudeTimeoutSeconds * 1000 + killGraceMs);
   try {
     const output = await child.output();
     if (!output.success) {
@@ -322,39 +427,50 @@ async function runClaudeSummary(
     }
     return new TextDecoder().decode(output.stdout).trim();
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(termTimer);
+    clearTimeout(killTimer);
   }
 }
 
-async function getSummary(
+class RateLimitError extends Error {}
+
+function getSummary(
   config: Config,
   notifications: Notification[],
   hash: string,
+  runner: (config: Config, prompt: string) => Promise<string> =
+    runClaudeSummary,
 ): Promise<string> {
   const cached = summaryCache.get(hash);
   if (
     cached && Date.now() - cached.generatedAt < config.summaryTtlSeconds * 1000
   ) {
-    return cached.summary;
+    return Promise.resolve(cached.summary);
   }
   const existing = inFlight.get(hash);
   if (existing) return existing;
 
   pruneDailyCallTimestamps();
   if (dailyCallTimestamps.length >= config.summaryDailyCap) {
-    throw new RateLimitError(
-      `summary rate limit reached (${config.summaryDailyCap}/24h); try again later`,
+    return Promise.reject(
+      new RateLimitError(
+        `summary rate limit reached (${config.summaryDailyCap}/24h); try again later`,
+      ),
     );
   }
+  // Reserve the slot for this *attempt* now, before the (possibly failing)
+  // call — not only on success. A failed/timed-out claude -p call (which a
+  // prompt-injected notification body could trigger deliberately, e.g. by
+  // requesting a disallowed tool) must still count against the cap; counting
+  // successes only would let repeated failures bypass the daily rate limit
+  // entirely, and doing this synchronously before the `await` also avoids a
+  // check-then-act race between concurrent calls for different hashes.
+  dailyCallTimestamps.push(Date.now());
 
   const promise = (async () => {
     try {
-      const summary = await runClaudeSummary(
-        config,
-        buildPrompt(notifications),
-      );
+      const summary = await runner(config, buildPrompt(notifications));
       summaryCache.set(hash, { summary, generatedAt: Date.now() });
-      dailyCallTimestamps.push(Date.now());
       return summary;
     } finally {
       inFlight.delete(hash);
@@ -363,8 +479,6 @@ async function getSummary(
   inFlight.set(hash, promise);
   return promise;
 }
-
-class RateLimitError extends Error {}
 
 // --- HTTP layer ---------------------------------------------------------------
 
@@ -389,6 +503,7 @@ h1{font-size:1.2rem}
 .note .meta{color:var(--ink-soft);font-size:.75rem}
 button{font:inherit;padding:.4rem .8rem;border-radius:.4rem;border:1px solid var(--accent);background:transparent;color:var(--accent)}
 #summary{white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:.5rem;padding:.75rem;margin-top:.75rem}
+.error{color:#b91c1c}
 </style></head><body><div class="wrap">
 <h1>ntfy notification dashboard</h1>
 <button id="refresh">refresh</button>
@@ -397,10 +512,26 @@ button{font:inherit;padding:.4rem .8rem;border-radius:.4rem;border:1px solid var
 <div id="groups"></div>
 <script>
 async function loadGroups() {
-  const res = await fetch('/api/notifications');
-  const data = await res.json();
   const container = document.getElementById('groups');
   container.textContent = '';
+  let res, data;
+  try {
+    res = await fetch('/api/notifications');
+    data = await res.json();
+  } catch (e) {
+    const err = document.createElement('div');
+    err.className = 'error';
+    err.textContent = 'error: could not reach the dashboard server';
+    container.appendChild(err);
+    return;
+  }
+  if (!res.ok) {
+    const err = document.createElement('div');
+    err.className = 'error';
+    err.textContent = 'error: ' + (data && data.error ? data.error : res.status);
+    container.appendChild(err);
+    return;
+  }
   for (const group of data.groups) {
     const el = document.createElement('div');
     el.className = 'group';
@@ -443,7 +574,28 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function createHandler(config: Config, creds: NtfyCredentials) {
+// The dashboard has no auth layer of its own (tailnet reachability is the
+// sole boundary, AC-005) — but /api/summary has a billable side effect, so a
+// same-site check blocks the common CSRF shape (a cross-origin page's fetch/
+// form silently POSTing to it while a tailnet device's browser visits it).
+// Sec-Fetch-Site is sent by all current browsers; when absent (older
+// browsers, non-browser clients like curl/health checks) an Origin mismatch
+// is treated as cross-site, and a request with neither header is allowed
+// through (it cannot have been issued by a browser acting on a third-party
+// page in the first place).
+function isSameSiteRequest(req: Request): boolean {
+  const site = req.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin" || site === "none";
+  const origin = req.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === new URL(req.url).host;
+  } catch {
+    return false;
+  }
+}
+
+function createHandler(config: Config) {
   return async (req: Request): Promise<Response> => {
     const url = new URL(req.url);
     try {
@@ -453,11 +605,14 @@ function createHandler(config: Config, creds: NtfyCredentials) {
         });
       }
       if (url.pathname === "/api/notifications" && req.method === "GET") {
-        const { notifications } = await getNotifications(creds);
+        const { notifications } = await getNotifications(config);
         return jsonResponse({ groups: groupBySession(notifications) });
       }
       if (url.pathname === "/api/summary" && req.method === "POST") {
-        const { notifications, hash } = await getNotifications(creds);
+        if (!isSameSiteRequest(req)) {
+          return jsonResponse({ error: "cross-site request rejected" }, 403);
+        }
+        const { notifications, hash } = await getNotifications(config);
         if (notifications.length === 0) {
           return jsonResponse({ summary: "要約対象の通知がありません。" });
         }
@@ -469,6 +624,9 @@ function createHandler(config: Config, creds: NtfyCredentials) {
       if (err instanceof RateLimitError) {
         return jsonResponse({ error: err.message }, 429);
       }
+      // Do not echo internal error detail (stack traces, file paths) to a
+      // tailnet-wide, unauthenticated client; log it server-side instead.
+      console.error(err);
       const message = err instanceof Error ? err.message : String(err);
       return jsonResponse({ error: message }, 502);
     }
@@ -477,19 +635,28 @@ function createHandler(config: Config, creds: NtfyCredentials) {
 
 export type { Config, Notification };
 export {
+  __resetRateLimitStateForTests,
+  buildClaudeArgs,
   buildPrompt,
+  getSummary,
   groupBySession,
   hashNotifications,
+  INDEX_HTML,
   parseArgs,
   parseEnvFile,
   parseTags,
+  pruneDailyCallTimestamps,
+  RateLimitError,
 };
 
 if (import.meta.main) {
   const config = parseArgs(Deno.args);
-  const creds = await loadCredentials(config.envFile);
+  // Credentials are not loaded here: an unattended, always-on process must
+  // not crash before Deno.serve even starts just because dashboard-env isn't
+  // written yet (see getCredentials' doc comment) — each request loads/
+  // reloads it lazily instead.
   Deno.serve(
     { port: config.port, hostname: "127.0.0.1" },
-    createHandler(config, creds),
+    createHandler(config),
   );
 }

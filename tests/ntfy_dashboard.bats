@@ -59,13 +59,7 @@ LIB="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
   ntfy_write_dashboard_env "subscriber" "bats-fixture-value-not-a-real-secret"
 
   [ -f "$ntfy_dashboard_env_file" ]
-  local mode
-  if stat --version >/dev/null 2>&1; then
-    mode="$(stat -c '%a' "$ntfy_dashboard_env_file")"
-  else
-    mode="$(stat -f '%Lp' "$ntfy_dashboard_env_file")"
-  fi
-  [ "$mode" = "600" ]
+  [ "$(_file_mode "$ntfy_dashboard_env_file")" = "600" ]
   grep -qF "NTFY_URL='http://127.0.0.1:2586'" "$ntfy_dashboard_env_file"
   grep -qF "NTFY_DASHBOARD_SUBSCRIBER_USER='subscriber'" "$ntfy_dashboard_env_file"
   grep -qF "NTFY_DASHBOARD_SUBSCRIBER_PASSWORD='bats-fixture-value-not-a-real-secret'" "$ntfy_dashboard_env_file"

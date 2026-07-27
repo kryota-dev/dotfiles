@@ -49,11 +49,11 @@ test: lint test-bats
 test-bats:
 	@bats tests/*.bats
 
-## Type-check and format-check the ntfy dashboard's Deno code (kryota-dev/dotfiles#371)
+## Type-check, lint, and format-check the ntfy dashboard's Deno code (kryota-dev/dotfiles#371)
 lint-deno:
 	@command -v deno >/dev/null 2>&1 || { echo "deno not found (mise install deno); skipping."; exit 0; }
-	@echo "==> Running deno check/fmt (ntfy dashboard)..."
-	@cd home/dot_config/ntfy-dashboard && deno check server.ts server_test.ts && deno fmt --check server.ts server_test.ts
+	@echo "==> Running deno check/lint/fmt (ntfy dashboard)..."
+	@cd home/dot_config/ntfy-dashboard && deno check server.ts server_test.ts && deno lint server.ts server_test.ts && deno fmt --check server.ts server_test.ts
 
 ## Run the ntfy dashboard's Deno unit tests (kryota-dev/dotfiles#371)
 test-deno:

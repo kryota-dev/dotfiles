@@ -16,13 +16,28 @@
   Least-privilege Deno permission flags: network is scoped to this process's
   own loopback port and the ntfy loopback port; --allow-run is scoped to the
   exact absolute path of the claude launcher wrapper (not a bare name, so no
-  PATH resolution is needed); --allow-read is scoped to the dashboard's own
-  credential file only.
+  PATH resolution is needed for Deno's own permission check); --allow-read is
+  scoped to the dashboard's own credential file only; --allow-env is scoped to
+  PATH/HOME, which server.ts reads and re-injects into the claude subprocess
+  with clearEnv:true (Deno.Command otherwise merges the *entire* parent
+  environment into the child by default, so --allow-env alone does not
+  restrict what the child inherits).
+  EnvironmentVariables.PATH below is required: launchd's default environment
+  is minimal (roughly /usr/bin:/bin:/usr/sbin:/sbin) and does not include
+  /opt/homebrew/bin, so `~/.local/launchers/claude`'s internal
+  `mise which claude` (a bare command) could not otherwise resolve `mise`
+  itself — the exact problem morning-radar.sh already builds its own PATH to
+  avoid for the same reason (see executable_morning-radar.sh's PATH comment).
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
   <string>dev.kryota.ntfy-dashboard</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{{ .chezmoi.homeDir }}/.local/launchers:{{ .chezmoi.homeDir }}/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
     <string>{{ .chezmoi.homeDir }}/.local/share/mise/shims/deno</string>
@@ -30,7 +45,7 @@
     <string>--allow-net=127.0.0.1:{{ .ntfy_dashboard.port }},127.0.0.1:{{ .ntfy.port }}</string>
     <string>--allow-run={{ .chezmoi.homeDir }}/.local/launchers/claude</string>
     <string>--allow-read={{ .chezmoi.homeDir }}/.config/ntfy-dashboard/dashboard-env</string>
-    <string>--allow-env=EXA_API_KEY,FIRECRAWL_API_KEY</string>
+    <string>--allow-env=PATH,HOME</string>
     <string>{{ .chezmoi.homeDir }}/.config/ntfy-dashboard/server.ts</string>
     <string>--port</string>
     <string>{{ .ntfy_dashboard.port }}</string>
