@@ -42,7 +42,7 @@ zoxide = "0.10.0"
 # npm-backed CLIs (no registry entry). agent-browser ships its specialized skills
 # (electron/slack/dogfood/...) via `agent-browser skills get`, so they are loaded at
 # runtime instead of being vendored; only the discovery stub is chezmoi-managed.
-"npm:agent-browser" = "0.33.0"
+"npm:agent-browser" = "0.33.1"
 
 pandoc = "3.10.1"
 typst = "0.15.1"
