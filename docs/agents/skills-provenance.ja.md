@@ -203,12 +203,13 @@ awk '
 - **必須の位置引数を先頭に**、山括弧記法で記述する: `<slug>`、`<path>`、`<issue-url-or-feature-description>`
 - **省略可能な位置引数**は山括弧トークンを角括弧で包む: `[<name>]`（例: `[<テーマ>]`）
 - **オプションはその後**に `[--name=<value>]` 形式（角括弧 = 省略可能）
+- **パス値を取るオプションは空白区切りの引数**（`--spec-context <dir>`）を `=<value>` の代わりに使ってよい。ファイルシステムパスではこの形が自然で、実際のパース方法とも一致する。パス以外の値オプションは `--name=<value>` 形式を保つ。
 - **単一スロット内の代替案**は `<...>` 内で `|`（スペースなし）で連結する: `<pr|session|topic>`
 - **短フラグ**（`-q`、`-w`、`-o`）は既知の慣例では許容
 
 具体例: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
 
-この形に従っている既存スキル: `zenn-draft`（`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` は上記の省略可能な位置引数ルールに従う）、`pr-workflow`（`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`）、`issue-fleet`（`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`）、`multi-review`（`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`）。
+この形に従っている既存スキル: `zenn-draft`（`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` は上記の省略可能な位置引数ルールに従う）、`pr-workflow`（`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`）、`issue-fleet`（`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`）、`multi-review`（`<PR番号 | owner/repo#PR番号 | PR URL> [--tier=trivial|small|standard|large] [--arch] [--spec-context <dir>]` — `--spec-context <dir>` は上記の空白区切りルールに従うパス値オプション）。
 
 ### `(Recommended)` マーカー規約
 
