@@ -74,15 +74,17 @@
 
 `statusLine` フィールドは `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh` を指し、同じ settings.json を両アカウントで共用できます。
 
-2つのプラグインを宣言しています：
+3つのプラグインを宣言しています：
 
 | プラグイン | 提供内容 |
 |---|---|
 | `codex@openai-codex` | Claude Code 内から Codex CLI（OpenAI）へ相談する機能 |
 | `claude-code-setup@claude-plugins-official` | Anthropic 公式の read-only コードベース分析ツール。hooks・skills・MCP サーバー・サブエージェントを推奨する |
+| `chatshelf@chatshelf` | Claude Code が scratchpad に書き出す「コード説明」HTML をセッション紐付きで管理するローカルライブラリ + viewer（ストア `$CLAUDE_CONFIG_DIR/code-explanations`、viewer `127.0.0.1:7788`（個人）/ `:7789`（r06）— [アカウント分離](account-isolation.ja.md) 参照） |
 
 `enabledPlugins` がプラグインを、`extraKnownMarketplaces` がその入手元となる非公式 marketplace を宣言します
-（`openai-codex` → `openai/codex-plugin-cc`、タグ `v1.0.6` に pin）。ただしどちらのキーも、それ自体は
+（`openai-codex` → `openai/codex-plugin-cc`、タグ `v1.0.6` に pin；`chatshelf` → `NoritakaIkeda/chatshelf`、
+タグ `v0.1.0` に pin）。ただしどちらのキーも、それ自体は
 インストールを行いません。CLI は `enabledPlugins` を「*すでにインストール済みの*プラグイン」の有効/無効
 スイッチとして扱い、settings.json に宣言があるだけでは marketplace を登録しません
 （[anthropics/claude-code#23737](https://github.com/anthropics/claude-code/issues/23737)（duplicate でクローズ）、

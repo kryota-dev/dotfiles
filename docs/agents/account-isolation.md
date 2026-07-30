@@ -22,10 +22,14 @@ These variables are set inline on the agent subprocess — they are never export
 | `ECC_MCP_HEALTH_STATE_PATH` | `~/.claude/mcp-health-cache.json` | `~/.claude-r06/mcp-health-cache.json` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 | `CODEX_HOME` | (default — `~/.codex`) | `~/.codex-r06` |
+| `CODE_EXPL_STORE_ROOT` | `~/.claude/code-explanations` | `~/.claude-r06/code-explanations` |
+| `CODE_EXPL_PORT` | `7788` | `7789` |
 
 The r06 Claude config directory (`~/.claude-r06`) contains only symlinks pointing back to `~/.claude` for every config artifact (settings, agents, commands, skills). What differs between accounts is entirely in the state that these env vars direct the tools to write.
 
 `CLV2_HOMUNCULUS_DIR` is the one directory that lives entirely outside `~/.claude` / `~/.claude-r06`, under `~/.local/share/`: Claude Code treats every path under the config dir as a sensitive file requiring interactive Write approval, and the CLV2 analysis session runs headless (`claude --model haiku --print`), so it could never grant that approval and every instinct write failed (issue #336). The other per-account vars (`CLAUDE_CONFIG_DIR`, `ECC_AGENT_DATA_HOME`, `ECC_MCP_HEALTH_STATE_PATH`, `GATEGUARD_STATE_DIR`) stay under the config dir because they are written directly by node/shell code rather than through Claude Code's Write tool, so they never hit that gate.
+
+`CODE_EXPL_STORE_ROOT` and `CODE_EXPL_PORT` isolate the [Chatshelf](claude-code.md) plugin per account: each account's PostToolUse registration hook and SessionStart viewer server write to their own `code-explanations/` store, and the r06 viewer binds `7789` so both accounts' servers can run at once (`server.mjs` exits 0 on `EADDRINUSE`, so a shared `7788` would leave whichever account started second silently serving the other account's shelf). Like the other node-written vars, these live under the config dir; they are injected by the claude wrapper (below), which is why the hook and viewer — children of the exec'd claude — inherit them. One upstream limitation remains: `server.mjs` reads transcripts from a hardcoded `~/.claude/projects`, ignoring `CLAUDE_CONFIG_DIR`, so on the r06 account the viewer's session preview and `claude://resume` helper cannot resolve r06 sessions. This degrades only the transcript-linked preview — the per-account shelf isolation (the privacy boundary) is unaffected.
 
 ---
 
