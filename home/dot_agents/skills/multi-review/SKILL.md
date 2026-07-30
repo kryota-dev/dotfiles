@@ -1,10 +1,11 @@
 ---
 name: multi-review
 description: |
-  3つのレビューツール（cc-code-review / cc-security-review / Codex）を並列でバックグラウンド実行し、
+  tier に応じたレビュー roster（Claude 汎用/セキュリティ + Codex generalist/specialist）を
+  並列でバックグラウンド実行し、レビュー負荷の大半を Codex へ offload する。
   結果を統合サマリーにまとめた上で、GitHub PR にレビュー（body サマリー + インラインコメント）として投稿する。
   PRの包括的レビューを一度に実行したい場合に使用する。
-  トリガー: "multi-review", "マルチレビュー", "全レビュー", "並列レビュー", "フルレビュー", "3ツールレビュー"
+  トリガー: "multi-review", "マルチレビュー", "全レビュー", "並列レビュー", "フルレビュー", "tierレビュー"
   使用場面: PRのコードレビュー・セキュリティレビュー・Codexレビューを一括で実行したい場合
 argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--tier=trivial|small|standard|large] [--arch] [--spec-context <dir>]"
 ---
@@ -27,7 +28,7 @@ roster は tier で gating し（過剰起動を抑制）、レビュー負荷�
 
 ## 引数の解釈
 
-**手順 0（フラグ抽出を最優先）**: `$ARGUMENTS` からまず `--arch` を取り除き `ARCH=true`（未指定なら `ARCH=false`）にする。次に `--spec-context <dir>` があれば取り除き `SPEC_CONTEXT=<dir>`（未指定なら空）にする（spec ドキュメントのディレクトリパス。「spec-context 入力」節参照）。さらに `--tier=<t>`（`trivial|small|standard|large`）があれば取り除き `TIER=<t>` にする（未指定なら空 → 「tier → roster 予算」節の diff 自動推定に回す。fail-safe 切り上げ）。残った 0/1 個のトークンを **target** として下記の優先順で判定する。フラグを先に剥がしておくことで `owner/repo#N --arch` のような複合引数のパース順序事故を避ける。
+**手順 0（フラグ抽出を最優先）**: `$ARGUMENTS` からまず `--arch` を取り除き `ARCH=true`（未指定なら `ARCH=false`）にする。次に `--spec-context <dir>` があれば取り除き `SPEC_CONTEXT=<dir>`（未指定なら空）にする（spec ドキュメントのディレクトリパス。「spec-context 入力」節参照）。さらに `--tier=<t>` があれば取り除き、**`<t>` が `trivial|small|standard|large` のいずれかのときのみ** `TIER=<t>` にする。**それ以外の未定義値（例 `--tier=foo`）は空扱い**とし `TIER` に載せず、未指定と同様に「tier → roster 予算」節の diff 自動推定へ回す（**未知値で roster gating を無効化しない = fail-open 禁止**。fail-safe 切り上げ）。残った 0/1 個のトークンを **target** として下記の優先順で判定する。フラグを先に剥がしておくことで `owner/repo#N --arch` のような複合引数のパース順序事故を避ける。
 
 target を以下の優先順で判定し、**owner/repo と PR 番号の 2 つ組**を確定する。以降の全 `gh` 呼び出しには `--repo <owner/repo>` を明示すること（cross-repo バッチで cwd の repo に暗黙解決される事故を防ぐ）。**cross-repo バッチ（review-fleet 等）から委譲されるときは PR 番号のみを渡さない**（case 3 の cwd 暗黙解決を踏むため）:
 
@@ -73,9 +74,10 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 
 ### tier の確定（TIER 未指定時の自動推定）
 
-- `TIER` が渡っていればそれを使う（pr-workflow からは Phase 6 で明示 `--tier=<Phase0 の tier>` が渡る）。
-- **未指定（standalone）なら diff から自動推定**する。`${DIFF}`（Phase 1 手順 2）の変更行数・変更ファイル数・変更特性を、pr-workflow 既存の tier 判定軸で評価する（新閾値を発明せず流用）: `trivial`=1〜数行/単一ファイル/振る舞い不変 ・ `small`=数ファイル/契約変更なし ・ `standard`=複数横断 or 新機能 ・ `large`=広範/外部契約/migration。
+- `TIER` が渡っていればそれを使う（pr-workflow からは Phase 6 で明示 `--tier=<Phase0 の tier>` が渡る）。**ただし手順 0 で未定義値（4 値以外）は既に空扱いに落とされている**ため、ここに載る `TIER` は常に `trivial|small|standard|large` のいずれか（fail-open 禁止の担保）。
+- **未指定（standalone）なら diff から自動推定**する。判定軸は **pr-workflow『size tier の判定軸』表を SSOT として流用**する（`~/.agents/skills/pr-workflow/SKILL.md` の Phase 0）。**ここで軸を再掲・paraphrase しない**（新閾値を発明せず、pr-workflow 表との drift を作らない）。`${DIFF}`（Phase 1 手順 2）の変更行数・変更ファイル数・変更特性をその表に当てて tier を選ぶ。
 - **fail-safe 切り上げ**: 迷う・境界上・契約/migration/security surface（認証/認可/機密/外部通信）の兆候があれば**上位 tier に切り上げる**。誤分類は over-tiering 側に倒す。
+- **security フロア（standalone の機械的ルール）**: 差分の変更パスに security surface の兆候 —— `auth` / `session` / `token` / `secret` / `credential` / `permission` / `.env`（`.env.*` を含む）等 —— を検出したら、自動推定の結果に関わらず**無条件で tier ≥ standard**とする。pr-workflow 経由なら分類側でこのフロアが効くが、standalone `/multi-review` は分類を経ないため、ここで機械的に担保する（security 変更が trivial/small の薄い roster を素通りするのを防ぐ）。検出は変更ファイルのパス一覧（`diff --git` ヘッダ / `--name-only`）に対する部分一致で行う。
 
 ### roster gating table（spawn する = ✓、モデルと effort 付き）
 
@@ -504,6 +506,14 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
 - 各 leg 起動後、`$STREAM_leg` 先頭の `thread.started` イベントから `thread_id` を捕捉（codex/SKILL.md の grep 例）。
 - `<scratch>/codex-review/<owner>__<repo>__<PR>/sessions.json`（**非コミット**）に `{leg → thread_id}` を記録する（`multi-review` が所有。round 2+ の resume がこれを読む）。**区切りは `__`（owner/repo にも PR にも出現しない）**にして、`foo/bar-baz#1` と `foo-bar/baz#1` のようなハイフン曖昧による cross-repo 衝突を避ける。
 
+#### TTL / クリーンアップ契機（OQ-005: 解決済み）
+
+`sessions.json` と scratch の `codex-review/` 配下は次の方針で寿命管理する（PR #406 の未解決事項 OQ-005 の確定）:
+
+- **所有と idempotency**: `multi-review` が round 1 開始時に自 `(owner,repo,PR)` の `codex-review/<owner>__<repo>__<PR>/` を idempotent に作り直す（前 run の stale な `sessions.json` を置換）。これにより同一 PR の再レビューで古い `thread_id` が混ざらない。
+- **TTL 掃除（mtime ベース）**: round 1 開始時に、`codex-review/` 直下のサブディレクトリのうち **mtime が 7 日以上前**のものを best-effort で削除する（`find "<scratch>/codex-review" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +` 相当）。scratch はセッション隔離だが、standalone 多用や cross-repo バッチで dir が溜まるのを防ぐ。掃除の失敗（権限・不在）は無視する（レビュー本体を止めない）。
+- **契機は round 1 のみ**: 掃除は round 1 開始時の 1 回に限定し、round 2+ の resume 中には行わない（resume 対象の状態ファイルを消さないため）。
+
 ### 並列上限とバッチ（CODEX_MAX_CONCURRENCY）
 
 - `CODEX_MAX_CONCURRENCY = 3`（named constant。read-only の codex exec 3 本同時に競合/レートエラーが出ないことを実機確認済みの床）。
@@ -524,7 +534,7 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
   - **create（round 開始）**: `tmux kill-session -t <name> 2>/dev/null` してから `tmux new-session -d`（idempotent。同名の orphan / 前回分を置換し、accumulation を (owner,repo,PR) ごと最大 1 に bound）。
   - **teardown（round 終了 = Phase 5 投稿後）**: multi-review が自分のセッションを `tmux kill-session -t <name> 2>/dev/null` で破棄する。**ただし client が attach 中（`tmux list-clients -t <name>` が非空）なら破棄せず残置**し、「見終わったら手動 kill、または次 run が置換する」と注記する（観測中の画面を消さない）。
   - **caller（pr-workflow）側の teardown は不要**: round ごとに multi-review が自己完結するため、pr-workflow の GATE 3 等での破棄には依存しない（standalone 多用でも PR ごとに溜まらない）。
-- **観測（tmux）と resume（`sessions.json`）は独立**: tmux セッションはライブ観測専用で、round 2+ の resume は `sessions.json` の `thread_id` を使う（tmux セッションに依存しない）。よって teardown で resume は壊れず、round 2 は fresh にセッションを作り直して新 STREAM を tail する。STREAM の JSONL はディスクに残置（post-hoc 検分用。掃除は scratch TTL = OQ-005 に委ねる）。
+- **観測（tmux）と resume（`sessions.json`）は独立**: tmux セッションはライブ観測専用で、round 2+ の resume は `sessions.json` の `thread_id` を使う（tmux セッションに依存しない）。よって teardown で resume は壊れず、round 2 は fresh にセッションを作り直して新 STREAM を tail する。STREAM の JSONL はディスクに残置（post-hoc 検分用。掃除は上記「TTL / クリーンアップ契機（OQ-005: 解決済み）」の scratch TTL に委ねる）。
 
 ### round 判定と resume 再レビュー
 
@@ -685,7 +695,7 @@ multi-review が投稿するインラインコメントの本文先頭には、�
 | シナリオ | 対応 |
 |---------|------|
 | cc-code-review / cc-security サブエージェントの失敗・スキップ | 1回リトライ。再失敗なら該当ツールをスキップして残りで続行 |
-| 動的 specialist の失敗・未定義（`<lang>-reviewer` 未配備） | 1回リトライ。再失敗なら該当 specialist のみスキップし、常設 3 ツール + 他 specialist で続行（specialist は補強レイヤのため必須ではない） |
+| 動的 specialist の失敗・未定義（`<lang>-reviewer` 未配備） | 1回リトライ。再失敗なら該当 specialist のみスキップし、その回の tier roster（generalist + フロア anchor + 他 specialist）で続行（specialist は補強レイヤのため必須ではない） |
 | `cc-code-review` / `cc-security-review` サブエージェント未定義 | `~/.claude/agents/` に定義があるか確認を案内（chezmoi apply 済みか）。該当ツールをスキップ |
 | `codex` コマンド未発見 | 警告を出力し、その回に spawn 済みの Claude leg（tier により cc-code-review **or** cc-security-review）と Claude specialist は無いため、**generalist 観点が失われる旨を明示**して続行。standard/large では generalist を Codex が独占するため、緊急フォールバックとして cc-code-review（Claude 汎用）の spawn を検討する |
 | codex が `No prompt provided via stdin.` で終了 | 差分を事前変数確保するパターンで1回リトライ（codex skill 参照） |
