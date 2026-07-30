@@ -67,6 +67,52 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> "<reque
 
 （実機確認: インストール済みの codex CLI（`codex --version` で確認可能）。`codex exec --help` で `-s, --sandbox <SANDBOX_MODE>`（`read-only` / `workspace-write` / `danger-full-access`）、`-o, --output-last-message <FILE>`、`-p, --profile <CONFIG_PROFILE_V2>` を確認。`--profile shared` で `$CODEX_HOME/shared.config.toml`（chezmoi source: `home/.chezmoitemplates/codex-shared-config.toml`。model/effort pin は `codex-model-pin.toml` が SSOT）の設定が適用されることも実機確認済み。公式: https://developers.openai.com/codex/noninteractive ）
 
+## `--json` ストリーム・session-id 捕捉・resume（multi-review 連携）
+
+`multi-review` のように **Codex レビューをライブ観測**し、**修正後に文脈を引き継いだ再レビュー（resume）**をしたい場合の SSOT。以下はいずれも codex-cli 0.145.0 で smoke test 済み（`--profile shared` / read-only 前提）。
+
+### `--json`（イベントストリーム）
+
+`codex exec --json` は進捗イベントを **JSONL で stdout にストリーム**する。`-o <RESULT_FILE>`（最終メッセージのみ）と**併用可**で、両者は別 sink:
+
+```bash
+codex exec --profile shared --sandbox read-only --cd <dir> --color never --json \
+  -o "$RESULT" review --base origin/<base> \
+  > "$STREAM" 2>&1   # run_in_background
+# $STREAM = JSONL イベント（tail してライブ観測）／ $RESULT = 最終レビュー結果（親が読む）
+```
+
+- **`-o` と `--json` は sink が異なる**（`-o`=最終メッセージのファイル、`--json`=イベントの stdout）。redirect 先 `$STREAM` に JSONL が流れる。
+- 親（呼び出し側）は **`$RESULT` のみ読む**。`$STREAM` はライブ観測（tail）用で、親コンテキストに載せない。
+- 生 JSONL の整形表示は `multi-review` の `codex-stream-fmt` ヘルパーに委ねる（本 skill は起動形のみ SSOT）。
+
+### session-id の捕捉
+
+JSONL の**最初のイベント**が session id を運ぶ:
+
+```json
+{"type":"thread.started","thread_id":"019fb164-17a2-7fc2-8264-62e27c10b3c8"}
+```
+
+```bash
+TID=$(grep -o '"thread_id":"[^"]*"' "$STREAM" | head -1 | cut -d'"' -f4)
+```
+
+この `thread_id`（UUID）を resume の SESSION_ID に使う。`--ephemeral` を付けるとセッションが永続せず resume 不可になるため、resume したい起動では付けない（既定で永続）。
+
+### resume（文脈を引き継いだ再実行）
+
+```bash
+codex exec resume "$TID" --json -o "$RESULT2" - <<'PROMPT' > "$STREAM2" 2>&1
+<再レビュー依頼（前ラウンドの指摘の再確認 + 修正で新たに混入した問題の走査）>
+PROMPT
+```
+
+- **文脈を継承する**（前ラウンドで見た差分・自分の指摘・棄却判断を覚えている）。よって呼び出し側の「棄却台帳」注入は resume 経路では不要。
+- `resume` には **`-p/--profile` / `-s/--sandbox` / `-C/--cd` が無い**。これらは元セッションの設定を**継承**する（read-only・対象 worktree のまま再レビューできる）。`--json` / `-o` / `-c` は使える。
+- **ラッパー経由でそのまま呼べる**: `~/.local/launchers/codex` は profile フラグが無いとき**グローバル位置**（プログラム名直後）に `--profile shared` を注入するため、`codex exec resume <id>` は内部的に `codex --profile shared exec resume <id>` となり正常動作する（resume の設定継承と衝突しない。実証済み）。ラッパー改修は不要。
+- **account 分離**: セッションファイルは `CODEX_HOME` 配下に永続する。resume は**同一アカウント（同一 Claude セッション文脈で解決される `CODEX_HOME`）から**行う。別アカウント・別環境からは解決できないため、**session id 欠落・resume 失敗時は fresh 起動にフォールバック**する（呼び出し側の責務）。
+
 ## agent profile（workspace-write 実行）
 
 実装・CI 修正など**ワークスペース内への書き込みを伴う委任**では、`--profile shared` ではなく **`--profile agent`**（`$CODEX_HOME/agent.config.toml`、chezmoi source: `home/.chezmoitemplates/codex-agent-config.toml`）を使う。agent profile は `sandbox_mode = "workspace-write"` / `approval_policy = "never"` / `network_access = false` を宣言する非対話実行用の permission 姿勢で、model/effort pin は shared と同一（`codex-model-pin.toml` を共有）。
