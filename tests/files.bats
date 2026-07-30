@@ -877,6 +877,7 @@ case "${1:-} ${2:-}" in
         case "$repo" in
           anthropics/claude-plugins-official) key=claude-plugins-official ;;
           openai/codex-plugin-cc) key=openai-codex ;;
+          NoritakaIkeda/chatshelf) key=chatshelf ;;
           *) echo "unknown marketplace source: $src" >&2; exit 1 ;;
         esac
         ref=""
@@ -937,10 +938,13 @@ FAKE_CLAUDE
   grep -qF 'marketplace-add .claude openai/codex-plugin-cc#v1.0.6' "${sandbox}/calls.log"
   grep -qF 'marketplace-add .claude-r06 openai/codex-plugin-cc#v1.0.6' "${sandbox}/calls.log"
   grep -qF 'marketplace-add .claude anthropics/claude-plugins-official' "${sandbox}/calls.log"
+  # chatshelf is registered at its own pinned tag (a distinct marketplace + ref from openai-codex).
+  grep -qF 'marketplace-add .claude NoritakaIkeda/chatshelf#v0.1.0' "${sandbox}/calls.log"
+  grep -qF 'marketplace-add .claude-r06 NoritakaIkeda/chatshelf#v0.1.0' "${sandbox}/calls.log"
 
-  # Both plugins land in both accounts.
-  [ "$(grep -c '^install .claude ' "${sandbox}/calls.log")" -eq 2 ]
-  [ "$(grep -c '^install .claude-r06 ' "${sandbox}/calls.log")" -eq 2 ]
+  # All three plugins land in both accounts.
+  [ "$(grep -c '^install .claude ' "${sandbox}/calls.log")" -eq 3 ]
+  [ "$(grep -c '^install .claude-r06 ' "${sandbox}/calls.log")" -eq 3 ]
 
   # The hook annotations the fake CLI stripped are back, and the work account's symlink was repaired.
   jq -e '.hooks.SessionStart[0] | has("id") and has("description")' "${sandbox}/home/.claude/settings.json"
