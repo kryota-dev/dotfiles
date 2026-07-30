@@ -71,6 +71,7 @@ status: draft
   - `$TMUX` セット（親が tmux 内）: 同セッションに専用ウィンドウ `codex-review-<PR>` を自動作成し、`Ctrl-b w` 等での切替を案内する。
   - `$TMUX` 未セット + tmux 在: detached セッションを作り、**親エージェントが「別ターミナルで `tmux attach -t codex-review-<PR>`」を提示**する（現端末では attach 不可＝Claude TUI と衝突する旨も添える）。
   - tmux 非在: JSONL ファイルのみ残し、`tail -f <STREAM_leg>.jsonl` のパスを提示する。
+  - **セッション lifecycle は multi-review（作成者）が所有し自己完結する**: create は `tmux kill-session ... 2>/dev/null` → `new-session`（idempotent。accumulation を (owner,repo,PR) ごと最大 1 に bound）、round 終了（Phase 5 投稿後）に自分のセッションを teardown する（**client が attach 中なら残置**して観測画面を消さない）。caller（pr-workflow）の teardown に依存しないため **standalone 多用でも溜まらない**。観測（tmux）と resume（`sessions.json`）は独立で、teardown しても resume は壊れない（round 2 は fresh に作り直す）。
 - **AC-018**: JSONL を簡潔な 1 行に整形するヘルパー `codex-stream-fmt`（curated script）を用意し、生 JSONL をそのまま見せない（**ただし jq 不在時は簡潔整形を諦め、leg タグ付きで生 JSONL への degrade を許容する** = 可用性優先のフォールバック。整形が主機能で、フォールバックは jq 非在という限定条件でのみ発生）。セッション名は `#` を避け `codex-review-<owner>__<repo>__<PR>`（例 `codex-review-kryota-dev__dotfiles__412`）とする。
 
 ## Codex resume 再レビュー（Part 3）
