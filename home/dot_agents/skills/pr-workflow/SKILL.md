@@ -146,7 +146,7 @@ CI green 確認後、`/multi-review` を起動する。
 `/multi-review` 完了後、**adversarial verify protocol** を 1 ラウンド追加する。**generator と逆のモデル族**で反証する（finding を出した文脈がそのまま反証もする自己強化バイアスに加え、同族の見落としバイアスも断つ）:
 
 - **Codex 由来の MUST**（generalist / specialists）→ **Claude `adversarial-verifier` サブエージェントを 2 並列 spawn**（Agent tool、`subagent_type: adversarial-verifier`。`model: sonnet` + `effort: xhigh` は frontmatter 固定。**effort は Agent tool の per-call パラメータで渡せず frontmatter でのみ固定できる**ため）。距離のあるフレーミング（correctness / security / does-it-reproduce 等）で反証させる。
-- **Claude-security 由来の MUST** → **Codex で 2 並列反証**（`codex exec --profile shared --sandbox read-only ... -c model_reasoning_effort=xhigh` の heredoc に「以下の指摘を一次ソースで反証せよ」。codex/SKILL.md の起動形）。
+- **Claude-security 由来の MUST** → **Codex で 2 並列反証**。**`adversarial-verifier.md` 本文（frontmatter 除去）を heredoc に注入して起動する**（specialist と同じ rubric SSOT パターン。薄い一行プロンプトにしない＝ REFUTED/UNCERTAIN の判定基準や「実行が要るなら反証せず UNCERTAIN」等の safety rail を Claude 側反証と揃え、2 票ガードの非対称による誤棄却を防ぐ）。反証対象の MUST テキストは **inline ではなく変数経由（`${FINDING}`）で埋め込む**（動的コンテンツをコマンドテンプレートに直書きしない。変数展開の結果は再スキャンされないため diff 由来の `$(...)` も実行されない）。`codex exec --profile shared --sandbox read-only ... -c model_reasoning_effort=xhigh`（codex/SKILL.md の起動形）。
 - **棄却は 2 本とも一次ソースで反証（`REFUTED`）したときのみ**（2 票ガードで誤棄却を防ぐ）。cross-model 化で独立性が構造的に上がったぶん、旧 ×3 を **×2** に落としても厳密性を維持できる。finding を出した親の inline 反証で代替しない。
 
 - **spawn 上限（コスト管理）**: 「各 MUST × 2」は MUST 件数に対して線形に増える。**1 ラウンドの総 spawn は上限 8 件**（旧 12 から引き下げ）とし、超える場合は severity / 影響範囲の上位 MUST から充てる。残りは親が inline で 1 パス反証し、**「反証未実施」として棄却ログに記録する**（黙って落とさない）。反証対象の優先順位づけでは、直接観測した字面事実（ファイルの記述の有無など）より**推論を含む主張**を優先する（前者は反証の価値が低い）。
