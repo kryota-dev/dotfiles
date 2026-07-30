@@ -16,7 +16,7 @@ ghq_user = "kryota-dev"
   # (skills/supabase/ and skills/supabase-postgres-best-practices/). Same pinning
   # rationale as above; a single pin covers both external entries because both
   # extract from the same tarball URL.
-  supabase_agent_skills_commit = "1ad9aaeb49caafd9e95c0a91116f71890eebbc53"
+  supabase_agent_skills_commit = "1207767388a0ffb55f21fb4e6988fee96942431d"
 
 [ecc]
   # Everything Claude Code — https://github.com/affaan-m/ECC
