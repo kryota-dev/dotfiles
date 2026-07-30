@@ -76,7 +76,7 @@ status: draft
 
 ## Codex resume 再レビュー（Part 3）
 
-- **AC-019**: round 1（初回レビュー）で各 Codex leg の session id を `--json` イベントから捕捉し、`<scratch>/codex-review/<owner>-<repo>-<PR>/sessions.json`（非コミット）に `{leg → session_id}` を記録する。所有者は `multi-review`。
+- **AC-019**: round 1（初回レビュー）で各 Codex leg の session id を `--json` イベントから捕捉し、`<scratch>/codex-review/<owner>__<repo>__<PR>/sessions.json`（非コミット。区切りは `__` で cross-repo のハイフン曖昧衝突を回避）に `{leg → session_id}` を記録する。所有者は `multi-review`。
 - **AC-020**: round 2+（修正後の再レビュー）は、open な指摘を持つ Codex leg を `codex exec resume <session_id> <prompt>` で継続する。resume により棄却台帳の注入は Codex leg で不要になる（session 継続が再提起を構造的に防ぐ）。
 - **AC-021**: resume プロンプトに「修正で新たに混入した問題も差分を走査せよ」を明示する（anchoring 緩和）。session id 欠落・期限切れ・resume 失敗時は fresh レビューにフォールバックする。
 - **AC-022**: 再レビュー対象は「前ラウンドで open 指摘を持つ leg」を resume。clean だった leg は原則スキップし、修正 diff がその leg のドメイン（拡張子/特性）に触れた場合のみ fresh で追加 spawn する。Claude 側は resume を追加せず現状維持（round ごと fresh spawn + 棄却台帳）。
