@@ -520,7 +520,11 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
 | tmux 非在 | ライブ整形はスキップ（コアは無傷） | `tail -f "$STREAM_leg"` の各パスを提示 |
 
 - 整形は `codex-stream-fmt`（`~/.agents/skills/multi-review/codex-stream-fmt`。JSONL→簡潔行、jq 不在時は生素通し）。セッション名は `#` を避け **`codex-review-<owner>__<repo>__<PR>`**（例 `codex-review-kryota-dev__dotfiles__412`）。**owner/repo を必ず含める**（PR 番号だけだと別 repo の同番号 PR が cross-repo バッチで衝突し、別リポジトリのレビュー実況が同じペインに混線するため）。上表の `codex-review-<PR>` はこの正式名の略記。
-- ウィンドウ/セッションは round 全体の完了後に残置 or 再利用（round 2+ の resume は同ペインで新 STREAM を tail）。
+- **セッションの lifecycle は multi-review（作成者）が所有し自己完結する（standalone でも溜めない）**:
+  - **create（round 開始）**: `tmux kill-session -t <name> 2>/dev/null` してから `tmux new-session -d`（idempotent。同名の orphan / 前回分を置換し、accumulation を (owner,repo,PR) ごと最大 1 に bound）。
+  - **teardown（round 終了 = Phase 5 投稿後）**: multi-review が自分のセッションを `tmux kill-session -t <name> 2>/dev/null` で破棄する。**ただし client が attach 中（`tmux list-clients -t <name>` が非空）なら破棄せず残置**し、「見終わったら手動 kill、または次 run が置換する」と注記する（観測中の画面を消さない）。
+  - **caller（pr-workflow）側の teardown は不要**: round ごとに multi-review が自己完結するため、pr-workflow の GATE 3 等での破棄には依存しない（standalone 多用でも PR ごとに溜まらない）。
+- **観測（tmux）と resume（`sessions.json`）は独立**: tmux セッションはライブ観測専用で、round 2+ の resume は `sessions.json` の `thread_id` を使う（tmux セッションに依存しない）。よって teardown で resume は壊れず、round 2 は fresh にセッションを作り直して新 STREAM を tail する。STREAM の JSONL はディスクに残置（post-hoc 検分用。掃除は scratch TTL = OQ-005 に委ねる）。
 
 ### round 判定と resume 再レビュー
 
