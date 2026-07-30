@@ -20,7 +20,7 @@ user-invocable: true
 
 **委譲は「起動」であって「再実装」ではない（手ロール代替の禁止）**: Phase 5〜7 の各ステップは、指定された skill（`/monitor-ci` / `/multi-review` / `/review-resolve-loop`）を **必ず実際に起動する**。「自分でやった方が速い」「重複が少ない」「指摘は自明」等の最適化判断で**同等処理を手ロール（inline の Bash / Agent）で代替してはならない**。オーバーライドは「skill を起動したうえで付加する」ものであり、起動そのものを省く理由にはならない。委譲先 skill は各々が固有の網羅性（例: `/review-resolve-loop` は review thread / review body / **CI marker Issue comment** の 3 経路を体系的に拾う）を持ち、手ロールはその経路網羅を欠いて指摘を取りこぼす。orchestrator の役割は分類・GATE・統合判断であって、委譲先の仕事の肩代わりではない。
 
-**model-tier（task #28 の拡張）**: 分類・設計・統合判断は **Leader**（session model）。機械的実装・CI ログ triage・fact-check は **worker 委譲**（Sonnet / Haiku）。**cross-model diversity は codex** — multi-review のレビュー leg に加え、**small tier の実装と Phase 5 の CI 修正でも Codex worker（`--profile agent`）を選べる**。要求 model/effort の契約（§4）は `/model-fitness-check` が唯一の SSOT であり、本 skill は値を再掲せず Phase 0 でそれを起動する。
+**model-tier（task #28 の拡張）**: 分類・設計・統合判断は **Leader**（session model）。機械的実装・CI ログ triage・fact-check は **worker 委譲**（Sonnet / Haiku）。**cross-model diversity は codex** — multi-review では tier に応じて **generalist（全 tier）+ 全 specialist（standard/large）を Codex 実行**し（多様性フロアで Claude≥1 を保証）、adversarial verify は generator と逆族で反証する（Phase 6, cross-model）。加えて **small tier の実装と Phase 5 の CI 修正でも Codex worker（`--profile agent`）を選べる**。要求 model/effort の契約（§4）は `/model-fitness-check` が唯一の SSOT であり、本 skill は値を再掲せず Phase 0 でそれを起動する。
 
 **マージは user**: 設計決定（task #21 原案の「merge 自動実行」を上書き）として、本 skill は**絶対に自動マージしない**。GATE 3 は merge-ready の handoff であり、merge は user の明示操作。
 
@@ -126,24 +126,30 @@ CI green 確認後、`/multi-review` を起動する。
 
 - trivial/small: Phase 1-4 で `/create-pr` 済の PR に対して起動
 - standard/large: `/sdd` が作成済の PR に対して起動
-- **large tier**: `/multi-review --arch`（diff-scope の盲点検出に `architecture-reviewer` を追加）
+- **large tier**: `/multi-review --tier=large --arch`（diff-scope の盲点検出に `architecture-reviewer` を追加）。他 tier も同様に `--tier=<tier>` を明示（下記オーバーライド指示）
 - **レビューは PR 作成後の 1 回に一本化（決定: single-pass, #347）**: 以前は standard/large で `/sdd` 内蔵 review（開発中の自己 review）と本 `/multi-review` を併用していたが、二重レビューは同一 diff にコード品質・セキュリティ観点が重複し、`/sdd` 内蔵 review の指摘は GitHub に痕跡を残さず dedup もできないため、`/sdd` から内蔵 review を廃止し、レビューは本 Phase 5-7 パイプライン（monitor-ci → multi-review → review-resolve-loop）の 1 回に集約した。`/sdd` の廃止した内蔵レビューで失われた performance / test / ux 観点と spec 整合チェックは、`/multi-review` の横断観点 specialist（`{performance,test,ux}-reviewer`）+ `--spec-context` 入力として移植済み（下記オーバーライド参照）。
 
 ### pr-workflow からの呼び出し時オーバーライド指示
 
 `/multi-review` を pr-workflow から呼ぶ際は、以下を**委譲プロンプトに明記**してオーバーライドする:
 
+> **`/multi-review` には `--tier=<Phase 0 で確定した tier>` を明示的に渡すこと。** roster gating・モデル配分（Claude/Codex）・Codex effort は tier で決まる（multi-review の「tier → roster 予算」節）。pr-workflow は分類済み tier を持つため、multi-review の diff 自動推定に委ねず確定値を渡す（large tier では従来どおり `--arch` も付す）。
+>
 > **投稿方法は「サマリーを body に含めて投稿」を自動選択すること。Phase 5 の投稿方法確認（`AskUserQuestion` の 3 択）はスキップし、body サマリー（統合レビュー結果）＋ インラインコメント（MUST/SHOULD/NITS）を `event: "COMMENT"` で即時 submit する。**
 >
 > **standard/large tier では、`/sdd` が生成した spec ディレクトリを `--spec-context <dir>` として渡すこと（`<dir>` は必ず絶対パス。例 `$(pwd)/.spec-workflow/specs/<name>/`。`.spec-workflow/` は gitignore されるため、相対パスだと reviewer サブエージェントが cwd 依存で解決に失敗しうる）。これにより multi-review が spec-implementation 整合チェック（要件取りこぼし・設計逸脱・未完了タスク）を行い、single-pass 化（#347）で `/sdd` の廃止した内蔵 review から失われた spec 整合観点を補う。performance / test / ux の横断観点 specialist は diff 特性で自動 spawn されるが、`<dir>/requirements.md` に性能要件（NFR）が明示されている場合は `performance-reviewer` を明示要請すること。**
 
 これにより `/multi-review` のレビュー結果（body サマリー + インラインコメント）が GitHub PR に投稿された状態で Phase 7 へ進む。
 
-### adversarial 強化（large tier）
+### adversarial 強化（large tier, cross-model）
 
-`/multi-review` 完了後、**adversarial verify protocol** を 1 ラウンド追加する。各 MUST に対し、**`adversarial-verifier` サブエージェントを 3 並列 spawn**（Agent tool、`subagent_type: adversarial-verifier`）し、それぞれに距離のあるフレーミング（correctness / security / does-it-reproduce 等）で反証させる。過半が反証（`REFUTED`）→ 棄却。**effort は Agent tool の per-call パラメータで渡せず frontmatter でのみ固定できる**ため、`adversarial-verifier`（`model: sonnet` + `effort: xhigh`）を使う（finding を出した文脈がそのまま反証もする自己強化バイアスを断つ）。finding を出した親の inline 反証で代替しない。
+`/multi-review` 完了後、**adversarial verify protocol** を 1 ラウンド追加する。**generator と逆のモデル族**で反証する（finding を出した文脈がそのまま反証もする自己強化バイアスに加え、同族の見落としバイアスも断つ）:
 
-- **spawn 上限（コスト管理）**: 「各 MUST × 3」は MUST 件数に対して線形に増える。**1 ラウンドの総 spawn は上限 N 件（既定 12）**とし、超える場合は severity / 影響範囲の上位 MUST から充てる。残りは親が inline で 1 パス反証し、**「反証未実施」として棄却ログに記録する**（黙って落とさない）。反証対象の優先順位づけでは、直接観測した字面事実（ファイルの記述の有無など）より**推論を含む主張**を優先する（前者は反証の価値が低い）。
+- **Codex 由来の MUST**（generalist / specialists）→ **Claude `adversarial-verifier` サブエージェントを 2 並列 spawn**（Agent tool、`subagent_type: adversarial-verifier`。`model: sonnet` + `effort: xhigh` は frontmatter 固定。**effort は Agent tool の per-call パラメータで渡せず frontmatter でのみ固定できる**ため）。距離のあるフレーミング（correctness / security / does-it-reproduce 等）で反証させる。
+- **Claude-security 由来の MUST** → **Codex で 2 並列反証**。**`adversarial-verifier.md` 本文（frontmatter 除去）を heredoc に注入して起動する**（specialist と同じ rubric SSOT パターン。薄い一行プロンプトにしない＝ REFUTED/UNCERTAIN の判定基準や「実行が要るなら反証せず UNCERTAIN」等の safety rail を Claude 側反証と揃え、2 票ガードの非対称による誤棄却を防ぐ）。反証対象の MUST テキストは **inline ではなく変数経由（`${FINDING}`）で埋め込む**（動的コンテンツをコマンドテンプレートに直書きしない。変数展開の結果は再スキャンされないため diff 由来の `$(...)` も実行されない）。`codex exec --profile shared --sandbox read-only ... -c model_reasoning_effort=xhigh`（codex/SKILL.md の起動形）。
+- **棄却は 2 本とも一次ソースで反証（`REFUTED`）したときのみ**（2 票ガードで誤棄却を防ぐ）。cross-model 化で独立性が構造的に上がったぶん、旧 ×3 を **×2** に落としても厳密性を維持できる。finding を出した親の inline 反証で代替しない。
+
+- **spawn 上限（コスト管理）**: 「各 MUST × 2」は MUST 件数に対して線形に増える。**1 ラウンドの総 spawn は上限 8 件**（旧 12 から引き下げ）とし、超える場合は severity / 影響範囲の上位 MUST から充てる。残りは親が inline で 1 パス反証し、**「反証未実施」として棄却ログに記録する**（黙って落とさない）。反証対象の優先順位づけでは、直接観測した字面事実（ファイルの記述の有無など）より**推論を含む主張**を優先する（前者は反証の価値が低い）。
 - **recall sink 化を防ぐ（#224）**: 棄却は **一次ソースで根拠づけられた反証が過半** のときのみ。反証自体が不確実（裏取りできない）なら finding を **棄却せず残し user に届ける**（coverage 優先）。
 - **棄却ログ（可監査化）**: 棄却した MUST は、**要約 + 棄却理由（一次ソース根拠）** を統合サマリー/PR の「棄却した指摘」節に必ず記録する。黙って落とさない。
 
