@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# codex exec --json の JSONL イベントを、tmux ライブ観測ペイン用の簡潔な 1 行へ整形する。
+#
+# 使い方:
+#   codex exec ... --json ... > STREAM.jsonl 2>&1 &
+#   tail -f STREAM.jsonl | codex-stream-fmt <leg-name>
+#
+#   <leg-name> 省略時は "codex"。jq が無い環境では整形を諦め、leg タグだけ付けて
+#   生 JSONL を素通しする（フォールバック。ライブ表示は生 JSONL になるが機能は保つ）。
+#
+# 対応イベント（codex-cli 0.145.0 実測）:
+#   thread.started   → session <id 短縮>       （resume 用 thread_id の先頭）
+#   turn.started     → start
+#   turn.completed   → done (tokens: N)
+#   item.completed   → reasoning / command_execution / agent_message / error を種別表示
+#   その他/未知      → · <type>                 （握り潰さず種別だけ出す）
+#   パース不能行      → 生行を leg タグ付きで素通し
+set -uo pipefail
+
+leg="${1:-codex}"
+
+if ! command -v jq >/dev/null 2>&1; then
+  # jq 不在: 整形せず leg タグだけ付けて素通し（フォールバック）
+  while IFS= read -r line; do
+    [ -n "$line" ] && printf '[%s] %s\n' "$leg" "$line"
+  done
+  exit 0
+fi
+
+# 単一 jq プロセスで stdin を 1 行ずつ処理する。--unbuffered で行ごとに flush し
+# ライブ tail に追従させる。-R で各行を生文字列として受け、JSON 化に失敗した行は素通す。
+exec jq -rR --unbuffered --arg leg "$leg" '
+  def short(s): (s // "") | gsub("\\s+"; " ") | if (length > 80) then (.[0:80] + "…") else . end;
+  . as $raw
+  | if ($raw | length) == 0 then empty
+    else
+      (try ($raw | fromjson) catch null) as $ev
+      | if ($ev | type) != "object" then "[\($leg)] \($raw)"
+        elif $ev.type == "thread.started" then "[\($leg)] ▸ session \(($ev.thread_id // "")[0:8])"
+        elif $ev.type == "turn.started"   then "[\($leg)] ▸ start"
+        elif $ev.type == "turn.completed" then "[\($leg)] ✓ done (tokens: \($ev.usage.output_tokens // 0))"
+        elif $ev.type == "item.completed" then
+          ($ev.item.type) as $it
+          | if   $it == "reasoning"         then "[\($leg)] … " + short($ev.item.text // $ev.item.summary)
+            elif $it == "command_execution" then "[\($leg)] ⚙ " + short($ev.item.command // $ev.item.cmd)
+            elif $it == "agent_message"     then "[\($leg)] ✎ " + short($ev.item.text)
+            elif $it == "error"             then "[\($leg)] ⚠ " + short($ev.item.message)
+            else "[\($leg)] · " + ($it // "item")
+            end
+        else "[\($leg)] · " + ($ev.type // "event")
+        end
+    end
+'
