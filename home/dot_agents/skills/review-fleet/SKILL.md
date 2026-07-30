@@ -93,14 +93,17 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
 
 以下の計画表を提示する:
 
-| repo | PR | tier | reviewer 構成 | 備考 |
+| repo | PR | 分類 | reviewer 構成（tier 別 roster） | 備考 |
 |------|----|----|--------------|------|
-| owner/repo-a | #123 | A | cc-code-review + cc-security-review + codex + (自動検出 specialist) | |
+| owner/repo-a | #123 | A | `multi-review` が diff から size tier を自動推定 → tier 別 roster（Codex generalist + Claude フロア anchor + 自動検出 specialist） | |
 | owner/repo-b | #456 | B | 同上（`--arch` 推奨） | 大規模diff |
 | owner/repo-c | #789 | C（除外） | - | WIP ラベルあり |
 
-- **コスト警告を必ず明示する**: `multi-review` の常設 reviewer（cc-code-review / cc-security-review）は frontmatter で `model: sonnet` + `effort: xhigh` に固定されているが、総コストは **PR 件数 × reviewer 構成**で積み上がる。計画表の直後にこの旨を一文で明記する。security-critical / large tier の PR では呼び出し側の判断で `model: "opus"` に引き上げられるため、その分のコスト増も見込む。
-- reviewer 構成は `multi-review` の動的 specialist roster（言語/ドメイン検出）を踏襲し、diff の変更ファイルから自動検出したものを表示する。
+> ここでの **A/B/C は review-fleet 独自の可否分類**であって、`multi-review` の size tier（trivial/small/standard/large）とは別軸。実際の reviewer 構成は `multi-review` が diff から推定する size tier で gating される。
+
+- **reviewer 構成は固定 3 ツールではない（tier gating + Codex offload）**: `multi-review` は size tier に応じて roster を絞り、レビュー負荷の大半を **Codex（generalist / specialist）へ offload** する。Claude 側は多様性フロア anchor（small=cc-code-review、standard/large=cc-security-review）と architecture/adversarial に集中する。構成の SSOT は `multi-review`「tier → roster 予算」節。review-fleet は diff の変更ファイルから自動検出した specialist を計画表に添えるが、確定 roster は委譲先が決める。
+- **コスト警告を必ず明示する**: 総コストは **PR 件数 × tier 別 roster**で積み上がる（Codex leg が主、Claude leg は tier ごとに 0〜1 の anchor）。計画表の直後にこの旨を一文で明記する。security-critical / large tier の PR では Codex generalist が effort=xhigh に上がり、`--arch` 追加時は architecture-reviewer の分も増える。
+- **`--tier` は既定で渡さない**: review-fleet は A/B/C 可否分類のみを持ち、pr-workflow のような size tier を持たない。よって `--tier` を明示せず、`multi-review` の diff 自動推定（fail-safe 切り上げ + security フロア）に委ねる。B 分類（大規模 diff）には `--arch` を付す現行運用のみ維持する。
 - **B 分類 PR に `--arch` を付けるかは Phase 3 の追加質問で確定する**（B が 0 件のときはこの質問を省略）。B が 1 件以上あれば下記の 2 問目を提示する。
 
 **AskUserQuestion で対象を確認する**（house 規約: 自由入力は auto-provided Other に任せ、選択肢には free-form の受け皿を置かない）:
@@ -117,7 +120,7 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
   |--------|------|
   | B 分類にのみ `--arch` を付ける (Recommended) | 大規模 diff だけ architecture-reviewer を追加する |
   | 全 PR に `--arch` を付ける | A・B すべてで aggregate-view レビュアーを走らせる（コスト増を許容） |
-  | どの PR にも `--arch` を付けない | 通常の常設 3 ツール（+ 動的 specialist）だけで処理する |
+  | どの PR にも `--arch` を付けない | tier 別 roster（Codex generalist + Claude フロア anchor + 動的 specialist）だけで処理する |
 
 - `--dry-run` は**この計画表提示までで終了**し、Phase 4 には進まない（AskUserQuestion も呼ばない）。
 - 承認が得られなければ Phase 4 に進まない。
@@ -125,8 +128,8 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
 ## Phase 4: バッチ実行（PR 単位は直列）
 
 承認された PR を **1 件ずつ直列**で処理する。並列にしない理由は明確: `/multi-review` は 1 PR あたり
-すでに 3〜5 個のサブエージェント（常設 3 ツール + 動的 specialist、`--arch` 時はさらに 1 つ）を
-**並列**起動する。PR 単位まで並列化すると同時実行エージェント数が N 倍に膨れ上がり、
+tier に応じて複数の leg（Codex generalist + Claude フロア anchor + 自動検出 specialist、`--arch`/large 時は
+architecture-reviewer も）を **並列**起動する。PR 単位まで並列化すると同時実行エージェント数が N 倍に膨れ上がり、
 ワークフローの並行数上限とコストの両方を超過する。したがって review-fleet は「PR は直列、
 reviewer は `/multi-review` 内で並列」という 2 層構造を維持する。
 
