@@ -590,6 +590,48 @@ load helpers/setup
   grep -q -- '--spec-context' "${HOME_DIR}/dot_agents/skills/pr-workflow/SKILL.md"
 }
 
+@test "multi-review tier-aware roster / Codex-offload contract (#407)" {
+  local skill="${HOME_DIR}/dot_agents/skills/multi-review/SKILL.md"
+  local pw="${HOME_DIR}/dot_agents/skills/pr-workflow/SKILL.md"
+  [ -f "$skill" ]
+  # The four size tiers each own a row in the roster gating table.
+  local t
+  for t in trivial small standard large; do
+    grep -qE "^\| \*\*${t}\*\*" "$skill" || { echo "missing gating row for tier: $t"; return 1; }
+  done
+  # Codex observation/offload wiring: --json stream + -o result file + named
+  # concurrency cap + resume's fresh fallback.
+  grep -q -- '--json' "$skill"
+  grep -q -- '-o <RESULT_FILE>' "$skill"
+  grep -q 'CODEX_MAX_CONCURRENCY' "$skill"
+  grep -q 'fresh フォールバック' "$skill"
+  # #407 robustness: fail-open guard on undefined --tier, standalone security
+  # floor, and the resolved OQ-005 (sessions.json TTL / cleanup).
+  grep -q 'fail-open' "$skill"
+  grep -q 'security フロア' "$skill"
+  grep -q '無条件で tier ≥ standard' "$skill"
+  grep -q 'OQ-005: 解決済み' "$skill"
+  # tier auto-inference points at pr-workflow's tier table as SSOT (no paraphrase).
+  grep -q 'size tier の判定軸' "$pw"
+  grep -q 'pr-workflow' "$skill"
+  # pr-workflow Phase 6 explicitly forwards the determined tier to multi-review.
+  grep -q -- '--tier' "$pw"
+  # The stale "always-on 3 tools" framing must be gone from the tier-aware roster.
+  ! grep -q '3ツールレビュー' "$skill"
+  ! grep -q '常設 3 ツール' "$skill"
+}
+
+@test "review-fleet reflects tier gating + Codex offload, not a fixed 3-tool roster (#407)" {
+  local skill="${HOME_DIR}/dot_agents/skills/review-fleet/SKILL.md"
+  [ -f "$skill" ]
+  # No stale "always-on 3 tools" wording remains.
+  ! grep -q '常設 3 ツール' "$skill"
+  # Tier gating + Codex offload framing and the --tier decision are documented.
+  grep -q 'tier gating' "$skill"
+  grep -q 'offload' "$skill"
+  grep -q -- '--tier' "$skill"
+}
+
 # The pipeline Plan (<slug>.plan.md) must be git-trackable while ad-hoc
 # timestamp plans stay ignored — the handoff artifact would break otherwise.
 @test "Plan-PRD pipeline plans are un-ignored in the global gitignore" {
