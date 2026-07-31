@@ -203,12 +203,13 @@ Rules:
 - **Required positionals come first**, in angle-bracket notation: `<slug>`, `<path>`, `<issue-url-or-feature-description>`
 - **Optional positionals** wrap the angle-bracket token in square brackets: `[<name>]` (e.g., `[<テーマ>]`)
 - **Options come after**, in `[--name=<value>]` form (square brackets = optional)
+- **Path-valued options may take a space-separated argument** (`--spec-context <dir>`) instead of `=<value>`; this reads more naturally for filesystem paths and matches how the option is parsed. Non-path value options keep the `--name=<value>` form.
 - **Alternatives within a single positional slot** are joined with `|` (no spaces) inside `<...>`: `<pr|session|topic>`
 - **Short flags** (`-q`, `-w`, `-o`) are acceptable for well-known conventions
 
 Concrete example: `<slug> [--from=<pr|session|topic>] [--out=<dir>]`
 
-Skills that already follow this shape: `zenn-draft` (`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` is an optional positional per the rule above), `pr-workflow` (`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`), `issue-fleet` (`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`), `multi-review` (`<PR番号 | owner/repo#PR番号 | PR URL> [--arch]`).
+Skills that already follow this shape: `zenn-draft` (`[<テーマ>] [--from=pr:...|session:...|topic:...] [--slug=<slug>]` — `[<テーマ>]` is an optional positional per the rule above), `pr-workflow` (`<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]`), `issue-fleet` (`<issue 番号列 or 検索条件> [--max-parallel=N] [--repo=owner/name] [--dry-run]`), `multi-review` (`<PR番号 | owner/repo#PR番号 | PR URL> [--tier=trivial|small|standard|large] [--arch] [--spec-context <dir>]` — `--spec-context <dir>` is a path-valued option per the space-separated rule above).
 
 ### `(Recommended)` marker convention
 
