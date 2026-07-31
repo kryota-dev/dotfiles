@@ -22,14 +22,22 @@
 set -uo pipefail
 
 leg="${1:-codex}"
+# leg（第一引数）も出力に混じるため無害化する。jq 経路は最終一括 sanitize で leg も覆うが、
+# フォールバック経路と対称にするため入力段で C0/DEL を除去しておく（両経路で leg を保護）。
+leg="${leg//[$'\x01'-$'\x1f']/}"
+leg="${leg//$'\x7f'/}"
 
 if ! command -v jq >/dev/null 2>&1; then
   # jq 不在: 整形せず leg タグだけ付けて素通し（フォールバック）。
   # 端末エスケープ注入対策として C0 制御文字（ESC/BEL 含む）と DEL を除去する。
   # builtin のパラメータ展開のみで行う（このフォールバックは jq も外部コマンドも
   # 無い環境で動く必要があるため tr 等を使わない）。C1（0x80-0x9f）は UTF-8 継続
-  # バイトと衝突するため触らず、実攻撃面である ESC/C0 を確実に落とす。
-  while IFS= read -r line; do
+  # バイトと衝突する（素朴なバイト除去は日本語等のマルチバイトを壊す）ため触らず、
+  # 実攻撃面である ESC/C0 を確実に落とす。**保証範囲**: フォールバックは C0/DEL/ESC まで
+  # （jq 経路のみ codepoint 単位で C1 8bit 形式まで完全網羅。多くの UTF-8 端末は raw 8bit
+  # C1 を CSI 解釈しないため、フォールバックでの残存 C1 の実害は限定的）。
+  # `|| [ -n "$line" ]`: 末尾に改行の無い最終行も取りこぼさず処理する。
+  while IFS= read -r line || [ -n "$line" ]; do
     line="${line//[$'\x01'-$'\x1f']/}"
     line="${line//$'\x7f'/}"
     [ -n "$line" ] && printf '[%s] %s\n' "$leg" "$line"

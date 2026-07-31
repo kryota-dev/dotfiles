@@ -165,7 +165,7 @@ require_jq() {
 
 @test "codex-stream-fmt: agent_message 内の ANSI/OSC エスケープを無害化する（valid JSON 経路）" {
   require_jq
-  # ESC を含む値を jq で valid JSON（ エスケープ）に組み立て、fromjson→short 経由で
+  # ESC を含む値を jq で valid JSON に組み立て（値のバイトは実行時 printf で生成）、fromjson→short 経由で
   # 出力される。無害化前は ESC/BEL が素通しされる（このテストが RED を示す）。
   local esc bel input
   esc=$(printf '\033'); bel=$(printf '\007')
@@ -197,4 +197,19 @@ require_jq() {
   [[ "$output" != *$'\033'* ]]
   [[ "$output" != *$'\007'* ]]
   [[ "$output" == *"[fb]"* ]]
+}
+
+@test "codex-stream-fmt: jq 経路は C1 制御文字(0x80-0x9F)を除去し日本語は保持する" {
+  require_jq
+  # C1（U+009B = 8bit CSI 導入子）を含む値を jq で valid JSON に組み立てる。jq 経路は
+  # codepoint 単位で無害化するため C1 は除去され、日本語（U+3000 以降）は保持される。
+  # フォールバック経路はバイト単位のため C1 を残す（保証範囲の差、スクリプト冒頭コメント参照）。
+  local input c1
+  input=$(jq -cn '{type:"item.completed",item:{type:"agent_message",text:("日本語" + ([155]|implode) + "X")}}')
+  c1=$(jq -rn '[155]|implode')   # U+009B 実体（byte 誤検知を避けるため codepoint で照合）
+  run bash "$SCRIPT" ts <<< "$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"$c1"* ]]     # C1 は出力に残らない
+  [[ "$output" == *"日本語"* ]]   # 日本語は保持される
+  [[ "$output" == *"X"* ]]
 }

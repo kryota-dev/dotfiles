@@ -72,12 +72,19 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 
 **tier がレビュー起動数とモデル配分を決める主レバー**。手順 0 の `TIER` を使い、下表の層だけを spawn する。tier を見ずに全 roster を組む旧挙動は廃止（小 PR の過剰起動を防ぐ）。
 
-### tier の確定（TIER 未指定時の自動推定）
+### tier の確定（自動推定 + security フロア）
 
-- `TIER` が渡っていればそれを使う（pr-workflow からは Phase 6 で明示 `--tier=<Phase0 の tier>` が渡る）。**ただし手順 0 で未定義値（4 値以外）は既に空扱いに落とされている**ため、ここに載る `TIER` は常に `trivial|small|standard|large` のいずれか（fail-open 禁止の担保）。
-- **未指定（standalone）なら diff から自動推定**する。判定軸は **pr-workflow『size tier の判定軸』表を SSOT として流用**する（`~/.agents/skills/pr-workflow/SKILL.md` の Phase 0）。**ここで軸を再掲・paraphrase しない**（新閾値を発明せず、pr-workflow 表との drift を作らない）。`${DIFF}`（Phase 1 手順 2）の変更行数・変更ファイル数・変更特性をその表に当てて tier を選ぶ。
-- **fail-safe 切り上げ**: 迷う・境界上・契約/migration/security surface（認証/認可/機密/外部通信）の兆候があれば**上位 tier に切り上げる**。誤分類は over-tiering 側に倒す。
-- **security フロア（standalone の機械的ルール）**: 差分の変更パスに security surface の兆候 —— `auth` / `session` / `token` / `secret` / `credential` / `permission` / `.env`（`.env.*` を含む）等 —— を検出したら、自動推定の結果に関わらず**無条件で tier ≥ standard**とする。pr-workflow 経由なら分類側でこのフロアが効くが、standalone `/multi-review` は分類を経ないため、ここで機械的に担保する（security 変更が trivial/small の薄い roster を素通りするのを防ぐ）。検出は変更ファイルのパス一覧（`diff --git` ヘッダ / `--name-only`）に対する部分一致で行う。
+**手順（順序が重要）**: (1) `TIER` を確定（明示 or 自動推定）→ (2) 確定後に security フロアを**無条件適用**する。フロアを (1) の枝分岐に埋め込まず、確定 `TIER` に対する後段の上書きとして書くことで、明示 `--tier` 経路もフロアの対象に含める。
+
+1. **`TIER` の確定**:
+   - `TIER` が渡っていればそれを使う（pr-workflow からは Phase 6 で明示 `--tier=<Phase0 の tier>` が渡る）。**ただし手順 0 で未定義値（4 値以外）は既に空扱いに落とされている**ため、ここに載る `TIER` は常に `trivial|small|standard|large` のいずれか（fail-open 禁止の担保）。`--tier` が複数回渡った場合は**最後の有効値**を採る（残りは無視）。
+   - **未指定（standalone）なら diff から自動推定**する。判定軸は **pr-workflow『size tier の判定軸』表を SSOT として流用**する（`~/.agents/skills/pr-workflow/SKILL.md` の Phase 0）。**ここで軸を再掲・paraphrase しない**（新閾値を発明せず、pr-workflow 表との drift を作らない）。`${DIFF}`（Phase 1 手順 2）の変更行数・変更ファイル数・変更特性をその表に当てて tier を選ぶ。
+   - **fail-safe 切り上げ**: 迷う・境界上・契約/migration/security surface（認証/認可/機密/外部通信）の兆候があれば**上位 tier に切り上げる**。誤分類は over-tiering 側に倒す。
+
+2. **security フロア（tier 確定後に無条件適用・決定的バックストップ）**: 上記で確定した `TIER` に対し、**明示指定か自動推定かに関わらず**、差分の変更パスに security surface の兆候を検出したら `TIER` を **`standard` 未満なら `standard` へ引き上げる**（`final = max(TIER, standard)`）。**明示 `--tier=trivial|small` であっても上書きする**（フロアは明示指定より優先。security 変更が薄い roster を素通りするのを防ぐ）。
+   - **検出対象キーワード（大文字小文字を無視した部分一致）**: `auth` / `session` / `token` / `secret` / `credential` / `permission` / `jwt` / `oauth` / `cookie` / `apikey` / `cert` / `ssh` / `.env`（`.env.*` を含む）等。変更ファイルのパス一覧（`diff --git` ヘッダ / `--name-only`）に対して評価する。
+   - **これは floor であって ceiling ではない**: パス名ベースの機械的な最低保証であり、diff 本文の内容判定（上記 fail-safe 切り上げ）を置き換えない。汎用ファイル名で中身が security-critical な変更は引き続き fail-safe 判断が主軸。
+   - **pr-workflow 経由との関係**: pr-workflow は Phase 0 の分類でも security surface を `standard` 以上とみなすが、それは LLM 判断（プローズ）。本フロアは multi-review 側の**決定的なバックストップ**として、pr-workflow が明示 `--tier` を forward した場合でも（分類の見落とし・誤操作・自動化による `--tier` 注入に対して）機械的に効く。
 
 ### roster gating table（spawn する = ✓、モデルと effort 付き）
 

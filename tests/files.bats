@@ -605,15 +605,26 @@ load helpers/setup
   grep -q -- '-o <RESULT_FILE>' "$skill"
   grep -q 'CODEX_MAX_CONCURRENCY' "$skill"
   grep -q 'fresh フォールバック' "$skill"
-  # #407 robustness: fail-open guard on undefined --tier, standalone security
-  # floor, and the resolved OQ-005 (sessions.json TTL / cleanup).
+  # #407 robustness — phrase-level assertions that guard semantic regression, not
+  # mere word presence (a bare 'fail-open'/'--tier' elsewhere must not satisfy these):
+  # fail-open guard — an undefined --tier value is treated as empty, not fail-open.
   grep -q 'fail-open' "$skill"
+  grep -qE '未定義値.*空扱い' "$skill"
+  # security floor is a post-determination, UNCONDITIONAL backstop that overrides
+  # even an explicit --tier=trivial/small (M1) — assert the max() formula + override.
   grep -q 'security フロア' "$skill"
-  grep -q '無条件で tier ≥ standard' "$skill"
+  grep -qF 'final = max(TIER, standard)' "$skill"
+  grep -qE '明示.*--tier.*上書き' "$skill"
+  grep -q '決定的' "$skill"
+  # floor keyword coverage is case-insensitive and floor-not-ceiling (S3).
+  grep -q '大文字小文字を無視' "$skill"
+  grep -q 'jwt' "$skill"; grep -q 'oauth' "$skill"
+  grep -q 'floor であって ceiling ではない' "$skill"
+  # resolved OQ-005 (sessions.json TTL / cleanup).
   grep -q 'OQ-005: 解決済み' "$skill"
   # tier auto-inference points at pr-workflow's tier table as SSOT (no paraphrase).
+  grep -qE 'size tier の判定軸.*SSOT' "$skill"
   grep -q 'size tier の判定軸' "$pw"
-  grep -q 'pr-workflow' "$skill"
   # pr-workflow Phase 6 explicitly forwards the determined tier to multi-review.
   grep -q -- '--tier' "$pw"
   # The stale "always-on 3 tools" framing must be gone from the tier-aware roster.
@@ -630,6 +641,8 @@ load helpers/setup
   grep -q 'tier gating' "$skill"
   grep -q 'offload' "$skill"
   grep -q -- '--tier' "$skill"
+  # review-fleet must not pass --tier by default (phrase-level, not mere '--tier').
+  grep -q '既定で渡さない' "$skill"
 }
 
 # The pipeline Plan (<slug>.plan.md) must be git-trackable while ad-hoc

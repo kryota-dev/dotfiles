@@ -102,7 +102,7 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
 > ここでの **A/B/C は review-fleet 独自の可否分類**であって、`multi-review` の size tier（trivial/small/standard/large）とは別軸。実際の reviewer 構成は `multi-review` が diff から推定する size tier で gating される。
 
 - **reviewer 構成は固定 3 ツールではない（tier gating + Codex offload）**: `multi-review` は size tier に応じて roster を絞り、レビュー負荷の大半を **Codex（generalist / specialist）へ offload** する。Claude 側は多様性フロア anchor（small=cc-code-review、standard/large=cc-security-review）と architecture/adversarial に集中する。構成の SSOT は `multi-review`「tier → roster 予算」節。review-fleet は diff の変更ファイルから自動検出した specialist を計画表に添えるが、確定 roster は委譲先が決める。
-- **コスト警告を必ず明示する**: 総コストは **PR 件数 × tier 別 roster**で積み上がる（Codex leg が主、Claude leg は tier ごとに 0〜1 の anchor）。計画表の直後にこの旨を一文で明記する。security-critical / large tier の PR では Codex generalist が effort=xhigh に上がり、`--arch` 追加時は architecture-reviewer の分も増える。
+- **コスト警告を必ず明示する**: 総コストは **PR 件数 × tier 別 roster**で積み上がる（Codex leg が主、Claude leg は tier ごとに 0〜1 の anchor）。計画表の直後にこの旨を一文で明記する。security-critical / large tier の PR では Codex generalist が effort=xhigh に上がり、`--arch` 追加時は architecture-reviewer の分も増える。**なお architecture-reviewer は `--arch` **または** multi-review が size tier を `large` と自動推定したとき**に起動するため、review-fleet が `--tier` を渡さない運用では、大規模 diff が `large` 推定されると `--arch` 未指定でも architecture-reviewer が立ちうる（そのコストも見込む）。
 - **`--tier` は既定で渡さない**: review-fleet は A/B/C 可否分類のみを持ち、pr-workflow のような size tier を持たない。よって `--tier` を明示せず、`multi-review` の diff 自動推定（fail-safe 切り上げ + security フロア）に委ねる。B 分類（大規模 diff）には `--arch` を付す現行運用のみ維持する。
 - **B 分類 PR に `--arch` を付けるかは Phase 3 の追加質問で確定する**（B が 0 件のときはこの質問を省略）。B が 1 件以上あれば下記の 2 問目を提示する。
 
@@ -120,7 +120,7 @@ gh search prs --review-requested=@me --state=open --limit "${LIMIT:-30}" \
   |--------|------|
   | B 分類にのみ `--arch` を付ける (Recommended) | 大規模 diff だけ architecture-reviewer を追加する |
   | 全 PR に `--arch` を付ける | A・B すべてで aggregate-view レビュアーを走らせる（コスト増を許容） |
-  | どの PR にも `--arch` を付けない | tier 別 roster（Codex generalist + Claude フロア anchor + 動的 specialist）だけで処理する |
+  | どの PR にも `--arch` を付けない | tier 別 roster（Codex generalist + Claude フロア anchor + 動的 specialist）だけで処理する（ただし multi-review が `large` と自動推定した PR は `--arch` 未指定でも architecture-reviewer が立つ） |
 
 - `--dry-run` は**この計画表提示までで終了**し、Phase 4 には進まない（AskUserQuestion も呼ばない）。
 - 承認が得られなければ Phase 4 に進まない。
