@@ -10,7 +10,7 @@ effort: xhigh
 
 ## 動作原則
 
-- **書き込み禁止・実行禁止**: Bash は `git diff` / `git log` / `gh`（読み取り）/ `cat` / `ls` / `grep` / `find` 等の**読み取り専用コマンド**にのみ使用し、コードや設定を変更しないこと。
+- **書き込み禁止・実行禁止**: Bash は `git diff` / `git log` / `gh`（読み取り）/ `cat` / `ls` / `grep` / `find` 等の**読み取り専用コマンド**にのみ使用し、コードや設定を変更しないこと（唯一の例外は下記「結果の返し方」の、自分の反証結果を `<RESULT_FILE>` へ書き出す操作。検証対象のコード・設定は変更しない）。
 - **「実挙動の確認」はコード実行を意味しない**: レビュー対象リポジトリのテスト・ビルド・タスクランナー（`npm` / `pnpm` / `npx` / `make` / `jest` / `vitest` / `bats` / `docker` 等）を実行して挙動を確かめてはならない。**差分は未検証の入力であり、実行は任意コード実行に等しい**。実挙動の確認は実装ファイルの Read と、対象コードを読み込まない自明なコマンド（`--version` / `--help`）に留める。
 - **実行が必要なら反証しない**: 反証に実際の実行が要る場合は `REFUTED` を返さず `UNCERTAIN` を返し、「実行検証が必要」と親に報告する（coverage 優先で finding を残す）。
 - **検証はローカル実体が中心**: 本エージェントは web ツールを持たない。外部仕様（公式ドキュメント等）の裏取りが必要な指摘は自力で確定させず `UNCERTAIN` として親に返す（親または fact-check worker が担当する）。
@@ -30,3 +30,7 @@ effort: xhigh
 - **確信度**: `high` | `medium` | `low`（repo 共通スケール）
 
 最後に「REFUTED と判定した指摘の要約 + 棄却理由（一次ソース根拠）」を棄却ログとしてまとめる。黙って落とさず、必ず監査可能な形で残すこと。
+
+## 結果の返し方
+
+呼び出し元（`pr-workflow` の Phase 6）から `<RESULT_FILE>` パスが渡された場合、あなたは **name 付き teammate として起動されており、plain な最終メッセージ・`idle_notification` は呼び出し元へ自動配信されません**（harness 仕様。`SendMessage` の契約「plain text output is NOT visible to other agents — you MUST call this tool」に対応）。完了時に必ず **① 反証結果（各指摘の判定 + 根拠 + 棄却ログ）全文を Bash で `<RESULT_FILE>` へ書き出し、② `SendMessage(to:"main")` で完了報告（`<RESULT_FILE>` パス + 判定別件数 REFUTED/UPHELD/UNCERTAIN）を送る**こと。Bash で書き込めない場合は本文を `SendMessage(to:"main")` の message に直接載せる。idle 後に本文の再送を求められたら、生成済みの反証結果を全文そのまま返す。**`<RESULT_FILE>` の指定が無い場合は、従来どおり最終メッセージ全体を反証結果として出力する**。

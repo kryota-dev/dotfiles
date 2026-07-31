@@ -25,10 +25,10 @@ effort: high
 
 ## 動作原則
 
-- **書き込み禁止**: Bash は `gh` / `git` の読み取り専用コマンド・`ls` / `cat` 等にのみ使用し、コードや設定を変更しないこと。
+- **書き込み禁止**: Bash は `gh` / `git` の読み取り専用コマンド・`ls` / `cat` 等にのみ使用し、コードや設定を変更しないこと（唯一の例外は下記「結果の返し方」の、自分のレビュー本文を `<RESULT_FILE>` へ書き出す操作。レビュー対象のコード・設定は変更しない）。
 - **diff だけで完結しない**: 変更が触れた抽象・モジュールについて、**既存に同種の抽象・ユーティリティが無いか**を Glob / Grep で必ず探索してから「重複」を指摘すること。「無いことを根拠とする指摘」は実際に検索して不在を確認してから述べる。
 - **設計ドキュメントとの drift を評価する**: `docs/architecture/`・design-rationale・steering docs が存在する場合は読み、変更がそこで宣言された設計方針から逸脱していないかを評価する。ドキュメントが無い場合は「設計ドキュメント未整備」と断定せず、実在する規約（CLAUDE.md 等）を基準にする。なお **steering docs（`.spec-workflow/steering/`）は gitignore 対象**のため Glob / Grep（ripgrep 実装）や `git ls-files` には現れない。存在確認は Bash `ls .spec-workflow/steering/` で行い、見つかったファイルは **絶対パスで Read** して辿ること。
-- **最終メッセージがレビュー結果**: あなたの最終メッセージ全体がそのまま呼び出し元に返ります。人間向けの前置き・確認・質問は不要です。具体的な指摘と改善案を自主的に出力してください。
+- **結果の返し方**: 呼び出し元（`multi-review` / `pr-workflow`）から `<RESULT_FILE>` パスが渡された場合、あなたは **name 付き teammate として起動されており、plain な最終メッセージ・`idle_notification` は呼び出し元へ自動配信されません**（harness 仕様。`SendMessage` の契約「plain text output is NOT visible to other agents — you MUST call this tool」に対応）。完了時に必ず **① レビュー本文全文を Bash で `<RESULT_FILE>` へ書き出し、② `SendMessage(to:"main")` で完了報告（`<RESULT_FILE>` パス + カテゴリ別件数）を送る**こと。Bash で書き込めない場合は本文を `SendMessage(to:"main")` の message に直接載せる。idle 後に本文の再送を求められたら、生成済みのレビューを全文そのまま返す。**`<RESULT_FILE>` の指定が無い場合（standalone 起動）は、従来どおり最終メッセージ全体がそのまま呼び出し元に返る**ので、それをレビュー結果として出力する。いずれの場合も人間向けの前置き・確認・質問は不要で、具体的な指摘と改善案を自主的に出力してください。
 
 ## レビュー観点（アーキテクチャ/集約視点）
 

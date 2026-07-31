@@ -253,11 +253,25 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 | 動的 specialist（言語 + 横断観点、マッチ分のみ, **standard/large**） | **バックグラウンド Bash（Codex）** `run_in_background: true` | **agent 定義本文を heredoc 注入して起動する**（Claude subagent ではなく Codex 実行）。プロンプト = 「`~/.claude/agents/<lang>-reviewer.md`（`{performance,test,ux}-reviewer.md`）の本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ `--spec-context` 指定時は spec パスと整合チェック指示）」。起動形は codex/SKILL.md の heredoc 方式に `--json -c model_reasoning_effort=high -o <RESULT> ... > <STREAM> 2>&1` を付す（「Codex leg 実行・並列・観測・resume」節）。**差分の渡し方（重要）**: Codex sandbox では `gh pr diff` の認証が届かないため specialist に gh を実行させない。generalist と同様、`--cd` が対象 PR の worktree なら heredoc で `git diff origin/<base>...HEAD` を指示し、cross-repo 等で不可なら事前確保した `${DIFF}` を埋め込む（差分取得失敗で空レビューが紛れ込むのを防ぐ）。観点・出力形式は agent 本文が SSOT のため multi-review 側で再掲しない |
 | architecture-reviewer（**`--arch` / large tier のときのみ**） | Agent ツール `subagent_type: architecture-reviewer`, `run_in_background: true` | cc-code-review と同形のプロンプト（「対象 PR 説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」）。**差分は起点として自身が取得し、そこから repo 全体へ探索を広げる**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵。diff 言語では spawn 判定せず、フラグ/tier で判定する（「aggregate-view reviewer」節参照） |
 
+#### Claude leg の結果回収契約（name 付き teammate）
+
+Claude leg（cc-code-review / cc-security-review / architecture-reviewer）は **一意な `name`（例 `sec-<PR番号>`）を付けて起動する**（観測性 ＋ Codex leg の `thread_id` 捕捉との対称。対話チャネルを常時確保する）。
+
+**契約（重要）**: `name` を付けると leg は **teammate 化**し、その **plain な最終メッセージ・`idle_notification` は本文を親へ自動配信しない**（harness 仕様。`SendMessage` ツールの契約「plain text output is NOT visible to other agents — you MUST call this tool」に対応。通知名は実セッションログ由来で、公式 doc には payload 記載なし）。ゆえに **結果はファイルで回収し、報告・対話は SendMessage で行う**。各 Claude leg の依頼文に**必ず次を含める**:
+
+1. **結果 = ファイル**: 完了時に**レビュー本文全文を Bash で `<RESULT_FILE>` へ書き出す**。`<RESULT_FILE>` は親が leg ごとに採番し（Codex leg と同じ scratch 配下 `<scratch>/codex-review/<owner>__<repo>__<PR>/` に `claude-<leg>-<round>.md` 等）、依頼文で渡す。
+2. **報告 = SendMessage**: 書き出し後、**`SendMessage(to:"main")` で完了報告**（`<RESULT_FILE>` パス ＋ カテゴリ別件数）を送る。
+3. **フォールバック**: Bash で `<RESULT_FILE>` に書けない場合（sandbox 制約等）は、本文を `SendMessage(to:"main")` の message に直接載せる（回収経路を必ず 1 本確保する）。
+
+**役割分担**: 結果回収は**ファイル**（大きな本文を message に載せない・durable・Codex `-o` と対称）、親↔leg の**追加対話**（clarify・追撃）は **`SendMessage(to:"<leg の name>")`**（Codex leg の対応物は `codex exec resume <thread_id>`。「Codex leg 実行・並列・観測・resume」節）。
+
+> `SendMessage` は `tools:` frontmatter に列挙していなくても background subagent には `to:"main"` 送信が使える（coordination-layer capability）。
+
 #### 手順
 
 1. **codex skill を Read**（Codex コマンド構築の SSOT: `--json` / `-o` / `review --base` / heredoc / `resume` / session-id 捕捉）。**Codex 実行する specialist の agent 定義（`~/.claude/agents/<matched>-reviewer.md`）本文も Read**（heredoc 注入用、frontmatter は剥がす）。cc-code-review / cc-security-review / architecture-reviewer は Claude subagent で起動時に定義が自動ロードされるため Read 不要。
 2. **tier gating table で確定した leg を同一メッセージ内で並列起動**:
-   - **Agent（Claude leg）** `run_in_background: true`: cc-code-review（**small のみ**）／ cc-security-review（**standard/large**）／ architecture-reviewer（`--arch` または large tier のみ）。プロンプトに差分取得コマンド・作業ディレクトリ絶対パス・（多ラウンド時は）棄却台帳を含める（**差分は埋め込まずエージェントに取得させる**）。`model` は指定不要（frontmatter が適用）。
+   - **Agent（Claude leg）** `run_in_background: true`: cc-code-review（**small のみ**）／ cc-security-review（**standard/large**）／ architecture-reviewer（`--arch` または large tier のみ）。**一意な `name` を付けて起動**し、プロンプトに差分取得コマンド・作業ディレクトリ絶対パス・**採番した `<RESULT_FILE>` と結果回収指示**（上記「Claude leg の結果回収契約」）・（多ラウンド時は）棄却台帳を含める（**差分は埋め込まずエージェントに取得させる**）。`model` は指定不要（frontmatter が適用）。
    - **Bash（Codex leg）** `run_in_background: true`: codex generalist（**全 tier**）＋ specialists（**standard/large** のマッチ分、言語 `<lang>-reviewer` + 横断観点 `{performance,test,ux}-reviewer`）。generalist は `review --base origin/<base>` primary / heredoc fallback、specialist は agent 本文注入 heredoc。**いずれも `--json -c model_reasoning_effort=<tier 別> -o <RESULT_FILE> ... > <STREAM_FILE> 2>&1`**（起動形・effort・並列上限・session-id 捕捉・観測は「Codex leg 実行・並列・観測・resume」節が SSOT）。`RESULT_FILE` / `STREAM_FILE` / 捕捉した `thread_id` を記録する。**`codex exec --profile shared` はそのまま使う**（ラッパーが account/`--profile shared` を注入。前置不要）。**並列上限 `CODEX_MAX_CONCURRENCY` を超える Codex leg はバッチで順次消化**する。
    - **`--spec-context` 指定時**: 上記すべての leg に spec ドキュメントの絶対パス（`<dir>/requirements.md` / `design.md` / `tasks.md`）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する（Claude leg はプロンプトに、Codex leg は heredoc に。「spec-context 入力」節）。
 3. **失敗時のリトライ**: 1 回までリトライ。codex が `No prompt provided via stdin.` の場合は事前変数確保パターンで再実行（codex skill 参照）。再失敗なら該当ツールをスキップして Phase 3 へ。
@@ -288,9 +302,9 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 
 ### Phase 3: 結果収集と統合
 
-1. 各バックグラウンドタスクの完了通知を待つ
-2. 完了したタスクの出力ファイルを Read で読み取る
-3. **失敗したツールがあればリトライ**（最大1回）。リトライも失敗した場合は該当ツールをスキップ
+1. **各 leg の完了を待つ**: Claude leg は **`SendMessage(to:"main")` の完了報告**、Codex leg は **Bash 完了通知**。teammate の plain 出力・`idle_notification` は本文を運ばない（harness 仕様）ため、**`idle_notification` を完了合図として解釈せず**、完了報告 or Bash 完了を合図にする。
+2. **各 leg の `<RESULT_FILE>` を Read で読み取る**（Claude / Codex 一律。通知が本文を運ぶかで回収ロジックを分岐しない）。Bash 書込不可のフォールバックで本文が完了報告の message に直接載っていた場合は、その message を本文として扱う。
+3. **失敗したツールがあればリトライ**（最大1回）: `<RESULT_FILE>` が無い / 空なら失敗として扱う。リトライ、または Claude leg では **`SendMessage(to:"<leg の name>")` で本文の再送を要求**（reactive フォールバック）。再失敗した場合は該当ツールをスキップ
 4. 全ツールの結果を統合サマリーにまとめる
 
 #### 統合サマリーのフォーマット
