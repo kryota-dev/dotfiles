@@ -62,6 +62,18 @@ export ECC_AGENT_DATA_HOME="$CLAUDE_CONFIG_DIR"
 export CLV2_HOMUNCULUS_DIR="$HOME/.local/share/ecc-homunculus-${homunculus_slug}"
 export ECC_MCP_HEALTH_STATE_PATH="$CLAUDE_CONFIG_DIR/mcp-health-cache.json"
 export GATEGUARD_STATE_DIR="$CLAUDE_CONFIG_DIR/.gateguard"
+# Chatshelf (NoritakaIkeda/chatshelf) keeps its explanation shelf and viewer server per-account,
+# on the same "state isolated via env" rule as the vars above. The PostToolUse registration hook
+# and the SessionStart viewer both run as children of this exec'd process, so they inherit this env
+# and each account writes to its own store. The r06 viewer takes 7789 so both accounts' servers can
+# run at once: server.mjs exits 0 on EADDRINUSE, so a shared 7788 would leave whichever account
+# started second silently serving the other account's shelf.
+export CODE_EXPL_STORE_ROOT="$CLAUDE_CONFIG_DIR/code-explanations"
+if [ "$homunculus_slug" = default ]; then
+  export CODE_EXPL_PORT=7788
+else
+  export CODE_EXPL_PORT=7789
+fi
 # Observer knobs, each overridable. The 300s watchdog (vs the 120s upstream default) lets the
 # Haiku analysis pass finish (#256); OBSERVER_ACTIVE_HOURS 0/0 disables the clock gate that
 # skipped cycles because sessions run past midnight (#336); MAX_TURNS 100 is the upstream cap,

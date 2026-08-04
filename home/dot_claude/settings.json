@@ -515,7 +515,8 @@
   "effortLevel": "xhigh",
   "enabledPlugins": {
     "codex@openai-codex": true,
-    "claude-code-setup@claude-plugins-official": true
+    "claude-code-setup@claude-plugins-official": true,
+    "chatshelf@chatshelf": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -523,6 +524,13 @@
         "source": "github",
         "repo": "openai/codex-plugin-cc",
         "ref": "v1.0.6"
+      }
+    },
+    "chatshelf": {
+      "source": {
+        "source": "github",
+        "repo": "NoritakaIkeda/chatshelf",
+        "ref": "v0.1.0"
       }
     }
   },
