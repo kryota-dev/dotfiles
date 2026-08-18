@@ -1,0 +1,55 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/bash
+# phone-harness — let an agent drive a real phone from this Mac: an iPhone
+# through the iPhone Mirroring window, or an Android over adb.
+# https://github.com/ShawnPana/phone-harness
+#
+# macOS-only (the CLI depends on pyobjc), so the whole script sits inside a
+# darwin guard and renders empty everywhere else — chezmoi does not run an empty
+# script. That guard is also why the CLI is not in mise's config.toml: that file
+# is not a template, and the Ubuntu CI job runs `mise install --yes`, where
+# pyobjc cannot build.
+#
+# run_onchange keys on the rendered content, so moving the pin below re-runs
+# this script. The pin itself lives in .chezmoidata.toml [phone_harness], where
+# Renovate tracks it (never auto-merged — this is executable code that captures
+# the screen and synthesises input on a real device).
+# phone-harness version: {{ .phone_harness.version }}
+set -euo pipefail
+PHONE_HARNESS_SPEC="phone-harness=={{ .phone_harness.version }}"
+
+# The agent rewrites its own helpers mid-session, so agent-workspace has to live
+# outside chezmoi's reach. phone-harness defaults it to <repo>/agent-workspace,
+# which is meaningless for a wheel install, so ~/.zprofile exports
+# PH_AGENT_WORKSPACE at the path created here. Only the directory is created:
+# the contents belong to the agent and apply must never clobber them
+# (.chezmoiignore also keeps a stray `chezmoi add` away from it).
+mkdir -p "$HOME/.local/share/phone-harness/agent-workspace"
+
+# uv is mise-managed, so go through `mise exec` instead of trusting whichever uv
+# comes first on PATH (same reasoning as the agent-browser setup script).
+if ! command -v mise &>/dev/null; then
+  echo "WARNING: mise is not installed; skipping the phone-harness install."
+  exit 0
+fi
+
+echo "==> Installing $PHONE_HARNESS_SPEC (via uv tool)..."
+# Idempotent by design: uv no-ops when the pinned version is already installed,
+# and swaps versions in either direction when the pin moves. No --force, which
+# would buy nothing and reinstall on every re-run.
+if ! mise exec -- uv tool install "$PHONE_HARNESS_SPEC"; then
+  echo "WARNING: installing phone-harness failed; run it later with:"
+  echo "         mise exec -- uv tool install '$PHONE_HARNESS_SPEC'"
+  exit 0
+fi
+
+# Everything that is left needs your hands and a physical phone, so it is
+# reported rather than automated (docs/agents/overview.md covers it in full).
+echo "==> phone-harness installed. The remaining setup is manual:"
+echo "    iPhone : pair the iPhone Mirroring app, then grant your terminal"
+echo "             Accessibility and Screen Recording in System Settings."
+echo "    Android: turn on Developer options and USB debugging, or pair over"
+echo "             Wi-Fi with 'phone-harness android pair <code>'."
+echo "    Then   : phone-harness config set platform ios|android"
+echo "             phone-harness --doctor"
+{{ end -}}

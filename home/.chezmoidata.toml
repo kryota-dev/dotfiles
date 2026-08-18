@@ -163,6 +163,26 @@ ghq_user = "kryota-dev"
     "vite-patterns",
   ]
 
+[phone_harness]
+  # phone-harness — https://github.com/ShawnPana/phone-harness
+  # Lets an agent drive a real phone from this Mac: an iPhone through the iPhone
+  # Mirroring window, or an Android over adb. macOS-only (the CLI depends on
+  # pyobjc), so everything it needs is gated on .chezmoi.os == "darwin".
+  #
+  # TWO pins, deliberately, because the two artifacts come from different
+  # datasources and are fetched by different layers:
+  #   version — the PyPI release installed by run_onchange_after_19-setup-phone-harness.sh.tmpl
+  #             via `uv tool install`. Tracked by a pypi custom manager.
+  #   commit  — the upstream commit that .chezmoiexternal.toml reads SKILL.md from.
+  #             Tracked by a git-refs custom manager, pinned to a full SHA so a
+  #             moved default branch cannot make `chezmoi apply` drift.
+  # They can legitimately sit at different points in upstream history: SKILL.md is
+  # standalone markdown, so a lagging skill pin never breaks the installed CLI.
+  # Neither is ever auto-merged — this ships executable code that captures the
+  # screen and synthesises input on a real device (see renovate.json5 packageRules).
+  version = "0.2.0"
+  commit = "47f37a6dd5baae9f10f16e21e50a6898ee42cd22"
+
 [ntfy]
   # Self-hosted ntfy notification server (kryota-dev/dotfiles#337).
   # SSOT for every ntfy constant except the Docker image tag, which lives

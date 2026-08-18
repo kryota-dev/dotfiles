@@ -60,6 +60,15 @@
 .agents/.skill-lock.json
 .agents/skills-lock.json
 
+# phone-harness agent workspace. run_onchange_after_19-setup-phone-harness.sh.tmpl
+# creates this directory and ~/.zprofile points PH_AGENT_WORKSPACE at it, but its
+# contents (agent_helpers.py) are written by the agent mid-session — chezmoi must
+# neither deploy nor collect them. Ignored for the same reason as
+# .local/share/ecc-homunculus-* above: this is a public repo, and a stray
+# `chezmoi add` under ~/.local/share must not be able to pick up whatever an agent
+# recorded while driving a real phone.
+.local/share/phone-harness
+
 # Codex runtime data
 # config.toml is intentionally unmanaged (Codex writes trust_level etc. dynamically);
 # auth.json holds login tokens and must never be added to the source tree.

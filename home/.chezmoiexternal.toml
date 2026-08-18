@@ -193,6 +193,21 @@
     url = "https://raw.githubusercontent.com/affaan-m/ECC/{{ .ecc.commit }}/commands/aside.md"
     refreshPeriod = "168h"
 
+# phone-harness agent skill — https://github.com/ShawnPana/phone-harness
+# Upstream ships SKILL.md at the repo root with the YAML frontmatter (name +
+# description) skill discovery needs, so it is fetched verbatim rather than
+# wrapped in a curated skill of our own. Same file-external shape as aside.md
+# above; pinned to [phone_harness].commit (a full SHA) in .chezmoidata.toml.
+# ~/.claude/skills and ~/.codex/skills are both symlinks to ~/.agents/skills, so
+# this single entry serves both harnesses. The CLI that the skill drives is NOT
+# installed here — it is macOS-only and comes from
+# run_onchange_after_19-setup-phone-harness.sh.tmpl. Fetching the skill on Linux
+# too is harmless (it is only markdown) and keeps this file free of an OS branch.
+[".agents/skills/phone-harness/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/ShawnPana/phone-harness/{{ .phone_harness.commit }}/SKILL.md"
+    refreshPeriod = "168h"
+
 # Moralerspace font (macOS only)
 # Version is defined in .chezmoidata.toml [versions.moralerspace_font]
 {{ if eq .chezmoi.os "darwin" -}}
