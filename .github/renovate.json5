@@ -132,6 +132,39 @@
       depNameTemplate: 'nginx',
       datasourceTemplate: 'docker',
     },
+    {
+      // phone-harness CLI (ShawnPana/phone-harness), installed by
+      // run_onchange_after_19-setup-phone-harness.sh.tmpl via `uv tool install`.
+      // The pin is a PyPI release rather than a git ref, so it needs its own
+      // manager separate from the SKILL.md digest below. Scoped to the
+      // [phone_harness] table so it cannot latch onto a `version =` elsewhere.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        '\\[phone_harness\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>[^"]+)"',
+      ],
+      depNameTemplate: 'phone-harness',
+      datasourceTemplate: 'pypi',
+    },
+    {
+      // phone-harness SKILL.md, fetched as a file external in
+      // .chezmoiexternal.toml. Tracked as a commit digest like the other
+      // third-party skills (drawio, supabase) instead of as the PyPI release
+      // above: the two artifacts move independently upstream.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        '\\[phone_harness\\][\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'ShawnPana/phone-harness',
+      datasourceTemplate: 'git-refs',
+      packageNameTemplate: 'https://github.com/ShawnPana/phone-harness',
+      currentValueTemplate: 'main',
+    },
   ],
   mise: {
     managerFilePatterns: [
@@ -160,6 +193,15 @@
       // pin-automerge lane. Force manual review of every bump so a compromised upstream
       // cannot ride automerge into a run that holds secrets.
       matchDepNames: ['anthropics/claude-code-action'],
+      automerge: false,
+    },
+    {
+      // phone-harness, both pins. Unlike the markdown-only skill archives above,
+      // this one ships executable Python that captures the screen and synthesises
+      // HID-level input on a real, unlocked phone — and its SKILL.md is what
+      // steers an agent into doing so. A patch bump would otherwise ride the
+      // patch/pin automerge lane straight onto a device holding real accounts.
+      matchDepNames: ['phone-harness', 'ShawnPana/phone-harness'],
       automerge: false,
     },
   ],
