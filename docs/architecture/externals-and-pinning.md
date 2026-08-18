@@ -21,7 +21,9 @@
 | phone-harness skill | `ShawnPana/phone-harness` | `file` | 1 |
 | Moralerspace font (macOS only) | `yuru7/moralerspace` | `archive` | 1 |
 
-Total declared entries: the static entries (17 + 1 + 2 + 1 + 1 + 1 + 1 = 24) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. Total actual HTTP downloads at a cold apply: 7 — one per **unique URL**, not per entry (the 17 Anthropic entries share one tarball, and the ECC runtime shares its tarball with every ECC skill; see caching below).
+Total declared entries: <!-- FACT:external-static-entry-count -->24<!-- /FACT --> static entries (17 + 1 + 2 + 1 + 1 + 1 + 1) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. The static count is asserted against `.chezmoiexternal.toml` by `tests/docs_facts.bats` — it had drifted before being pinned (drawio and supabase were added as externals while this total stayed behind).
+
+Cold-apply HTTP downloads are fewer than entries, because the unit of fetching is the **unique URL**, not the entry: the 17 Anthropic entries share one tarball, the 2 Supabase entries share another, and the ECC runtime shares its tarball with every `range`-generated ECC skill. That leaves one download each for Anthropic, drawio, Supabase, ECC, `aside.md`, phone-harness, and the font.
 
 ---
 
