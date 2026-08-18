@@ -80,6 +80,31 @@ chezmoi ソースは `home/dot_agents/skills/` 経由でキュレーテッドス
 
 ---
 
+## 実機操作: phone-harness
+
+[phone-harness](https://github.com/ShawnPana/phone-harness) は、どちらのハーネスからでもこの Mac 経由で実機のスマートフォンを操作できるようにします。iPhone は iPhone ミラーリングウィンドウ越し（目は画面キャプチャ + Vision OCR、手は CGEvent）、Android は adb 経由です。transport はすべて Mac 側にあり、端末側には何もインストールしません。
+
+構成要素は 1 つのまとまりとしてではなく、既存の 3 レイヤへ意図的に分割して管理します。部品ごとに寿命も対応プラットフォームも異なるためです。
+
+| 部品 | レイヤ | 備考 |
+|---|---|---|
+| `phone-harness` CLI | `run_onchange_after_19-setup-phone-harness.sh.tmpl` → `uv tool install` | macOS 専用（pyobjc 依存）。`[phone_harness].version` で pin |
+| `SKILL.md` | `.chezmoiexternal.toml` の `file` external | upstream からそのまま取得。`[phone_harness].commit` で pin |
+| `adb` | Brewfile の `cask "android-platform-tools"` | Android 経路でのみ必要 |
+| `agent_helpers.py` | **管理対象外** — `PH_AGENT_WORKSPACE` が chezmoi ツリー外を指す | エージェントがセッション中に書き込む。apply のたびに保持されなければならない |
+
+### `chezmoi apply` がやらないこと
+
+apply はツールを入れるだけです。権限付与も端末のペアリングも行いません。これらには実機とあなたの手が必要です。
+
+- **iPhone** — iPhone ミラーリングアプリを一度開いてペアリングを完了し、System Settings → Privacy & Security でターミナルに **Accessibility**（タップとキー入力。即時反映）と **Screen Recording**（画面の取得。ターミナル再起動後に反映）を付与する。
+- **Android** — 端末側でビルド番号を 7 回タップして開発者オプションを表示し、USB デバッグを有効にして接続時に Allow をタップするか、ワイヤレスデバッグを有効にして `phone-harness android pair <code>` を実行する。
+- **共通** — `phone-harness config set platform ios|android` で既定を選び、`phone-harness --doctor` で全体を確認する。新しいマシンでは最初の操作時にさらに権限を求められることがあります。`--doctor` が通るのにタップやキャプチャが無反応な場合は、macOS のプロンプトを探してください。
+
+どちらの pin も自動マージしません。markdown のみのスキルアーカイブとは異なり、これは実アカウントを保持したロック解除済み端末の画面をキャプチャし HID レベルの入力を合成する実行可能コードを配布するためです。詳細は [externals-and-pinning.ja.md](../architecture/externals-and-pinning.ja.md#1-つのツールに-2-つの-pin-phone-harness) を参照してください。
+
+---
+
 ## ランタイムにおけるアカウント分離
 
 設定は共有されていますが、ランタイム状態は `~/.local/launchers/{claude,codex}` にある 2 つのランチャーラッパースクリプトが注入する環境変数によってアカウントごとに分離されます。これらは `claude`/`cld`/`cld-r06` と `codex`/`cdx`/`cdx-r06` としてアクセスされます。各ラッパーは `$0` で分岐し、プロセス単位の環境変数をセットして各ツールを正しい状態ディレクトリへ向けます。（`cdx-r06` は `CODEX_HOME=$HOME/.codex-r06` を無条件に設定し、`codex`/`cdx` は設定済みの `CLAUDE_CONFIG_DIR` に追従し、なければ `~/.codex` にデフォルトします。）インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、ラッパーはどのシェルからでも同一に動作します。状態変数は、ラッパー自身の短命なプロセスを超えてシェルの一般的な環境にエクスポートされることはありません。

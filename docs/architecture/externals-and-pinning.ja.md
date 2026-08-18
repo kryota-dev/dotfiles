@@ -13,12 +13,15 @@
 | カテゴリ | ソースリポジトリ | エントリ種別 | 件数 |
 |---------|----------------|------------|------|
 | Anthropic スキル | `anthropics/skills` | `archive` | 17 |
+| drawio スキル | `jgraph/drawio-mcp` | `archive` | 1 |
+| Supabase スキル | `supabase/agent-skills` | `archive` | 2 |
 | ECC フックランタイム（`scripts/hooks` + `scripts/lib`） | `affaan-m/ECC` | `archive` | 1 |
 | ECC 採用スキル | `affaan-m/ECC` | `archive`（range 生成） | `[ecc].skills` の長さと等しい（`tests/docs_facts.bats` で検証） |
 | `aside` スラッシュコマンド | `affaan-m/ECC` | `file` | 1 |
+| phone-harness スキル | `ShawnPana/phone-harness` | `file` | 1 |
 | Moralerspace フォント（macOS のみ） | `yuru7/moralerspace` | `archive` | 1 |
 
-宣言エントリ総数: 静的エントリ（17 + 1 + 1 + 1 = 20）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。コールド apply での実際の HTTP ダウンロード回数: 4（ユニークなタール URL ごとに 1 回 — 以下のキャッシュを参照）。
+宣言エントリ総数: 静的エントリ（17 + 1 + 2 + 1 + 1 + 1 + 1 = 24）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。コールド apply での実際の HTTP ダウンロード回数: 7 — エントリ数ではなく**ユニークな URL** ごとに 1 回です（17 件の Anthropic エントリは 1 つのタールボールを共有し、ECC ランタイムも全 ECC スキルとタールボールを共有します。以下のキャッシュを参照）。
 
 ---
 
@@ -138,6 +141,7 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 | ECC フックランタイム | `168h`（7 日） |
 | ECC スキル | `168h`（7 日） |
 | `aside` コマンド | `168h`（7 日） |
+| phone-harness スキル | `168h`（7 日） |
 | Moralerspace フォント | `672h`（28 日） |
 
 期間内は chezmoi がネットワークリクエストなしにキャッシュコピーを返します。期間が切れると、次の `chezmoi apply` で再ダウンロードします（SHA が変わっていなければ同じバイト列を取得します）。
@@ -151,6 +155,19 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 重要なポリシー: **ECC は絶対に自動マージしません。** `renovate.json5` の `packageRule` で `affaan-m/ECC` に `"automerge": false` を設定しています。ECC タールボールにはエージェントハーネス内で実行される実行可能なフックスクリプトが含まれているため、すべての ECC バンプは手動でレビューする必要があります。
 
 同じ「データにピン固定して Renovate でバンプ」パターンは `anthropics/skills`（`.skills.anthropic_commit`）と Moralerspace フォント（`.versions.moralerspace_font`）にも適用されます。
+
+### 1 つのツールに 2 つの pin: phone-harness
+
+`phone-harness` は、成果物が**2 つの異なるデータソース**から来る唯一のエントリです。そのため `[phone_harness]` は 2 つの pin を持ち、Renovate は同じテーブルに対して 2 つの custom manager を走らせます。
+
+| pin | 対象 | データソース | 取得元 |
+|-----|------|------------|--------|
+| `version` | CLI（PyPI リリース） | `pypi` | `run_onchange_after_19-setup-phone-harness.sh.tmpl` → `uv tool install` |
+| `commit` | `SKILL.md`（リポジトリ内のファイル） | `git-refs` | `.chezmoiexternal.toml` の `file` external |
+
+両者は upstream 履歴上の別地点にあってかまいません。`SKILL.md` は独立した markdown なので、スキル側の pin が遅れていてもインストール済みの CLI が壊れることはなく、最悪でもスキル本文が実際より少し古いヘルパーを説明するだけです。2 つの正規表現はいずれも `[phone_harness]` テーブルにスコープされており、隣接テーブルの `version =` / `commit =` を掴むことはありません。
+
+ECC と同様に **phone-harness も絶対に自動マージしません**。しかもその理由は markdown のみのスキルアーカイブより強いものです。phone-harness は、実機のロック解除された端末の画面をキャプチャし HID レベルの入力を合成する実行可能な Python を配布し、その `SKILL.md` こそがエージェントをその操作へ導くものだからです。明示的な `automerge: false` がなければ、パッチバンプが patch/pin の自動マージレーンに乗り、実アカウントを保持した端末へそのまま到達します。
 
 ---
 

@@ -13,12 +13,15 @@
 | Category | Source repo | Entry type | Count |
 |----------|-------------|------------|-------|
 | Anthropic skills | `anthropics/skills` | `archive` | 17 |
+| drawio skill | `jgraph/drawio-mcp` | `archive` | 1 |
+| Supabase skills | `supabase/agent-skills` | `archive` | 2 |
 | ECC hook runtime (`scripts/hooks` + `scripts/lib`) | `affaan-m/ECC` | `archive` | 1 |
 | ECC adopted skills | `affaan-m/ECC` | `archive` (range-generated) | = length of `[ecc].skills` (asserted by `tests/docs_facts.bats`) |
 | `aside` slash command | `affaan-m/ECC` | `file` | 1 |
+| phone-harness skill | `ShawnPana/phone-harness` | `file` | 1 |
 | Moralerspace font (macOS only) | `yuru7/moralerspace` | `archive` | 1 |
 
-Total declared entries: the static entries (17 + 1 + 1 + 1 = 20) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. Total actual HTTP downloads at a cold apply: 4 (one per unique tarball URL — see caching below).
+Total declared entries: the static entries (17 + 1 + 2 + 1 + 1 + 1 + 1 = 24) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. Total actual HTTP downloads at a cold apply: 7 — one per **unique URL**, not per entry (the 17 Anthropic entries share one tarball, and the ECC runtime shares its tarball with every ECC skill; see caching below).
 
 ---
 
@@ -138,6 +141,7 @@ A moved tag cannot change the fetched bytes. The `refreshPeriod` controls how lo
 | ECC hook runtime | `168h` (7 days) |
 | ECC skills | `168h` (7 days) |
 | `aside` command | `168h` (7 days) |
+| phone-harness skill | `168h` (7 days) |
 | Moralerspace font | `672h` (28 days) |
 
 Within the period chezmoi serves the cached copy without a network request. After the period expires, the next `chezmoi apply` re-downloads (but fetches the same bytes if the SHA has not changed).
@@ -151,6 +155,19 @@ Within the period chezmoi serves the cached copy without a network request. Afte
 Critical policy: **ECC is never auto-merged.** A `packageRule` in `renovate.json5` sets `"automerge": false` for `affaan-m/ECC`. Every ECC bump must be reviewed manually because the ECC tarball contains executable hook scripts that run inside the agent harness.
 
 The same pin-in-data / bump-via-Renovate pattern applies to `anthropics/skills` (`.skills.anthropic_commit`) and the Moralerspace font (`.versions.moralerspace_font`).
+
+### Two pins for one tool: phone-harness
+
+`phone-harness` is the one entry whose artifacts come from **two different datasources**, so `[phone_harness]` carries two pins and Renovate runs two custom managers over the same table:
+
+| Pin | What it governs | Datasource | Fetched by |
+|-----|-----------------|------------|------------|
+| `version` | the CLI (a PyPI release) | `pypi` | `run_onchange_after_19-setup-phone-harness.sh.tmpl` → `uv tool install` |
+| `commit` | `SKILL.md` (a repo file) | `git-refs` | the `file` external in `.chezmoiexternal.toml` |
+
+They can legitimately sit at different points in upstream history. `SKILL.md` is standalone markdown, so a lagging skill pin never breaks the installed CLI — at worst the skill text describes helpers slightly older than the ones installed. Both regexes are scoped to the `[phone_harness]` table so neither can latch onto a `version =` or `commit =` in a neighbouring one.
+
+Like ECC, **phone-harness is never auto-merged** — and for a stronger reason than the markdown-only skill archives. It ships executable Python that captures the screen and synthesises HID-level input on a real, unlocked phone, and its `SKILL.md` is precisely what steers an agent into doing so. Without an explicit `automerge: false`, a patch bump would ride the patch/pin automerge lane straight onto a device holding real accounts.
 
 ---
 

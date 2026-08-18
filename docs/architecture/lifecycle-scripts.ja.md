@@ -40,7 +40,8 @@ flowchart TD
         G --> H["16 migrate-claude-binary\nrun_once\n(~/.local/bin/claude を\nmise installs/claude/latest へ symlink)"]
         H --> H2["17 setup-claude-plugins\nrun_onchange\n(dot_claude/settings.json が宣言する\nmarketplace 登録 + plugin インストール)"]
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(mise exec 経由で agent-browser install)"]
-        I --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder/ControlCenter)"]
+        I --> I2["19 setup-phone-harness\nrun_onchange · macOS のみ\n(pin された CLI を uv tool install +\nエージェントワークスペースを mkdir\nuv が無ければ警告して exit 0)"]
+        I2 --> J["20 macos-defaults\nrun_onchange · macOS のみ\n(defaults write + killall Dock/Finder/ControlCenter)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS のみ\n(repo 管理 LaunchAgent の launchctl bootstrap\nCI ではスキップ)"]
         J2 --> J3["31 setup-ntfy\nrun_onchange · macOS のみ\n(ntfy サーバー用の docker compose up +\ntailscale serve; CI ではスキップ)"]
         J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -86,6 +87,14 @@ flowchart TD
 
 `20-macos-defaults` は `joinPath` による自己ハッシュを使用しており、スクリプト自体を編集するだけで全 `defaults write` が再適用されます。
 
+`19-setup-phone-harness` は同じ発想の変種ですが、ハッシュを一切使いません。ファイルのダイジェストではなく、追跡したい**値そのもの**を埋め込みます。
+
+```bash
+# phone-harness version: {{ .phone_harness.version }}
+```
+
+`.chezmoidata.toml` の `[phone_harness].version` を動かすとレンダリング結果が変わるため、スクリプトが再実行され `uv tool install` が新しいリリースへ入れ替えます。`.chezmoidata.toml` の他の箇所を編集してもこのスクリプトの本文は変わりません。ファイル単位の `include | sha256sum` にしていたら、同ファイル内の無関係な pin バンプのたびに再実行されていました。
+
 `17-setup-claude-plugins` はハッシュを使わずに同じ結果を得ています。`include | fromJson` で
 `dot_claude/settings.json` を読み、`enabledPlugins` と `extraKnownMarketplaces` だけを JSON として
 quoted heredoc の中に埋め込みます。これにより単一ソースを保ちつつ、宣言が変わったときにだけ再実行されます
@@ -110,6 +119,7 @@ quoted heredoc の中に埋め込みます。これにより単一ソースを�
 | `16-migrate-claude-binary` | 両対応 | OS ガードなし。バイナリ存在をランタイムで確認 |
 | `17-setup-claude-plugins` | 両対応 | OS ガードなし。両アカウントを処理 |
 | `18-setup-agent-browser` | 両対応 | `{{ if linux }}` で `--with-deps` を追加 |
+| `19-setup-phone-harness` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux では 0 バイトにレンダリング（CLI が pyobjc を必要とするため） |
 | `20-macos-defaults` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `30-register-launchd-agents` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
 | `31-setup-ntfy` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux ではほぼ空にレンダリング |
