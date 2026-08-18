@@ -107,6 +107,8 @@ cask "adobe-acrobat-reader"
 cask "adobe-creative-cloud"
 # Enable Windows-like alt-tab
 cask "alt-tab", args: { appdir: "/Applications" }
+# Tools for building Android applications
+cask "android-studio"
 # Application uninstaller
 cask "appcleaner", args: { appdir: "/Applications" }
 # Display management tool
