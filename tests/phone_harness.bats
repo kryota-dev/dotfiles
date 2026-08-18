@@ -110,9 +110,11 @@ _phone_harness_pin() {
     echo "${SETUP_SCRIPT} does not guard on mise being present"
     false
   }
-  # Two degradation paths (no mise, failed install), both exiting 0.
+  # Two degradation paths (no mise, failed install), both exiting 0. Matched
+  # loosely on purpose: what matters is that two paths exit 0, not how deeply
+  # they happen to be indented or whether a trailing comment follows.
   local exits
-  exits="$(grep -c '^  exit 0$' "$script")"
+  exits="$(grep -cE '^[[:space:]]*exit 0([[:space:]]*#.*)?$' "$script")"
   [ "$exits" -ge 2 ] || {
     echo "${SETUP_SCRIPT} has ${exits} 'exit 0' degradation paths, expected at least 2"
     false
@@ -132,9 +134,12 @@ _phone_harness_pin() {
   # The export tells phone-harness where the agent's helpers live; the script
   # creates that directory. If the two drift, the agent silently writes into a
   # directory nothing else knows about and its accumulated helpers vanish.
+  # `[^"]*` rather than a greedy `.*`, so trailing text after the closing quote
+  # (the `|| echo ...` degradation on the mkdir line) is not captured as part of
+  # the path.
   local exported created
-  exported="$(grep 'export PH_AGENT_WORKSPACE=' "$zprofile" | sed 's/.*="\(.*\)"/\1/')"
-  created="$(grep 'mkdir -p "\$HOME/.local/share/phone-harness' "$script" | sed 's/.*mkdir -p "\(.*\)"/\1/')"
+  exported="$(grep 'export PH_AGENT_WORKSPACE=' "$zprofile" | sed 's/.*="\([^"]*\)".*/\1/')"
+  created="$(grep 'mkdir -p "\$HOME/.local/share/phone-harness' "$script" | sed 's/.*mkdir -p "\([^"]*\)".*/\1/')"
 
   [ -n "$exported" ] || {
     echo "dot_zprofile.tmpl does not export PH_AGENT_WORKSPACE"
@@ -144,16 +149,44 @@ _phone_harness_pin() {
     echo "PH_AGENT_WORKSPACE ('${exported}') != the directory the setup script creates ('${created}')"
     false
   }
+
+  # Requirements 4-2 / 4-4: apply creates the directory but must never touch its
+  # contents. That guarantee currently rests on `mkdir -p` being the only thing
+  # the script does to this path, so assert the destructive case away directly
+  # rather than leaving it implicit.
+  ! grep -qE '(^|[^a-z-])rm[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*[^|;&]*phone-harness/agent-workspace' "$script" || {
+    echo "${SETUP_SCRIPT} must never remove the agent workspace (requirements 4-2 / 4-4)"
+    false
+  }
 }
 
 @test "phone-harness: the PH_AGENT_WORKSPACE export is darwin-only" {
   # Guard placement, not just presence: exporting it on Linux would advertise a
   # tool that is never installed there.
+  #
+  # Nesting-aware on purpose. dot_zprofile.tmpl already opens with a darwin guard
+  # that *contains* an arm64 if/else, so a flat toggle would close on the inner
+  # `{{ end }}` and only get the right answer by accident of line order. Track
+  # depth instead: remember the depth at which the darwin branch opened, and drop
+  # out of it on the matching `{{ end }}` — or on an `{{ else }}` at that same
+  # depth, since the else side is the non-darwin branch.
   local guarded
   guarded="$(awk '
-    /^\{\{ if eq \.chezmoi\.os "darwin" -\}\}$/ { in_guard = 1; next }
-    /^\{\{ end -\}\}$/ { in_guard = 0 }
-    in_guard && /export PH_AGENT_WORKSPACE=/ { print }
+    /^\{\{[[:space:]]*if / {
+      depth++
+      if (darwin_at == 0 && $0 ~ /\.chezmoi\.os "darwin"/) darwin_at = depth
+      next
+    }
+    /^\{\{[[:space:]]*else/ {
+      if (darwin_at == depth) darwin_at = 0
+      next
+    }
+    /^\{\{[[:space:]]*end/ {
+      if (darwin_at == depth) darwin_at = 0
+      depth--
+      next
+    }
+    darwin_at > 0 && /export PH_AGENT_WORKSPACE=/ { print }
   ' "${HOME_DIR}/dot_zprofile.tmpl")"
   [ -n "$guarded" ] || {
     echo "PH_AGENT_WORKSPACE is exported outside a darwin guard in dot_zprofile.tmpl"
@@ -193,8 +226,13 @@ _phone_harness_pin() {
     echo "renovate.json5 has no pypi custom manager for the phone-harness CLI"
     false
   }
-  grep -qF '\\[phone_harness\\]' "$renovate" || {
-    echo "renovate.json5 custom managers are not scoped to the [phone_harness] table"
+  # Both managers must carry the table anchor, not just one of them: a single
+  # `grep -q` would still pass if one lost its prefix and started matching a
+  # `version =` / `commit =` in a neighbouring table.
+  local scoped
+  scoped="$(grep -cF '\\[phone_harness\\]' "$renovate")"
+  [ "$scoped" -ge 2 ] || {
+    echo "only ${scoped} phone-harness custom manager(s) are scoped to the [phone_harness] table, expected 2"
     false
   }
   grep -qF 'https://github.com/ShawnPana/phone-harness' "$renovate" || {
@@ -204,8 +242,18 @@ _phone_harness_pin() {
 
   # This ships executable code that drives a real phone: both dep names must sit
   # in an automerge:false rule rather than inheriting the patch/pin lane.
+  # matchDepNames is an unordered array, so extract the rule block and check for
+  # membership instead of matching a literal (order-dependent) array rendering.
   local rule
-  rule="$(grep -A3 "matchDepNames: \['phone-harness', 'ShawnPana/phone-harness'\]" "$renovate")"
+  rule="$(awk '/matchDepNames:.*phone-harness/ { found = 1 } found { print } found && /^[[:space:]]*},[[:space:]]*$/ { exit }' "$renovate")"
+  [[ "$rule" == *"'phone-harness'"* ]] || {
+    echo "no packageRule matches the phone-harness PyPI dep"
+    false
+  }
+  [[ "$rule" == *"'ShawnPana/phone-harness'"* ]] || {
+    echo "no packageRule matches the phone-harness SKILL.md git-refs dep"
+    false
+  }
   [[ "$rule" == *'automerge: false'* ]] || {
     echo "phone-harness is not covered by an automerge: false packageRule"
     false

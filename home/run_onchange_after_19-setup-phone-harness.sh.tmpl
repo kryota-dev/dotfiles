@@ -24,7 +24,13 @@ PHONE_HARNESS_SPEC="phone-harness=={{ .phone_harness.version }}"
 # PH_AGENT_WORKSPACE at the path created here. Only the directory is created:
 # the contents belong to the agent and apply must never clobber them
 # (.chezmoiignore also keeps a stray `chezmoi add` away from it).
-mkdir -p "$HOME/.local/share/phone-harness/agent-workspace"
+#
+# Non-fatal like every other step here: under `set -e` a failed mkdir (a full
+# disk, or a ~/.local/share left root-owned by some other tool) would otherwise
+# abort the whole apply over an optional convenience. Without the directory the
+# CLI still works — phone-harness just finds no agent_helpers.py and moves on.
+mkdir -p "$HOME/.local/share/phone-harness/agent-workspace" ||
+  echo "WARNING: could not create the phone-harness agent workspace directory."
 
 # uv is mise-managed, so go through `mise exec` instead of trusting whichever uv
 # comes first on PATH (same reasoning as the agent-browser setup script).
