@@ -58,6 +58,19 @@ The `home/.chezmoiexternal.toml` file contains a `{{ range $skill := .ecc.skills
 
 **For Anthropic system skills**: add a literal `[".agents/skills/<name>"]` entry to `home/.chezmoiexternal.toml`, following the `stripComponents = 3` pattern already used for the 17 existing Anthropic entries.
 
+**For an upstream that already ships a usable `SKILL.md`**: fetch that one file instead of an archive. `phone-harness` is the reference case — its repo-root `SKILL.md` carries the `name` / `description` frontmatter skill discovery needs, so wrapping it in a curated skill of our own would only add a copy that goes stale:
+
+```toml
+[".agents/skills/phone-harness/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/ShawnPana/phone-harness/{{ .phone_harness.commit }}/SKILL.md"
+    refreshPeriod = "168h"
+```
+
+Note the table name: the path ends in the **file**, not the skill directory. `_skill_is_external()` in `tests/skill_provenance.bats` matches both `[".agents/skills/<name>"]` and `[".agents/skills/<name>/`, so this shape still classifies as `external`. Renaming it to anything else silently demotes the skill to `unmanaged`.
+
+A skill fetched this way is independent of whatever tool it drives. The `phone-harness` **CLI** is macOS-only and is installed by `run_onchange_after_19-setup-phone-harness.sh.tmpl`, not by this external; the skill text is plain markdown and is fetched on every platform.
+
 ### The never-both rule
 
 A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (curated) and in the external declarations. chezmoi would attempt to deploy a directory from source and fetch an external to the same path, which produces a conflict. The provenance bats test asserts this for all curated skills against both the literal external headers and every element of `[ecc].skills`.
@@ -114,6 +127,7 @@ Miscellaneous functional skills spanning databases, media conversion, and daily 
 | Anthropic system skills | 17 skills | `[skills].anthropic_commit` in `.chezmoidata.toml` |
 | jgraph/drawio-mcp (`drawio`) | 1 skill | `[skills].drawio_mcp_commit` in `.chezmoidata.toml` |
 | supabase/agent-skills (`supabase`, `supabase-postgres-best-practices`) | 2 skills | `[skills].supabase_agent_skills_commit` in `.chezmoidata.toml` |
+| ShawnPana/phone-harness (`phone-harness`) | 1 skill (single file) | `[phone_harness].commit` in `.chezmoidata.toml` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
 
@@ -159,6 +173,7 @@ Removing a file from the chezmoi source does not delete an already-deployed copy
 - Every curated skill directory in source is non-empty (contains at least one regular file at depth ≤ 2).
 - `.chezmoiexternal.toml` declares at least one `[".agents/skills/..."]` external entry, and includes the ECC range block wired to `[ecc].commit`.
 - No skill name appears in both the curated source tree and the external declarations (never-both rule).
+- `phone-harness` resolves as `external` and is absent from the curated source tree — a guard on the single-file external's table name, whose only visible symptom otherwise would be a silent demotion to `unmanaged` (which the runtime check merely reports).
 - `home/AGENTS.md.tmpl` documents all five provenance categories.
 - Retired unmanaged skills (`agentcore`, `vercel-sandbox`, `patch-remote-control`, `find-skills`) are absent from source.
 - Orphaned `sdd-*` subagents are absent from `home/dot_claude/agents/`.

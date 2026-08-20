@@ -37,6 +37,33 @@ load helpers/setup
   }
 }
 
+@test "docs_facts: every <!-- FACT:external-static-entry-count --> marker matches .chezmoiexternal.toml" {
+  # The number of LITERAL external entries — the range-generated ECC skill entries are
+  # excluded (their count is the volatile [ecc].skills length, pinned separately above).
+  # This one drifted silently before it was pinned: drawio and supabase were added as
+  # externals but the docs total stayed at its pre-existing value.
+  local actual
+  actual="$(grep -E '^\[".*"\]$' "${HOME_DIR}/.chezmoiexternal.toml" | grep -vF '{{' | grep -c .)"
+  [ "$actual" -ge 10 ] || {
+    echo "sanity: counted only $actual literal external entries (<10) — the extractor likely broke"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:external-static-entry-count is $val but .chezmoiexternal.toml declares $actual literal entries"
+        false
+      }
+    done < <(grep -oE 'FACT:external-static-entry-count[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:external-static-entry-count' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:external-static-entry-count markers found under ${DOCS_DIR} — the docs refactor regressed"
+    false
+  }
+}
+
 @test "docs_facts: every lifecycle script in home/ is documented in lifecycle-scripts.md" {
   local doc="${DOCS_DIR}/architecture/lifecycle-scripts.md"
   [ -f "$doc" ]

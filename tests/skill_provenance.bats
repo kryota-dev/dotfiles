@@ -151,6 +151,23 @@ _skill_is_external() {
   }
 }
 
+@test "skill provenance: phone-harness is external, not curated or unmanaged" {
+  # phone-harness ships a frontmatter-carrying SKILL.md at its repo root, so it is
+  # fetched verbatim as a file external rather than wrapped in a curated skill of
+  # our own. The external's table name is [".agents/skills/phone-harness/SKILL.md"],
+  # which _skill_is_external() matches via its subpath pattern — this test pins that
+  # relationship, since renaming the table would silently demote the skill to
+  # `unmanaged` (a policy violation the runtime check only warns about).
+  _skill_is_external phone-harness || {
+    echo "phone-harness is not recognised as external (see .chezmoiexternal.toml)"
+    false
+  }
+  [ ! -e "${HOME_DIR}/dot_agents/skills/phone-harness" ] || {
+    echo "phone-harness must not be vendored in source; it is fetched as an external"
+    false
+  }
+}
+
 @test "skill provenance: no skill is both curated and external" {
   local dir name
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do

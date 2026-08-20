@@ -40,7 +40,8 @@ flowchart TD
         G --> H["16 migrate-claude-binary\nrun_once\n(symlink ~/.local/bin/claude\n-> mise installs/claude/latest)"]
         H --> H2["17 setup-claude-plugins\nrun_onchange\n(registers marketplaces + installs plugins\ndeclared in dot_claude/settings.json)"]
         H2 --> I["18 setup-agent-browser\nrun_onchange\n(agent-browser install via mise exec)"]
-        I --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder/ControlCenter)"]
+        I --> I2["19 setup-phone-harness\nrun_onchange · macOS only\n(uv tool install of the pinned CLI +\nmkdir of the agent workspace;\nwarns and exits 0 if uv is unavailable)"]
+        I2 --> J["20 macos-defaults\nrun_onchange · macOS only\n(defaults write + killall Dock/Finder/ControlCenter)"]
         J --> J2["30 register-launchd-agents\nrun_onchange · macOS only\n(launchctl bootstrap of repo-managed\nLaunchAgents; skipped in CI)"]
         J2 --> J3["31 setup-ntfy\nrun_onchange · macOS only\n(docker compose up + tailscale serve\nfor the ntfy server; skipped in CI)"]
         J3 --> K["40 setup-sheldon\nrun_onchange\n(sheldon lock)"]
@@ -86,6 +87,14 @@ When `dot_Brewfile` changes, the rendered comment line changes, the script body 
 
 `20-macos-defaults` uses a `joinPath` self-hash — editing the script itself is enough to re-apply all macOS `defaults write` calls.
 
+`19-setup-phone-harness` is a variant of the same idea with no hash at all: it interpolates the tracked **value** directly rather than a file digest.
+
+```bash
+# phone-harness version: {{ .phone_harness.version }}
+```
+
+Moving `[phone_harness].version` in `.chezmoidata.toml` changes the rendered body, so the script re-runs and `uv tool install` swaps to the new release. Any other edit to `.chezmoidata.toml` leaves this script's body untouched — a file-level `include | sha256sum` would have re-run it on every unrelated pin bump in that file.
+
 `17-setup-claude-plugins` reaches the same result without a hash: it reads
 `dot_claude/settings.json` with `include | fromJson` and embeds just the `enabledPlugins` and
 `extraKnownMarketplaces` objects into the script body as JSON, inside a quoted heredoc. That keeps
@@ -111,6 +120,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | `16-migrate-claude-binary` | both | No OS guard; guards on binary existance at runtime |
 | `17-setup-claude-plugins` | both | No OS guard; both accounts processed |
 | `18-setup-agent-browser` | dual | `{{ if linux }}` adds `--with-deps` |
+| `19-setup-phone-harness` | **macOS only** | Entire body inside `{{ if darwin }}`; renders to zero bytes on Linux (the CLI needs pyobjc) |
 | `20-macos-defaults` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `30-register-launchd-agents` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |
 | `31-setup-ntfy` | **macOS only** | Entire body inside `{{ if darwin }}`; renders near-empty on Linux |

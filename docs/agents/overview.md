@@ -80,6 +80,31 @@ Adding or updating a skill in `~/.agents/skills/` is immediately visible to all 
 
 ---
 
+## Device control: phone-harness
+
+[phone-harness](https://github.com/ShawnPana/phone-harness) lets either harness drive a real phone from this Mac — an iPhone through the iPhone Mirroring window (screen capture + Vision OCR for eyes, CGEvents for hands), or an Android over adb. The Mac is the whole transport: nothing is installed on the phone.
+
+It is deliberately split across three existing layers rather than managed as one unit, because its parts have different lifetimes and different platforms:
+
+| Part | Layer | Notes |
+|---|---|---|
+| `phone-harness` CLI | `run_onchange_after_19-setup-phone-harness.sh.tmpl` → `uv tool install` | macOS only (depends on pyobjc); pinned by `[phone_harness].version` |
+| `SKILL.md` | `file` external in `.chezmoiexternal.toml` | Fetched verbatim from upstream; pinned by `[phone_harness].commit` |
+| `adb` | `cask "android-platform-tools"` in the Brewfile | Only needed for the Android path |
+| `agent_helpers.py` | **not managed** — `PH_AGENT_WORKSPACE` points outside the chezmoi tree | Written by the agent mid-session; must survive every apply |
+
+### What `chezmoi apply` does not do
+
+Apply installs the tooling. It grants no permissions and pairs no devices — those need your hands and a physical phone:
+
+- **iPhone** — open the iPhone Mirroring app once and complete its pairing prompts, then grant your terminal **Accessibility** (taps and keystrokes; effective immediately) and **Screen Recording** (seeing the phone; effective only after the terminal restarts) in System Settings → Privacy & Security.
+- **Android** — on the phone, tap Build number 7× to reveal Developer options, then either enable USB debugging and tap Allow when plugged in, or enable Wireless debugging and run `phone-harness android pair <code>`.
+- **Both** — pick the default with `phone-harness config set platform ios|android`, then confirm the whole chain with `phone-harness --doctor`. A fresh machine may prompt for further permissions the first time an action runs: if `--doctor` passes but taps or captures silently do nothing, look for a macOS prompt.
+
+Neither pin is ever auto-merged. Unlike the markdown-only skill archives, this ships executable code that captures the screen and synthesises HID-level input on an unlocked phone holding real accounts — see [externals-and-pinning.md](../architecture/externals-and-pinning.md#two-pins-for-one-tool-phone-harness).
+
+---
+
 ## Account isolation at runtime
 
 Although config is shared, runtime state is isolated per account via environment variables injected by two launcher wrapper scripts at `~/.local/launchers/{claude,codex}`, reached as `claude`/`cld`/`cld-r06` and `codex`/`cdx`/`cdx-r06`. Each wrapper dispatches on `$0` and sets per-process env vars that direct its tool to the right state directories. (`cdx-r06` sets `CODEX_HOME=$HOME/.codex-r06` unconditionally; `codex`/`cdx` follow `CLAUDE_CONFIG_DIR` when it is set, else default to `~/.codex`.) Being real files on PATH rather than interactive-zsh-only aliases, the wrappers work identically from any shell. No state variable is exported into the general shell environment beyond the wrapper's own short-lived process.

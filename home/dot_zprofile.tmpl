@@ -15,6 +15,18 @@ export VISUAL=nvim
 export PAGER=less
 export LANG=ja_JP.UTF-8
 
+{{ if eq .chezmoi.os "darwin" -}}
+# phone-harness keeps the agent's own helpers in agent_helpers.py and defaults
+# that directory to <repo>/agent-workspace — a path a wheel install does not
+# have. Point it somewhere stable and outside chezmoi's source tree, so the
+# helpers an agent writes mid-session survive every `chezmoi apply`. Exported
+# here rather than from a ~/.config/zsh module because those load deferred via
+# sheldon (interactive shells only), and agents run phone-harness from
+# non-interactive ones. run_onchange_after_19-setup-phone-harness.sh.tmpl
+# creates this directory; tests/phone_harness.bats keeps the two paths in sync.
+export PH_AGENT_WORKSPACE="$HOME/.local/share/phone-harness/agent-workspace"
+
+{{ end -}}
 # PATH deduplication
 typeset -gU path
 

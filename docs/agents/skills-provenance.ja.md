@@ -58,6 +58,19 @@
 
 **Anthropic システムスキルの場合**: 既存の 17 エントリで使われている `stripComponents = 3` パターンに従い、`home/.chezmoiexternal.toml` にリテラルの `[".agents/skills/<name>"]` エントリを追加します。
 
+**upstream がそのまま使える `SKILL.md` を配布している場合**: アーカイブではなくその 1 ファイルだけをフェッチします。`phone-harness` がこのパターンの参照実装です。リポジトリルートの `SKILL.md` がスキルディスカバリに必要な `name` / `description` フロントマターを持っているため、独自の curated スキルで包んでも陳腐化するコピーが増えるだけです。
+
+```toml
+[".agents/skills/phone-harness/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/ShawnPana/phone-harness/{{ .phone_harness.commit }}/SKILL.md"
+    refreshPeriod = "168h"
+```
+
+テーブル名に注意してください。パス末尾はスキルディレクトリではなく**ファイル**です。`tests/skill_provenance.bats` の `_skill_is_external()` は `[".agents/skills/<name>"]` と `[".agents/skills/<name>/` の両方にマッチするため、この形でも `external` に分類されます。これ以外の名前に変更すると、スキルは黙って `unmanaged` へ降格します。
+
+この方法でフェッチしたスキルは、それが操作するツール本体とは独立しています。`phone-harness` の **CLI** は macOS 専用で、この external ではなく `run_onchange_after_19-setup-phone-harness.sh.tmpl` がインストールします。スキル本文は単なる markdown なので、全プラットフォームでフェッチされます。
+
 ### 重複禁止ルール
 
 スキル名は `home/dot_agents/skills/<name>/`（curated）と external 宣言の**両方**に同時に存在してはなりません。chezmoi がソースからのディレクトリデプロイと同じパスへの external フェッチを同時に試み、コンフリクトが発生します。プロベナンス bats テストは、すべての curated スキルについてリテラルの external ヘッダーと `[ecc].skills` の全要素に対してこれを検証します。
@@ -114,6 +127,7 @@
 | Anthropic システムスキル | 17 スキル | `.chezmoidata.toml` の `[skills].anthropic_commit` |
 | jgraph/drawio-mcp（`drawio`） | 1 スキル | `.chezmoidata.toml` の `[skills].drawio_mcp_commit` |
 | supabase/agent-skills（`supabase`、`supabase-postgres-best-practices`） | 2 スキル | `.chezmoidata.toml` の `[skills].supabase_agent_skills_commit` |
+| ShawnPana/phone-harness（`phone-harness`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[phone_harness].commit` |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
 
@@ -159,6 +173,7 @@ chezmoi ソースからファイルを削除しても既にデプロイされた
 - ソース内のすべての curated スキルディレクトリが空でない（深さ ≤ 2 に少なくとも 1 つの通常ファイルを含む）。
 - `.chezmoiexternal.toml` が少なくとも 1 つの `[".agents/skills/..."]` external エントリを宣言し、`[ecc].commit` に紐付けられた ECC range ブロックを含む。
 - どのスキル名も curated ソースツリーと external 宣言の両方に同時に現れない（重複禁止ルール）。
+- `phone-harness` が `external` と判定され、curated ソースツリーに存在しない — 単一ファイル external のテーブル名を守るガード。これが崩れても表に出る症状は `unmanaged` への静かな降格だけであり（ランタイムチェックは報告するのみ）、他に気づく手段がない。
 - `home/AGENTS.md.tmpl` が 5 つのプロベナンスカテゴリすべてを記載している。
 - 廃止された unmanaged スキル（`agentcore`、`vercel-sandbox`、`patch-remote-control`、`find-skills`）がソースに存在しない。
 - 孤立した `sdd-*` サブエージェントが `home/dot_claude/agents/` に存在しない。
