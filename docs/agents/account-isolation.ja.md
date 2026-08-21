@@ -22,10 +22,14 @@
 | `ECC_MCP_HEALTH_STATE_PATH` | `~/.claude/mcp-health-cache.json` | `~/.claude-r06/mcp-health-cache.json` |
 | `GATEGUARD_STATE_DIR` | `~/.claude/.gateguard` | `~/.claude-r06/.gateguard` |
 | `CODEX_HOME` | （デフォルト — `~/.codex`） | `~/.codex-r06` |
+| `CODE_EXPL_STORE_ROOT` | `~/.claude/code-explanations` | `~/.claude-r06/code-explanations` |
+| `CODE_EXPL_PORT` | `7788` | `7789` |
 
 r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべての設定アーティファクト（settings、agents、commands、skills）が `~/.claude` を指すシンボリックリンクのみが含まれます。アカウント間で異なるのは、これらの環境変数がツールに書き込むよう指示するランタイム状態のみです。
 
 `CLV2_HOMUNCULUS_DIR` だけは `~/.claude` / `~/.claude-r06` の外、`~/.local/share/` 配下に完全に置かれています。Claude Code は config dir 配下のすべてのパスを sensitive file として扱い Write に対話承認を要求しますが、CLV2 の解析セッションは headless（`claude --model haiku --print`）で動くためその承認を得ることができず、instinct の書き込みがすべて失敗していました（issue #336）。他のアカウント別変数（`CLAUDE_CONFIG_DIR`、`ECC_AGENT_DATA_HOME`、`ECC_MCP_HEALTH_STATE_PATH`、`GATEGUARD_STATE_DIR`）が config dir 配下のままなのは、それらが Claude Code の Write ツールを経由せず node / shell コードから直接書き込まれるため、このゲートに引っかからないからです。
+
+`CODE_EXPL_STORE_ROOT` と `CODE_EXPL_PORT` は [Chatshelf](claude-code.ja.md) プラグインをアカウント別に分離します。各アカウントの PostToolUse 登録フックと SessionStart の viewer サーバーはそれぞれ自分の `code-explanations/` ストアに書き込み、r06 の viewer は `7789` を bind するので両アカウントのサーバーを同時に起動できます（`server.mjs` は `EADDRINUSE` で `exit 0` するため、`7788` を共有すると後から起動したアカウントが黙って相手の shelf を配信してしまいます）。これらは他の node 書き込み変数と同様 config dir 配下に置かれ、claude ラッパー（後述）が注入します。だからこそフックと viewer は — exec された claude の子プロセスとして — これらを継承します。ひとつだけ上流由来の制約が残ります。`server.mjs` は transcript を `~/.claude/projects` 固定で読み `CLAUDE_CONFIG_DIR` を見ないため、r06 アカウントでは viewer のセッション preview と `claude://resume` 補助が r06 セッションを解決できません。これは transcript 紐付きの preview のみが劣化するもので、アカウント別の shelf 分離（プライバシー境界）には影響しません。
 
 ---
 

@@ -74,15 +74,17 @@ This document covers the Claude Code harness configuration deployed by this dotf
 
 The `statusLine` field points to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline.sh` so the same settings file works for both accounts.
 
-Two plugins are declared:
+Three plugins are declared:
 
 | Plugin | Provides |
 |---|---|
 | `codex@openai-codex` | Codex CLI (OpenAI) consultation from within Claude Code |
 | `claude-code-setup@claude-plugins-official` | Anthropic-official read-only codebase analyzer that recommends hooks, skills, MCP servers, and subagents |
+| `chatshelf@chatshelf` | Session-linked local library + viewer for the "code explanation" HTML Claude Code writes to a scratchpad (store `$CLAUDE_CONFIG_DIR/code-explanations`, viewer `127.0.0.1:7788` personal / `:7789` r06 — see [account isolation](account-isolation.md)) |
 
 `enabledPlugins` names the plugins, and `extraKnownMarketplaces` names the non-official marketplaces
-they come from (`openai-codex` → `openai/codex-plugin-cc`, pinned to tag `v1.0.6`). Neither key
+they come from (`openai-codex` → `openai/codex-plugin-cc`, pinned to tag `v1.0.6`; `chatshelf` →
+`NoritakaIkeda/chatshelf`, pinned to tag `v0.1.0`). Neither key
 installs anything by itself: the CLI treats `enabledPlugins` as a switch for plugins that are
 *already* installed, and it does not register a marketplace merely because settings.json declares one
 — see [anthropics/claude-code#23737](https://github.com/anthropics/claude-code/issues/23737) (closed
