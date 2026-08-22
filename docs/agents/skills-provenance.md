@@ -77,9 +77,9 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (<!-- FACT:curated-skill-count -->45<!-- /FACT --> skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->46<!-- /FACT --> skills)
 
-The 45 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 46 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (13 skills)
 
@@ -111,11 +111,11 @@ Managing conversation state, compacting transcripts, and post-session capture. `
 
 `wtp`, `wtp-cleanup`, `chezmoi`, `git-filter-path`
 
-### Domain, database, media, and productivity utilities (11 skills)
+### Domain, database, media, and productivity utilities (12 skills)
 
-Miscellaneous functional skills spanning databases, media conversion, and daily productivity, plus the morning-routine and reporting/publishing skills added in the 2026-07-07 rounds (`gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`).
+Miscellaneous functional skills spanning databases, media conversion, and daily productivity, plus the morning-routine and reporting/publishing skills added in the 2026-07-07 rounds (`gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`). `virtual-device` covers driving the real browser on an iOS Simulator / Android Emulator and hands the exploratory-testing workflow itself off to `agent-browser skills get dogfood`.
 
-`fix-migration-leftover`, `webp-convert`, `agent-browser`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `redact-patterns`, `gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`
+`fix-migration-leftover`, `webp-convert`, `agent-browser`, `virtual-device`, `daily-planning`, `sync-daily-planning-calendar`, `empirical-prompt-tuning`, `redact-patterns`, `gmail-triage`, `morning-brief`, `worklog`, `zenn-draft`
 
 ---
 

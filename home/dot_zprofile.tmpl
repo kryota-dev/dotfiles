@@ -26,6 +26,19 @@ export LANG=ja_JP.UTF-8
 # creates this directory; tests/phone_harness.bats keeps the two paths in sync.
 export PH_AGENT_WORKSPACE="$HOME/.local/share/phone-harness/agent-workspace"
 
+# Android SDK (cask android-commandlinetools). sdkmanager installs emulator/ and
+# system-images/ under this root, so every Android tool needs ANDROID_HOME to find
+# them. Exported here rather than from a ~/.config/zsh module for the same reason as
+# PH_AGENT_WORKSPACE above: those load deferred via sheldon (interactive shells only),
+# and agents drive the emulator from non-interactive ones.
+#
+# platform-tools is deliberately NOT on this PATH: adb already comes from the
+# `android-platform-tools` cask at $(brew --prefix)/bin. Two adb binaries on one host
+# desync the adb server ("adb server version doesn't match this client"), so we keep
+# exactly one and let ANDROID_HOME cover only the pieces brew does not ship.
+export ANDROID_HOME="{{ if eq .chezmoi.arch "arm64" }}/opt/homebrew{{ else }}/usr/local{{ end }}/share/android-commandlinetools"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/emulator:$PATH"
+
 {{ end -}}
 # PATH deduplication
 typeset -gU path

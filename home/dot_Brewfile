@@ -73,6 +73,8 @@ brew "neovim"
 brew "ntfy"
 # PDF rendering library (based on the xpdf-3.0 code base)
 brew "poppler"
+# Convert bitmaps to vector graphics
+brew "potrace"
 # Perl-powered file rename script with many helpful built-ins
 brew "rename"
 # Terminal multiplexer with VT100/ANSI terminal emulation
@@ -107,6 +109,8 @@ cask "adobe-acrobat-reader"
 cask "adobe-creative-cloud"
 # Enable Windows-like alt-tab
 cask "alt-tab", args: { appdir: "/Applications" }
+# Command-line tools for building and debugging Android apps
+cask "android-commandlinetools"
 # Android SDK component
 cask "android-platform-tools"
 # Tools for building Android applications
@@ -288,4 +292,5 @@ vscode "yzane.markdown-pdf"
 vscode "yzhang.markdown-all-in-one"
 go "cmd/go"
 go "cmd/gofmt"
+uv "phone-harness"
 npm "corepack"

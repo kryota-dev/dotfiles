@@ -77,9 +77,9 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->45<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->46<!-- /FACT --> スキル）
 
-`home/dot_agents/skills/` の 45 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 46 スキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（13 スキル）
 
@@ -111,11 +111,11 @@
 
 `wtp`、`wtp-cleanup`、`chezmoi`、`git-filter-path`
 
-### ドメイン、データベース、メディア、生産性ユーティリティ（11 スキル）
+### ドメイン、データベース、メディア、生産性ユーティリティ（12 スキル）
 
-データベース、メディア変換、日々の生産性にまたがる各種機能スキルに加え、2026-07-07 のラウンドで追加された朝ルーチン・レポーティング/発信系スキル（`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`）。
+データベース、メディア変換、日々の生産性にまたがる各種機能スキルに加え、2026-07-07 のラウンドで追加された朝ルーチン・レポーティング/発信系スキル（`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`）。`virtual-device` は iOS Simulator / Android Emulator の実ブラウザを駆動するところまでを担い、探索テストのワークフロー自体は `agent-browser skills get dogfood` へ委譲します。
 
-`fix-migration-leftover`、`webp-convert`、`agent-browser`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`、`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`
+`fix-migration-leftover`、`webp-convert`、`agent-browser`、`virtual-device`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`、`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`
 
 ---
 
