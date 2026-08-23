@@ -71,8 +71,15 @@ load helpers/setup
   for f in "${HOME_DIR}"/run_*.sh.tmpl; do
     [ -e "$f" ] || continue
     slug="$(basename "$f")"
-    slug="${slug#run_once_}"
-    slug="${slug#run_onchange_}"
+    # chezmoi's script attributes appear in a fixed order: run_, then an optional once_/onchange_,
+    # then before_/after_. Peel them one at a time instead of matching whole combinations, so an
+    # always-run script (run_before_NN-…, which carries no once_/onchange_) normalizes to the same
+    # NN-slug shape as every other lifecycle script rather than leaking its raw filename into the
+    # grep below. Peeling is a no-op for any attribute a given script does not use, so the derived
+    # slug is unchanged for every pre-existing script.
+    slug="${slug#run_}"
+    slug="${slug#once_}"
+    slug="${slug#onchange_}"
     slug="${slug#before_}"
     slug="${slug#after_}"
     slug="${slug%.sh.tmpl}"

@@ -15,7 +15,9 @@ chezmoi はスクリプト実行を、管理ファイルの書き込みを基準
 - **`before_` フェーズ** — `$HOME` への対象ファイル書き込みが行われる**前**に実行
 - **`after_` フェーズ** — 管理ファイルがすべて配置された**後**に実行
 
-各フェーズ内では、スクリプトは**ファイル名のアルファベット順**（実質的に数値順）で実行されます。すべてのスクリプト名に2桁の数値プレフィックス（`00-`, `10-`, `11-`, …）が付いているため、実行順序は決定的で推論しやすくなっています。
+各フェーズ内では、スクリプトは**ターゲット名のアルファベット順**（実質的に数値順）で実行されます。ターゲット名とは、ソースのファイル名から `run_` / `once_` / `onchange_` / `before_` / `after_` の各属性を取り除いたものです。すべてのスクリプト名に2桁の数値プレフィックス（`00-`, `05-`, `10-`, `11-`, …）が付いているため、実行順序は決定的で推論しやすくなっています。
+
+ターゲット名とソースのファイル名の区別は、あるスクリプトが隣接スクリプトと異なる属性の組み合わせを持つ場合に効いてきます。`run_before_05-…` は生のファイル名としては `run_once_before_00-…` より**前**に並びますが、chezmoi は `05-…` と `00-…` を比較するため、実行は**後**になります。
 
 ### apply の完全なタイムライン
 
@@ -24,8 +26,9 @@ flowchart TD
     A([chezmoi apply 開始]) --> B
 
     subgraph BEFORE ["BEFORE フェーズ (ファイル未書き込み)"]
-        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew + Rosetta 2)\n(Linux: apt build-deps + Linuxbrew)"]
-        B --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: .brewfile-linux-exclude でフィルタ)"]
+        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew)\n(Linux: apt build-deps + Linuxbrew)"]
+        B --> B2["05 ensure-macos-prerequisites\nrun_ (毎回) · macOS のみ\n(Xcode ライセンス同意 + Rosetta 2)\n(CI ではスキップ)"]
+        B2 --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: .brewfile-linux-exclude でフィルタ)\n(部分失敗は警告のみ・apply は継続)"]
     end
 
     C --> FILES[chezmoi が管理ファイルを HOME へ書き込む]
@@ -111,6 +114,7 @@ quoted heredoc の中に埋め込みます。これにより単一ソースを�
 | スクリプト | OS スコープ | ガード機構 |
 |-----------|------------|-----------|
 | `00-install-prerequisites` | 両対応 | `{{ if darwin }}` / `{{ else if linux }}` 2ブロック。それぞれ shebang を持つ |
+| `05-ensure-macos-prerequisites` | **macOS のみ** | 本文全体が `{{ if darwin }}` 内。Linux では 0 バイトにレンダリング。Rosetta ブロックはさらに `{{ if arm64 }}` の入れ子ガード内 |
 | `10-brew-bundle` | 両対応 | shebang は1つ。`{{ if linux }}` でフィルタ済み Brewfile パスへ切り替え |
 | `11-validate-1password` | **macOS のみ** | 2行目で非 darwin は exit 0 (`set -euo pipefail` より前) |
 | `12-setup-mise` | 両対応 | `{{ if linux }}` で `MISE_NODE_VERIFY=false` を追加 |
@@ -133,11 +137,26 @@ quoted heredoc の中に埋め込みます。これにより単一ソースを�
 
 ### 00 — install-prerequisites (`run_once`、before)
 
-Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリング）と Homebrew（arch 対応 shellenv: arm64 → `/opt/homebrew`、intel → `/usr/local`）をインストールします。Apple Silicon では Rosetta 2 も（冪等な `arch -x86_64` ガード付きで）インストールし、`sony-ps-remote-play` のような Intel 専用 cask が `brew bundle` 中に正しくインストールされるようにします。Linux では `apt-get` で `build-essential curl file git` をインストールした後 Linuxbrew をインストールします。レンダリング済みコンテンツが同じなら1回のみ実行されるため、`chezmoi apply` を再実行しても Homebrew インストールは繰り返されません。
+Xcode CLI ツール（macOS、`xcode-select -p` が成功するまでポーリング）と Homebrew（arch 対応 shellenv: arm64 → `/opt/homebrew`、intel → `/usr/local`）をインストールします。Linux では `apt-get` で `build-essential curl file git` をインストールした後 Linuxbrew をインストールします。レンダリング済みコンテンツが同じなら1回のみ実行されるため、`chezmoi apply` を再実行しても Homebrew インストールは繰り返されません。
+
+このスクリプトは「本当にマシンごとに1回でよい重量級のインストール」だけを意図的に担います。Rosetta 2 は以前ここにありましたが、下記の理由で 05 へ移設しました。
+
+### 05 — ensure-macos-prerequisites (`run_`、before、macOS のみ)
+
+`brew bundle` が依存しており、かつ構築済みのマシンから静かに失われうる 2 つの macOS 前提条件を再確立します。
+
+- **Xcode ライセンス**。developer directory が選択されていてライセンスが未同意の場合、Homebrew は `You have not agreed to the Xcode license` で**一切動作しません**。つまり未同意のライセンスは、10 が何かをインストールする前にそれを落とします。判定は Homebrew 自身の検査（`Library/Homebrew/brew.sh`）をそのまま流用しています。すなわち「`xcode-select -p` が非空」を前提に「`xcrun --find clang` が非ゼロ」かつ「その出力が license に言及している」ことです。brew と同一のテストを使うことで、brew が実際に拒否するときだけ同意処理が走り、それ以外のマシン（Command Line Tools のみの環境を含む）では `sudo` を一切要求しません。真っ新な Mac では本質的に 2 フェーズになります。Xcode.app 自体が 10 の `mas "Xcode"` で入るため、ライセンスの関門は**次回**の apply でしか現れないからです。
+- **Rosetta 2**（Apple Silicon のみ、`{{ if arm64 }}` ガード内）。Brewfile 内の Intel 専用ペイロード（`sony-ps-remote-play` cask と `PicGIF Lite` App Store アプリ）は x86_64 インストーラを同梱しており、Rosetta なしでは実行を拒否されます。ガードは冪等です。`arch -x86_64` はユニバーサルバイナリの x86_64 スライスを Rosetta が存在するときにのみ実行でき、`/usr/bin/true` はユニバーサルバイナリだからです。
+
+**なぜ `run_once_` / `run_onchange_` ではなく素の `run_` なのか**。このスクリプトが修復する状態はソースツリーではなく**マシン**の側にあります。`run_once_` は自身のレンダリング済み内容の SHA256 を chezmoi の永続 state に記録して判定するため、一度実行したマシンでは二度と走りません。00 が「すでにインストール済み」であるにもかかわらず、macOS アップグレードで失われた Rosetta 2 が戻らなかったのはまさにこれです。`run_onchange_` も同様で、再実行されるのは**スクリプト**が変わったときですが、変わったのはスクリプトではありません。毎回実行されるスクリプトだけが毎回再検査できます。どちらの検査も健全なマシンでは安価な no-op なので、コストは apply あたり数回の `exec` です。
+
+どちらの修復も apply を失敗させません（警告して継続します）。`before_` スクリプトの非ゼロ終了は以降のすべてを中断させますが、それはこのスクリプトが防ぐために存在する失敗モードそのものであり、作り出してよいものではありません。CI は `[ -n "${CI:-}" ]` で即スキップし、ランナーが `sudo` を求められないようにしています。これは 30 や 31 と同じ in-script 方式で、workflow からスクリプトを削除する方法と違って render/apply 経路が CI で検証され続けます。
 
 ### 10 — brew-bundle (`run_onchange`、before)
 
 `dot_Brewfile` に対して `brew bundle --no-upgrade` を実行します。Linux では Brewfile を `.brewfile-linux-exclude`（リポジトリルートの `grep -E` パターンリスト）でフィルタし、一時ファイルに書き出してから `tap`/`brew` 行のみを `brew bundle` に渡します。変化キーとして Brewfile の sha256 を最初のコメント行に埋め込んでいます。
+
+**失敗ポリシー**。`brew bundle` は**いずれか 1 件**でも失敗すると非ゼロで終了します。これは `before_` スクリプトなので、その status をそのまま伝播させると dotfiles が 1 つも書かれないまま apply 全体が中断します。引退した App Store アプリや Intel 専用 cask のせいでシェル設定を失うのは割に合わないため、部分失敗ではスキップされた対象を列挙した囲み警告を出したうえで exit 0 します。成功行 `Brew bundle complete.` はクリーンな実行時のみ出力されます。exit code だけでは「そもそも実行できなかった」と区別できない（Brewfile が無い場合も exit 1）ため、致命的な 2 条件（`brew` が `PATH` に無い / Brewfile が読めない）は明示的に事前検査し、従来どおり `exit 1` します。この挙動は macOS と Linux で同一です。CI は影響を受けません。`setup-validation.yml` はこのスクリプトを退避したうえで、フィルタ済み Brewfile に対して独自の厳格な `brew bundle` を実行するため、Brewfile の破損はそちらで検出され続けます。
 
 ### 11 — validate-1password (`run_once`、after、macOS のみ)
 
@@ -278,12 +297,12 @@ brew (00) → Homebrew パッケージ（mise, sheldon を含む）(10)
 
 ## スクリプト追加時の規約
 
-1. 順序付きタイムラインに自然に収まるプレフィックスを選ぶ。現在の空きスロット: `…15…17…19…32-39…`（40 より前）、`…41-49…`（sheldon とログインシェルの間）。
-2. 高コスト・不可逆な操作には `run_once_`、冪等な同期ステップには `run_onchange_` を使用する。
+1. 順序付きタイムラインに自然に収まるプレフィックスを選ぶ。現在の空きスロット: `…01-04…06-09…`（before フェーズ）、`…15…17…19…32-39…`（40 より前）、`…41-49…`（sheldon とログインシェルの間）。
+2. 高コスト・不可逆な操作には `run_once_`、冪等な同期ステップには `run_onchange_` を使用する。ソースツリーの外で退行しうる**マシン側**の状態を毎回検査し直す必要がある場合は、素の `run_`（`once_` / `onchange_` なし）を使う。他の 2 つの属性ではその変化を検知できないため（05 を参照）。
 3. 外部ファイルへの変化で `run_onchange_` を再トリガーするには、先頭コメントに `{{ include "<path>" | sha256sum }}` を埋め込む。
 4. すべてのスクリプトを `#!/bin/bash` と `set -euo pipefail` で始める。ただし、スクリプト全体が OS 固有の場合は shebang を OS テンプレートガードの内側に置く。
 5. mise でインストールされるツールで、スクリプト 16 より前に実行される可能性があるものは `mise exec -- <tool>` 経由で呼び出す。
-6. サイレントスキップが `run_onchange` を「完了済み」としてマークし将来のリトライを妨げる場合は、ハードフェイル（`exit 1`）する。ツールが現在のマシン状態で genuinely オプションな場合は警告 + exit 0 が適切。
+6. サイレントスキップが `run_onchange` を「完了済み」としてマークし将来のリトライを妨げる場合は、ハードフェイル（`exit 1`）する。ツールが現在のマシン状態で genuinely オプションな場合は警告 + exit 0 が適切。`before_` フェーズではこの判断をより厳しく行うこと。非ゼロ終了は管理ファイルが 1 つも書かれる前に、そしてすべての after スクリプトより前に apply を中断させるため、「以降の apply が無意味になる条件」に限定する（10 の事前検査と、個々の Brewfile エントリの失敗を許容する挙動の対比を参照）。
 
 ---
 

@@ -87,6 +87,7 @@ load helpers/setup
 
 @test "lifecycle scripts exist" {
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl" ]
@@ -347,21 +348,110 @@ load helpers/setup
   grep -qF 'dev.kryota.ntfy-dashboard' "$script"
 }
 
-@test "prerequisites installs Rosetta 2 behind an arm64 guard" {
-  local tmpl="${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
+@test "macOS prerequisites script installs Rosetta 2 behind an arm64 guard" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
   # Installs Rosetta 2 non-interactively (Intel-only casks need it).
   grep -Fq 'softwareupdate --install-rosetta --agree-to-license' "$tmpl"
   # Idempotent: skips when x86_64 binaries already run (Rosetta present).
   grep -Fq 'arch -x86_64' "$tmpl"
   # The install must sit inside an arm64 template guard, not just anywhere: the
-  # Homebrew shellenv block also opens an arm64 guard, so a bare grep for the
-  # guard string would pass even if the Rosetta block lost its own guard.
+  # file already opens an OS guard, so a bare grep for a guard string would pass
+  # even if the Rosetta block lost its own arch guard.
   awk '
     /\{\{ if eq \.chezmoi\.arch "arm64" -\}\}/ { guard = 1; next }
     /\{\{ (else|end)/ { guard = 0 }
     /softwareupdate --install-rosetta/ && guard { inside = 1 }
     END { exit !inside }
   ' "$tmpl"
+}
+
+@test "install-prerequisites no longer owns Rosetta 2" {
+  # Rosetta moved out of the run_once script because run_once records a content hash in chezmoi's
+  # persistent state and never fires again on that machine, so a Rosetta install lost to a macOS
+  # upgrade stayed lost. Two copies would also mean two sudo prompts.
+  ! grep -q 'install-rosetta' "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
+}
+
+@test "macOS prerequisites script is always-run, not once or onchange" {
+  # The whole point of this script. run_once_ fires at most once per machine, and run_onchange_
+  # fires only when the script itself changes; neither notices that the *machine* lost Rosetta or
+  # gained an unaccepted Xcode license. Only a bare run_ attribute re-probes on every apply.
+  [ -f "${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl" ]
+  local stray
+  stray=$(find "${HOME_DIR}" -maxdepth 1 -name 'run_*_before_*-ensure-macos-prerequisites.sh.tmpl' | wc -l)
+  [ "$stray" -eq 0 ]
+}
+
+@test "macOS prerequisites script is numbered between install-prerequisites and brew-bundle" {
+  # chezmoi runs same-phase scripts in target-name order, so the numeric prefix is the only thing
+  # guaranteeing Homebrew already exists when this probes, and that it has repaired the
+  # prerequisites before brew-bundle needs them.
+  local n
+  n=$(basename "$(find "${HOME_DIR}" -maxdepth 1 -name 'run_before_*-ensure-macos-prerequisites.sh.tmpl')")
+  n=${n#run_before_}
+  n=${n%%-*}
+  [ "$n" -gt 0 ]
+  [ "$n" -lt 10 ]
+}
+
+@test "macOS prerequisites script is macOS-only and skips CI" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # Renders empty on Linux, which chezmoi skips, so no Linux-side exclusion is needed.
+  head -n1 "$tmpl" | grep -qF '{{ if eq .chezmoi.os "darwin" -}}'
+  # CI runners must never be prompted for sudo, and Rosetta on a runner is thrown away with the VM.
+  grep -qF 'if [ -n "${CI:-}" ]; then' "$tmpl"
+}
+
+@test "macOS prerequisites script probes the Xcode license the way Homebrew does" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # Homebrew (Library/Homebrew/brew.sh) aborts when a developer dir is selected and
+  # `xcrun --find clang` fails with a license-related message. Reusing that exact probe means we
+  # accept precisely when brew would refuse to run, and never prompt for sudo otherwise.
+  grep -qF 'xcode-select -p' "$tmpl"
+  grep -qF 'xcrun --find clang' "$tmpl"
+  grep -qF '*license*' "$tmpl"
+  grep -qF 'sudo xcodebuild -license accept' "$tmpl"
+}
+
+@test "brew-bundle tolerates a partial failure instead of aborting the apply" {
+  local tmpl="${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl"
+  # A before-script that exits non-zero aborts the whole apply, taking the dotfiles themselves and
+  # every after-script with it, so brew bundle's status is captured rather than propagated.
+  grep -qF 'bundle_status=$?' "$tmpl"
+  grep -qF 'report_bundle_failure' "$tmpl"
+  # The success message must stay inside the success branch: a partial failure must never look like
+  # a clean run.
+  awk '
+    /bundle_status" -eq 0 / { in_ok = 1; next }
+    /^else$/ { in_ok = 0 }
+    /Brew bundle complete/ && in_ok { ok = 1 }
+    END { exit !ok }
+  ' "$tmpl"
+}
+
+@test "brew-bundle still aborts when brew bundle could not run at all" {
+  local tmpl="${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl"
+  # A missing Brewfile exits 1 exactly like a partial failure, so the fatal cases cannot be inferred
+  # from the exit code and have to be preflighted. Skipping every package must never report success.
+  grep -qF 'command -v brew' "$tmpl"
+  grep -qF '[ ! -r "$BREWFILE" ]' "$tmpl"
+  local hard_exits
+  hard_exits=$(grep -c '^  exit 1$' "$tmpl")
+  [ "$hard_exits" -eq 2 ]
+}
+
+@test "Brewfile has no Go standard-library entries" {
+  # `go install` refuses standard-library packages ("argument must not be a package in the standard
+  # library"), so a go "cmd/..." entry fails on every machine forever. brew bundle dump regenerates
+  # them from $GOBIN, which is why the brew launcher strips them; this guards the checked-in file.
+  ! grep -q '^go "cmd/' "${HOME_DIR}/dot_Brewfile"
+}
+
+@test "Brewfile RunCat entry points at an App Store app that still exists" {
+  # ADAM ID 1429033973 was retired: mas fails with "No apps found in the App Store for ADAM ID".
+  # RunCat Neo is the successor from the same developer.
+  ! grep -q '1429033973' "${HOME_DIR}/dot_Brewfile"
+  grep -qF 'mas "RunCat Neo", id: 6757801838' "${HOME_DIR}/dot_Brewfile"
 }
 
 @test "claude agents exist" {

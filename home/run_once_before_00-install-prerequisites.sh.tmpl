@@ -24,14 +24,10 @@ if ! command -v brew &>/dev/null; then
   {{ end -}}
 fi
 
-{{ if eq .chezmoi.arch "arm64" -}}
-# Rosetta 2 (Apple Silicon only; required by Intel-only casks e.g. sony-ps-remote-play).
-# Idempotent: `arch -x86_64` succeeds only once Rosetta can run x86_64 binaries.
-if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
-  echo "Installing Rosetta 2..."
-  sudo softwareupdate --install-rosetta --agree-to-license
-fi
-{{ end -}}
+# Rosetta 2 used to be installed here. It moved to run_before_05-ensure-macos-prerequisites.sh
+# because `run_once_` cannot heal it: once this script's content hash is recorded in chezmoi's
+# persistent state it never runs again on that machine, so a Rosetta install lost to a macOS
+# upgrade stayed lost. This script keeps only the genuinely once-per-machine, heavyweight installs.
 echo "Prerequisites installed."
 {{ else if eq .chezmoi.os "linux" -}}
 #!/bin/bash
