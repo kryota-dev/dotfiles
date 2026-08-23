@@ -87,6 +87,7 @@ load helpers/setup
 
 @test "lifecycle scripts exist" {
   [ -f "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl" ]
+  [ -f "${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_20-macos-defaults.sh.tmpl" ]
   [ -f "${HOME_DIR}/run_onchange_after_30-register-launchd-agents.sh.tmpl" ]
@@ -347,21 +348,236 @@ load helpers/setup
   grep -qF 'dev.kryota.ntfy-dashboard' "$script"
 }
 
-@test "prerequisites installs Rosetta 2 behind an arm64 guard" {
-  local tmpl="${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
+@test "macOS prerequisites script installs Rosetta 2 behind an arm64 guard" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
   # Installs Rosetta 2 non-interactively (Intel-only casks need it).
   grep -Fq 'softwareupdate --install-rosetta --agree-to-license' "$tmpl"
   # Idempotent: skips when x86_64 binaries already run (Rosetta present).
   grep -Fq 'arch -x86_64' "$tmpl"
   # The install must sit inside an arm64 template guard, not just anywhere: the
-  # Homebrew shellenv block also opens an arm64 guard, so a bare grep for the
-  # guard string would pass even if the Rosetta block lost its own guard.
+  # file already opens an OS guard, so a bare grep for a guard string would pass
+  # even if the Rosetta block lost its own arch guard.
   awk '
     /\{\{ if eq \.chezmoi\.arch "arm64" -\}\}/ { guard = 1; next }
     /\{\{ (else|end)/ { guard = 0 }
     /softwareupdate --install-rosetta/ && guard { inside = 1 }
     END { exit !inside }
   ' "$tmpl"
+}
+
+@test "install-prerequisites no longer owns Rosetta 2" {
+  # Rosetta moved out of the run_once script because run_once records a content hash in chezmoi's
+  # persistent state and never fires again on that machine, so a Rosetta install lost to a macOS
+  # upgrade stayed lost. Two copies would also mean two sudo prompts.
+  ! grep -q 'install-rosetta' "${HOME_DIR}/run_once_before_00-install-prerequisites.sh.tmpl"
+}
+
+@test "macOS prerequisites script is always-run, not once or onchange" {
+  # The whole point of this script. run_once_ fires at most once per machine, and run_onchange_
+  # fires only when the script itself changes; neither notices that the *machine* lost Rosetta or
+  # gained an unaccepted Xcode license. Only a bare run_ attribute re-probes on every apply.
+  [ -f "${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl" ]
+  local stray
+  stray=$(find "${HOME_DIR}" -maxdepth 1 -name 'run_*_before_*-ensure-macos-prerequisites.sh.tmpl' | wc -l)
+  [ "$stray" -eq 0 ]
+}
+
+@test "macOS prerequisites script is numbered between install-prerequisites and brew-bundle" {
+  # chezmoi runs same-phase scripts in target-name order, so the numeric prefix is the only thing
+  # guaranteeing Homebrew already exists when this probes, and that it has repaired the
+  # prerequisites before brew-bundle needs them.
+  local n
+  n=$(basename "$(find "${HOME_DIR}" -maxdepth 1 -name 'run_before_*-ensure-macos-prerequisites.sh.tmpl')")
+  n=${n#run_before_}
+  n=${n%%-*}
+  [ "$n" -gt 0 ]
+  [ "$n" -lt 10 ]
+}
+
+@test "macOS prerequisites script is macOS-only and skips CI" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # Renders empty on Linux, which chezmoi skips, so no Linux-side exclusion is needed.
+  head -n1 "$tmpl" | grep -qF '{{ if eq .chezmoi.os "darwin" -}}'
+  # CI runners must never be prompted for sudo, and Rosetta on a runner is thrown away with the VM.
+  grep -qF 'if [ -n "${CI:-}" ]; then' "$tmpl"
+}
+
+@test "macOS prerequisites script probes the Xcode license the way Homebrew does" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # Homebrew (Library/Homebrew/brew.sh) refuses to run when a developer dir is selected and
+  # `xcrun --find clang` fails with a license-related message. Reusing that exact probe means we
+  # accept precisely when brew would refuse to run, and never prompt for sudo otherwise.
+  grep -qF 'xcode-select -p' "$tmpl"
+  grep -qF 'xcrun --find clang' "$tmpl"
+  grep -qF '*license*' "$tmpl"
+  grep -qF 'xcodebuild -license accept' "$tmpl"
+}
+
+@test "macOS prerequisites script refuses to probe xcrun when the developer dir is /" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # Homebrew treats this state as fatal precisely because xcrun *hangs* on it. A hung before-script
+  # blocks the apply exactly like a failing one, so the `/` case must short-circuit before the probe
+  # rather than fall through to it.
+  grep -qF '"$xcode_dir" = "/"' "$tmpl"
+  awk '
+    /\[ "\$xcode_dir" = "\/" \]/ { seen_guard = 1 }
+    /xcrun --find clang/ && seen_guard { after = 1 }
+    END { exit !after }
+  ' "$tmpl"
+}
+
+@test "macOS prerequisites script calls privileged binaries by absolute path" {
+  local tmpl="${HOME_DIR}/run_before_05-ensure-macos-prerequisites.sh.tmpl"
+  # This script runs on every apply and can escalate, so it must not depend on PATH resolution for
+  # the binaries it escalates with (CWE-426).
+  grep -qF '/usr/bin/sudo /usr/bin/xcodebuild -license accept' "$tmpl"
+  grep -qF '/usr/bin/sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license' "$tmpl"
+  grep -qF '/usr/bin/arch -x86_64' "$tmpl"
+  # No bare-name invocation of any of them may survive.
+  ! grep -qE '^[[:space:]]*(if ! )?sudo ' "$tmpl"
+}
+
+# The brew-bundle failure policy is the whole point of this script, and it is a *runtime* contract:
+# a before-script that exits non-zero aborts the apply before a single dotfile is written. Asserting
+# it by grepping the template does not work — the shim-shadowing bug that made `command -v brew`
+# useless satisfied every plausible textual assertion. These tests render the template and run it
+# against a stub brew instead.
+#
+# Renders for $os/$arch, then repoints the script at the fixtures: BREW_BIN at the stub (or at a
+# path that does not exist), and the Brewfile it reads. On Linux the script derives its Brewfile
+# from SOURCE_BREWFILE through the exclude filter, so that input is redirected instead.
+_render_brew_bundle() {
+  local os="$1" arch="$2" brew_bin="$3" brewfile="$4" out="$5"
+  _render_script_template "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" "$os" "$arch" "$out" || return 1
+  local empty_exclude="${BATS_TEST_TMPDIR}/exclude"
+  : >"$empty_exclude"
+  sed -i.bak \
+    -e "s#^BREW_BIN=.*#BREW_BIN=${brew_bin}#" \
+    -e "s#^BREWFILE=\"/.*#BREWFILE=${brewfile}#" \
+    -e "s#^SOURCE_BREWFILE=.*#SOURCE_BREWFILE=${brewfile}#" \
+    -e "s#^EXCLUDE=.*#EXCLUDE=${empty_exclude}#" \
+    "$out"
+  rm -f "$out.bak"
+}
+
+# A fake brew. $STUB_MODE selects the shape of the run:
+#   ok      — succeeds, as a clean `brew bundle` does
+#   partial — reproduces brew's install-phase failure output and exits 1
+_write_stub_brew() {
+  local path="$1"
+  cat >"$path" <<'STUBEOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+  # The script evals the output of `brew shellenv`, so this must stay valid shell — i.e. empty.
+  shellenv) exit 0 ;;
+  --version) echo "Homebrew 5.0.0"; exit 0 ;;
+esac
+if [ "${STUB_MODE:-ok}" = "partial" ]; then
+  echo "Installing sony-ps-remote-play has failed!"
+  echo '`brew bundle` failed! 1 Brewfile dependency failed to install'
+  exit 1
+fi
+echo "Homebrew Bundle complete!"
+exit 0
+STUBEOF
+  chmod +x "$path"
+}
+
+@test "brew-bundle: a partial failure warns and lets the apply continue" {
+  _render_script_template "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" darwin arm64 \
+    "${BATS_TEST_TMPDIR}/probe.sh" || skip "chezmoi not installed"
+  local stub="${BATS_TEST_TMPDIR}/brew" bf="${BATS_TEST_TMPDIR}/Brewfile" script="${BATS_TEST_TMPDIR}/run.sh"
+  _write_stub_brew "$stub"
+  echo 'brew "coreutils"' >"$bf"
+  _render_brew_bundle darwin arm64 "$stub" "$bf" "$script"
+
+  STUB_MODE=partial run bash "$script"
+  # Exit 0 is the contract: anything else takes the dotfiles and every after-script down with it.
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qF 'WARNING: brew bundle did not install everything'
+  # The failing entry has to be named, or the user cannot tell what was skipped.
+  printf '%s\n' "$output" | grep -qF 'sony-ps-remote-play'
+  # ...and a partial failure must never read as a clean run.
+  ! printf '%s\n' "$output" | grep -qF 'Brew bundle complete.'
+}
+
+@test "brew-bundle: a clean run reports success and warns about nothing" {
+  _render_script_template "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" darwin arm64 \
+    "${BATS_TEST_TMPDIR}/probe.sh" || skip "chezmoi not installed"
+  local stub="${BATS_TEST_TMPDIR}/brew" bf="${BATS_TEST_TMPDIR}/Brewfile" script="${BATS_TEST_TMPDIR}/run.sh"
+  _write_stub_brew "$stub"
+  echo 'brew "coreutils"' >"$bf"
+  _render_brew_bundle darwin arm64 "$stub" "$bf" "$script"
+
+  run bash "$script"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qF 'Brew bundle complete.'
+  ! printf '%s\n' "$output" | grep -qF 'WARNING'
+}
+
+@test "brew-bundle: an unreadable Brewfile is still fatal" {
+  _render_script_template "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" darwin arm64 \
+    "${BATS_TEST_TMPDIR}/probe.sh" || skip "chezmoi not installed"
+  local stub="${BATS_TEST_TMPDIR}/brew" script="${BATS_TEST_TMPDIR}/run.sh"
+  _write_stub_brew "$stub"
+  _render_brew_bundle darwin arm64 "$stub" "${BATS_TEST_TMPDIR}/does-not-exist" "$script"
+
+  run bash "$script"
+  # Skipping every package must never be reported as success.
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qF 'Brewfile is not readable'
+}
+
+@test "brew-bundle: a missing Homebrew is fatal even when a brew shim shadows it on PATH" {
+  _render_script_template "${HOME_DIR}/run_onchange_before_10-brew-bundle.sh.tmpl" darwin arm64 \
+    "${BATS_TEST_TMPDIR}/probe.sh" || skip "chezmoi not installed"
+  # Regression guard for the shim-shadowing hole: ~/.local/launchers is prepended to PATH by
+  # dot_zprofile/dot_zshrc, and the brew shim there exits 127 when it cannot resolve a real brew.
+  # A preflight based on `command -v brew` accepts that shim, and the partial-failure path then
+  # normalizes its 127 into exit 0 — a machine with no Homebrew reporting a clean apply.
+  local shimdir="${BATS_TEST_TMPDIR}/launchers" bf="${BATS_TEST_TMPDIR}/Brewfile" script="${BATS_TEST_TMPDIR}/run.sh"
+  mkdir -p "$shimdir"
+  cat >"$shimdir/brew" <<'SHIMEOF'
+#!/usr/bin/env bash
+echo "brew launcher: could not resolve the real brew binary." >&2
+exit 127
+SHIMEOF
+  chmod +x "$shimdir/brew"
+  echo 'brew "coreutils"' >"$bf"
+  _render_brew_bundle darwin arm64 "${BATS_TEST_TMPDIR}/no-such-homebrew/bin/brew" "$bf" "$script"
+
+  PATH="$shimdir:$PATH" run bash "$script"
+  [ "$status" -eq 1 ]
+  printf '%s\n' "$output" | grep -qF 'no usable Homebrew'
+}
+
+@test "brew-bundle: the Linux rendering carries the same failure policy" {
+  local script="${BATS_TEST_TMPDIR}/run-linux.sh"
+  local stub="${BATS_TEST_TMPDIR}/brew" bf="${BATS_TEST_TMPDIR}/Brewfile"
+  _write_stub_brew "$stub"
+  echo 'brew "coreutils"' >"$bf"
+  _render_brew_bundle linux amd64 "$stub" "$bf" "$script" || skip "chezmoi not installed"
+
+  # The failure handling is shared across both OS branches, so the Linux rendering must tolerate a
+  # partial failure identically — this is what stops the two branches from drifting apart.
+  STUB_MODE=partial run bash "$script"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qF 'WARNING: brew bundle did not install everything'
+  ! printf '%s\n' "$output" | grep -qF 'Brew bundle complete.'
+}
+
+@test "Brewfile has no Go standard-library entries" {
+  # `go install` refuses standard-library packages ("argument must not be a package in the standard
+  # library"), so a go "cmd/..." entry fails on every machine forever. brew bundle dump regenerates
+  # them from $GOBIN, which is why the brew launcher strips them; this guards the checked-in file.
+  ! grep -q '^go "cmd/' "${HOME_DIR}/dot_Brewfile"
+}
+
+@test "Brewfile RunCat entry points at an App Store app that still exists" {
+  # ADAM ID 1429033973 was retired: mas fails with "No apps found in the App Store for ADAM ID".
+  # RunCat Neo is the successor from the same developer.
+  ! grep -q '1429033973' "${HOME_DIR}/dot_Brewfile"
+  grep -qF 'mas "RunCat Neo", id: 6757801838' "${HOME_DIR}/dot_Brewfile"
 }
 
 @test "claude agents exist" {

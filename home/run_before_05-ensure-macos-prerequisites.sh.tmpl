@@ -1,0 +1,89 @@
+{{ if eq .chezmoi.os "darwin" -}}
+#!/bin/bash
+set -euo pipefail
+
+# Always-run: no `once_`/`onchange_` attribute, so this executes on every `chezmoi apply`.
+#
+# Both checks below guard against state that silently disappears from a machine that was already
+# set up: a macOS major upgrade drops Rosetta 2, and Xcode.app arriving (or being reinstalled)
+# re-arms the license gate. Neither of the usual attributes can heal that.
+#   - `run_once_` keys on the SHA256 of its own rendered content, recorded in chezmoi's persistent
+#     state. Once it has run on a machine it never runs there again, no matter what happens to the
+#     machine afterwards. Rosetta 2 was installed from `00-install-prerequisites` this way and did
+#     not come back after it was lost.
+#   - `run_onchange_` re-runs when *this file* changes, which is just as blind: the thing that
+#     changed is the machine, not the script.
+# The drift we need to detect lives outside the source state, so it has to be probed every time.
+# Both probes are cheap no-ops on a healthy machine (three execs total, no sudo), which is what
+# makes paying them on every apply the right trade.
+#
+# Numbered 05 so it lands after 00-install-prerequisites (which installs Homebrew) and before
+# 10-brew-bundle, which is what actually breaks when either prerequisite is missing.
+
+# CI runners must never be prompted for sudo, and installing Rosetta there burns minutes on
+# software that is discarded with the VM. Skip inside CI only — unlike deleting this script in the
+# workflow, the render/apply path stays CI-validated.
+if [ -n "${CI:-}" ]; then
+  echo "[macos-prereqs] CI detected; skipping Xcode license and Rosetta 2 checks."
+  exit 0
+fi
+
+# Xcode license. Homebrew refuses to do anything at all ("You have not agreed to the Xcode
+# license") when a developer directory is selected and the license has not been accepted, so an
+# unaccepted license takes 10-brew-bundle down before it installs a single package.
+#
+# The probe mirrors Homebrew's own gate (Library/Homebrew/brew.sh), including both of its arms:
+#   - a developer directory of `/`, which brew refuses outright because it makes xcrun *hang*;
+#   - otherwise, a non-zero `xcrun --find clang` whose output mentions the license.
+# Matching brew's test means we act precisely when brew would otherwise refuse to run, and stay a
+# silent no-op — no sudo prompt — on every other machine, including Command Line Tools-only
+# installs where xcrun simply succeeds. Gating on a non-empty `xcode-select -p` first is also
+# brew's behaviour: probing xcrun with neither Xcode nor the CLT installed pops up the CLT
+# installer.
+#
+# Two-phase on a brand-new Mac: Xcode.app itself arrives via `mas "Xcode"` during 10-brew-bundle,
+# so the license gate can only appear on the *next* apply. Being always-run is exactly what lets
+# that second pass clear it instead of stranding the user at a manual `sudo xcodebuild -license`.
+#
+# Privileged and repair commands are called by absolute path. This script runs on every apply and
+# can invoke sudo, so it should not depend on PATH resolution for the binaries it escalates with.
+if xcode_dir="$(/usr/bin/xcode-select -p 2>/dev/null)" && [ -n "$xcode_dir" ]; then
+  if [ "$xcode_dir" = "/" ]; then
+    # Do not probe xcrun here. Homebrew documents that this state hangs xcrun, and a hung
+    # before-script blocks the apply just as completely as a failing one — the exact outcome this
+    # script exists to prevent. Report it and leave the Xcode side alone; Rosetta is unaffected.
+    echo "WARNING: xcode-select path is '/', which makes xcrun hang and Homebrew refuse to run." >&2
+    echo "         Fix with 'sudo xcode-select --switch /Applications/Xcode.app' or 'sudo rm -rf /usr/share/xcode-select'." >&2
+    echo "         Skipping the Xcode license check until then." >&2
+  elif ! xcrun_output="$(/usr/bin/xcrun --find clang 2>&1)"; then
+    case "$xcrun_output" in
+      *license*)
+        echo "Accepting the Xcode license (Homebrew cannot run until this is done)..."
+        # Warn instead of aborting: a failing before-script takes the whole apply down with it —
+        # dotfiles and every after-script included — which is the very failure mode this change set
+        # exists to remove. brew bundle tolerates its own failures now, so the apply still completes
+        # and the next one retries this.
+        if ! /usr/bin/sudo /usr/bin/xcodebuild -license accept; then
+          echo "WARNING: 'sudo xcodebuild -license accept' failed. Run it manually; Homebrew will keep refusing to run until you do." >&2
+        fi
+        ;;
+    esac
+  fi
+fi
+{{ if eq .chezmoi.arch "arm64" -}}
+
+# Rosetta 2 (Apple Silicon only; required by Intel-only payloads in the Brewfile — the
+# sony-ps-remote-play cask and the PicGIF Lite App Store app both ship x86_64 installers that
+# refuse to run without it).
+# Idempotent: `arch -x86_64` can only execute the x86_64 slice of a universal binary once Rosetta
+# is present, and /usr/bin/true is universal (x86_64 + arm64e), so a successful run proves Rosetta
+# works and costs a single exec when it does.
+if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+  echo "Installing Rosetta 2..."
+  if ! /usr/bin/sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license; then
+    echo "WARNING: Rosetta 2 install failed; Intel-only casks and App Store apps will not install." >&2
+  fi
+fi
+{{ end -}}
+echo "macOS prerequisites verified."
+{{ end -}}

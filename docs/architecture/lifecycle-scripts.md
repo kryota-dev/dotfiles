@@ -15,7 +15,9 @@ chezmoi separates script execution into two phases relative to writing managed f
 - **`before_` phase** — scripts run _before_ any target file is written to `$HOME`.
 - **`after_` phase** — scripts run _after_ all managed files are in place.
 
-Within each phase, scripts execute in **alphabetical order by filename**. Because every script name uses a two-digit numeric prefix (`00-`, `10-`, `11-`, …), the execution order is deterministic and easy to reason about.
+Within each phase, scripts execute in **alphabetical order by target name** — the source filename with its `run_` / `once_` / `onchange_` / `before_` / `after_` attributes stripped. Because every script name uses a two-digit numeric prefix (`00-`, `05-`, `10-`, `11-`, …), the execution order is deterministic and easy to reason about.
+
+The distinction between target name and source filename matters once a script carries a different set of attributes from its neighbours: `run_before_05-…` sorts *before* `run_once_before_00-…` as a raw filename, but runs *after* it, because chezmoi compares `05-…` against `00-…`.
 
 ### Full apply timeline
 
@@ -24,8 +26,9 @@ flowchart TD
     A([chezmoi apply starts]) --> B
 
     subgraph BEFORE ["BEFORE phase (files not yet written)"]
-        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew + Rosetta 2)\n(Linux: apt build-deps + Linuxbrew)"]
-        B --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: filters .brewfile-linux-exclude)"]
+        B["00 install-prerequisites\nrun_once\n(macOS: Xcode CLI + Homebrew)\n(Linux: apt build-deps + Linuxbrew)"]
+        B --> B2["05 ensure-macos-prerequisites\nrun_ (every apply) · macOS only\n(Xcode license accept + Rosetta 2)\n(skipped in CI)"]
+        B2 --> C["10 brew-bundle\nrun_onchange\n(brew bundle --no-upgrade)\n(Linux: filters .brewfile-linux-exclude)\n(partial failure warns; apply continues)"]
     end
 
     C --> FILES[chezmoi writes managed files to HOME]
@@ -112,6 +115,7 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 | Script | OS scope | Guard mechanism |
 |--------|----------|-----------------|
 | `00-install-prerequisites` | dual | Two full `{{ if darwin }}` / `{{ else if linux }}` blocks; each has its own shebang |
+| `05-ensure-macos-prerequisites` | **macOS only** | Entire body inside `{{ if darwin }}`; renders to zero bytes on Linux. The Rosetta block sits inside a nested `{{ if arm64 }}` |
 | `10-brew-bundle` | dual | Single shebang; `{{ if linux }}` switches to filtered-Brewfile path |
 | `11-validate-1password` | **macOS only** | Non-darwin exits 0 at line 2 before `set -euo pipefail` |
 | `12-setup-mise` | dual | `{{ if linux }}` adds `MISE_NODE_VERIFY=false` |
@@ -134,11 +138,26 @@ Scripts use chezmoi template guards to select the appropriate behavior per OS.
 
 ### 00 — install-prerequisites (`run_once`, before)
 
-Installs Xcode CLI tools (macOS, polling until `xcode-select -p` succeeds) and Homebrew (arch-aware shellenv: `/opt/homebrew` on arm64, `/usr/local` on intel). On Apple Silicon it also installs Rosetta 2 (idempotent `arch -x86_64` guard) so Intel-only casks like `sony-ps-remote-play` install cleanly during `brew bundle`. On Linux installs `build-essential curl file git` via `apt-get` then Linuxbrew. Runs once per rendered content so a re-run of `chezmoi apply` never repeats the Homebrew install.
+Installs Xcode CLI tools (macOS, polling until `xcode-select -p` succeeds) and Homebrew (arch-aware shellenv: `/opt/homebrew` on arm64, `/usr/local` on intel). On Linux installs `build-essential curl file git` via `apt-get` then Linuxbrew. Runs once per rendered content so a re-run of `chezmoi apply` never repeats the Homebrew install.
+
+This script deliberately holds only the genuinely once-per-machine, heavyweight installs. Rosetta 2 used to live here and moved to 05 for the reason described below.
+
+### 05 — ensure-macos-prerequisites (`run_`, before, macOS only)
+
+Re-establishes two macOS prerequisites that `brew bundle` depends on and that can silently disappear from an already-provisioned machine:
+
+- **Xcode license.** Homebrew refuses to run at all — `You have not agreed to the Xcode license` — when a developer directory is selected and the license has not been accepted, so an unaccepted license takes 10 down before it installs anything. The probe mirrors Homebrew's own gate in `Library/Homebrew/brew.sh`, including both of its arms: a developer directory of `/` is reported and left alone (brew rejects that state outright because it makes `xcrun` *hang*, and a hung before-script blocks the apply just as completely as a failing one), and otherwise a non-zero `xcrun --find clang` whose output mentions the license triggers the accept. Both are gated on a non-empty `xcode-select -p`. Reusing brew's test means the script acts precisely when brew would otherwise refuse to run and never prompts for `sudo` on any other machine, including Command Line Tools-only installs. On a brand-new Mac this is inherently two-phase: Xcode.app itself arrives via `mas "Xcode"` during 10, so the license gate can only appear on the *next* apply.
+- **Rosetta 2** (Apple Silicon only, inside a `{{ if arm64 }}` guard). Intel-only payloads in the Brewfile — the `sony-ps-remote-play` cask and the `PicGIF Lite` App Store app — ship x86_64 installers that refuse to run without it. The guard is idempotent: `arch -x86_64` can only execute the x86_64 slice of a universal binary once Rosetta is present, and `/usr/bin/true` is universal.
+
+**Why a bare `run_` rather than `run_once_` or `run_onchange_`.** The state this script repairs lives on the machine, not in the source tree. `run_once_` keys on the SHA256 of its own rendered content recorded in chezmoi's persistent state, so once it has run on a machine it never runs there again — which is exactly how a Rosetta 2 install lost to a macOS upgrade stayed lost even though 00 "had already installed it". `run_onchange_` is no better: it re-runs when the *script* changes, and the script is not what changed. Only an always-run script re-probes every time. Both probes are cheap no-ops on a healthy machine, so the cost is a few `exec`s per apply.
+
+Neither repair is allowed to fail the apply: each warns and continues. A non-zero exit from a `before_` script aborts everything downstream, which is the failure mode this script exists to prevent, not create. CI is skipped outright via `[ -n "${CI:-}" ]` so runners are never prompted for `sudo` — the same in-script approach 30 and 31 use, which keeps the render/apply path CI-validated rather than deleting the script from the workflow.
 
 ### 10 — brew-bundle (`run_onchange`, before)
 
 Runs `brew bundle --no-upgrade` against `dot_Brewfile`. On Linux, filters the Brewfile through `.brewfile-linux-exclude` (a `grep -E` pattern list at the repo root) via a temp file, then passes only `tap`/`brew` lines that survive the filter. The Brewfile sha256 is embedded in the first comment line as the change key.
+
+**Failure policy.** `brew bundle` exits non-zero when *any* entry fails, and this is a `before_` script, so propagating that status aborts the whole apply before a single dotfile is written. A retired App Store app or an Intel-only cask must not cost the user their shell config, so a partial failure prints a boxed warning listing what was skipped and the script exits 0; the success line `Brew bundle complete.` is printed only on a clean run. The exit code alone cannot distinguish this from "could not run at all" — a missing Brewfile also exits 1 — so the two fatal conditions (no usable Homebrew, Brewfile unreadable) are preflighted explicitly and still `exit 1`. The Homebrew preflight resolves the real binary by absolute path and runs `--version` on it rather than calling `command -v brew`: `~/.local/launchers` sits at the front of `PATH` (see [shell environment](shell-environment.md)), and the `brew` shim there exits 127 when no real Homebrew exists — which `command -v` would accept and the partial-failure path would then normalize into a clean-looking apply that installed nothing. This applies identically on macOS and Linux. CI is unaffected: `setup-validation.yml` moves this script aside and runs its own strict `brew bundle` against a filtered Brewfile, so Brewfile breakage is still caught there.
 
 ### 11 — validate-1password (`run_once`, after, macOS only)
 
@@ -297,12 +316,12 @@ Scripts 13 and 14 invoke tools through `mise exec --` rather than via PATH becau
 
 ## Conventions for adding scripts
 
-1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…15…17…19…32-39…` (before 40), `…41-49…` (between sheldon and login-shell).
-2. Use `run_once_` for expensive/irreversible operations; `run_onchange_` for idempotent sync.
+1. Choose a prefix that slots naturally into the ordered timeline. Current slots with gaps: `…01-04…06-09…` (before phase), `…15…17…19…32-39…` (before 40), `…41-49…` (between sheldon and login-shell).
+2. Use `run_once_` for expensive/irreversible operations; `run_onchange_` for idempotent sync; a bare `run_` (no `once_`/`onchange_`) when the script must re-probe **machine** state that can regress outside the source tree, since neither of the other two attributes can notice that — see 05.
 3. For `run_onchange_` scripts that must react to an external file, embed `{{ include "<path>" | sha256sum }}` in a leading comment.
 4. Start every script with `#!/bin/bash` and `set -euo pipefail` — or place the shebang inside the OS template guard if the entire script is OS-specific.
 5. Tools installed by mise that may not yet be on PATH must be invoked via `mise exec -- <tool>` on scripts that may run before 16.
-6. Hard-fail (`exit 1`) when a silent skip would mark a `run_onchange` "done" and prevent future retries. Warn-and-exit-0 is appropriate when the tool is genuinely optional for the current machine state.
+6. Hard-fail (`exit 1`) when a silent skip would mark a `run_onchange` "done" and prevent future retries. Warn-and-exit-0 is appropriate when the tool is genuinely optional for the current machine state. Weigh this harder in the `before_` phase: a non-zero exit there aborts the apply before any managed file is written and before every after-script, so reserve it for conditions that make the rest of the apply meaningless — see 10's preflight versus its tolerance of individual Brewfile entries failing.
 
 ---
 

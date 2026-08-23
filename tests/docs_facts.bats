@@ -64,20 +64,50 @@ load helpers/setup
   }
 }
 
-@test "docs_facts: every lifecycle script in home/ is documented in lifecycle-scripts.md" {
-  local doc="${DOCS_DIR}/architecture/lifecycle-scripts.md"
-  [ -f "$doc" ]
+@test "docs_facts: every lifecycle script in home/ is documented in lifecycle-scripts.md (EN and JA)" {
+  # Both mirrors are checked. The EN-only form let a script be documented in the canonical file
+  # while the JA mirror silently lost it, which is exactly the parity the docs promise.
+  local doc
+  for doc in "${DOCS_DIR}/architecture/lifecycle-scripts.md" "${DOCS_DIR}/architecture/lifecycle-scripts.ja.md"; do
+    [ -f "$doc" ]
+    _assert_lifecycle_scripts_documented "$doc"
+  done
+}
+
+_assert_lifecycle_scripts_documented() {
+  local doc="$1"
   local f slug
   for f in "${HOME_DIR}"/run_*.sh.tmpl; do
     [ -e "$f" ] || continue
     slug="$(basename "$f")"
-    slug="${slug#run_once_}"
-    slug="${slug#run_onchange_}"
+    # chezmoi's script attributes appear in a fixed order: run_, then an optional once_/onchange_,
+    # then before_/after_. Peel them one at a time instead of matching whole combinations, so an
+    # always-run script (run_before_NN-…, which carries no once_/onchange_) normalizes to the same
+    # NN-slug shape as every other lifecycle script rather than leaking its raw filename into the
+    # grep below. Peeling is a no-op for any attribute a given script does not use, so the derived
+    # slug is unchanged for every pre-existing script.
+    slug="${slug#run_}"
+    slug="${slug#once_}"
+    slug="${slug#onchange_}"
     slug="${slug#before_}"
     slug="${slug#after_}"
     slug="${slug%.sh.tmpl}"
     grep -qF "$slug" "$doc" || {
-      echo "lifecycle script '$slug' exists in home/ but is not documented in lifecycle-scripts.md"
+      echo "lifecycle script '$slug' exists in home/ but is not documented in ${doc##*/}"
+      false
+    }
+  done
+}
+
+@test "docs_facts: the brew-bundle failure policy is documented in both mirrors" {
+  # The policy that a partial brew bundle failure warns instead of aborting is the load-bearing
+  # behaviour of the before phase; losing it from either mirror leaves the docs describing an
+  # apply that stops on the first failed cask.
+  local doc
+  for doc in "${DOCS_DIR}/architecture/lifecycle-scripts.md" "${DOCS_DIR}/architecture/lifecycle-scripts.ja.md"; do
+    [ -f "$doc" ]
+    grep -qiE 'failure policy|失敗ポリシー' "$doc" || {
+      echo "${doc##*/} does not document the brew-bundle failure policy"
       false
     }
   done

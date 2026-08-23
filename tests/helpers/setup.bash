@@ -13,7 +13,8 @@ DOCS_DIR="${REPO_ROOT}/docs"
 # template var) can't see the expanded names — resolve the list directly here. Scoped
 # strictly to the [ecc] table's `skills = [ ... ]` array so an unrelated section gaining a
 # `skills` key (or a formatter changing the indent) can't perturb the result. Kept
-# dependency-free on purpose: CI's bats job installs only bats/shellcheck/zsh, no chezmoi.
+# dependency-free on purpose so it keeps working even where chezmoi is unavailable
+# (_render_script_template below is the one helper that does need it).
 _ecc_skill_list() {
   awk '
     /^\[ecc\]$/        { in_ecc = 1; next }
@@ -22,6 +23,31 @@ _ecc_skill_list() {
     in_ecc && in_list && /^[[:space:]]*\]/ { in_list = 0; next }
     in_ecc && in_list  { print }
   ' "${HOME_DIR}/.chezmoidata.toml" | grep -oE '"[^"]+"' | tr -d '"'
+}
+
+# Render a chezmoi script template for a specific OS/arch into $out, so behavioural tests can
+# execute it instead of grepping its source. `chezmoi execute-template` always reports the *host's*
+# os/arch, so the guard conditions are rewritten to literal true/false first; everything else
+# (branch balancing, `include`, `.chezmoi.sourceDir`) still goes through chezmoi's real engine,
+# which is what makes an unbalanced if/end or a bad expansion show up here.
+#
+# --source pins the source dir to this repo so `include "dot_Brewfile"` resolves regardless of
+# whether the machine running the tests has chezmoi initialised.
+#
+# Returns 1 without writing anything when chezmoi is unavailable, so callers can `skip`. CI's bats
+# job installs chezmoi for exactly this reason (.github/workflows/ci.yml); the other helpers here
+# stay dependency-free so they keep working without it.
+_render_script_template() {
+  local tmpl="$1" os="$2" arch="$3" out="$4"
+  command -v chezmoi >/dev/null 2>&1 || return 1
+  local is_darwin is_linux is_arm64
+  if [ "$os" = "darwin" ]; then is_darwin=true; is_linux=false; else is_darwin=false; is_linux=true; fi
+  if [ "$arch" = "arm64" ]; then is_arm64=true; else is_arm64=false; fi
+  sed \
+    -e "s/eq \.chezmoi\.os \"darwin\"/${is_darwin}/g" \
+    -e "s/eq \.chezmoi\.os \"linux\"/${is_linux}/g" \
+    -e "s/eq \.chezmoi\.arch \"arm64\"/${is_arm64}/g" \
+    "$tmpl" | chezmoi execute-template --source "${HOME_DIR}" >"$out"
 }
 
 # Octal permission bits of a file or directory (e.g. 700), on both CI platforms.

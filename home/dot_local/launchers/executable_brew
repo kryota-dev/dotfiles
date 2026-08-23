@@ -97,6 +97,36 @@ if is_dump_trigger "$subcommand"; then
       "$real" bundle dump --force --file="$brewfile" 2>&1 >/dev/null)"; then
       echo "brew launcher: 'brew bundle dump' failed; $brewfile not refreshed." >&2
       if [ -n "$dump_err" ]; then printf '%s\n' "$dump_err" >&2; fi
+    else
+      # `brew bundle dump` walks $GOBIN and emits one `go "<import path>"` line per binary it finds
+      # there. mise points GOBIN at the Go toolchain's own bin directory, so the toolchain's own
+      # `go` and `gofmt` get dumped as `go "cmd/go"` / `go "cmd/gofmt"`. Those are Go
+      # standard-library packages and `go install` refuses them outright ("argument must not be a
+      # package in the standard library"), so every later `brew bundle` fails on them forever — and
+      # deleting the lines by hand does not stick, because the next mutating brew command dumps
+      # them straight back. Strip `cmd/`-rooted go entries here instead: no third-party module can
+      # live at that import path (a real one is github.com/owner/repo/cmd/tool), so nothing
+      # installable is lost and every other go entry survives verbatim.
+      #
+      # Staged as a dot-prefixed file in the source dir — chezmoi ignores dot-prefixed source
+      # entries, so an interrupted run cannot leave behind something that would get deployed — and
+      # swapped in with a same-filesystem rename so the Brewfile is never observed half-written.
+      # mktemp rather than a $$-derived name: the redirection below follows symlinks, so a
+      # predictable path is worth avoiding even though the source dir is normally user-only.
+      # sed rather than `grep -v`: grep reports "selected no lines" as exit 1, which is
+      # indistinguishable from a real failure and would skip the rename for a dump consisting
+      # entirely of stdlib entries — leaving exactly the entries this is meant to remove.
+      # Like every other branch here this only warns on failure and still falls through to
+      # `exit "$status"`; keeping it inside the `if` condition also stops `set -e` from aborting.
+      staged=""
+      if staged="$(mktemp "$source_path/.brewfile-sanitize.XXXXXX")" &&
+        sed '/^go "cmd\//d' "$brewfile" >"$staged" &&
+        mv "$staged" "$brewfile"; then
+        :
+      else
+        if [ -n "$staged" ]; then rm -f "$staged"; fi
+        echo "brew launcher: could not strip stdlib go entries; $brewfile left as dumped." >&2
+      fi
     fi
   fi
 fi
