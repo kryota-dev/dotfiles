@@ -9,9 +9,11 @@ load helpers/setup
 #
 # These tests exercise the wrapper directly with a stub "real" brew (via BREW_LAUNCHER_BIN, mirroring
 # the CLAUDE_LAUNCHER_BIN seam) and a stub chezmoi, so no real brew/chezmoi install is needed
-# (CI-safe). The stub brew logs its argv to $BREW_CALLS, writes a marker to the --file= target on
-# `bundle dump` (unless $STUB_DUMP_EXIT is non-zero, which simulates a dump failure), and otherwise
-# exits with $STUB_BREW_EXIT. The stub chezmoi fails `source-path` when $STUB_CHEZMOI_SP_FAIL is set.
+# (CI-safe). The stub brew logs its argv to $BREW_CALLS, writes a small but realistic Brewfile to
+# the --file= target on `bundle dump` (unless $STUB_DUMP_EXIT is non-zero, which simulates a dump
+# failure), and otherwise exits with $STUB_BREW_EXIT. The dump payload deliberately contains both
+# Go standard-library entries and a genuine module so the wrapper's post-dump sanitizing can be
+# exercised. The stub chezmoi fails `source-path` when $STUB_CHEZMOI_SP_FAIL is set.
 
 WRAPPER="${HOME_DIR}/dot_local/launchers/executable_brew"
 
@@ -36,7 +38,17 @@ if [ "${1:-}" = "bundle" ] && [ "${2:-}" = "dump" ]; then
     exit "${STUB_DUMP_EXIT}"
   fi
   for a in "$@"; do
-    case "$a" in --file=*) printf 'dumped\n' >"${a#--file=}" ;; esac
+    case "$a" in
+    --file=*)
+      cat >"${a#--file=}" <<'DUMPEOF'
+brew "coreutils"
+go "cmd/go"
+go "cmd/gofmt"
+go "github.com/owner/repo/cmd/tool"
+mas "Xcode", id: 497799835
+DUMPEOF
+      ;;
+    esac
   done
   exit 0
 fi
@@ -189,6 +201,52 @@ E
   [ "$status" -eq 0 ]
   [ ! -f "$SRC/dot_Brewfile" ]
   ! grep -qE '^bundle dump ' "$BREW_CALLS"
+}
+
+@test "brew wrapper: the dump is sanitized of Go stdlib entries, keeping real ones" {
+  _stubs
+  _run_wrapper install foo
+  [ "$status" -eq 0 ]
+  # `go install` refuses standard-library packages, so a go "cmd/..." entry makes every later
+  # `brew bundle` fail forever. brew bundle dump regenerates them from $GOBIN (mise points it at
+  # the Go toolchain's own bin dir), so removing them from the Brewfile only sticks if the wrapper
+  # strips them on the way out of every dump.
+  ! grep -q '^go "cmd/' "$SRC/dot_Brewfile"
+  # A genuine module whose import path merely *contains* /cmd/ must survive: only the cmd/ root is
+  # reserved for the standard library.
+  grep -qF 'go "github.com/owner/repo/cmd/tool"' "$SRC/dot_Brewfile"
+  # Nothing else may be dropped on the way through.
+  grep -qF 'brew "coreutils"' "$SRC/dot_Brewfile"
+  grep -qF 'mas "Xcode", id: 497799835' "$SRC/dot_Brewfile"
+}
+
+@test "brew wrapper: sanitizing leaves no staging file in the chezmoi source" {
+  _stubs
+  _run_wrapper install foo
+  [ "$status" -eq 0 ]
+  # The staging file is dot-prefixed so chezmoi would ignore a leftover rather than deploy it, but
+  # the happy path must not leave one at all.
+  local strays
+  strays=$(find "$SRC" -maxdepth 1 -name '.brewfile-sanitize.*' | wc -l)
+  [ "$strays" -eq 0 ]
+}
+
+@test "brew wrapper: a dump failure skips sanitizing entirely" {
+  _stubs
+  STUB_DUMP_EXIT=1 _run_wrapper install foo
+  [ "$status" -eq 0 ]
+  # Nothing was written, so there is nothing to sanitize — and no sanitize warning to emit either.
+  [ ! -f "$SRC/dot_Brewfile" ]
+  ! printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+}
+
+@test "brew wrapper: sanitizing does not mask a failing real brew (AC3)" {
+  _stubs
+  STUB_BREW_EXIT=3 _run_wrapper install foo
+  [ "$status" -eq 3 ]
+  # The dump still runs after a failed install (the package set may have changed before the
+  # failure) and is still sanitized, but the caller must see brew's own status.
+  ! grep -q '^go "cmd/' "$SRC/dot_Brewfile"
 }
 
 @test "brew wrapper: passes shellcheck" {

@@ -210,7 +210,7 @@ mas "Microsoft Excel", id: 462058435
 mas "Microsoft PowerPoint", id: 462062816
 mas "Microsoft Word", id: 462054704
 mas "PicGIF Lite", id: 844918735
-mas "RunCat", id: 1429033973
+mas "RunCat Neo", id: 6757801838
 mas "Spark Desktop", id: 6445813049
 mas "ToyViewer", id: 414298354
 mas "Windows App", id: 1295203466
@@ -290,7 +290,5 @@ vscode "yoavbls.pretty-ts-errors"
 vscode "yusukehirao.vscode-markuplint"
 vscode "yzane.markdown-pdf"
 vscode "yzhang.markdown-all-in-one"
-go "cmd/go"
-go "cmd/gofmt"
 uv "phone-harness"
 npm "corepack"
