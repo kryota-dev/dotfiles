@@ -111,7 +111,10 @@ chezmoi は固定された二フェーズの順序で適用します。番号付
 ```
 BEFORE フェーズ（ファイル書き込み前）
   00-install-prerequisites   run_once    Xcode CLI ツール + Homebrew / Linuxbrew
+  05-ensure-macos-prerequisites  run_    Xcode ライセンス + Rosetta 2（macOS。毎回の apply で再検査）
   10-brew-bundle             run_onchange  brew bundle --no-upgrade
+                                          （部分失敗は警告して継続。brew か Brewfile が
+                                            使えないときだけ apply を中断）
 
 chezmoi がすべての管理ファイルを $HOME に書き込む
 

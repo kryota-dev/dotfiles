@@ -32,18 +32,30 @@ fi
 # license") when a developer directory is selected and the license has not been accepted, so an
 # unaccepted license takes 10-brew-bundle down before it installs a single package.
 #
-# The probe is copied from Homebrew's own check (Library/Homebrew/brew.sh): a non-zero
-# `xcrun --find clang` whose output mentions the license. Matching brew's test exactly means we
-# accept precisely when brew would otherwise abort, and stay a silent no-op — no sudo prompt — on
-# every other machine, including Command Line Tools-only installs where xcrun simply succeeds.
-# Gating on a non-empty `xcode-select -p` first is also brew's behaviour: probing xcrun with
-# neither Xcode nor the CLT installed pops up the CLT installer.
+# The probe mirrors Homebrew's own gate (Library/Homebrew/brew.sh), including both of its arms:
+#   - a developer directory of `/`, which brew refuses outright because it makes xcrun *hang*;
+#   - otherwise, a non-zero `xcrun --find clang` whose output mentions the license.
+# Matching brew's test means we act precisely when brew would otherwise refuse to run, and stay a
+# silent no-op — no sudo prompt — on every other machine, including Command Line Tools-only
+# installs where xcrun simply succeeds. Gating on a non-empty `xcode-select -p` first is also
+# brew's behaviour: probing xcrun with neither Xcode nor the CLT installed pops up the CLT
+# installer.
 #
 # Two-phase on a brand-new Mac: Xcode.app itself arrives via `mas "Xcode"` during 10-brew-bundle,
 # so the license gate can only appear on the *next* apply. Being always-run is exactly what lets
 # that second pass clear it instead of stranding the user at a manual `sudo xcodebuild -license`.
+#
+# Privileged and repair commands are called by absolute path. This script runs on every apply and
+# can invoke sudo, so it should not depend on PATH resolution for the binaries it escalates with.
 if xcode_dir="$(/usr/bin/xcode-select -p 2>/dev/null)" && [ -n "$xcode_dir" ]; then
-  if ! xcrun_output="$(/usr/bin/xcrun --find clang 2>&1)"; then
+  if [ "$xcode_dir" = "/" ]; then
+    # Do not probe xcrun here. Homebrew documents that this state hangs xcrun, and a hung
+    # before-script blocks the apply just as completely as a failing one — the exact outcome this
+    # script exists to prevent. Report it and leave the Xcode side alone; Rosetta is unaffected.
+    echo "WARNING: xcode-select path is '/', which makes xcrun hang and Homebrew refuse to run." >&2
+    echo "         Fix with 'sudo xcode-select --switch /Applications/Xcode.app' or 'sudo rm -rf /usr/share/xcode-select'." >&2
+    echo "         Skipping the Xcode license check until then." >&2
+  elif ! xcrun_output="$(/usr/bin/xcrun --find clang 2>&1)"; then
     case "$xcrun_output" in
       *license*)
         echo "Accepting the Xcode license (Homebrew cannot run until this is done)..."
@@ -51,7 +63,7 @@ if xcode_dir="$(/usr/bin/xcode-select -p 2>/dev/null)" && [ -n "$xcode_dir" ]; t
         # dotfiles and every after-script included — which is the very failure mode this change set
         # exists to remove. brew bundle tolerates its own failures now, so the apply still completes
         # and the next one retries this.
-        if ! sudo xcodebuild -license accept; then
+        if ! /usr/bin/sudo /usr/bin/xcodebuild -license accept; then
           echo "WARNING: 'sudo xcodebuild -license accept' failed. Run it manually; Homebrew will keep refusing to run until you do." >&2
         fi
         ;;
@@ -66,9 +78,9 @@ fi
 # Idempotent: `arch -x86_64` can only execute the x86_64 slice of a universal binary once Rosetta
 # is present, and /usr/bin/true is universal (x86_64 + arm64e), so a successful run proves Rosetta
 # works and costs a single exec when it does.
-if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
   echo "Installing Rosetta 2..."
-  if ! sudo softwareupdate --install-rosetta --agree-to-license; then
+  if ! /usr/bin/sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license; then
     echo "WARNING: Rosetta 2 install failed; Intel-only casks and App Store apps will not install." >&2
   fi
 fi

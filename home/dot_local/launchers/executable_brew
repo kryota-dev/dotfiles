@@ -111,13 +111,20 @@ if is_dump_trigger "$subcommand"; then
       # Staged as a dot-prefixed file in the source dir — chezmoi ignores dot-prefixed source
       # entries, so an interrupted run cannot leave behind something that would get deployed — and
       # swapped in with a same-filesystem rename so the Brewfile is never observed half-written.
+      # mktemp rather than a $$-derived name: the redirection below follows symlinks, so a
+      # predictable path is worth avoiding even though the source dir is normally user-only.
+      # sed rather than `grep -v`: grep reports "selected no lines" as exit 1, which is
+      # indistinguishable from a real failure and would skip the rename for a dump consisting
+      # entirely of stdlib entries — leaving exactly the entries this is meant to remove.
       # Like every other branch here this only warns on failure and still falls through to
       # `exit "$status"`; keeping it inside the `if` condition also stops `set -e` from aborting.
-      staged="$source_path/.brewfile-sanitize.$$"
-      if grep -v '^go "cmd/' "$brewfile" >"$staged" && mv "$staged" "$brewfile"; then
+      staged=""
+      if staged="$(mktemp "$source_path/.brewfile-sanitize.XXXXXX")" &&
+        sed '/^go "cmd\//d' "$brewfile" >"$staged" &&
+        mv "$staged" "$brewfile"; then
         :
       else
-        rm -f "$staged"
+        if [ -n "$staged" ]; then rm -f "$staged"; fi
         echo "brew launcher: could not strip stdlib go entries; $brewfile left as dumped." >&2
       fi
     fi

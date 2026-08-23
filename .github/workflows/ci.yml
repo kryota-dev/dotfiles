@@ -70,6 +70,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bats shellcheck zsh
 
+      # tests/files.bats renders the chezmoi script templates and executes them, which is the only
+      # way to assert the brew-bundle failure policy as behaviour rather than as text — a purely
+      # textual assertion cannot catch a preflight that is present but does not actually work.
+      # Those tests skip when chezmoi is absent, so without this step they would silently never run
+      # here. Installed standalone (the same installer install/install.sh uses) rather than via
+      # mise, which would pull the entire pinned toolchain for one binary.
+      - name: Install chezmoi
+        run: |
+          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
       - name: Run Bats tests
         run: make test-bats
 

@@ -50,7 +50,8 @@ report_bundle_failure() {
 }
 
 {{ if eq .chezmoi.os "linux" -}}
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+BREW_BIN=/home/linuxbrew/.linuxbrew/bin/brew
+eval "$("$BREW_BIN" shellenv)"
 echo "Running brew bundle (Linux: filtering incompatible formulas)..."
 SOURCE_BREWFILE="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 EXCLUDE="{{ .chezmoi.sourceDir }}/../.brewfile-linux-exclude"
@@ -59,18 +60,27 @@ grep -E '^(tap |brew )' "$SOURCE_BREWFILE" | grep -v -E -f "$EXCLUDE" >"$FILTERE
 BREWFILE="$FILTERED_BREWFILE"
 {{ else -}}
 {{ if eq .chezmoi.arch "arm64" -}}
-eval "$(/opt/homebrew/bin/brew shellenv)"
+BREW_BIN=/opt/homebrew/bin/brew
 {{ else -}}
-eval "$(/usr/local/bin/brew shellenv)"
+BREW_BIN=/usr/local/bin/brew
 {{ end -}}
+eval "$("$BREW_BIN" shellenv)"
 echo "Running brew bundle..."
 BREWFILE="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 {{ end -}}
 
 # Preflight the two conditions that mean brew bundle never even looked at the Brewfile. These stay
 # fatal: silently continuing would skip every single package while reporting success.
-if ! command -v brew >/dev/null 2>&1; then
-  echo "ERROR: brew is not on PATH; cannot run brew bundle." >&2
+#
+# Probe the real Homebrew by absolute path, and by *running* it — `command -v brew` is not enough.
+# This repo prepends ~/.local/launchers to PATH (dot_zprofile, dot_zshrc), and the brew shim living
+# there exits 127 when it cannot resolve a real brew. `command -v` would accept the shim, and the
+# partial-failure path below would then normalize that 127 into exit 0: a machine with no Homebrew
+# at all would report a clean apply having installed nothing. `--version` is answered and exited
+# early by brew itself, before any of its own environment gates, so this stays a cheap liveness
+# check rather than a second opinion on whether brew likes the machine.
+if [ ! -x "$BREW_BIN" ] || ! "$BREW_BIN" --version >/dev/null 2>&1; then
+  echo "ERROR: no usable Homebrew at $BREW_BIN; cannot run brew bundle." >&2
   exit 1
 fi
 if [ ! -r "$BREWFILE" ]; then
@@ -84,7 +94,7 @@ fi
 # user's terminal rather than from stdin, and stdin is left attached here either way.
 BUNDLE_LOG=$(mktemp)
 bundle_status=0
-brew bundle --no-upgrade --file="$BREWFILE" 2>&1 | tee "$BUNDLE_LOG" || bundle_status=$?
+"$BREW_BIN" bundle --no-upgrade --file="$BREWFILE" 2>&1 | tee "$BUNDLE_LOG" || bundle_status=$?
 
 if [ "$bundle_status" -eq 0 ]; then
   echo "Brew bundle complete."

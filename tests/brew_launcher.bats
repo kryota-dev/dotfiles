@@ -40,13 +40,22 @@ if [ "${1:-}" = "bundle" ] && [ "${2:-}" = "dump" ]; then
   for a in "$@"; do
     case "$a" in
     --file=*)
-      cat >"${a#--file=}" <<'DUMPEOF'
+      if [ "${STUB_DUMP_ALL_STDLIB:-0}" != "0" ]; then
+        # Degenerate but legal dump: every line is a stdlib go entry, so the sanitizer's filter
+        # selects nothing. `grep -v` reports that as exit 1; sed reports it as success.
+        cat >"${a#--file=}" <<'DUMPEOF'
+go "cmd/go"
+go "cmd/gofmt"
+DUMPEOF
+      else
+        cat >"${a#--file=}" <<'DUMPEOF'
 brew "coreutils"
 go "cmd/go"
 go "cmd/gofmt"
 go "github.com/owner/repo/cmd/tool"
 mas "Xcode", id: 497799835
 DUMPEOF
+      fi
       ;;
     esac
   done
@@ -83,6 +92,7 @@ _run_wrapper() {
     BREW_CALLS="$BREW_CALLS" \
     STUB_BREW_EXIT="${STUB_BREW_EXIT:-0}" \
     STUB_DUMP_EXIT="${STUB_DUMP_EXIT:-0}" \
+    STUB_DUMP_ALL_STDLIB="${STUB_DUMP_ALL_STDLIB:-0}" \
     STUB_CHEZMOI_SP_FAIL="${STUB_CHEZMOI_SP_FAIL:-}" \
     bash "$WRAPPER" "$@"
 }
@@ -238,6 +248,40 @@ E
   # Nothing was written, so there is nothing to sanitize — and no sanitize warning to emit either.
   [ ! -f "$SRC/dot_Brewfile" ]
   ! printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+}
+
+@test "brew wrapper: a dump made entirely of stdlib go entries is still sanitized" {
+  _stubs
+  STUB_DUMP_ALL_STDLIB=1 _run_wrapper install foo
+  [ "$status" -eq 0 ]
+  # The filter selects nothing here. `grep -v` reports that as exit 1 — indistinguishable from a
+  # real failure — which would skip the rename and leave exactly the entries this strips. The
+  # Brewfile must come out empty, not untouched.
+  [ -f "$SRC/dot_Brewfile" ]
+  ! grep -q '^go "cmd/' "$SRC/dot_Brewfile"
+  ! printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+}
+
+@test "brew wrapper: a sanitize failure warns, keeps the dump, and preserves the exit code" {
+  _stubs
+  # Break the rename that swaps the sanitized file into place.
+  cat >"$STUBBIN/mv" <<'MVEOF'
+#!/usr/bin/env bash
+echo "stub mv: simulated rename failure" >&2
+exit 1
+MVEOF
+  chmod +x "$STUBBIN/mv"
+
+  STUB_BREW_EXIT=4 _run_wrapper install foo
+  # AC3: the caller sees the real brew's status, never the sanitizer's.
+  [ "$status" -eq 4 ]
+  printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+  # The dumped Brewfile survives untouched rather than being left half-written or removed.
+  grep -qF 'brew "coreutils"' "$SRC/dot_Brewfile"
+  # ...and the staging file is cleaned up even on the failure path.
+  local strays
+  strays=$(find "$SRC" -maxdepth 1 -name '.brewfile-sanitize.*' | wc -l)
+  [ "$strays" -eq 0 ]
 }
 
 @test "brew wrapper: sanitizing does not mask a failing real brew (AC3)" {

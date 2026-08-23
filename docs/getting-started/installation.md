@@ -111,7 +111,10 @@ chezmoi applies in a fixed two-phase order. The numbered lifecycle scripts run a
 ```
 BEFORE phase (runs before any files are written)
   00-install-prerequisites   run_once    Xcode CLI tools + Homebrew / Linuxbrew
+  05-ensure-macos-prerequisites  run_    Xcode license + Rosetta 2 (macOS; re-checked every apply)
   10-brew-bundle             run_onchange  brew bundle --no-upgrade
+                                          (a partial failure warns and the apply continues; only an
+                                           unusable brew or Brewfile aborts it)
 
 chezmoi writes all managed files to $HOME
 
