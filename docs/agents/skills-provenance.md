@@ -71,6 +71,8 @@ Note the table name: the path ends in the **file**, not the skill directory. `_s
 
 A skill fetched this way is independent of whatever tool it drives. The `phone-harness` **CLI** is macOS-only and is installed by `run_onchange_after_19-setup-phone-harness.sh.tmpl`, not by this external; the skill text is plain markdown and is fetched on every platform.
 
+`eli5` (from `anthropics/claude-plugins-community`) follows the same pattern with no companion CLI at all — it is markdown-only, so `[eli5].commit` is its only pin. The one difference from `phone-harness` is the source path: `phone-harness` ships `SKILL.md` at its repo root, while `eli5` is a plugin whose skill lives under `eli5/skills/eli5/SKILL.md`, so the raw URL includes that subpath.
+
 ### The never-both rule
 
 A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (curated) and in the external declarations. chezmoi would attempt to deploy a directory from source and fetch an external to the same path, which produces a conflict. The provenance bats test asserts this for all curated skills against both the literal external headers and every element of `[ecc].skills`.
@@ -128,6 +130,7 @@ Miscellaneous functional skills spanning databases, media conversion, and daily 
 | jgraph/drawio-mcp (`drawio`) | 1 skill | `[skills].drawio_mcp_commit` in `.chezmoidata.toml` |
 | supabase/agent-skills (`supabase`, `supabase-postgres-best-practices`) | 2 skills | `[skills].supabase_agent_skills_commit` in `.chezmoidata.toml` |
 | ShawnPana/phone-harness (`phone-harness`) | 1 skill (single file) | `[phone_harness].commit` in `.chezmoidata.toml` |
+| anthropics/claude-plugins-community (`eli5`) | 1 skill (single file) | `[eli5].commit` in `.chezmoidata.toml` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
 
