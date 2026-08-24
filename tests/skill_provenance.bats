@@ -168,6 +168,24 @@ _skill_is_external() {
   }
 }
 
+@test "skill provenance: eli5 is external, not curated or unmanaged" {
+  # eli5 (anthropics/claude-plugins-community) ships a frontmatter-carrying
+  # skills/eli5/SKILL.md, so it is fetched verbatim as a file external rather than
+  # wrapped in a curated skill of our own — same pattern as phone-harness above. The
+  # external's table name is [".agents/skills/eli5/SKILL.md"], which
+  # _skill_is_external() matches via its subpath pattern — this test pins that
+  # relationship, since renaming the table would silently demote the skill to
+  # `unmanaged` (a policy violation the runtime check only warns about).
+  _skill_is_external eli5 || {
+    echo "eli5 is not recognised as external (see .chezmoiexternal.toml)"
+    false
+  }
+  [ ! -e "${HOME_DIR}/dot_agents/skills/eli5" ] || {
+    echo "eli5 must not be vendored in source; it is fetched as an external"
+    false
+  }
+}
+
 @test "skill provenance: no skill is both curated and external" {
   local dir name
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do

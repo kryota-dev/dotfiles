@@ -208,6 +208,17 @@
     url = "https://raw.githubusercontent.com/ShawnPana/phone-harness/{{ .phone_harness.commit }}/SKILL.md"
     refreshPeriod = "168h"
 
+# eli5 agent skill — https://github.com/anthropics/claude-plugins-community/tree/main/eli5
+# Same file-external pattern as phone-harness above: upstream's skills/eli5/SKILL.md
+# already carries the frontmatter (name + description) skill discovery needs, so it is
+# fetched verbatim rather than wrapped in a curated skill of our own. There is no
+# companion CLI to install — eli5 is markdown-only — so there is only this one entry,
+# pinned to [eli5].commit (a full SHA) in .chezmoidata.toml.
+[".agents/skills/eli5/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/{{ .eli5.commit }}/eli5/skills/eli5/SKILL.md"
+    refreshPeriod = "168h"
+
 # Moralerspace font (macOS only)
 # Version is defined in .chezmoidata.toml [versions.moralerspace_font]
 {{ if eq .chezmoi.os "darwin" -}}

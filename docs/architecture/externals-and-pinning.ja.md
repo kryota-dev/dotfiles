@@ -19,11 +19,12 @@
 | ECC 採用スキル | `affaan-m/ECC` | `archive`（range 生成） | `[ecc].skills` の長さと等しい（`tests/docs_facts.bats` で検証） |
 | `aside` スラッシュコマンド | `affaan-m/ECC` | `file` | 1 |
 | phone-harness スキル | `ShawnPana/phone-harness` | `file` | 1 |
+| eli5 スキル | `anthropics/claude-plugins-community` | `file` | 1 |
 | Moralerspace フォント（macOS のみ） | `yuru7/moralerspace` | `archive` | 1 |
 
-宣言エントリ総数: <!-- FACT:external-static-entry-count -->24<!-- /FACT --> 件の静的エントリ（17 + 1 + 2 + 1 + 1 + 1 + 1）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。静的エントリ数は `tests/docs_facts.bats` が `.chezmoiexternal.toml` と突き合わせて検証します（pin 化する前に実際に drift していました。drawio と supabase が external として追加されたのに、この総数が取り残されていました）。
+宣言エントリ総数: <!-- FACT:external-static-entry-count -->25<!-- /FACT --> 件の静的エントリ（17 + 1 + 2 + 1 + 1 + 1 + 1 + 1）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。静的エントリ数は `tests/docs_facts.bats` が `.chezmoiexternal.toml` と突き合わせて検証します（pin 化する前に実際に drift していました。drawio と supabase が external として追加されたのに、この総数が取り残されていました）。
 
-コールド apply での HTTP ダウンロード回数はエントリ数より少なくなります。取得の単位がエントリではなく**ユニークな URL** だからです。17 件の Anthropic エントリは 1 つのタールボールを共有し、2 件の Supabase エントリも別の 1 つを共有し、ECC ランタイムは `range` 生成の全 ECC スキルとタールボールを共有します。結果として Anthropic / drawio / Supabase / ECC / `aside.md` / phone-harness / フォントそれぞれ 1 回ずつになります。
+コールド apply での HTTP ダウンロード回数はエントリ数より少なくなります。取得の単位がエントリではなく**ユニークな URL** だからです。17 件の Anthropic エントリは 1 つのタールボールを共有し、2 件の Supabase エントリも別の 1 つを共有し、ECC ランタイムは `range` 生成の全 ECC スキルとタールボールを共有します。結果として Anthropic / drawio / Supabase / ECC / `aside.md` / phone-harness / eli5 / フォントそれぞれ 1 回ずつになります。
 
 ---
 

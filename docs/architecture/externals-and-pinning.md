@@ -19,11 +19,12 @@
 | ECC adopted skills | `affaan-m/ECC` | `archive` (range-generated) | = length of `[ecc].skills` (asserted by `tests/docs_facts.bats`) |
 | `aside` slash command | `affaan-m/ECC` | `file` | 1 |
 | phone-harness skill | `ShawnPana/phone-harness` | `file` | 1 |
+| eli5 skill | `anthropics/claude-plugins-community` | `file` | 1 |
 | Moralerspace font (macOS only) | `yuru7/moralerspace` | `archive` | 1 |
 
-Total declared entries: <!-- FACT:external-static-entry-count -->24<!-- /FACT --> static entries (17 + 1 + 2 + 1 + 1 + 1 + 1) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. The static count is asserted against `.chezmoiexternal.toml` by `tests/docs_facts.bats` — it had drifted before being pinned (drawio and supabase were added as externals while this total stayed behind).
+Total declared entries: <!-- FACT:external-static-entry-count -->25<!-- /FACT --> static entries (17 + 1 + 2 + 1 + 1 + 1 + 1 + 1) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. The static count is asserted against `.chezmoiexternal.toml` by `tests/docs_facts.bats` — it had drifted before being pinned (drawio and supabase were added as externals while this total stayed behind).
 
-Cold-apply HTTP downloads are fewer than entries, because the unit of fetching is the **unique URL**, not the entry: the 17 Anthropic entries share one tarball, the 2 Supabase entries share another, and the ECC runtime shares its tarball with every `range`-generated ECC skill. That leaves one download each for Anthropic, drawio, Supabase, ECC, `aside.md`, phone-harness, and the font.
+Cold-apply HTTP downloads are fewer than entries, because the unit of fetching is the **unique URL**, not the entry: the 17 Anthropic entries share one tarball, the 2 Supabase entries share another, and the ECC runtime shares its tarball with every `range`-generated ECC skill. That leaves one download each for Anthropic, drawio, Supabase, ECC, `aside.md`, phone-harness, eli5, and the font.
 
 ---
 

@@ -165,6 +165,22 @@
       packageNameTemplate: 'https://github.com/ShawnPana/phone-harness',
       currentValueTemplate: 'main',
     },
+    {
+      // eli5 skill, fetched as a file external in .chezmoiexternal.toml. Tracked as a
+      // commit digest like the other third-party skills (drawio, supabase,
+      // phone-harness SKILL.md) — this repo has no PyPI/npm release to pin instead.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        '\\[eli5\\][\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'anthropics/claude-plugins-community',
+      datasourceTemplate: 'git-refs',
+      packageNameTemplate: 'https://github.com/anthropics/claude-plugins-community',
+      currentValueTemplate: 'main',
+    },
   ],
   mise: {
     managerFilePatterns: [
@@ -178,12 +194,13 @@
       automerge: false,
     },
     {
-      // Third-party skill archives (drawio, supabase). Content is markdown-only today
-      // (no shell/JS/Python payload), so supply-chain risk is limited to prompt-injected
-      // instructions — but the digest datasource means Renovate produces `digest` PRs
-      // whose automerge behaviour is otherwise inherited implicitly. Pin it explicitly
-      // to `false` so a compromised upstream cannot ride the pin-automerge lane.
-      matchDepNames: ['jgraph/drawio-mcp', 'supabase/agent-skills'],
+      // Third-party skills (drawio, supabase archives; eli5 single-file external).
+      // Content is markdown-only today (no shell/JS/Python payload), so supply-chain
+      // risk is limited to prompt-injected instructions — but the digest datasource
+      // means Renovate produces `digest` PRs whose automerge behaviour is otherwise
+      // inherited implicitly. Pin it explicitly to `false` so a compromised upstream
+      // cannot ride the pin-automerge lane.
+      matchDepNames: ['jgraph/drawio-mcp', 'supabase/agent-skills', 'anthropics/claude-plugins-community'],
       automerge: false,
     },
     {

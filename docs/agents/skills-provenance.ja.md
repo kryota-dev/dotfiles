@@ -71,6 +71,8 @@
 
 この方法でフェッチしたスキルは、それが操作するツール本体とは独立しています。`phone-harness` の **CLI** は macOS 専用で、この external ではなく `run_onchange_after_19-setup-phone-harness.sh.tmpl` がインストールします。スキル本文は単なる markdown なので、全プラットフォームでフェッチされます。
 
+`eli5`（`anthropics/claude-plugins-community` 由来）も同じパターンに従いますが、対応する CLI は一切ありません — markdown のみなので、ピンは `[eli5].commit` の 1 つだけです。`phone-harness` との違いはソースパスです：`phone-harness` はリポジトリルートに `SKILL.md` を配置していますが、`eli5` はプラグインであり、スキル本体は `eli5/skills/eli5/SKILL.md` に置かれているため、raw URL にそのサブパスが含まれます。
+
 ### 重複禁止ルール
 
 スキル名は `home/dot_agents/skills/<name>/`（curated）と external 宣言の**両方**に同時に存在してはなりません。chezmoi がソースからのディレクトリデプロイと同じパスへの external フェッチを同時に試み、コンフリクトが発生します。プロベナンス bats テストは、すべての curated スキルについてリテラルの external ヘッダーと `[ecc].skills` の全要素に対してこれを検証します。
@@ -128,6 +130,7 @@
 | jgraph/drawio-mcp（`drawio`） | 1 スキル | `.chezmoidata.toml` の `[skills].drawio_mcp_commit` |
 | supabase/agent-skills（`supabase`、`supabase-postgres-best-practices`） | 2 スキル | `.chezmoidata.toml` の `[skills].supabase_agent_skills_commit` |
 | ShawnPana/phone-harness（`phone-harness`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[phone_harness].commit` |
+| anthropics/claude-plugins-community（`eli5`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[eli5].commit` |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
 
