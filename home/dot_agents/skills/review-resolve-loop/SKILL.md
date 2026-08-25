@@ -14,6 +14,13 @@ user-invocable: true
 
 # Review Resolve Loop - 自律レビュー対応スキル
 
+## Harness contract (normative)
+
+`~/.agents/workflow/README.md` を優先する。本文の `AskUserQuestion` は approval capability の Claude
+adapter であり、Codex では会話承認または user-owned `agent-workflow approve` に置換する。人間 reviewer
+への返信、PR への投稿、push は明示承認を保ち、非対話で勝手に再開しない。CI marker は harness 名ではなく
+既存の configured marker を data として収集するため、Claude 名を含む marker を一般規則にしない。
+
 PR のレビューコメントを取得し、各指摘を分析して、対応が必要なものはコード変更・テスト・コミット・push まで行い、全コメントに返信して resolve する。未解決スレッドがなくなるまでループする。
 
 **完了するまで一切の中断・停止をしてはならない。**
@@ -43,7 +50,7 @@ Phase 7 → Phase 8（新規未解決スレッドなし）
 
 **Phase 6 は必ず実行する。** push の有無に関わらず省略不可。
 push がなかった場合でも、`gh pr checks --watch` は直前の commit に対する CI 状態を返すため、
-review ワークフロー（CodeRabbit, Copilot, claude[bot] 等）の完了待ちとして機能する。
+review ワークフロー（CodeRabbit, Copilot 等）の完了待ちとして機能する。
 `--watch` が全 check 完了で終了した時点で、ボットレビューコメントは投稿済みであることが保証される。
 
 ---
@@ -87,7 +94,7 @@ GitHub PR のレビュー由来のコメントには **3 種類** がある。�
 |------|------|-----|-------------|
 | **Review threads** | ファイルの特定行に対するインラインコメント | GraphQL `reviewThreads` | ✅ `resolveReviewThread` |
 | **Review body** | レビュー全体のサマリーコメント（APPROVE/REQUEST_CHANGES/COMMENT と共に投稿） | REST `pulls/{PR}/reviews` | ❌ スレッドではないため不可 |
-| **CI レビューコメント** | CI ワークフロー（`.github/workflows/claude-review.yml` / `claude-self-merge-check.yml`）が marker 付きで upsert する Issue comment（`<!-- claude-code-review -->` / `<!-- claude-self-merge-check -->`、`github-actions[bot]` が投稿） | REST `issues/{PR}/comments`（marker 検索） | ❌ Issue comment のため不可 |
+| **CI レビューコメント** | リポジトリが設定した CI workflow が hidden marker 付きで upsert する Issue comment（`github-actions[bot]` 等が投稿） | REST `issues/{PR}/comments`（configured marker 検索） | ❌ Issue comment のため不可 |
 
 ### 1-1. 未解決・未返信のスレッドのみを取得（review threads）
 
@@ -231,12 +238,22 @@ rm -f "$TMP_REVIEWS" "$TMP_REPLIED"
 
 ### 1-1c. 未返信の CI レビューコメントを取得（marker 付き Issue comment）
 
-CI ワークフローは、レビュー結果を **marker 付きの Issue comment** として upsert する。これらは review threads にも review body にも含まれないため、別途 Issue comment を marker で検索して取得する。
+CI ワークフローは、レビュー結果を **marker 付きの Issue comment** として upsert し得る。これらは review
+threads にも review body にも含まれないため、configured marker を data として検索する。
 
-| marker | ワークフロー | 内容 |
-|--------|-------------|------|
-| `<!-- claude-code-review -->` | `claude-review.yml` | ci-review skill の指摘サマリ（例「🔺 人間レビュー必須」、actionable な指摘を含む） |
-| `<!-- claude-self-merge-check -->` | `claude-self-merge-check.yml` | セルフマージ可否判定の「PR レビューサマリー」 |
+### marker の解決
+
+marker は harness や workflow filename から推測しない。まず caller が渡した `CI_REVIEW_MARKERS`（改行区切りの
+完全な hidden marker）を使う。未指定時は対象 repository の `.github/workflows/` から
+`<!-- [a-z0-9][a-z0-9._-]* -->` 形の marker を抽出する。どちらも空なら、この PR には CI review comment
+経路が設定されていないものとして、review thread / review body の処理だけを続ける。
+
+例:
+
+```text
+<!-- automated-code-review -->
+<!-- merge-policy -->
+```
 
 **重要 — upsert される性質**: これらのコメントは marker で **同一コメントを PATCH 更新** する（1 marker につき 1 コメント）。CI が再実行されると **同じ comment id のまま本文が書き換わる**。したがって返信済み判定は comment id 単体ではなく **`commentId@updatedAt`** をキーにする。本文が更新（= 新しい CI 実行）されれば `updatedAt` が変わり、再評価対象になる。
 
@@ -245,22 +262,35 @@ MY_LOGIN=$(gh api user --jq .login)
 TMP_CI=$(mktemp)
 TMP_CI_REPLIED=$(mktemp)
 
-# Step 1: marker 付き Issue comment を取得
-gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
+# caller supplied values take precedence; otherwise inspect repository workflow definitions.
+if [ -n "${CI_REVIEW_MARKERS:-}" ]; then
+  MARKERS_JSON=$(printf '%s\n' "$CI_REVIEW_MARKERS" | jq -Rsc 'split("\n") | map(select(length > 0))')
+else
+  MARKERS_JSON=$(rg -o --no-filename '<!-- [a-z0-9][a-z0-9._-]* -->' .github/workflows \
+    -g '*.yml' -g '*.yaml' 2>/dev/null | sort -u | jq -Rsc 'split("\n") | map(select(length > 0))')
+fi
+
+# Step 1: marker 付き Issue comment を取得. Empty configuration is an empty result, not a broad match.
+if [ "$(jq 'length' <<<"$MARKERS_JSON")" -gt 0 ]; then
+  gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
 [
   .[]
-  | select(.body | test("<!-- claude-code-review -->|<!-- claude-self-merge-check -->"))
+  | .body as $body
+  | select([$markers[] as $marker | select($body | contains($marker))] | length > 0)
   | {
       type: "ci_review_comment",
       commentId: .id,
       reviewer: .user.login,
       isBot: true,
-      marker: (if (.body | test("<!-- claude-self-merge-check -->")) then "claude-self-merge-check" else "claude-code-review" end),
+      marker: ([$markers[] as $marker | select($body | contains($marker)) | $marker][0]),
       updatedAt: .updated_at,
       body: .body[:1000],
       url: .html_url
     }
-]' > "$TMP_CI"
+]' --argjson markers "$MARKERS_JSON" > "$TMP_CI"
+else
+  printf '[]\n' > "$TMP_CI"
+fi
 
 # Step 2: 自分が返信済みの CI コメント（commentId@updatedAt）を取得
 gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
@@ -278,7 +308,7 @@ rm -f "$TMP_CI" "$TMP_CI_REPLIED"
 **設計意図**:
 - review body 同様、CI コメントは制御文字を含み得るため一時ファイル経由で処理する
 - `commentId@updatedAt` の hidden marker（`<!-- ci-review-reply: {commentId}@{updatedAt} -->`）で「この内容に対しては返信済み」を表現し、CI 再実行で本文が更新されたら再評価する
-- `marker` フィールドで `claude-code-review`（actionable な指摘を含む）か `claude-self-merge-check`（サマリ中心）かを区別し、Phase 2-3c の対応方針判定に使う
+- `marker` フィールドは configured marker の値を保持する。対応方針は marker 名ではなく本文の actionable 性で判定する
 
 **出力フィールド**:
 
@@ -379,15 +409,15 @@ Phase 1-1c で取得した CI レビューコメント（marker 付き Issue com
 
 | marker / 内容 | 例 | 対応方針 |
 |---|---|---|
-| **actionable な指摘を含む** | `claude-code-review` が具体的なバグ・規約違反・修正提案を列挙 | **対応する**（Phase 3 でコード対応 → Phase 4 で返信） |
-| **人間レビュー必須・マージブロックの通知** | `claude-code-review` の「🔺 人間レビュー必須」、`claude-self-merge-check` の「セルフマージ不可」判定 | **返信対象**（コード対応は不要だが、認識した旨と対応方針を Phase 4 で返信。ユーザーに状況を共有） |
-| **サマリ / セルフマージ可 / 指摘なし** | `claude-self-merge-check` の「PR レビューサマリー」「セルフマージ可」、指摘のない概要 | **返信不要**（ノイズ回避） |
+| **actionable な指摘を含む** | 具体的なバグ・規約違反・修正提案を列挙 | **対応する**（Phase 3 でコード対応 → Phase 4 で返信） |
+| **人間レビュー必須・マージブロックの通知** | 人間レビュー必須、ポリシー上のマージ不可 | **返信対象**（コード対応は不要だが、認識した旨と対応方針を Phase 4 で返信。ユーザーに状況を共有） |
+| **サマリ / 指摘なし** | 実質的な指摘を含まないレビューサマリ | **返信不要**（ノイズ回避） |
 
-**注意**: `claude-self-merge-check` は多くの場合サマリで `返信不要`。`claude-code-review` は actionable な指摘を含むことがあるため必ず全文を読んで判定する。コード対応が必要な指摘は review thread と同様に Phase 3 で対応する。
+**注意**: marker 名だけで actionable 性を推測しない。必ず全文を読んで判定する。コード対応が必要な指摘は review thread と同様に Phase 3 で対応する。
 
 ### 2-4. 対応方針のユーザー承認
 
-全スレッドの分析が完了したら、考察結果を一覧表にまとめて `AskUserQuestion` でユーザーに提示し、最終判断を委ねる。**ボットレビュー・人間レビューの区別なく、必ずユーザー承認を経る。**
+全スレッドの分析が完了したら、考察結果を一覧表にまとめて approval capability でユーザーに提示し、最終判断を委ねる。Claude adapter は `AskUserQuestion` を使う。Codex 非対話は `waiting-for-user` として停止する。**ボットレビュー・人間レビューの区別なく、必ずユーザー承認を経る。**
 
 提示形式:
 
@@ -437,9 +467,9 @@ pnpm -F @apps/api test {関連テストファイル}
 ### 3-3. コミット & push
 
 ```bash
-git add {変更ファイル}
-git commit -m "{type}({scope}): レビュー指摘対応 — {変更内容の要約}"
-git push
+agent-workflow commit <run-id> --message-file <message-file> -- <変更ファイル>...
+# user が TTY で approve <run-id> push を実行した後だけ許可される
+agent-workflow push <run-id>
 ```
 
 push が `protected branch hook declined` で失敗した場合は、merge queue 実行中の可能性がある。`notify` でユーザーに通知し、解消後にリトライする。
@@ -498,7 +528,7 @@ gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
 
 ### 4-1b. 人間レビュアーへの返信内容のユーザー承認
 
-**真の人間レビュアー（`isBot == false` かつ `isSelf == false`）への返信は、投稿前に必ず `AskUserQuestion` でユーザーに返信内容を提示し承認を得る。** ボットレビューおよびセルフレビュー（`isSelf == true`）への返信は定型文のため承認不要（セルフはボット同等に扱う。Phase 2-4 の方針一括承認でカバー済み）。
+**全 reviewer（人間・bot・self）への返信は、投稿前に approval capability で内容を提示し承認を得る。** Claude adapter は `AskUserQuestion`、Codex 非対話は user-owned approval を使う。定型文であっても外向き投稿の approval を省略しない。
 
 提示形式:
 
@@ -619,12 +649,16 @@ gh api repos/{owner}/{repo}/pulls/{PR番号}/requested_reviewers \
 **このPhaseは必ず実行する。省略禁止。**
 
 push がなかった場合でも、`gh pr checks --watch` は直前の commit に対する CI 状態を返す。
-review ワークフロー（CodeRabbit, Copilot, claude[bot]）は GitHub Actions として実行されるため、
+review ワークフロー（CodeRabbit, Copilot 等）は GitHub Actions として実行されるため、
 `--watch` が全 check 完了で終了した時点で、ボットレビューコメントは投稿済みであることが保証される。
 
 ### 6-1. 全 check の完了を待つ
 
 ```bash
+# Codex 非対話 run: host runner が記録済み PR / repo だけを監視する
+agent-workflow checks <run-id> --watch
+
+# Claude adapter または対話型 main session:
 gh pr checks {PR番号} --repo {owner}/{repo} --watch
 ```
 
@@ -704,7 +738,7 @@ Phase 1-1b と同じ REST API クエリを再実行する。**台帳に載って
 
 ### 7-2b. 未返信 CI レビューコメントの再取得
 
-Phase 1-1c と同じクエリを再実行し、`commentId@updatedAt` が **新規または変化した** CI レビューコメントのみを対象とする（変化なし = 台帳済みは除外）。Phase 6 の `--watch` で `claude-review` / `claude-self-merge-check` ワークフローの完了を待っているため、この時点で最新の CI コメントが投稿済みであることが保証される。
+Phase 1-1c と同じ configured-marker query を再実行し、`commentId@updatedAt` が **新規または変化した** CI レビューコメントのみを対象とする（変化なし = 台帳済みは除外）。Phase 6 の `--watch` で repository が設定した review workflow の完了を待っているため、この時点で最新の CI コメントが投稿済みであることが保証される。
 
 ### 7-3. 判定
 
@@ -763,7 +797,7 @@ notify
 | 個別 thread のサマリー review body | Phase 1-1b で **常に取得**する（取得段階では除外しない）。返信要否は Phase 2-3b で判定し、多くは「返信不要」（個別 thread で対応）。返信不要としたものは Phase 7 台帳で再トリガーから除外 |
 | No Issues / ack のみの review body | Phase 2-3b で「返信不要」分類。重複応答とノイズ回避のため返信しない（ボット・人間問わず適用） |
 | CI レビューコメントが再実行で更新された | upsert で同一 comment id のまま本文が変わる。返信済み判定は `commentId@updatedAt` をキーにし、`updatedAt` が変われば再評価する（Phase 1-1c） |
-| `claude-self-merge-check` のサマリのみ | Phase 2-3c で「返信不要」分類。actionable な指摘がなければ返信しない |
+| configured CI marker のサマリのみ | Phase 2-3c で「返信不要」分類。actionable な指摘がなければ返信しない |
 | `github-actions[bot]` へのメンション | `@github-actions` は通知効果を持たないため付与しない（Phase 4-2） |
 | セルフレビューへの返信メンション | 自分宛 `@{自分のlogin}` は自分への通知を生むだけで無意味なため付与しない（Phase 4-2） |
 | `gh pr checks` の fail 誤検知 | `grep -ic "fail"` はチェック名（`notify-on-schedule-failure` 等）にも一致する。ステータス列で `awk -F'\t' '$2=="fail"'` と判定する（Phase 6-2） |

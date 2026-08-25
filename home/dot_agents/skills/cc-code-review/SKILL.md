@@ -10,13 +10,23 @@ argument-hint: "[PR番号 | PR URL | ブランチ名 | ファイルパス | --st
 
 # コードレビュー
 
-`cc-code-review` エージェント（`~/.claude/agents/cc-code-review.md`）を Agent ツールで起動し、独立したコンテキストでコードレビューを実行する。エージェントは現在の会話履歴を引き継がず、プロジェクトの CLAUDE.md / AGENTS.md を自動でロードするため、バイアスのないプロジェクト準拠のレビューが得られる。
+## Harness contract
+
+レビュー rubric の SSOT は `~/.agents/reviewers/cc-code-review.md` である。Claude は custom Agent adapter、
+Codex は `codex exec --profile shared --sandbox read-only` child として同じ rubric を使う。結果は parent が
+採番した result file へ返し、親が一次情報で検証してから投稿する。Claude adapter が無いことを理由に
+レビューを skip しない。
+
+検出した harness で独立 context のコードレビューを実行する。Claude は custom Agent adapter、Codex は
+`codex exec --profile shared --sandbox read-only` child を使う。いずれも project の AGENTS.md と共有 rubric を
+読み、親の会話履歴を渡さない。
 
 ## SSOT としての位置づけ
 
-- **レビューのペルソナ・観点・出力形式・「（未確認）」ルール・差分取得方法** は **エージェント定義** `~/.claude/agents/cc-code-review.md` が Single Source of Truth。本 skill では再定義しない。
-- **本 skill** はレビュー対象の特定とエージェント起動を担うオーケストレーション層。
-- `multi-review` skill から呼ばれる場合も、同じ `cc-code-review` エージェントを起動する。
+- **レビューのペルソナ・観点・出力形式・「（未確認）」ルール** は共有 rubric
+  `~/.agents/reviewers/cc-code-review.md` が唯一の SSOT。`~/.claude/agents/` は Claude adapter である。
+- **本 skill** はレビュー対象の特定、adapter 選択、結果回収を担うオーケストレーション層。
+- `multi-review` から呼ばれる場合も、同じ rubric を使う独立 leg を起動する。
 
 ## 引数の解釈
 
@@ -32,8 +42,10 @@ argument-hint: "[PR番号 | PR URL | ブランチ名 | ファイルパス | --st
 ## 実行手順
 
 1. **引数を解析**してレビュー対象を特定する
-2. **`cc-code-review` エージェントを起動**する（Agent ツール、`subagent_type: cc-code-review`）。プロンプトには「レビュー対象の指定 + 差分取得コマンド + 作業ディレクトリの絶対パス」を渡す。**差分はエージェント自身が取得する**ため、本 skill 側で差分を取得・埋め込みしない。レビュー観点・出力形式もエージェント定義に内蔵されているため再掲しない。
-3. **エージェントの最終メッセージ（レビュー結果）をユーザーに提示**する
+2. **shared rubric を渡した reviewer leg を起動**する。Claude は `subagent_type: cc-code-review`、Codex は
+   read-only child とする。プロンプトには「レビュー対象の指定 + 差分取得方法 + 作業ディレクトリの絶対パス」を渡す。
+   Codex child が GitHub 認証を持たない場合は、親が取得済みの diff を prompt に渡す。
+3. **result file の最終メッセージ（レビュー結果）をユーザーに提示**する
 
 ### Agent ツール呼び出し例
 
@@ -57,7 +69,8 @@ Agent(
 ## 注意事項
 
 ### コスト管理
-- エージェントは frontmatter で `model: sonnet` + `effort: xhigh` に固定（SSOT はエージェント定義 `~/.claude/agents/cc-code-review.md`）。**呼び出し元セッションの model を継承しない**ため、standalone 起動でも sonnet で動く。security-critical な変更や large tier のレビューで品質を上げたい場合は、Agent 呼び出し時に `model: "opus"` を明示指定して引き上げる（opt-in）。
+- model/effort は `/model-fitness-check` が検証する。Claude adapter の frontmatter と Codex adapter の
+  resolved profile は実行方法であり、review rubric の SSOT ではない。
 
 ### エラーハンドリング
 - 差分が空: エージェントがその旨を報告

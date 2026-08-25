@@ -5,11 +5,19 @@ description: PR作成後やCI実行中にStatus Checksの状態を監視する�
 
 # Monitor CI Checks
 
+## Harness contract
+
+`~/.agents/workflow/README.md` を優先する。Claude 固有のツールは使わず、両 harness とも host 側で
+CI status を取得する。Codex の非対話実行では `agent-workflow checks <run-id> --watch` を使い、必要な
+PR 番号や GitHub capability が不足すると `blocked` として停止する。監視結果・ログ・token は transient
+state にのみ置き、tracked handoff へ保存しない。
+
 Pull Request の CI チェックが解決する（成功または失敗）まで監視する。
 
 ## 使い方
 
-CI チェックの監視を求められたら、Claude は以下を行う:
+CI チェックの監視を求められたら、harness は以下を行う（Codex 非対話は下記の host runner command を使い、
+直接の `gh` command は Claude adapter / 対話型 main session に限る）:
 
 1. `gh pr checks --watch` を実行し、継続的にステータスを監視する
 2. すべてのチェックが完了するまで待つ
@@ -22,6 +30,9 @@ CI チェックの監視を求められたら、Claude は以下を行う:
 # watch モードで PR チェックを監視
 gh pr checks --watch
 
+# Codex の非対話 run（host runner 経由）
+agent-workflow checks <run-id> --watch
+
 # 代替: 一度だけステータスを確認
 gh pr checks
 
@@ -31,7 +42,7 @@ gh pr checks --verbose
 
 ## ワークフロー
 
-1. **監視開始**: PR 作成直後、または依頼を受けたら即座に `gh pr checks --watch` を実行する
+1. **監視開始**: PR 作成直後、または依頼を受けたら即座に `agent-workflow checks <run-id> --watch`（Codex 非対話）または `gh pr checks --watch`（Claude adapter / 対話型 main）を実行する
 2. **進捗の追跡**: このコマンドは全 CI チェックの状態をリアルタイムで表示する
 3. **完了**: すべてのチェックが ✓（成功）または X（失敗）になるまで待つ
 4. **失敗時の対応**:

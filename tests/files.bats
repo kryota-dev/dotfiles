@@ -590,7 +590,7 @@ SHIMEOF
 @test "language specialist reviewer agents exist with expected frontmatter" {
   local lang agent
   for lang in typescript react python database; do
-    agent="${HOME_DIR}/dot_claude/agents/${lang}-reviewer.md"
+    agent="${HOME_DIR}/dot_claude/agents/${lang}-reviewer.md.tmpl"
     [ -f "$agent" ]
     grep -q "^name: ${lang}-reviewer$" "$agent"
     grep -q "^model: sonnet$" "$agent"
@@ -599,7 +599,7 @@ SHIMEOF
 }
 
 @test "adversarial-verifier agent exists with a pinned refutation tier" {
-  local agent="${HOME_DIR}/dot_claude/agents/adversarial-verifier.md"
+  local agent="${HOME_DIR}/dot_claude/agents/adversarial-verifier.md.tmpl"
   [ -f "$agent" ]
   grep -q "^name: adversarial-verifier$" "$agent"
   grep -q "^model: sonnet$" "$agent"
@@ -610,10 +610,10 @@ SHIMEOF
 @test "cross-cutting specialist reviewer agents exist with expected frontmatter" {
   # #347: sdd's built-in review (Phase 5) was removed and its performance/test/ux
   # perspectives moved to multi-review as dedicated specialist agents, mirroring the
-  # language reviewer pattern (SSOT in the agent definition, sonnet + high pinned).
+  # language reviewer pattern (shared rubric plus a thin Claude adapter, sonnet + high pinned).
   local role agent
   for role in performance test ux; do
-    agent="${HOME_DIR}/dot_claude/agents/${role}-reviewer.md"
+    agent="${HOME_DIR}/dot_claude/agents/${role}-reviewer.md.tmpl"
     [ -f "$agent" ]
     grep -q "^name: ${role}-reviewer$" "$agent"
     grep -q "^model: sonnet$" "$agent"
@@ -627,7 +627,7 @@ SHIMEOF
   # covered automatically. `model:` accepts aliases only — switching an agent to a literal
   # slug (the pinning philosophy settings.json uses) would need this pattern widened.
   local agent name
-  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md "${HOME_DIR}"/dot_claude/agents/*.md.tmpl; do
     [ -e "$agent" ] || continue
     name="$(basename "$agent")"
     grep -qE '^model: (sonnet|opus|haiku|fable)$' "$agent" || {
@@ -645,13 +645,18 @@ SHIMEOF
   # Reviewer agents read diffs that are, by definition, unverified input. `permissions.allow`
   # pre-approves npm/npx/vitest/docker, so the technical layer lets a runner through — this
   # prompt-level constraint is the only control, and it must not be missing from any agent.
-  local agent name
-  for agent in "${HOME_DIR}"/dot_claude/agents/*.md; do
+  local agent name rubric rubric_name
+  for agent in "${HOME_DIR}"/dot_claude/agents/*.md "${HOME_DIR}"/dot_claude/agents/*.md.tmpl; do
     [ -e "$agent" ] || continue
     name="$(basename "$agent")"
     # Agents without Bash cannot execute anything, so the constraint is moot for them.
     grep -qE '^tools:.*\bBash\b' "$agent" || continue
-    grep -q '読み取り専用' "$agent" || {
+    rubric="$agent"
+    if [[ "$agent" == *.tmpl ]]; then
+      rubric_name="$(sed -nE 's|.*include "dot_agents/reviewers/([^"]+)".*|\1|p' "$agent")"
+      rubric="${HOME_DIR}/dot_agents/reviewers/${rubric_name}"
+    fi
+    grep -q '読み取り専用' "$rubric" || {
       echo "${name}: no read-only Bash constraint — the agent could execute repo code under review"
       false
     }
@@ -678,7 +683,7 @@ SHIMEOF
   # `gh pr diff <n> -- <path>` form. Positive guard (the docs mention the bad form
   # only as a counter-example, so a negative grep would false-positive on it).
   local agent
-  for agent in "${HOME_DIR}/dot_claude/agents"/{cc-code-review,typescript-reviewer,react-reviewer,python-reviewer,database-reviewer,architecture-reviewer}.md; do
+  for agent in "${HOME_DIR}/dot_agents/reviewers"/{cc-code-review,typescript-reviewer,react-reviewer,python-reviewer,database-reviewer,architecture-reviewer}.md; do
     grep -q -- "--name-only" "$agent"
   done
 }
@@ -687,12 +692,14 @@ SHIMEOF
   # #223: whole-repo/architecture reviewer, distinct from the diff-triggered
   # specialist roster. Pinned to sonnet (#28 model-tier) and scans the repo tree
   # (not just the diff), so it must reference a repo-wide enumeration command.
-  local agent="${HOME_DIR}/dot_claude/agents/architecture-reviewer.md"
+  local agent="${HOME_DIR}/dot_claude/agents/architecture-reviewer.md.tmpl"
+  local rubric="${HOME_DIR}/dot_agents/reviewers/architecture-reviewer.md"
   [ -f "$agent" ]
   grep -q "^name: architecture-reviewer$" "$agent"
   grep -q "^model: sonnet$" "$agent"
   grep -q "^tools: Read, Glob, Grep, Bash$" "$agent"
-  grep -q "git ls-files" "$agent"
+  grep -q 'dot_agents/reviewers/architecture-reviewer.md' "$agent"
+  grep -q "git ls-files" "$rubric"
 }
 
 @test "shared agent skills exist" {

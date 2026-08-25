@@ -6,6 +6,13 @@ argument-hint: "[branch-name]"
 
 現在の差分を分析し、適切なブランチを作成して論理的な粒度でコミットを作成します。
 
+## Harness contract
+
+commit 計画の user 承認は `~/.agents/workflow/README.md` の approval capability で得る。Claude では
+`AskUserQuestion` を使える。Codex の非対話実行は `agent-workflow approve <run-id> commit` の後にだけ
+`agent-workflow commit <run-id> --message-file <file> -- <path>...` を使う。任意 command や main worktree
+への commit は許可しない。
+
 引数: $ARGUMENTS（ブランチ名の提案。未指定の場合は変更内容から自動生成）
 
 実行手順：
@@ -45,29 +52,16 @@ argument-hint: "[branch-name]"
       - package.json
       - pnpm-lock.yaml
 
-   `AskUserQuestion`ツールを使用して、この計画でコミットを作成してよいかユーザーに確認を取ること。
-
-   AskUserQuestionパラメータ:
-   - question: "上記のコミット計画で作成してよろしいですか？"
-   - header: "Commit"
-   - options:
-     - { label: "はい", description: "この計画でコミットを作成する" }
-     - { label: "修正が必要", description: "計画の調整が必要な箇所を伝える" }
-   - multiSelect: false
+   approval capability で、この計画・対象 path・外向き影響を提示して明示承認を得る。Claude adapter は
+   `AskUserQuestion` を使う。Codex 非対話では user が TTY で `agent-workflow approve <run-id> commit` を
+   実行するまで `waiting-for-user` として停止する。
    ```
 
-4. ブランチ作成（main ブランチでない場合のみ）：
+4. ブランチの検証：
 
-   ```bash
-   # 現在のブランチがmainの場合、新しいブランチを作成
-   if [ "$(git branch --show-current)" = "main" ]; then
-     # ブランチ名の提案（引数があればそれを使用、なければ変更内容から生成）
-     branch_name="${ARGUMENTS:-feat/auto-generated-branch-name}"
-
-     # ブランチ作成とチェックアウト
-     git checkout -b "$branch_name"
-   fi
-   ```
+   pr-workflow からは Phase 0.5 で作成済みの linked worktree / branch を使う。main worktree の branch 作成・
+   checkout はこの skill の責務外であり、Codex sandbox 内で実行しない。run state と実際の branch が一致しなければ
+   `blocked` とする。
 
 5. 論理的なコミット単位で変更をステージング＆コミット：
 
@@ -77,18 +71,14 @@ argument-hint: "[branch-name]"
    - 適切なコミットメッセージを生成
    - コミット実行
 
-   ```bash
-   # 例: 機能追加のコミット
-   git add [関連ファイル]
-   git commit -m "$(cat <<'EOF'
-   feat(scope): 簡潔な説明
+   Codex は message file を linked worktree 内に作り、次の固定 action を使う:
 
-   - 詳細な変更内容1
-   - 詳細な変更内容2
-   - 詳細な変更内容3
-   EOF
-   )"
+   ```bash
+   agent-workflow commit <run-id> --message-file <message-file> -- <related-file>...
    ```
+
+   runner は worktree・recorded branch・path containment・承認済み gate を検証する。Claude adapter の直接実行も
+   同じ approval contract を満たす必要がある。
 
 6. コミット作成の原則：
 
@@ -109,7 +99,7 @@ argument-hint: "[branch-name]"
 8. 実行前の確認：
 
    - 重要な変更がある場合は、コミット計画をユーザーに提示
-   - `AskUserQuestion`ツールを使用してユーザーの承認を得てから実行（ステップ3と同様のパラメータを使用）
+   - approval capability でユーザーの承認を得てから実行する
 
 重要事項：
 

@@ -204,7 +204,8 @@ _assert_lifecycle_scripts_documented() {
 
 @test "docs_facts: every <!-- FACT:claude-agent-count --> marker matches the agent definition count" {
   local actual
-  actual="$(find "${HOME_DIR}/dot_claude/agents" -maxdepth 1 -name '*.md' | grep -c .)"
+  actual="$(find "${HOME_DIR}/dot_claude/agents" -maxdepth 1 \
+    \( -name '*.md' -o -name '*.md.tmpl' \) | grep -c .)"
   [ "$actual" -ge 5 ] || {
     echo "sanity: agent definition count resolved to $actual (<5) — the layout likely moved"
     false

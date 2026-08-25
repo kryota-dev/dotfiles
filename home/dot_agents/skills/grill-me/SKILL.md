@@ -13,13 +13,20 @@ description: |
 
 コードベースを探索すれば答えられる質問は、質問する代わりにコードベースを探索せよ。
 
+## Harness contract
+
+`~/.agents/workflow/README.md` を優先する。対話の質問と最終承認は harness capability として扱う。
+Codex の非対話実行では、PRD の保存前に `waiting-for-user` で停止し、明示承認後だけ保存する。
+新規 PRD は `.agent-workflow/prds/<slug>.prd.md` に git 追跡で保存する。legacy `.claude/prds/` は
+読み取り migration input としてのみ扱い、新規作成・移動・削除をしない。
+
 ## Plan-PRD pipeline（任意 / opt-in, task #22）
 
 以下の flag は **任意**。**未指定時は上記の通常動作（対話のみ、ファイル出力なし）を完全に維持する**。flag を渡したときだけ session 横断 handoff 用の PRD file を出力する。
 
 | flag | 既定 | 意味 |
 |------|------|------|
-| `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し **slug = basename（拡張子・`.prd` を除く）**。省略時は対話で確定した feature 名を **kebab-case 化した slug** で `.claude/prds/<slug>.prd.md`（git tracked）に出力 |
+| `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し **slug = basename（拡張子・`.prd` を除く）**。省略時は対話で確定した feature 名を **kebab-case 化した slug** で `.agent-workflow/prds/<slug>.prd.md`（git tracked）に出力 |
 | `--mode=interactive\|auto` | `interactive` | `interactive`=各判断を user 対話で詰める（現状動作）/ `auto`=決定木を自律で踏破して最終 PRD を審議し、**user が 1 回承認**する（詳細は下記「`--mode=auto` の自律審議」） |
 
 - **auto でも security / data migration / contract change 等は強制的に user エスカレート**する（下記 auto フローの手順3）。

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ "$1" == "add" && "$2" == "-b" ]] || exit 64
+branch="$3"
+base="$4"
+[[ "$5" == "--quiet" && "$#" == 5 ]] || exit 64
+
+worktree="${TEST_ROOT}/created-worktree"
+git -C "$PWD" worktree add -b "$branch" "$worktree" "$base" >/dev/null
+printf '%s\n' "$worktree"

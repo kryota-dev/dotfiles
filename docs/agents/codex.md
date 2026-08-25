@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-This document covers the OpenAI Codex CLI harness configuration deployed by this dotfiles repo. The harness provisions two isolated `CODEX_HOME` accounts (`~/.codex` and `~/.codex-r06`), keeps their hooks and shared profile config in sync via chezmoi templates, applies a shared SSOT profile through a PATH-resolvable launcher wrapper, and gates destructive Bash commands through a cross-harness gateguard shared with Claude Code.
+This document covers the OpenAI Codex CLI harness configuration deployed by this dotfiles repo. The harness provisions two isolated `CODEX_HOME` accounts (`~/.codex` and `~/.codex-r06`), keeps their hooks and named profile configs in sync via chezmoi templates, applies the interactive `main` profile through a PATH-resolvable launcher wrapper, and gates destructive Bash commands through a cross-harness gateguard shared with Claude Code.
 
 ---
 
@@ -14,9 +14,10 @@ This document covers the OpenAI Codex CLI harness configuration deployed by this
 - [Two-account model](#two-account-model)
 - [hooks.json — PreToolUse gateguard](#hooksjson--pretooluse-gateguard)
 - [shared.config.toml — the shared profile](#sharedconfigtoml--the-shared-profile)
+- [main.config.toml — the main profile](#mainconfigtoml--the-main-profile)
 - [agent.config.toml — the agent profile](#agentconfigtoml--the-agent-profile)
 - [Template SSOT — preventing account drift](#template-ssot--preventing-account-drift)
-- [--profile shared mechanism](#--profile-shared-mechanism)
+- [--profile main mechanism](#--profile-main-mechanism)
   - [codex / cdx / cdx-r06 — the wrapper](#codex--cdx--cdx-r06--the-wrapper)
   - [Bare codex now loads the SSOT config too](#bare-codex-now-loads-the-ssot-config-too)
 - [The unmanaged base config and project trust](#the-unmanaged-base-config-and-project-trust)
@@ -34,6 +35,7 @@ Each `CODEX_HOME` receives an identical file set. Both are rendered from the sam
 | Source path | Deploys to (personal) | Deploys to (work) |
 |---|---|---|
 | `home/dot_codex/hooks.json.tmpl` | `~/.codex/hooks.json` | `~/.codex-r06/hooks.json` |
+| `home/dot_codex/private_main.config.toml.tmpl` | `~/.codex/main.config.toml` (0600) | `~/.codex-r06/main.config.toml` (0600) |
 | `home/dot_codex/private_shared.config.toml.tmpl` | `~/.codex/shared.config.toml` (0600) | `~/.codex-r06/shared.config.toml` (0600) |
 | `home/dot_codex/symlink_AGENTS.md.tmpl` | `~/.codex/AGENTS.md -> ~/AGENTS.md` | `~/.codex-r06/AGENTS.md -> ~/AGENTS.md` |
 | `home/dot_codex/symlink_skills.tmpl` | `~/.codex/skills -> ~/.agents/skills` | `~/.codex-r06/skills -> ~/.agents/skills` |
@@ -47,13 +49,13 @@ There is also `home/dot_codex/private_agent.config.toml.tmpl` → `~/.codex/agen
 The personal account uses the default `CODEX_HOME=~/.codex` (Codex's built-in default); the work account uses `CODEX_HOME=~/.codex-r06`. Account selection now lives in a wrapper *script*, `~/.local/launchers/codex` (source: `home/dot_local/launchers/executable_codex`), reached as `codex` / `cdx` / `cdx-r06` — the latter two are symlinks to it, and it dispatches on `$0`:
 
 ```
-codex / cdx  → CODEX_HOME follows CLAUDE_CONFIG_DIR when set (else defaults to ~/.codex), then --profile shared "$@"
-cdx-r06      → CODEX_HOME=~/.codex-r06 (unconditional override), then --profile shared "$@"
+codex / cdx  → CODEX_HOME follows CLAUDE_CONFIG_DIR when set (else defaults to ~/.codex), then --profile main "$@"
+cdx-r06      → CODEX_HOME=~/.codex-r06 (unconditional override), then --profile main "$@"
 ```
 
 Being a real file on PATH rather than an interactive-zsh-only alias, the wrapper works identically from any shell — interactive, a hook, or Claude Code's own Bash tool — so `codex` and `cdx` are literally the same behavior for the personal-account case; see [codex / cdx / cdx-r06 — the wrapper](#codex--cdx--cdx-r06--the-wrapper) below for the full dispatch logic, including how `CLAUDE_CONFIG_DIR` propagates the account from an enclosing Claude Code session.
 
-Because both homes receive their own copy of `hooks.json` and `shared.config.toml` — rendered from shared templates — each account runs the identical hook and config logic while keeping auth tokens and conversation state isolated in separate directories.
+Because both homes receive their own copy of `hooks.json` and each named profile — rendered from shared templates — each account runs the identical hook and config logic while keeping auth tokens and conversation state isolated in separate directories.
 
 ---
 
@@ -106,6 +108,25 @@ This file is deployed as `$CODEX_HOME/shared.config.toml` (mode 0600, via chezmo
 
 ---
 
+## main.config.toml — the main profile
+
+`home/.chezmoitemplates/codex-main-config.toml` is included by both `dot_codex/private_main.config.toml.tmpl` and `dot_codex-r06/private_main.config.toml.tmpl`. It is the named `main` profile selected by the launcher for interactive Codex orchestration.
+
+Like the other profiles, it includes `codex-model-pin.toml`; its distinct permission posture is:
+
+```toml
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+web_search = "live"
+
+[sandbox_workspace_write]
+network_access = true
+```
+
+The profile preserves the workspace-write filesystem boundary while allowing the main session to read GitHub state and perform live web research. Network access does not authorize repository or GitHub writes: worktree creation, commit, push, pull-request creation, and ready-for-review remain fixed `agent-workflow` host actions with the required TTY confirmation. It is not used by non-interactive children; those use `agent` or `shared` explicitly.
+
+---
+
 ## agent.config.toml — the agent profile
 
 `home/.chezmoitemplates/codex-agent-config.toml` is the config body, included by both `dot_codex/private_agent.config.toml.tmpl` and `dot_codex-r06/private_agent.config.toml.tmpl` and deployed as `$CODEX_HOME/agent.config.toml` (mode 0600) to both accounts. It is the named `agent` profile selected with `--profile agent` — the non-interactive posture skills use when Codex acts as an implementation or CI-fix worker.
@@ -124,7 +145,7 @@ multi_agent = true
 network_access = false
 ```
 
-- `sandbox_mode = "workspace-write"` — Codex may edit files inside the workspace. Protected paths stay read-only recursively (`.git`, `.agents`, `.codex`) — an enforcement the Codex CLI itself provides, not something this profile declares — so Codex cannot stage, commit, or otherwise write git state: the parent Claude session reviews the diff and commits.
+- `sandbox_mode = "workspace-write"` — Codex may edit files inside the workspace. Protected paths stay read-only recursively (`.git`, `.agents`, `.codex`) — an enforcement the Codex CLI itself provides, not something this profile declares — so Codex cannot stage, commit, or otherwise write git state: the host workflow reviews the diff and commits.
 - `approval_policy = "never"` — required for non-interactive `codex exec` runs, which have no human available to answer approval prompts.
 - `web_search = "cached"` and `network_access = false` — no live network by default. A call site that genuinely needs network access opts in per invocation (`-c sandbox_workspace_write.network_access=true`). The opt-in boundary is a policy control, not a technical one — `-c` overrides take precedence over profile values; the `codex` skill owns that distinction.
 
@@ -142,6 +163,9 @@ Division of use: implementation and CI-fix tasks run `--profile agent`; review t
 # dot_codex/hooks.json.tmpl (and dot_codex-r06/hooks.json.tmpl)
 {{ includeTemplate "codex-hooks.json" . }}
 
+# dot_codex/private_main.config.toml.tmpl (and dot_codex-r06/private_main.config.toml.tmpl)
+{{ includeTemplate "codex-main-config.toml" . }}
+
 # dot_codex/private_shared.config.toml.tmpl (and dot_codex-r06/private_shared.config.toml.tmpl)
 {{ includeTemplate "codex-shared-config.toml" . }}
 
@@ -155,11 +179,11 @@ If the actual config were duplicated in `dot_codex/` and `dot_codex-r06/`, a cha
 
 ---
 
-## --profile shared mechanism
+## --profile main mechanism
 
-`shared.config.toml` is a named Codex CLI profile. It is layered on top of Codex's dynamically-written `config.toml` only when Codex is invoked with `--profile shared`. Without that flag, the underlying `codex` binary silently ignores the SSOT config — but since #345 the wrapper injects that flag on essentially every invocation, so in practice this only matters for the rare call that bypasses the wrapper entirely (see below).
+`main.config.toml` is a named Codex CLI profile. It is layered on top of Codex's dynamically-written `config.toml` only when Codex is invoked with `--profile main`. Without that flag, the underlying `codex` binary silently ignores the SSOT config — but the wrapper injects it on every invocation that does not explicitly select another profile.
 
-The wrapper script is the only mechanism that injects `--profile shared` automatically:
+The wrapper script is the only mechanism that injects `--profile main` automatically:
 
 ### codex / cdx / cdx-r06 — the wrapper
 
@@ -186,13 +210,13 @@ Two things happen on every invocation:
    ```
 
    `CLAUDE_CONFIG_DIR` being authoritative means a `codex` call made from inside a `cld-r06` Claude Code session (e.g. via the `codex` skill's Bash tool, or a hook) lands on the r06 Codex account even if some stray inherited `CODEX_HOME` says otherwise — closing a cross-account leak that existed before #345. An explicit `CODEX_HOME` is only honored when no Claude Code session is in scope (`CLAUDE_CONFIG_DIR` unset).
-2. **`--profile shared` injection.** The wrapper scans argv token by token (`--profile`, `--profile=…`, `-p`, `-p<value>`, stopping at a literal `--`) and injects `--profile shared` only when no profile flag is already present. `codex --profile agent …` therefore still resolves to the `agent` profile untouched, and the injected flag lands ahead of any subcommand (`exec`, `exec review`) so it parses in every invocation shape.
+2. **`--profile main` injection.** The wrapper scans argv token by token (`--profile`, `--profile=…`, `-p`, `-p<value>`, stopping at a literal `--`) and injects `--profile main` only when no profile flag is already present. `codex --profile agent …` and `codex --profile shared …` therefore resolve untouched, and the injected flag lands ahead of any subcommand (`exec`, `exec review`) so it parses in every invocation shape.
 
 `real="${CODEX_LAUNCHER_BIN:-/opt/homebrew/bin/codex}"` resolves the brew-managed binary directly — unlike the `claude` wrapper, Codex stays brew-managed rather than mise-managed. `CODEX_LAUNCHER_BIN` overrides this for tests. If the real binary cannot be resolved, the wrapper fails loudly rather than silently doing nothing.
 
 ### Bare codex now loads the SSOT config too
 
-Before #345, a direct `codex` invocation — without the `cdx`/`cdx-r06` aliases — did **not** load `shared.config.toml`; only the aliases injected `--profile shared`, and that was easy to trip over in scripts, CI, or editor integrations that invoked `codex` directly. That gap is closed: because `codex` on PATH now resolves to the same wrapper as `cdx` (the launcher directory is kept ahead of Homebrew's `bin` both by a static PATH prepend in `dot_zshrc.tmpl` and a `precmd` hook that re-asserts it after `mise activate`, plus a hard-coded prepend in launchd's morning-radar script), any bare `codex` call gets `--profile shared` injected exactly like `cdx` does, unless the caller already passed an explicit `--profile`. The only way to reach the true bare binary, un-wrapped, is to invoke it by its absolute path (`/opt/homebrew/bin/codex`) — something most callers never do.
+Before #345, a direct `codex` invocation — without the `cdx`/`cdx-r06` aliases — did not load a managed profile, which was easy to trip over in scripts, CI, or editor integrations. That gap is closed: because `codex` on PATH now resolves to the same wrapper as `cdx`, any bare `codex` call gets `--profile main` unless the caller explicitly selects another profile. The only way to reach the true bare binary, un-wrapped, is to invoke it by its absolute path (`/opt/homebrew/bin/codex`).
 
 ---
 
@@ -206,7 +230,7 @@ The base `$CODEX_HOME/config.toml` is written by the Codex CLI itself and is del
 - `chezmoi apply` would revert user-approved `[projects.*] trust_level` entries.
 - Committing it would leak absolute paths of unrelated projects into a public repository.
 
-The cost is a known, accepted drift source: the base config carries its own copy of model settings that ages independently of the SSOT pin. Profile-based invocations (`--profile shared` / `--profile agent`) layer over it and are unaffected; since #345 that includes bare `codex` calls too, because the wrapper injects `--profile shared` by default (see [Bare codex now loads the SSOT config too](#bare-codex-now-loads-the-ssot-config-too)). Only an invocation that bypasses the wrapper entirely (the brew binary's absolute path) resolves against the unmanaged base config alone.
+The cost is a known, accepted drift source: the base config carries its own copy of model settings that ages independently of the SSOT pin. Profile-based invocations (`--profile main` / `--profile shared` / `--profile agent`) layer over it and are unaffected; bare `codex` uses `main` through the wrapper. Only an invocation that bypasses the wrapper entirely (the brew binary's absolute path) resolves against the unmanaged base config alone.
 
 ### Project trust policy
 

@@ -6,6 +6,13 @@ argument-hint: "[base-branch]"
 
 # Pull Request作成タスク
 
+## Harness contract
+
+`~/.agents/workflow/README.md` を優先する。承認は capability として扱い、Codex の非対話実行では
+`agent-workflow approve <run-id> create-pr` を user が TTY で実行してから host runner が PR を作成する。
+新規 PR 下書きは `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に保存する。legacy
+`.claude/pull-requests/` は読み取り互換だけで、新規作成・移動・削除しない。
+
 ## 概要
 
 このタスクは、現在のブランチの変更内容を分析し、Pull Requestの下書きを自動生成してGitHubに投稿します。git diffによる差分分析、PRテンプレートの活用、GitHub CLIを使用したPR作成を行います。
@@ -16,6 +23,7 @@ argument-hint: "[base-branch]"
 - GitHub CLIで認証済みであること (`gh auth login`)
 - `git` コマンドが利用可能であること
 - 現在のブランチがマージ対象のベースブランチと異なること
+- pr-workflow からは linked worktree と run id が初期化済みであること
 
 ## 実行手順
 
@@ -52,14 +60,8 @@ PR作成前に既存のPRがないか確認してください：
 gh pr list --head $(git branch --show-current) --state open --json number,title,url
 ```
 
-- 現在のブランチで開いているPRを検索
-- 既にPRが存在する場合は、`AskUserQuestion`ツールを使用してユーザーに確認を取ること
-  - question: "既にPRが存在します。どうしますか？"
-  - header: "PR操作"
-  - options:
-    - { label: "既存PRを更新", description: "既存のPRを更新する" }
-    - { label: "新規PR作成", description: "新しいPRを作成する" }
-  - multiSelect: false
+- 現在のブランチで開いている PR を検索する
+- 既に存在する場合は approval capability で user の方針（既存を使う / 中止）を得る。新規 PR を重複作成しない
 
 ### 4. PR下書きの生成
 
@@ -80,87 +82,39 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 
 以下の手順で下書きファイルを保存してください：
 
-1. **ディレクトリ構造の作成**:
+1. **state ディレクトリ**:
 
    ```
-   .claude/pull-requests/drafts/{branchName}/
+   ${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/
    ```
 
-   - ブランチ名に`/`が含まれる場合は、ディレクトリを分割
-   - 例: `feature/create-app` → `.claude/pull-requests/drafts/feature/create-app/`
+   title と body を別 file として保存する。ファイル名に branch を埋め込まず、run id を唯一の識別子にする。
 
-2. **ファイル名の生成**:
+2. **legacy の扱い**:
 
-   ```
-   {timestamp}.md
-   ```
-
-   - `timestamp`: `YYYYMMDD-HHMMSS`形式（例: `20241225-143022`）
-
-3. **完全なパス例**:
-
-   ```
-   .claude/pull-requests/drafts/feature/create-app/20241225-143022.md
-   .claude/pull-requests/drafts/hotfix-bug/20241225-150315.md
-   ```
+   `.claude/pull-requests/` は既存下書きの参照だけに使う。新規作成、rename、削除は行わない。
 
 ### 6. ユーザー確認プロセス
 
 下書きファイルを作成後、以下の確認を行ってください：
 
-1. **下書き内容の表示**: 生成したPR下書きの内容をユーザーに提示
-2. **確認の取得**: `AskUserQuestion`ツールを使用してユーザーに確認を取ること
-   - question: "このPRを作成しますか？"
-   - header: "PR作成"
-   - options:
-     - { label: "はい", description: "PR作成を実行する" }
-     - { label: "いいえ", description: "下書きのみ保存して終了する" }
-     - { label: "修正", description: "内容の修正が必要" }
-   - multiSelect: false
+1. **下書き内容の表示**: 生成した PR title/body と target branch をユーザーに提示する。
+2. **確認の取得**: approval capability を使う。Codex 非対話では `waiting-for-user` として停止し、user が
+   TTY で `agent-workflow approve <run-id> create-pr` を実行する。`--resume` は承認を与えない。
 
 ### 7. PR作成の実行
 
-ユーザーが「はい」と回答した場合のみ、以下を実行してください：
+ユーザーが承認した場合のみ、固定 host action を実行する:
 
-1. **PR作成の実行**:
+```bash
+agent-workflow create-pr <run-id> \
+  --title-file <title-file-in-run-state> \
+  --body-file <body-file-in-run-state> \
+  --base "${BASE_BRANCH}" [--draft]
+```
 
-   ```bash
-   gh pr create \
-     --title "自動生成されたPRタイトル" \
-     --body-file .claude/pull-requests/drafts/{branchName}/{timestamp}.md \
-     --base "${BASE_BRANCH}" \
-     --head "${CURRENT_BRANCH}" \
-     --assignee "@me"
-   ```
-
-   - `--title`: 自動生成されたPRタイトル
-   - `--body-file`: 下書きファイルのパス
-   - `--base`: ユーザーが指定したベースブランチ名
-   - `--head`: 現在のブランチ名
-   - `--assignee "@me"`: 作成者を自動アサイン
-
-2. **PR番号の取得**:
-
-   PR作成コマンドの出力URLからPR番号を抽出、またはJSON形式で取得：
-
-   ```bash
-   PR_INFO=$(gh pr create --title "..." --body-file "..." --base "..." --head "..." --assignee "@me" --json number,url,title)
-   PR_NUMBER=$(echo "$PR_INFO" | jq -r '.number')
-   PR_URL=$(echo "$PR_INFO" | jq -r '.url')
-   ```
-
-3. **下書きファイルのリネーム**:
-   - Before: `.claude/pull-requests/drafts/{branchName}/{timestamp}.md`
-   - After: `.claude/pull-requests/{prNumber}.md`
-
-4. **ブランチディレクトリの削除**:
-   下書きファイルのリネーム完了後、**空になった**ブランチディレクトリのみを削除
-   - 削除条件: `.claude/pull-requests/drafts/{branchName}/` が空の場合のみ
-   - 保護条件: 他の下書きファイル（過去の下書き等）が残っている場合は削除しない
-   - ブランチ名に`/`が含まれる場合は、最深のディレクトリから順に空かどうかを確認
-   - 例: `feature/create-app` の場合
-     - `.claude/pull-requests/drafts/feature/create-app/` が空なら削除
-     - `.claude/pull-requests/drafts/feature/` が空なら削除（上位ディレクトリも確認）
+runner は承認済み gate、linked worktree、recorded branch、run state 内の title/body path containment、GitHub remote を検証して
+PR URL を返す。agent が任意の `gh pr create` 引数を実行したり、下書きを移動・削除したりしてはならない。
 
 ## 自動生成ルール
 
@@ -193,7 +147,7 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 - **ベースブランチの確認**: ユーザーから指定されたベースブランチが正しく存在することを確認
 - **ファイルパスの安全性**: ブランチ名の特殊文字を適切にエスケープ
 - **重複防止**: 同じブランチで既にPRが存在する場合の確認
-- **下書き保存**: PR作成に失敗しても下書きは保存された状態を維持
+- **下書き保存**: PR 作成に失敗しても transient state の下書きは保存された状態を維持
 - **タイムスタンプの一意性**: 同じ時刻に複数実行された場合の対応
 - **PRテンプレート**: `.github/PULL_REQUEST_TEMPLATE.md`を必ず読み込んで使用すること
 
@@ -207,7 +161,7 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 - **PR番号**: #123
 - **タイトル**: feat: ユーザー認証機能の追加
 - **URL**: https://github.com/owner/repo/pull/123
-- **下書きファイル**: `.claude/pull-requests/123.md`
+- **下書きファイル**: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/body.md`
 - **ベースブランチ**: main
 - **ヘッドブランチ**: feature/auth
 
@@ -219,7 +173,7 @@ PRが正常に作成されました。レビューをお待ちください。
 ```markdown
 📝 **PR下書き保存完了**
 
-- **下書きファイル**: `.claude/pull-requests/drafts/feature/auth/20241225-143022.md`
+- **下書きファイル**: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/body.md`
 - **ブランチ**: feature/auth
 - **ベースブランチ**: main
 

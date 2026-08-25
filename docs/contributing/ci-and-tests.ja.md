@@ -76,7 +76,7 @@ lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を Gi
 - **observer knobs とシークレット。** `ECC_OBSERVER_TIMEOUT_SECONDS`、`OBSERVER_ACTIVE_HOURS_START`/`END`、`ECC_OBSERVER_MAX_TURNS` が正しくデフォルトし、override 可能であること。ラッパーは MCP キーファイルを自ら source してキーを export しますが、呼び出し元がすでに決めたキー（`morning-radar` が web 検索をオプトアウトするための空文字を含む）は上書きしません。`claude-config` の `ECC_DISABLED_HOOKS_EXTRA` プレフィックスは、ラッパーの完全な env 継承を通じて exec されたプロセスに届きます。
 - **フェイルラウド。** 両ラッパーとも、本物のバイナリが解決できない場合はサイレントに何もしない代わりに、診断メッセージ付きで非ゼロ終了します。
 - **Codex のアカウント選択。** `codex`/`cdx` は `CLAUDE_CONFIG_DIR` に追従します（不一致な継承済み `CODEX_HOME` がアカウントをまたいでリークしてはいけないケースを含む — #345 が塞ぐクロスアカウントリーク）；`cdx-r06` は `CODEX_HOME` を無条件に上書きします；明示的な `CODEX_HOME` は `CLAUDE_CONFIG_DIR` がスコープにない場合のみ尊重されます。
-- **`--profile shared` の注入。** argv に `--profile`/`-p` フラグがない場合にのみ注入されます（`--profile x`、`--profile=x`、`-p x`、`-px` のすべての形式）；プロンプト引数内の `--profile` という部分文字列は誤って注入を抑制しません；走査はリテラルの `--` で停止します；フラグは常にサブコマンド（`exec`、`exec review`）より前に挿入されます。
+- **`--profile main` の注入。** argv に `--profile`/`-p` フラグがない場合にのみ注入されます（`--profile x`、`--profile=x`、`-p x`、`-px` のすべての形式）；プロンプト引数内の `--profile` という部分文字列は誤って注入を抑制しません；走査はリテラルの `--` で停止します；フラグは常にサブコマンド（`exec`、`exec review`）より前に挿入されます。
 - **残存する zsh ヘルパー。** `_claude_fable`（`claude-fable-5` を pin し、readable な場合はオーケストレータープロンプトファイルを追加し、fable フラグより前に呼び出し元自身のフラグを通す）、`cldf`/`cldf-r06`（アカウントごとに Fable オーケストレーターを配線）、`claude-config`（フックのオプトアウトをプレフィックスし、デフォルトアカウントを pin する）は、従来どおり `claude.zsh` をソースする `zsh -fc` で駆動されます。
 
 ### `tests/skill_provenance.bats`

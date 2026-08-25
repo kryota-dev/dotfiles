@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${GH_CAPTURE:?GH_CAPTURE must be set}"
+printf '%s\n' "$@" >"$GH_CAPTURE"
+
+if [[ "$1" == "pr" && "$2" == "create" ]]; then
+  printf '%s\n' "https://github.com/example/repository/pull/123"
+fi

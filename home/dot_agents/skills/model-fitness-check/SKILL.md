@@ -10,11 +10,44 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 セッションの model / effort が作業の要求水準（§4 contract）を満たすかを検査し、満たさない場合は**実装・レビュー実行に入る前に停止**して user に切り替えを提案する共有ゲート。
 
+## Harness contract (normative)
+
+`~/.agents/workflow/README.md` を優先する。harness を自動検出し、`--harness=codex|claude` があれば
+それを優先する。検出不能、profile 解決不能、model/effort が不明な場合は silent pass せず `blocked` とする。
+
+- **Claude**: 以下の Claude §4 contract、model identity 検出、quota pressure を従来どおり使う。
+- **Codex**: main session は `main`、read-only child は `shared`、書込み child は `agent` の profile を解決し、そこから
+  有効な model と `model_reasoning_effort` を確認する。呼出し側が別 profile や `-c` override を指定した
+  場合も、実際に渡す設定を対象にする。作業が要求する configured model/effort を満たさない、または値を
+  解決できないときは、profile/model/effort を表示して切替・continue anyway・abort を提示する。
+- **Codex の quota は常に `unknown` と明示する**。Claude の statusline snapshot を読んだり、token 数・
+  rate limit・モデル名から quota を推測したりしない。quota 不明だけを理由に blocking しない。
+- 同じ run id で一度 pass または user が continue anyway を選んだ行は再提示しない。`--resume` はこの
+  記録を復元するだけで、新しい pass や approval を与えない。
+
 ## SSOT としての位置づけ
 
-**§4 contract テーブルはこの skill が唯一の SSOT**。`pr-workflow` / `sdd` / `multi-review` はこのテーブルを複製せず、各 entry から本 skill を 1 行で呼ぶだけにする（複製すると Codex pin が 3 箇所で drift した失敗を Claude 側で再演することになる）。
+**model/effort contract はこの skill が唯一の SSOT**。`pr-workflow` / `sdd` / `multi-review` は値を複製せず、各 entry から本 skill を 1 行で呼ぶだけにする。Claude の具体的な table と Codex の profile 解決を混在させず、上の harness contract で分岐する。
 
-## §4 contract（Model/effort テーブル）
+## Codex profile / model / effort の解決
+
+Codex の判定は Claude の family 比較を流用しない。対象 command が実際に使う `--profile` と `-c`
+override を解決し、managed profile の有効な `model` と `model_reasoning_effort` を確認する。
+
+1. main session は `main`、read-only review child は `shared`、workspace-write child は `agent` を既定にする。
+   call site が `--profile` または `-c model=` / `-c model_reasoning_effort=` を渡す場合は、その指定を優先する。
+2. 対応する `$CODEX_HOME/<profile>.config.toml` を読み、model pin と effort を取得する。profile file が無い、
+   unmanaged base config へ fall back する、複数値が競合する、または effort を解決できない場合は `blocked` にする。
+3. 報告には profile、effective model、effective effort、override の有無を明記する。要求水準を満たす
+   managed pin が確認できれば pass とする。profile/model/effort の対応が不明なら推測せず、switch・continue
+   anyway・abort を提示する。
+4. quota は常に `unknown` と表示する。rate limit、token 数、Claude の statusline、model 名から利用枠を
+   推測しない。quota 不明だけでは block しない。
+
+Codex profile の model 値は `codex-model-pin.toml`、profile の permission posture は各 profile template が
+SSOT である。この skill は値のコピーを保持しない。
+
+## Claude §4 contract（Model/effort テーブル）
 
 テーブルが規定するのは**セッション自身**の model / effort であり、**委譲先 worker の tier は各 agent 定義の frontmatter が SSOT**（例: adversarial verification 行は「その作業を主導するセッション」に Opus @ xhigh を要求するのであって、`adversarial-verifier` agent が Opus であるべきという意味ではない）。
 
@@ -37,7 +70,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 - **Fable / cldf セッションは floor 行（上方向）の switch 提案を受けない**。Fable は全 floor の要求を満たす（monotonic の最上位）うえ、`fable-orchestrator-prompt.md` で独自の委譲契約を持つため、Opus 契約に合わせる上方向の提案は構造的に矛盾する。下方向（過剰スペックの解消）は over-provision パスの対象で、**Fable セッションも免除されない**。
 - over-provisioning（Fable で trivial をこなす等）は毎回は停止しないが、累積が閾値を超えたら 1 回だけ blocking する（「over-provision 閾値ゲート」参照）。cldf でも exit → profile に応じた `cld` / `cld-r06` の `--continue` で orchestrator 契約ごと降りられるため、「是正不能」ではない。
 
-## model の検出
+## Claude model の検出
 
 1. **主経路**: セッションの system-prompt に埋め込まれた model identity（自己申告。「You are powered by ...」等）を読む。
    **主経路が Fable と解決したら、副経路の cross-check はスキップする**（floor 判定を pass にするだけで、判定は終了せず over-provision パスに進む —— Fable も over-provision ゲートの対象だから）。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
@@ -54,7 +87,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
-### floor 行（Opus @ high / Opus @ xhigh）で mismatch
+### Claude floor 行（Opus @ high / Opus @ xhigh）で mismatch
 
 `AskUserQuestion` で **blocking** し、次の 3 択を提示する:
 
@@ -71,11 +104,11 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
-### 検出不能時の fallback
+### Claude で検出不能時の fallback
 
 model 検出が主経路・副経路とも失敗した場合、**silent skip せず**、常にチェック内容（要求水準と現在の不確実性）を提示する（fail-safe）。
 
-## over-provision 閾値ゲート
+## Claude の over-provision 閾値ゲート
 
 trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「カウンタ × 実測 quota 圧力」の 2 シグナルで監視し、閾値超過時のみ 1 回 blocking する。サブスクリプション（Max / Team）では over-provision の実害は金額ではなく **quota（全モデル共有プール）のクラウドアウト**——Fable / Opus で軽作業を続けると、重作業に必要な quota が先に尽きる——なので、圧力シグナルと組み合わせ、quota に余裕がある間は止めない（alert fatigue の回避。blocking の希少性が floor 停止の信頼性を支える）。
 
@@ -127,6 +160,6 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 - `sdd`: Phase 0 冒頭 —— `/model-fitness-check orchestration`（large 相当なら `large`）
 - `multi-review`: Phase 1 の前 —— `/model-fitness-check orchestration`（`multi-review` に Phase 0 は無い）
 
-各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
+各 skill は本 skill を呼ぶ 1 行を持つのみで、**model/effort の具体値や profile を再掲しない**。
 
 **idempotency（多重起動の抑制）**: `pr-workflow` → `sdd` → `multi-review` と連鎖すると 1 実行で最大 3 回同じ判定が走る。**同一セッションで一度 pass した行、および明示的に continue-anyway を選んだ行については再提示しない**（前回の判断を再利用する）。model / effort が変更された形跡があるときのみ再評価する。

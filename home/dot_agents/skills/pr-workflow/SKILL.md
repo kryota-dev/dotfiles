@@ -6,21 +6,36 @@ description: |
   ワークツリー作成 → 実装 → CI → review → 指摘対応 を進め、orchestration GATE で進行を整理する。
   トリガー: "pr-workflow", "tier 判定して PR まで orchestrate", "ワークフロー skill で進めて"
   使用場面: 規模の異なるタスクを、tier に応じた最適な深さ（inline〜grill-me+sdd）で PR 化したいとき。
-argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]"
+argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--harness=codex|claude] [--resume <run-id>] [--strict]"
 user-invocable: true
 ---
 
 # pr-workflow
 
+## Harness contract (normative)
+
+実行時は `~/.agents/workflow/README.md` の harness contract を優先する。本文中の
+`AskUserQuestion`、Claude Agent、`SendMessage`、`notify` は Claude adapter の具体例であり、
+Codex では同契約の capability に置換する。`--harness=codex|claude` と `--resume <run-id>` を
+追加で受け付け、指定がなければ harness を自動検出する。
+
+- Codex-only では Claude leg を省略しない。同じ shared rubric を渡した独立 `codex exec` leg に
+  置換し、同族 review であることを統合結果に明記する。
+- 非対話の Codex は gate で `waiting-for-user` を返す。user が TTY で
+  `agent-workflow approve <run-id> <gate>` を実行するまで `--resume` しても進めない。
+- worktree 作成、commit、push、PR 作成、ready-for-review は `agent-workflow` の固定 action を使う。任意 command、
+  sandbox bypass、暗黙の approval は禁止する。
+- 必須 capability の欠落は `blocked` として停止する。optional specialist の欠落だけは明記して続行する。
+
 タスクの **size tier** と **operation variant** を判定し、tier に応じた path で「ワークツリー作成 → 実装 → CI → review → 指摘対応」を orchestrate する。各既存 skill を束ねる**司令塔**であり、自分は薄く保ち、重い処理は委譲する。
 
-**ワークツリー作業は必須**: pr-workflow は **全 tier で `/wtp` を用いてワークツリーを作成し（Phase 0.5）、以降の全 Phase をそのワークツリー内で実行する**。main worktree を直接汚さない。
+**ワークツリー作業は必須**: pr-workflow は **全 tier で linked worktree を作成し（Phase 0.5）、以降の全 Phase をそのワークツリー内で実行する**。main worktree を直接汚さない。
 
 **委譲先 skill への呼び出しプロンプト**: `/multi-review` と `/review-resolve-loop` は pr-workflow から呼ぶ際に**オーバーライド指示を委譲プロンプトに含める**（下記 Phase 6・7 参照）。これらの指示は pr-workflow が orchestrator として付加するものであり、skill を standalone で使う場合の挙動には影響しない。
 
 **委譲は「起動」であって「再実装」ではない（手ロール代替の禁止）**: Phase 5〜7 の各ステップは、指定された skill（`/monitor-ci` / `/multi-review` / `/review-resolve-loop`）を **必ず実際に起動する**。「自分でやった方が速い」「重複が少ない」「指摘は自明」等の最適化判断で**同等処理を手ロール（inline の Bash / Agent）で代替してはならない**。オーバーライドは「skill を起動したうえで付加する」ものであり、起動そのものを省く理由にはならない。委譲先 skill は各々が固有の網羅性（例: `/review-resolve-loop` は review thread / review body / **CI marker Issue comment** の 3 経路を体系的に拾う）を持ち、手ロールはその経路網羅を欠いて指摘を取りこぼす。orchestrator の役割は分類・GATE・統合判断であって、委譲先の仕事の肩代わりではない。
 
-**model-tier（task #28 の拡張）**: 分類・設計・統合判断は **Leader**（session model）。機械的実装・CI ログ triage・fact-check は **worker 委譲**（Sonnet / Haiku）。**cross-model diversity は codex** — multi-review では tier に応じて **generalist（全 tier）+ 全 specialist（standard/large）を Codex 実行**し（多様性フロアで Claude≥1 を保証）、adversarial verify は generator と逆族で反証する（Phase 6, cross-model）。加えて **small tier の実装と Phase 5 の CI 修正でも Codex worker（`--profile agent`）を選べる**。要求 model/effort の契約（§4）は `/model-fitness-check` が唯一の SSOT であり、本 skill は値を再掲せず Phase 0 でそれを起動する。
+**model-tier**: 分類・設計・統合判断は Leader が担い、worker と reviewer は harness contract に従う。Claude/Codex の両方が利用できる場合は cross-model diversity を優先する。Codex-only は独立した Codex leg を使い、利用量を推測せず profile/model/effort 契約だけを `/model-fitness-check` で検証する。
 
 **マージは user**: 設計決定（task #21 原案の「merge 自動実行」を上書き）として、本 skill は**絶対に自動マージしない**。GATE 3 は merge-ready の handoff であり、merge は user の明示操作。
 
@@ -60,10 +75,13 @@ user-invocable: true
 
 ## Phase 0.5: Worktree setup（enforced）
 
-Phase 0 の分類直後、**tier に関わらず必ず `/wtp` でワークツリーを作成し、以降の全 Phase（実装・commit・PR・CI 監視・review・指摘対応）をそのワークツリー内で実行する**。pr-workflow は main worktree を直接変更しない。
+Phase 0 の分類直後、**tier に関わらず必ず linked worktree を作成し、以降の全 Phase（実装・commit・PR・CI 監視・review・指摘対応）をそのワークツリー内で実行する**。pr-workflow は main worktree を直接変更しない。
 
 1. **ブランチ名の導出**: operation variant + task から命名する（`add-feature`/`change-feature`→`feat/...`、`fix-defect`→`fix/...`、`refactor`→`refactor/...`、`mvp`→`feat/...`）。GitHub Issue 起点なら `#番号` を含めてよい。
-2. **ワークツリー作成**: 新規ブランチは `wtp add -b <branch> main`（既定 base=`main`）、既存ブランチは `wtp add <branch>`。作成後の絶対パスを起点に以降を実行する（`--quiet` で path を捕捉可）。
+2. **ワークツリー作成**: Claude adapter は `/wtp` に従う。Codex main session は human が main worktree の
+   TTY で `agent-workflow worktree-init <run-id> --branch <branch> --base main` を実行し、出力された絶対パスで
+   `codex --profile main --cd <path>` を開始または再開する。Codex sandbox 内の `wtp add` / `git worktree add` は
+   禁止する。既存 branch の再利用は `agent-workflow init <run-id> --worktree <path>` で state を初期化する。
 3. **既存衝突時**: `wtp list` で既存ワークツリー/ブランチを確認。同名があれば再利用するか別名を選ぶ（`failed to create worktree: exit status 128` は path 既存が主因）。
 4. **後片付け**: マージは user（GATE 3）。マージ後のワークツリー削除は `/wtp-cleanup`（merged worktree の一括整理）に委ねる。pr-workflow は自動削除しない。
 
@@ -79,7 +97,7 @@ Phase 0 の分類直後、**tier に関わらず必ず `/wtp` でワークツリ
 |------|------|
 | `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr` |
 | `small` | **worker に委任（二択）**: (a) general-purpose サブエージェント（`model: sonnet`）に inline prompt で委任、または (b) 実装の cross-model diversity が欲しい／Claude が行き詰まったときは **Codex worker**（`codex exec --profile agent`、workspace-write）。既定は (a)。自己完結タスク（少数ファイル・所有境界内・契約変更なし = small tier 定義そのもの）が Codex 委譲の条件。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。**Codex を選ぶ場合、呼び出し形・`CODEX_HOME` prelude・worktree ガード・実行順序契約・委任範囲の制約は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が唯一の SSOT**。ここに再掲せず必ずそれに従う（特に **`git diff` 全体レビュー → ホスト側の検証コマンド → commit** の順序。**diff レビュー前にテスト・lint・ビルドを実行しない** —— TDD 委譲では Codex がテストを書くため、それをホストで走らせる前に必ず diff を読む）。→ `/commit` → `/create-pr` |
-| `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を `AskUserQuestion` で 1 回確認。承認 1 回で自律性を最大限維持）→ `/sdd`（完全自律実行）。**`/sdd` は内部で自前に commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
+| `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を approval capability で 1 回確認。Codex 非対話は TTY approval を待つ）→ `/sdd`（完全自律実行）。**`/sdd` は host runner を介して commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
 | `large` | **intent gate（enforced）**: `/sdd` の前に `/grill-me --mode=auto`（自律審議＋最終 PRD を user が 1 回承認）を pr-workflow から auto-invoke する（`--mode=auto` が「対話型だから auto-invoke しない」を解消。auto でも security/data-migration/contract は grill-me が強制 user エスカレート）→ `/sdd`（完全自律実行）。 |
 
 **intent gate（#222・構造化）**: `standard`/`large` は **human intent check なしに実装フェーズ（`/sdd` Phase 4）へ入れない**。large=`/grill-me --mode=auto` の PRD 承認、standard=軽量 intent gate がそれに当たる。**gate を skip する場合は必ず理由を記録**する（decision log / spec / PR の 1 行）。**PRD 生成は non-trivial（standard/large）の default handoff**とする（生成は default、file 永続化は grill-me の memory ポリシーに従い user 承認必須）。
@@ -88,7 +106,7 @@ Phase 0 の分類直後、**tier に関わらず必ず `/wtp` でワークツリ
 
 ## GATE 1: Ready for review
 
-Phase 1-4（実装・commit・PR 作成）完了後、**`AskUserQuestion` で「ready for review に移行するか」をユーザーに確認する**。
+Phase 1-4（実装・commit・PR 作成）完了後、**approval capability で「ready for review に移行するか」をユーザーに確認する**。Claude adapter は `AskUserQuestion` を使い、Codex 非対話は `waiting-for-user` として user-owned TTY approval を待つ。
 
 - trivial/small: `/create-pr` 完了後に確認
 - standard/large: `/sdd` 完了（PR 作成済）を検知して pr-workflow 再開後に確認
@@ -99,7 +117,7 @@ PR #<番号> を ready for review に移行しますか？
 移行後も Draft に戻すことは可能です（gh pr convert-to-draft）。
 ```
 
-- **承認した場合**: `gh pr ready <番号>` を実行 → Phase 5（CI 監視）へ
+- **承認した場合**: `agent-workflow ready-for-review <run-id> <番号>` を実行 → Phase 5（CI 監視）へ
 - **スキップした場合**: Draft のまま Phase 5（CI 監視）へ
 
 > **分類**: 外向き操作（レビュアーへの通知を伴う）のためユーザー確認を行う。ただし **不可逆ではない**（`gh pr convert-to-draft` でいつでも Draft に戻せる）。
@@ -135,7 +153,7 @@ CI green 確認後、`/multi-review` を起動する。
 
 > **`/multi-review` には `--tier=<Phase 0 で確定した tier>` を明示的に渡すこと。** roster gating・モデル配分（Claude/Codex）・Codex effort は tier で決まる（multi-review の「tier → roster 予算」節）。pr-workflow は分類済み tier を持つため、multi-review の diff 自動推定に委ねず確定値を渡す（large tier では従来どおり `--arch` も付す）。
 >
-> **投稿方法は「サマリーを body に含めて投稿」を自動選択すること。Phase 5 の投稿方法確認（`AskUserQuestion` の 3 択）はスキップし、body サマリー（統合レビュー結果）＋ インラインコメント（MUST/SHOULD/NITS）を `event: "COMMENT"` で即時 submit する。**
+> **投稿方法は shared approval contract を維持すること。** body サマリー + インラインコメントを投稿する前に、target・投稿内容・件数を示して明示承認を得る。Codex 非対話は `waiting-for-user` で停止し、承認なしに即時 submit しない。
 >
 > **standard/large tier では、`/sdd` が生成した spec ディレクトリを `--spec-context <dir>` として渡すこと（`<dir>` は必ず絶対パス。例 `$(pwd)/.spec-workflow/specs/<name>/`。`.spec-workflow/` は gitignore されるため、相対パスだと reviewer サブエージェントが cwd 依存で解決に失敗しうる）。これにより multi-review が spec-implementation 整合チェック（要件取りこぼし・設計逸脱・未完了タスク）を行い、single-pass 化（#347）で `/sdd` の廃止した内蔵 review から失われた spec 整合観点を補う。performance / test / ux の横断観点 specialist は diff 特性で自動 spawn されるが、`<dir>/requirements.md` に性能要件（NFR）が明示されている場合は `performance-reviewer` を明示要請すること。**
 
@@ -167,7 +185,7 @@ GATE 2（auto-proceed。`--strict` 時のみ user 承認待ち）を経て Phase
 
 `/review-resolve-loop` を pr-workflow から呼ぶ際は、以下を**委譲プロンプトに明記**してオーバーライドする:
 
-> **Phase 2-4 の対応方針確認ゲート（`AskUserQuestion`）は、真の人間レビュアー（`isBot == false` かつ `isSelf == false`）が 1 件以上存在するラウンドのみ実行すること。ボット・セルフレビュー（`isSelf == true` の `/multi-review` 投稿分を含む）のみのラウンドは、承認なしで Phase 3 へ直行し自律的にループを継続する。**
+> **Phase 2-4 の対応方針確認と各返信投稿は approval capability を必ず通すこと。** reviewer が人間・bot・self のいずれかで approval を省略しない。Codex 非対話では `waiting-for-user` state を返し、`--resume` は承認を与えない。
 
 これにより `/multi-review` の指摘（セルフ）と人間レビューの指摘を一括処理しつつ、真の人間レビュアーがいる場合のみゲートを通す。
 
@@ -210,7 +228,7 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 
 | 局面 | 対処 |
 |------|------|
-| Phase 0.5 ワークツリー作成失敗 | `wtp list` で既存衝突を確認 → 別ブランチ名で再試行。remote 曖昧/未 fetch は `git fetch` 後に retry。解決不能 → user |
+| Phase 0.5 ワークツリー作成失敗 | Claude は `wtp list`、Codex は TTY 上の `agent-workflow worktree-init` で既存衝突を確認 → 別ブランチ名で再試行。base ref が無い場合は host 側で fetch してから retry。解決不能 → user |
 | Phase 4 実装失敗 | RED→GREEN 規律で再試行、3 回 retry → user |
 | Phase 5 CI fail | ログ取得 → 原因分析 → 修正 → retry（pr-workflow が budget 管理、最大 3 回）。3 回 fail → user |
 | Phase 5 commit 失敗（1Password） | `osascript` で通知音付き push 通知 → 中断 |
@@ -223,7 +241,7 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 
 - 本 skill は orchestrator。重い処理は各 skill に委譲し、分類・GATE・統合判断に専念する。
 - **委譲先 skill は起動する（手ロール代替禁止）**: Phase 5〜7 は `/monitor-ci` / `/multi-review` / `/review-resolve-loop` を実際に起動する。同等処理の自前実装は各 skill の経路網羅性（特に `/review-resolve-loop` の CI marker コメント経路）を欠き、指摘を取りこぼす（詳細は冒頭原則・Phase 7）。
-- **ワークツリー作業は必須**（Phase 0.5）。全 tier で `/wtp` を使い、main worktree を直接汚さない。standard/large の `/sdd` には新規ワークツリー作成を抑止するオーバーライドを渡す。
+- **ワークツリー作業は必須**（Phase 0.5）。Claude は `/wtp`、Codex は human-owned `agent-workflow worktree-init` を使い、main worktree を直接汚さない。standard/large の `/sdd` には新規ワークツリー作成を抑止するオーバーライドを渡す。
 - **マージは user**（GATE 3 を通しても自動マージしない）。
 - **CI first**: CI green を確認してからレビューを実施する（Phase 5 → Phase 6 の順）。CI が落ちている状態でのレビューは無駄になる可能性が高い。
 - **Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT**（`codex:codex-rescue` を起動しない理由もそこに集約。ここでは再掲しない）。

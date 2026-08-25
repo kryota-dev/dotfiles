@@ -6,13 +6,19 @@ disable-model-invocation: true
 
 # 実行計画の作成
 
+## Harness contract
+
+`~/.agents/workflow/README.md` を優先する。Plan の保存は approval capability を経てから行い、Codex
+非対話実行では承認待ち state のまま停止する。新規 Plan は `.agent-workflow/plans/` に git 追跡で保存し、
+legacy `.claude/plans/` は読み取り migration input としてだけ扱う。
+
 ## 概要
 
-このドキュメントは、`.claude/plans`ディレクトリに配置する実行計画ファイルの作成ガイドです。明確で実行可能な計画を作成するための指針を提供します。
+このドキュメントは、`.agent-workflow/plans`ディレクトリに配置する実行計画ファイルの作成ガイドです。明確で実行可能な計画を作成するための指針を提供します。
 
 ## ファイル名の規則
 
-- **配置場所**: `.claude/plans` ディレクトリに作成する
+- **配置場所**: `.agent-workflow/plans` ディレクトリに作成する
 - **命名規則**: `YYYYMMDDHHMMSS_taskName.md` 形式を使用する
   - `date` コマンドで現在時刻を取得してファイル名にすること
   - `taskName`は英語で簡潔に記述（例：`user-auth-implementation`）
@@ -29,12 +35,12 @@ echo "ファイル名: ${FILENAME}"
 
 ## Plan-PRD pipeline（任意 / opt-in, task #22）
 
-以下の flag は **任意**。**未指定時は本ドキュメントの通常動作（`.claude/plans/YYYYMMDDHHMMSS_taskName.md` への計画出力）を完全に維持する**。flag を渡したときだけ PRD 入力 / pipeline 形式の Plan 出力を行う。
+以下の flag は **任意**。**未指定時は本ドキュメントの通常動作（`.agent-workflow/plans/YYYYMMDDHHMMSS_taskName.md` への計画出力）を完全に維持する**。flag を渡したときだけ PRD 入力 / pipeline 形式の Plan 出力を行う。
 
 | flag | 既定 | 意味 |
 |------|------|------|
 | `--input-prd <path>` | （なし） | `/grill-me --output-prd` が出力した PRD file を入力 context として読み込み、その Acceptance Criteria を計画の起点にする |
-| `--output-plan [<path>]` | （なし） | pipeline 形式で Plan file を出力。**この flag を渡したときのみ** slug 命名になる（未指定時は従来の timestamp 命名）。slug は `--input-prd` 指定時は **PRD frontmatter の `slug` を継承**、未指定時は task 名を kebab-case 化。`<path>` 省略時の既定配置は `.claude/plans/<slug>.plan.md`（git tracked。`*.plan.md` は global gitignore の negation で追跡される） |
+| `--output-plan [<path>]` | （なし） | pipeline 形式で Plan file を出力。**この flag を渡したときのみ** slug 命名になる（未指定時は従来の timestamp 命名）。slug は `--input-prd` 指定時は **PRD frontmatter の `slug` を継承**、未指定時は task 名を kebab-case 化。`<path>` 省略時の既定配置は `.agent-workflow/plans/<slug>.plan.md`（git tracked） |
 | `--mode=interactive\|auto` | `interactive` | `interactive`=現状動作 / `auto`=council（4 視点）審議で自動詳細化し、**最終 Plan draft を user が 1 回承認** |
 
 - **auto でも security / data migration / contract change 等は強制的に user エスカレート**する。

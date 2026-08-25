@@ -40,8 +40,8 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 | `claude-config` | Claude Code | 個人 | zsh ヘルパー：ECC config-protection + gateguard-fact-force ゲートを無効化してから `claude` ラッパーを呼ぶ；意図的な設定編集用 |
 | `cldf` | Claude Code | 個人 | zsh ヘルパー：`claude` ラッパーを `--model claude-fable-5` と [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで呼ぶ — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
 | `cldf-r06` | Claude Code | 業務（r06） | r06 アカウントでの `cldf` |
-| `codex` / `cdx` | Codex CLI | `CLAUDE_CONFIG_DIR` に追従（fill-gaps） | brew 管理の `codex` バイナリを実行し、argv に `--profile` がなければ `--profile shared` を注入；`CODEX_HOME` は `CLAUDE_CONFIG_DIR` が設定されていればそれに追従（`.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）、未設定なら明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |
-| `cdx-r06` | Codex CLI | 業務（r06） | 同じラッパー；`CODEX_HOME` を無条件に `~/.codex-r06` に強制（override）；`--profile shared` は引き続き注入 |
+| `codex` / `cdx` | Codex CLI | `CLAUDE_CONFIG_DIR` に追従（fill-gaps） | brew 管理の `codex` バイナリを実行し、argv に `--profile` がなければ `--profile main` を注入；`CODEX_HOME` は `CLAUDE_CONFIG_DIR` が設定されていればそれに追従（`.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）、未設定なら明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |
+| `cdx-r06` | Codex CLI | 業務（r06） | 同じラッパー；`CODEX_HOME` を無条件に `~/.codex-r06` に強制（override）；`--profile main` は引き続き注入 |
 
 個人アカウントについては、`claude` と `cld` は文字通り同じファイルに 2 つの名前でアクセスしているだけです — ラッパーの `$0` 分岐には `cld-r06` 用の分岐しかなく `cld` 専用の分岐はありません — したがって両者に分離上の違いはありません。`codex`/`cdx` も同様です。短縮名が存在するのは `-r06` 系との対称性と手癖のためであり、ベアの名前に何かが欠けているからではありません（[ベア呼び出しはもはやギャップではない](#ベア呼び出しはもはやギャップではない) を参照）。
 
@@ -106,7 +106,7 @@ exec "$real" "$@"
 
 ## ベア呼び出しはもはやギャップではない
 
-ベアのバイナリ名（`claude`、`codex`）での実行は、#345 より前はアカウント機構を完全にバイパスしていました — per-account 環境と（Codex の場合）`--profile shared` を注入するのは zsh エイリアス（`cld`、`cdx` など）だけでした。このギャップは解消されています：`claude` と `codex` は PATH 上で `cld`/`cld-r06`、`cdx`/`cdx-r06` と同じラッパースクリプトに解決されます。これが機能するのは `~/.local/launchers` が mise のシムディレクトリと Homebrew の `bin` の両方より PATH 上で前に来るよう維持されているためです — `dot_zshrc.tmpl` での静的な prepend に加え、`mise activate` の**後**に登録される `precmd` フック（mise は自身の `precmd` フックで毎プロンプトごとに自分のシムディレクトリを再 prepend するため、こちらは mise の後に実行されて勝つ必要がある）、そして launchd の morning-radar スクリプトが自身のハードコードされた PATH の先頭に同じディレクトリを prepend します。
+ベアのバイナリ名（`claude`、`codex`）での実行は、#345 より前はアカウント機構を完全にバイパスしていました — per-account 環境と（Codex の場合）管理済み profile を注入するのは zsh エイリアス（`cld`、`cdx` など）だけでした。このギャップは解消されています：`claude` と `codex` は PATH 上で `cld`/`cld-r06`、`cdx`/`cdx-r06` と同じラッパースクリプトに解決されます。これが機能するのは `~/.local/launchers` が mise のシムディレクトリと Homebrew の `bin` の両方より PATH 上で前に来るよう維持されているためです — `dot_zshrc.tmpl` での静的な prepend に加え、`mise activate` の**後**に登録される `precmd` フック（mise は自身の `precmd` フックで毎プロンプトごとに自分のシムディレクトリを再 prepend するため、こちらは mise の後に実行されて勝つ必要がある）、そして launchd の morning-radar スクリプトが自身のハードコードされた PATH の先頭に同じディレクトリを prepend します。
 
 インタラクティブ zsh 専用のエイリアスではなく PATH 上の実ファイルであるため、ラッパーはエイリアスが届かなかった文脈——フックプロセス、launchd ジョブ、Claude Code 自身の Bash ツールが実行するコマンド——からも動作します。アカウント選択ロジックのコピーが 1 つしかないため、呼び出し元ごとのエイリアス定義が必要としていたであろう手コピーの環境ブロックが、呼び出し箇所間でドリフトすることがありません。
 

@@ -5,7 +5,8 @@
 #                 a codex run inside a cld-r06 session stays on r06 and a personal session cannot
 #                 be dragged onto r06 by a stray CODEX_HOME.
 #   cdx-r06    -> work (r06) account, unconditional override.
-# It injects `--profile shared` (the chezmoi-managed SSOT config) when argv carries no --profile,
+# It injects `--profile main` (the interactive, network-enabled orchestration profile) when argv
+# carries no --profile,
 # then execs the brew-managed codex. Being a real file on PATH it works from any shell, so the
 # codex skill's inline account-selection prelude is no longer needed (#345).
 set -eu
@@ -36,7 +37,7 @@ case "$name" in
 esac
 export CODEX_HOME
 
-# Inject --profile shared only when argv carries no profile flag. Scan per token — recognising
+# Inject --profile main only when argv carries no profile flag. Scan per token — recognising
 # --profile, --profile=…, -p and -p<value> — and stop at a literal `--` so a "--profile"
 # substring inside a prompt argument cannot false-match. codex accepts --profile as a global
 # option, so insert it right after the program name, ahead of any subcommand (bare / exec /
@@ -52,7 +53,7 @@ for arg in "$@"; do
   esac
 done
 if [ "$has_profile" -eq 0 ]; then
-  set -- --profile shared "$@"
+  set -- --profile main "$@"
 fi
 
 # Resolve the brew-managed codex without going through PATH (which would re-resolve this wrapper).

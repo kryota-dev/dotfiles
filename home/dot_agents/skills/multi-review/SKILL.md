@@ -1,8 +1,8 @@
 ---
 name: multi-review
 description: |
-  tier に応じたレビュー roster（Claude 汎用/セキュリティ + Codex generalist/specialist）を
-  並列でバックグラウンド実行し、レビュー負荷の大半を Codex へ offload する。
+  tier に応じた harness 非依存の reviewer roster を並列実行し、shared rubric に沿って
+  結果を統合する。
   結果を統合サマリーにまとめた上で、GitHub PR にレビュー（body サマリー + インラインコメント）として投稿する。
   PRの包括的レビューを一度に実行したい場合に使用する。
   トリガー: "multi-review", "マルチレビュー", "全レビュー", "並列レビュー", "フルレビュー", "tierレビュー"
@@ -12,15 +12,28 @@ argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--tier=trivial|small|
 
 # Multi Review
 
-**tier に応じたレビュー roster（Claude + Codex）** を並列でバックグラウンド実行し、結果を統合サマリーにまとめる。
-roster は tier で gating し（過剰起動を抑制）、レビュー負荷の大半を Codex へ offload する（Claude は security / architecture / adversarial に集中）。
+## Harness contract (normative)
+
+`~/.agents/workflow/README.md` が roster・結果回収・approval の優先仕様である。shared rubric は
+`~/.agents/reviewers/<role>.md` が唯一の SSOT であり、`~/.claude/agents/` は Claude adapter に過ぎない。
+Codex leg は shared rubric を stdin prompt に注入し、親が採番した result file へ結果を返す。
+
+Codex-only は全ての Claude leg を独立 Codex leg に置換する。Claude が利用できる場合だけ cross-model
+diversity を使う。必須 generalist/code/security/architecture/adversarial leg が起動または結果回収に失敗した場合は
+`blocked`、optional specialist の失敗は統合結果へ記録して続行する。投稿の承認は harness contract の
+approval capability を使い、非対話の場合は user-owned runner approval を待つ。
+
+**tier に応じた shared-role roster** を並列でバックグラウンド実行し、結果を統合サマリーにまとめる。
+roster は tier で gating し（過剰起動を抑制）、harness adapter は各 role の実行だけを担当する。
+Claude/Codex がともに使える場合は cross-model diversity を優先し、Codex-only では同じ role を独立した
+Codex leg として必ず起動する。
 既存レビュー（CodeRabbit / Devin / claude[bot] / 人間レビュアー）と重複する指摘を除外したうえで、
 統合結果をユーザーに提示し、承認があれば GitHub PR にレビュー（body サマリー + インラインコメント、または インラインのみ）を投稿する（投稿方法はユーザーが選択）。
 
 ```
 引数解析(--tier 抽出) → 差分取得 → tier 確定(明示 or 自動推定) → 既存レビュー取得
-  + tier 別 roster 並列実行(Claude Agent + Codex bash, --json 観測) → 結果収集 → 統合サマリー
-  → 既存レビューとの重複除外 → ユーザー確認(投稿方法を選択) → 投稿
+  + tier 別 shared-role roster 並列実行(adapter が Claude Agent / Codex exec を選択) → 結果収集 → 統合サマリー
+  → 既存レビューとの重複除外 → approval capability → 投稿
 ```
 
 **重複除外の意義**: 既存レビュアーが既に同じ指摘をしている場合、再投稿は冗長でレビュアーの認知負荷を増やす。
@@ -86,21 +99,24 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
    - **これは floor であって ceiling ではない**: パス名ベースの機械的な最低保証であり、diff 本文の内容判定（上記 fail-safe 切り上げ）を置き換えない。汎用ファイル名で中身が security-critical な変更は引き続き fail-safe 判断が主軸。
    - **pr-workflow 経由との関係**: pr-workflow は Phase 0 の分類でも security surface を `standard` 以上とみなすが、それは LLM 判断（プローズ）。本フロアは multi-review 側の**決定的なバックストップ**として、pr-workflow が明示 `--tier` を forward した場合でも（分類の見落とし・誤操作・自動化による `--tier` 注入に対して）機械的に効く。
 
-### roster gating table（spawn する = ✓、モデルと effort 付き）
+### roster gating table（spawn する = ✓、shared role と effort）
 
-| tier | cc-code-review<br>(Claude 汎用) | cc-security-review<br>(Claude security) | codex generalist<br>(Codex) | specialists<br>(Codex) | architecture<br>(Claude, `--arch`) | adversarial<br>(pr-workflow Phase 6) |
+| tier | generalist | code | security | matched specialists | architecture (`--arch`) | adversarial（pr-workflow Phase 6） |
 |---|---|---|---|---|---|---|
-| **trivial** | — | — | ✓ effort=high | — | — | — |
-| **small** | ✓ | — | ✓ effort=high | — | — | — |
-| **standard** | — | ✓ | ✓ effort=xhigh | ✓ effort=high | — | — |
-| **large** | — | ✓ | ✓ effort=xhigh | ✓ effort=high | ✓（large または `--arch`） | ✓（cross-model） |
+| **trivial** | ✓ high | — | — | — | — | — |
+| **small** | ✓ high | ✓ high | — | — | `--arch` 時のみ | — |
+| **standard** | ✓ xhigh | — | ✓ xhigh | ✓ high | `--arch` 時のみ | — |
+| **large** | ✓ xhigh | — | ✓ xhigh | ✓ high | ✓ | ✓ |
 
-- **多様性フロア（non-trivial で Claude≥1 + Codex≥1 を保証）**: small=cc-code(Claude)+codex(Codex)、standard/large=cc-security(Claude)+codex/specialists(Codex)。trivial のみ単一モデル（Codex）を許容する。
-- **generalist は Codex 単独**（規模でコスト爆発する層を offload）。small だけは diff が小さくコストが低いため Claude generalist(cc-code) を安価なフロア anchor として併走させる。standard 以上では security(Claude) が anchor を担い、generalist は完全に Codex へ移す。
-- **specialists（言語 roster + 横断 roster のマッチ分）は全て Codex 実行**（従来の Claude subagent spawn を置換。実行形は「Codex leg 実行・並列・観測・resume」節、rubric は agent `.md` が SSOT）。**マッチ 0 件なら spawn しない**現行挙動は不変。
-- **architecture は tier gating の対象外**（フラグ/tier のみで判定）: **`--arch`（tier 不問）または tier=large** のとき spawn する。gating table の trivial/small/standard 行の `—` は「通常 `--arch` を付けない運用上の目安」であって、`--tier=small --arch` のように明示すれば spawn する（起動内容表・「aggregate-view reviewer」節と一致）。
-- **architecture / adversarial は Claude 側**（architecture=whole-repo 深い推論・`--arch`/large のみ、adversarial=pr-workflow Phase 6 で cross-model）。
-- **Codex effort は `-c model_reasoning_effort=<high|xhigh>` で leg 別に上書き**する（`codex-model-pin.toml` は変更しない。デフォルト xhigh を fail-safe に据え置き、上表どおり specialist と 軽量 tier generalist だけ high に下げる）。
+- **required role**: table の generalist / code / security / architecture / adversarial は、✓ であれば required
+  である。起動・result 回収・一次情報検証のいずれかに失敗した場合は `blocked` にする。
+- **optional specialist**: matched specialist だけが optional である。失敗時は role と理由を統合結果へ記録して
+  続行する。マッチ 0 件では起動しない。
+- **adapter projection**: Claude が使える場合は Claude adapter と Codex adapter に role を分配して diversity を
+  得る。Codex-only では table のすべての required role を**別々の `codex exec` leg** へ投影し、同族 review
+  であることを統合結果に明記する。role の skip や generalist への縮退は禁止する。
+- **architecture** は `--arch`（tier 不問）または tier=large で required になる。
+- **Codex effort** は `-c model_reasoning_effort=<high|xhigh>` で leg 別に上書きする（`codex-model-pin.toml` は変更しない）。
 
 ## SSOT（Single Source of Truth）
 
@@ -108,16 +124,18 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 
 | ツール | 実行方式 | SSOT |
 |--------|---------|------|
-| cc-code-review | カスタムサブエージェント（Agent ツール、`subagent_type: cc-code-review`） | エージェント定義 `~/.claude/agents/cc-code-review.md`（レビュー観点・出力形式）／ skill `~/.agents/skills/cc-code-review/SKILL.md`（対象解決・起動方法） |
-| cc-security-review | カスタムサブエージェント（Agent ツール、`subagent_type: cc-security-review`） | エージェント定義 `~/.claude/agents/cc-security-review.md`（OWASP チェックリスト・出力形式）／ skill（対象解決・起動方法） |
-| codex | CLI（`codex exec`、バックグラウンド Bash） | skill `~/.agents/skills/codex/SKILL.md`（実行コマンド・`-o` 出力・stdin 堅牢化・プロンプトルール・**wrapper 経由の account/`--profile shared` 自動注入**） |
+| code | Claude adapter の `cc-code-review` または Codex child | `~/.agents/reviewers/cc-code-review.md`（観点・出力形式）／ skill `~/.agents/skills/cc-code-review/SKILL.md`（対象解決） |
+| security | Claude adapter の `cc-security-review` または Codex child | `~/.agents/reviewers/cc-security-review.md`（OWASP 観点・出力形式）／ skill `~/.agents/skills/cc-security-review/SKILL.md`（対象解決） |
+| generalist / specialist / architecture / adversarial | harness adapter | `~/.agents/reviewers/<role>.md`（観点・出力形式）と `~/.agents/skills/codex/SKILL.md`（Codex command / result 回収） |
 
-- **cc-code-review / cc-security-review**: レビュー観点・出力形式・OWASP チェックリストはエージェント定義（system prompt）に内蔵されており、サブエージェント起動時に自動適用される。multi-review はプロンプトに「対象の説明 + 差分 + 作業ディレクトリの絶対パス」のみを渡し、観点・出力形式を再掲しない。エージェント定義は起動時に自動ロードされるため multi-review 側で Read する必要はない。
-- **codex**: Phase 2 開始前に `~/.agents/skills/codex/SKILL.md` を Read し、`-o <FILE>` 出力・stdin 堅牢化・タイムアウト・「（未確認）」ルールに従ってコマンドを組み立てる。
+- adapter は実行前に shared rubric を Read し、Claude は thin adapter として読み込み、Codex は stdin prompt
+  に本文を注入する。multi-review は観点・出力形式を再掲しない。
+- Phase 2 開始前に `~/.agents/skills/codex/SKILL.md` を Read し、`-o <FILE>` 出力・stdin 堅牢化・タイムアウト・
+  「（未確認）」ルールに従って command を組み立てる。
 
 ### 動的 specialist roster（言語/ドメイン特化レビュアー）
 
-**差分の言語・ドメインに応じて専門レビュアーを動的に追加**する。汎用レビュー（generalist）が見落としがちな言語固有・データ層固有の観点を補強するため。**実行は Codex**（tier gating table 参照。standard/large でのみ spawn、effort=high）。**rubric（観点・出力形式・「（未確認）」ルール）は agent 定義 `~/.claude/agents/<lang>-reviewer.md` 本文が SSOT**で、Codex heredoc に注入する（frontmatter は除去。実行形は「Codex leg 実行・並列・観測・resume」節）。rubric は常設ツールと同一の `[MUST]/[SHOULD]/[NITS]/[GOOD]`。
+**差分の言語・ドメインに応じて専門レビュアーを動的に追加**する。汎用レビュー（generalist）が見落としがちな言語固有・データ層固有の観点を補強するため。standard/large でのみ spawn、effort=high。**rubric（観点・出力形式・「（未確認）」ルール）は `~/.agents/reviewers/<lang>-reviewer.md` が SSOT**で、Codex adapter は stdin prompt に注入する。rubric は常設ツールと同一の `[MUST]/[SHOULD]/[NITS]/[GOOD]`。
 
 | specialist | subagent_type | spawn 条件（変更ファイル） |
 |------------|---------------|--------------------------|
@@ -130,11 +148,11 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 - **重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer と react-reviewer の両方が立つ（観点が直交するため許容）。
 - **マッチ 0 件なら言語 specialist を spawn しない**（tier gating table の非 specialist leg のみが立つ）。dotfiles（shell/zsh/bats）のような非対象言語の PR では言語 specialist を spawn しない。
 - **roster 外の agent**: `renovate-analyzer` 等の専用 skill / フローから起動するエージェントは本動的 roster の spawn 対象外。今後 specialist を増やす場合も「diff の言語・ドメインで自動 spawn する reviewer」のみを上表に載せる。
-- **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/<lang>-reviewer.md`）本文に内蔵。**Codex 実行では multi-review がこの本文を Read → frontmatter を剥がして heredoc に注入**し、そこへ「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context があればそのパス）」を添える（観点は再掲・複製しない = drift ゼロ）。agent `.md` 本文は harness 中立化済みで、Claude subagent としても latent に成立する（多様性フロアの逃げ道）。
+- **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールは shared rubric（`~/.agents/reviewers/<lang>-reviewer.md`）本文に置く。Codex adapter は本文を heredoc に注入し、「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context）」を添える。Claude adapter も同じ本文を使う。
 
 ### 横断観点 specialist roster（変更特性ベース, #347）
 
-言語 roster（拡張子ベース）とは別に、**変更の特性**に応じて横断観点の specialist を動的に追加する。sdd の内蔵レビューを廃止（single-pass 化, #347）したことで失われる performance / test / ux 観点を multi-review 側で補うためのレイヤ。言語 roster と同じく **Codex 実行**（tier gating table 参照、standard/large でのみ spawn、effort=high。rubric は agent 定義本文を heredoc 注入）で、rubric は `[MUST]/[SHOULD]/[NITS]/[GOOD]`。
+言語 roster（拡張子ベース）とは別に、**変更の特性**に応じて横断観点の specialist を動的に追加する。sdd の内蔵レビューを廃止（single-pass 化, #347）したことで失われる performance / test / ux 観点を multi-review 側で補うためのレイヤ。standard/large でのみ spawn、effort=high。shared rubric を adapter が注入し、`[MUST]/[SHOULD]/[NITS]/[GOOD]` を使う。
 
 | specialist | subagent_type | spawn 条件（変更ファイル・特性） |
 |------------|---------------|--------------------------------|
@@ -145,15 +163,15 @@ case "$OWNER" in *--*|*-|-*) echo "invalid owner shape: $OWNER" >&2; exit 2 ;; e
 - **検出方法**: 言語 roster と同じく Phase 1 の手順 2 で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` のパス一覧を上表のマッチ基準で判定する。performance は差分特性に加え **caller 要請**でも spawn しうる（性能は差分の字面だけでは判定しづらいため、spec-context や large tier のヒントを併用する）。
 - **language roster と重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer / react-reviewer（言語 roster）と ux-reviewer（横断観点）が同時に立つ（観点が直交するため許容）。DB 系 PR（`*.sql` / `migrations/` / `schema.prisma` / `*.schema.ts`）では database-reviewer（スキーマ安全性・injection）と performance-reviewer（クエリ効率・N+1）が両方立つ —— 追加コストが最も大きい重複パターンだが、観点が異なるため意図的に許容する。
 - **マッチ 0 件なら spawn しない**: 非対象の変更（例: shell/zsh のみの dotfiles PR）では横断観点 specialist を spawn しない。
-- **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/{performance,test,ux}-reviewer.md`）本文に内蔵。**Codex 実行では multi-review がこの本文を heredoc 注入**し、「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context があればそのパス）」を添える（観点は再掲・複製しない）。
+- **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールは `~/.agents/reviewers/{performance,test,ux}-reviewer.md` に置く。adapter は本文を注入し、「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context）」を添える。
 
 ### aggregate-view reviewer（repo/architecture 集約視点, #223）
 
-diff 起動の specialist roster とは **別レイヤ**の reviewer。diff 起動の leg（generalist・security・specialist いずれも）は **diff 起点**のため、「既存抽象との重複」「不要な結合」「意図した設計からの drift」のような **単一 PR の差分だけでは見えない集約視点の問題**は誰も検出できない。それを埋めるのが `architecture-reviewer`（`~/.claude/agents/architecture-reviewer.md`、`model: sonnet` 固定 = #28 model-tier 整合）。
+diff 起動の specialist roster とは **別レイヤ**の reviewer。diff 起動の leg（generalist・security・specialist いずれも）は **diff 起点**のため、「既存抽象との重複」「不要な結合」「意図した設計からの drift」のような **単一 PR の差分だけでは見えない集約視点の問題**は誰も検出できない。それを埋めるのが `architecture-reviewer`（`~/.agents/reviewers/architecture-reviewer.md`）。
 
 - **対象が違う**: 上記 roster は diff を起点にするが、architecture-reviewer は **repo tree・既存モジュール・設計ドキュメント（`docs/architecture/`・design-rationale・steering docs）を横断スキャン**する（diff は探索の起点に過ぎない）。よって roster の「diff 言語で自動 spawn」ロジックには載せず、別レイヤとして扱う。
 - **gated（毎 PR は走らせない・コスト方針）**: whole-repo スキャンは高コストなため、**opt-in（`--arch`）または pr-workflow の large tier から要請されたときのみ** spawn する。デフォルト（無印の multi-review）では spawn しない。この gating が #223 の「per-PR vs periodic」コスト方針の SSOT（＝毎 PR ではなく large/opt-in の per-PR）。
-- **SSOT**: 観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/architecture-reviewer.md`）に内蔵。multi-review は「対象 PR 説明 + 差分取得コマンド + 作業ディレクトリ絶対パス + 棄却台帳」のみ渡す（cc-code-review と同形。差分はエージェント自身が取得し、そこから repo 全体へ探索を広げる）。
+- **SSOT**: 観点・出力形式・「（未確認）」ルールは shared rubric（`~/.agents/reviewers/architecture-reviewer.md`）に置く。adapter は「対象 PR 説明 + 差分取得コマンド + 作業ディレクトリ絶対パス + 棄却台帳」のみを添える（差分は reviewer 自身が取得し、そこから repo 全体へ探索を広げる）。
 
 ### spec-context 入力（呼び出し元からの spec 整合コンテキスト, #347）
 
@@ -236,22 +254,20 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 
 ### Phase 2: 並列実行
 
-**まず「tier → roster 予算」節の gating table で spawn 対象を確定する**（`TIER` と `${DIFF}` から）。そのうえで該当する leg を **同一メッセージ内で並列起動**する:
-
-- **Claude leg（Agent ツール, `run_in_background: true`）**: cc-code-review（**small のみ**）、cc-security-review（**standard/large**）、architecture-reviewer（`--arch`/large）。
-- **Codex leg（バックグラウンド Bash, `run_in_background: true`）**: codex generalist（**全 tier**）、specialists（**standard/large** のマッチ分）。起動形・effort・並列上限・観測（`--json`）・session-id 捕捉・resume は「Codex leg 実行・並列・観測・resume」節が SSOT。
+**まず「tier → roster 予算」節の gating table で role を確定する**（`TIER` と `${DIFF}` から）。そのうえで
+該当する leg を **同一メッセージ内で並列起動**する。Claude/Codex の混在時は adapter に role を分配してよいが、
+Codex-only は下表の role をすべて別の Codex child として起動する。
 
 **Phase 2 開始前**: 「動的 specialist roster」節（言語ベース）と「横断観点 specialist roster」節（変更特性ベース）の検出方法（Phase 1 手順 2 で確保した `${DIFF}` のヘッダ行 `diff --git a/<path> b/<path>` を primary に、`${DIFF}` が空のときのみ fallback として `gh pr diff --repo <owner/repo> <番号> --name-only`）で spawn 対象 specialist を確定する（**standard/large のみ**。trivial/small は specialist を spawn しない）。performance-reviewer は差分特性に加え caller 要請（spec-context の `requirements.md` に NFR 検出）でも spawn しうる。fallback を先に選ぶと cross-repo で `--repo` 忘れの事故が増えるため、原則 `${DIFF}` 再利用を推奨。
 
 #### 起動内容
 
-| ツール | 起動方法 | 渡すもの |
+| shared role | Claude/Codex 混在時の adapter | Codex-only adapter / 渡すもの |
 |--------|---------|---------|
-| cc-code-review（Claude 汎用, **small のみ**） | Agent ツール `subagent_type: cc-code-review`, `run_in_background: true` | プロンプト = 「PR #<番号>（owner/repo）のレビュー依頼 + 差分取得コマンド（`gh pr diff --repo <owner/repo> <番号>`）+ 作業ディレクトリ絶対パス」。**差分はエージェント自身が取得**するため埋め込まない。`--repo` を含めないと cwd 依存で cross-repo バッチが誤解決される。観点・出力形式はエージェント定義に内蔵のため再掲しない。**small tier の多様性フロア anchor**（standard 以上では spawn せず、フロアは cc-security-review が担う） |
-| cc-security-review（Claude security, **standard/large**） | Agent ツール `subagent_type: cc-security-review`, `run_in_background: true` | 同上（セキュリティ観点。差分取得コマンドにも `--repo <owner/repo>` を明示）。差分はエージェント自身が取得。OWASP チェックリストはエージェント定義に内蔵。**standard/large の多様性フロア anchor**（generalist を Codex 単独にした際の Claude 側の目） |
-| codex generalist（Codex, **全 tier**） | バックグラウンド Bash `run_in_background: true` | **primary（base をローカルに取得できる通常ケース）**: 先に `git fetch origin <base_branch>` してから `codex exec --profile shared --sandbox read-only --cd <dir> --color never --json -c model_reasoning_effort=<xhigh: standard/large / high: trivial/small> -o <RESULT_FILE> review --base origin/<base_branch> > <STREAM_FILE> 2>&1`（first-class `review` サブコマンド。exec 側フラグを `review` より前に置く — codex/SKILL.md 参照。差分の heredoc 埋め込みが不要）。`--json`=イベント JSONL を `<STREAM_FILE>` へ（観測用）、`-o`=最終結果を `<RESULT_FILE>` へ（親が読む）。effort は tier gating table に従い `-c` で上書き。**`origin/` を付ける理由**: `--base` はローカル ref を基準にするため、ローカル `main` が古いと既に main へマージ済みの他 PR のコミットまで差分に混入し、codex leg だけ他 reviewer と異なるスコープを見ることになる。**fallback**（fetch できない / base ref を解決できない）は従来の codex skill「PR 差分のレビュー」heredoc 方式（`-o <RESULT_FILE>`、差分は事前変数 `${DIFF}` 埋め込み）。**cross-repo 注意**: `--cd <dir>` は cwd のリポジトリを見るため、`<dir>` が対象 PR のリポジトリと一致しない場合（`review-fleet` 等からの cross-repo 委譲）は primary を使わず fallback を選ぶ。**`codex` はラッパー経由（`~/.local/launchers/codex`、#345）で account/`--profile shared` が自動注入されるため前置不要**（非対話 Bash でも PATH 上のラッパーが効く） |
-| 動的 specialist（言語 + 横断観点、マッチ分のみ, **standard/large**） | **バックグラウンド Bash（Codex）** `run_in_background: true` | **agent 定義本文を heredoc 注入して起動する**（Claude subagent ではなく Codex 実行）。プロンプト = 「`~/.claude/agents/<lang>-reviewer.md`（`{performance,test,ux}-reviewer.md`）の本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ `--spec-context` 指定時は spec パスと整合チェック指示）」。起動形は codex/SKILL.md の heredoc 方式に `--json -c model_reasoning_effort=high -o <RESULT> ... > <STREAM> 2>&1` を付す（「Codex leg 実行・並列・観測・resume」節）。**差分の渡し方（重要）**: Codex sandbox では `gh pr diff` の認証が届かないため specialist に gh を実行させない。generalist と同様、`--cd` が対象 PR の worktree なら heredoc で `git diff origin/<base>...HEAD` を指示し、cross-repo 等で不可なら事前確保した `${DIFF}` を埋め込む（差分取得失敗で空レビューが紛れ込むのを防ぐ）。観点・出力形式は agent 本文が SSOT のため multi-review 側で再掲しない |
-| architecture-reviewer（**`--arch` / large tier のときのみ**） | Agent ツール `subagent_type: architecture-reviewer`, `run_in_background: true` | cc-code-review と同形のプロンプト（「対象 PR 説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」）。**差分は起点として自身が取得し、そこから repo 全体へ探索を広げる**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵。diff 言語では spawn 判定せず、フラグ/tier で判定する（「aggregate-view reviewer」節参照） |
+| generalist（全 tier） | Claude / Codex のいずれか | `--profile shared` の read-only `codex exec`。base がローカルなら `review --base origin/<base>`、それ以外は `${DIFF}` を渡す。result file は親が採番する |
+| code（small） / security（standard/large） | Claude adapter の該当 role を使える | `~/.agents/reviewers/cc-*-review.md` を stdin prompt に注入した独立 `codex exec`。差分は parent が取得して渡す |
+| matched specialist（standard/large） | adapter が利用可能なら使う | `~/.agents/reviewers/<role>.md` を stdin prompt に注入した独立 `codex exec`。optional のため失敗だけを記録する |
+| architecture（`--arch` / large） / adversarial（large） | Claude adapter を優先できる | shared rubric を stdin prompt に注入した独立 `codex exec`。required のため失敗は `blocked` |
 
 #### Claude leg の結果回収契約（name 付き teammate）
 
@@ -275,12 +291,12 @@ Claude leg（cc-code-review / cc-security-review / architecture-reviewer）は *
 
 #### 手順
 
-1. **codex skill を Read**（Codex コマンド構築の SSOT: `--json` / `-o` / `review --base` / heredoc / `resume` / session-id 捕捉）。**Codex 実行する specialist の agent 定義（`~/.claude/agents/<matched>-reviewer.md`）本文も Read**（heredoc 注入用、frontmatter は剥がす）。cc-code-review / cc-security-review / architecture-reviewer は Claude subagent で起動時に定義が自動ロードされるため Read 不要。
+1. **codex skill を Read**（Codex command の SSOT: `--json` / `-o` / `review --base` / heredoc / `resume` / session-id 捕捉）。**table で選ばれた全 role の shared rubric（`~/.agents/reviewers/<role>.md`）も Read**する。Codex child には rubric 本文を、Claude adapter には対応する thin adapter を渡す。
 2. **tier gating table で確定した leg を同一メッセージ内で並列起動**:
-   - **Agent（Claude leg）** `run_in_background: true`: cc-code-review（**small のみ**）／ cc-security-review（**standard/large**）／ architecture-reviewer（`--arch` または large tier のみ）。**一意な `name` を付けて起動**し、プロンプトに差分取得コマンド・作業ディレクトリ絶対パス・**採番した `<RESULT_FILE>` と結果回収指示**（上記「Claude leg の結果回収契約」）・（多ラウンド時は）棄却台帳を含める（**差分は埋め込まずエージェントに取得させる**）。`model` は指定不要（frontmatter が適用）。
-   - **Bash（Codex leg）** `run_in_background: true`: codex generalist（**全 tier**）＋ specialists（**standard/large** のマッチ分、言語 `<lang>-reviewer` + 横断観点 `{performance,test,ux}-reviewer`）。generalist は `review --base origin/<base>` primary / heredoc fallback、specialist は agent 本文注入 heredoc。**いずれも `--json -c model_reasoning_effort=<tier 別> -o <RESULT_FILE> ... > <STREAM_FILE> 2>&1`**（起動形・effort・並列上限・session-id 捕捉・観測は「Codex leg 実行・並列・観測・resume」節が SSOT）。`RESULT_FILE` / `STREAM_FILE` / 捕捉した `thread_id` を記録する。**`codex exec --profile shared` はそのまま使う**（ラッパーが account/`--profile shared` を注入。前置不要）。**並列上限 `CODEX_MAX_CONCURRENCY` を超える Codex leg はバッチで順次消化**する。
-   - **`--spec-context` 指定時**: 上記すべての leg に spec ドキュメントの絶対パス（`<dir>/requirements.md` / `design.md` / `tasks.md`）と「実装差分が spec に整合しているか（要件の取りこぼし・設計からの逸脱・未完了タスク）も併せて確認せよ」という指示を追加する（Claude leg はプロンプトに、Codex leg は heredoc に。「spec-context 入力」節）。
-3. **失敗時のリトライ**: 1 回までリトライ。codex が `No prompt provided via stdin.` の場合は事前変数確保パターンで再実行（codex skill 参照）。再失敗なら該当ツールをスキップして Phase 3 へ。
+   - Claude adapter を使う leg には一意な name、差分取得 command、worktree、親が採番した `<RESULT_FILE>`、棄却台帳を渡す。
+   - Codex adapter の leg はすべて `codex exec --profile shared --sandbox read-only --cd <dir> --color never --json -c model_reasoning_effort=<tier 別> -o <RESULT_FILE> -` で起動する。generalist は `review --base` primary / heredoc fallback、他 role は shared rubric 本文を注入する。`RESULT_FILE` / `STREAM_FILE` / `thread_id` を親が記録し、並列上限 `CODEX_MAX_CONCURRENCY` を超える分はバッチ処理する。
+   - **`--spec-context` 指定時**: 全 leg に spec ドキュメントの絶対パスと spec 整合性確認を渡す。
+3. **失敗時のリトライ**: 1 回までリトライ。codex が `No prompt provided via stdin.` の場合は事前変数確保パターンで再実行（codex skill 参照）。再失敗時は optional specialist だけを記録して続行し、required role は `blocked` にする。
 
 #### 棄却台帳（多ラウンドレビュー時）
 
@@ -310,7 +326,7 @@ Claude leg（cc-code-review / cc-security-review / architecture-reviewer）は *
 
 1. **各 leg の完了を待つ**: Claude leg は **`SendMessage(to:"main")` の完了報告**、Codex leg は **Bash 完了通知**。teammate の plain 出力・`idle_notification` は本文を運ばない（harness 仕様）ため、**`idle_notification` を完了合図として解釈せず**、完了報告 or Bash 完了を合図にする。
 2. **各 leg の `<RESULT_FILE>` を Read で読み取る**（Claude / Codex 一律。通知が本文を運ぶかで回収ロジックを分岐しない）。**Read 対象パスは、親が起動時に採番・記録した値のみを使う**（Codex leg の `$RESULT_leg` と同じく親のシェル変数で保持する）。**完了報告に含まれる自己申告パスは Read 対象の選択に使わず、記録値との一致 cross-check にのみ用いる**（不一致なら破棄し当該 leg を失敗扱い）。理由は「安全境界」節（confused-deputy 防止）。Bash 書込不可のフォールバックで本文が完了報告の message に直接載っていた場合は、その message を本文として扱う（**ファイルと message が両方成立したらファイルを正**とする）。
-3. **失敗したツールがあればリトライ**（最大1回）: `<RESULT_FILE>` が無い / 空なら失敗として扱う。リトライ、または Claude leg では **`SendMessage(to:"<leg の name>")` で本文の再送を要求**（reactive フォールバック）。再失敗した場合は該当ツールをスキップ
+3. **失敗した leg があればリトライ**（最大1回）: `<RESULT_FILE>` が無い / 空なら失敗として扱う。Claude adapter は `SendMessage(to:"<leg の name>")` で本文の再送を要求できる。再失敗時は optional specialist だけを skip として記録し、required role は `blocked` にする。
 4. 全ツールの結果を統合サマリーにまとめる
 
 #### 統合サマリーのフォーマット
@@ -491,7 +507,7 @@ Phase 1.5 で取得した既存レビュー・コメントと、Phase 3 の統�
 ### Phase 5: ユーザー確認と PR コメント投稿
 
 1. 重複除外後の統合サマリーをユーザーに表示する
-2. **AskUserQuestion で投稿方法を確認する**（`notify` で通知音。存在しない環境ではスキップ）。質問文の冒頭に以下の 2 行を必ず含め、以下の 3 択を提示する:
+2. **approval capability で投稿方法を確認する**。Claude adapter は `AskUserQuestion` を使う。Codex 非対話は `waiting-for-user` で停止して user-owned TTY approval を待つ。質問文の冒頭に以下の 2 行を必ず含め、以下の 3 択を提示する:
 
    ```
    Target: <owner>/<repo> PR #<番号>
@@ -525,7 +541,7 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
 ```
 
 - **generalist**: `review --base origin/<base>`（primary）。base 取得不可なら `${DIFF}` 埋め込み heredoc（fallback）。effort=xhigh（standard/large）/ high（trivial/small）。
-- **specialist**: heredoc = 「agent `.md` 本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ spec-context）」。effort=high。
+- **specialist / code / security / architecture / adversarial**: heredoc = 「shared rubric 本文 + 対象説明 + 差分取得 command（`--repo` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ spec-context）」。effort は roster table に従う。
 - 親は **`$RESULT_leg` のみ Read**。`$STREAM_leg`（JSONL）は観測用で親コンテキストに載せない。
 
 ### session-id 捕捉と状態ファイル
@@ -721,26 +737,26 @@ multi-review が投稿するインラインコメントの本文先頭には、�
 
 | シナリオ | 対応 |
 |---------|------|
-| cc-code-review / cc-security サブエージェントの失敗・スキップ | 1回リトライ。再失敗なら該当ツールをスキップして残りで続行 |
+| required role（generalist / code / security / architecture / adversarial）の失敗・未定義 | 1 回リトライ。再失敗なら `blocked` とし、role・adapter・失敗理由を報告する。別 role への縮退や skip はしない |
 | 動的 specialist の失敗・未定義（`<lang>-reviewer` 未配備） | 1回リトライ。再失敗なら該当 specialist のみスキップし、その回の tier roster（generalist + フロア anchor + 他 specialist）で続行（specialist は補強レイヤのため必須ではない） |
-| `cc-code-review` / `cc-security-review` サブエージェント未定義 | `~/.claude/agents/` に定義があるか確認を案内（chezmoi apply 済みか）。該当ツールをスキップ |
-| `codex` コマンド未発見 | 警告を出力し、その回に spawn 済みの Claude leg（tier により cc-code-review **or** cc-security-review）と Claude specialist は無いため、**generalist 観点が失われる旨を明示**して続行。standard/large では generalist を Codex が独占するため、緊急フォールバックとして cc-code-review（Claude 汎用）の spawn を検討する |
+| Claude adapter が未定義 | `~/.agents/reviewers/` の shared rubric と Claude thin adapter の配備を確認する。Codex-only なら該当 role の独立 Codex leg を起動し、Claude が必要な run なら `blocked` |
+| `codex` コマンド未発見 | Codex-only は `blocked`。Claude/Codex 混在でも Codex に割り当てた required role があれば `blocked` とする |
 | codex が `No prompt provided via stdin.` で終了 | 差分を事前変数確保するパターンで1回リトライ（codex skill 参照） |
 | codex 結果ファイルにログ混入 | `-o <FILE>` 形式になっているか確認（`> file 2>&1` 併合をやめる） |
-| 個別ツールのタイムアウト | 1回リトライ。2回目も失敗なら該当ツールをスキップ |
+| 個別 leg のタイムアウト | 1 回リトライ。2 回目も失敗なら optional specialist は記録して続行、required role は `blocked` |
 | 空の差分 | 「レビュー対象の差分がありません」と報告して終了 |
 | PR番号が無効 | エラーメッセージを表示して終了 |
 | Pending Review 作成失敗 | エラー内容を表示してユーザーに報告 |
-| 全ツール失敗 | エラーサマリーを出力して終了 |
+| 全 required role が回収不能 | `blocked` のエラーサマリーを出力して終了 |
 
 ## 注意事項
 
 ### コスト管理
 
-- **tier gating が第一のコストレバー**（「tier → roster 予算」節）。小 PR は spawn 数が激減し（trivial=Codex 1 本、small=2 本）、大 PR でのみ specialist を含む網羅 roster が立つ。tier を見ずに全 roster を組む旧挙動は廃止。
-- **Codex への offload**: generalist（全 tier）と specialists（standard/large）は **Codex 実行**で Claude 予算から外れる。Claude が残るのは cc-code-review（small のフロア anchor）／ cc-security-review（standard/large のフロア anchor）／ architecture-reviewer（large の集約視点）／ adversarial（pr-workflow Phase 6、cross-model）に限られる。**多様性フロア**（non-trivial で Claude≥1 + Codex≥1）は守る。
+- **tier gating が第一のコストレバー**（「tier → roster 予算」節）。小 PR は spawn 数が激減し、大 PR でのみ specialist を含む網羅 roster が立つ。tier を見ずに全 roster を組む旧挙動は廃止。
+- **adapter 選択**: Claude/Codex 両方が利用可能な run は cross-model diversity を優先する。Codex-only は required role を削らず独立 Codex leg に置換し、cross-model diversity が無いことを結果に明記する。
 - **Codex effort（`-c model_reasoning_effort=`）**: generalist=xhigh（standard/large の唯一の広い網ゆえ品質バー維持）／ specialist=high。`codex-model-pin.toml` は変更せず、デフォルト xhigh を fail-safe に据え置いたうえで leg 別に上書きする。model は `gpt-5.6-terra` 単一。
-- **Claude leg の model / effort の SSOT は各エージェント定義の frontmatter**（cc-code-review / cc-security-review = `model: sonnet` + `effort: xhigh`、architecture-reviewer = `model: sonnet`）。specialist の agent 定義（`model: sonnet` + `effort: high`）は **Codex 実行では未使用**（frontmatter は剥がされる）だが、Claude subagent としての latent 起動時に適用される（多様性フロアの逃げ道）。security-critical / large では Claude leg の Agent 呼び出し時に `model: "opus"` 等を明示指定して品質を上げる opt-in を維持する。
+- **Claude adapter の model / effort** は thin adapter の frontmatter、Codex leg の effort は roster table が SSOT である。shared rubric に model 設定を複製しない。
 - **Codex 並列は `CODEX_MAX_CONCURRENCY`（=3）で上限**（「Codex leg 実行・並列・観測・resume」節）。超過分はバッチ順次で、未検証の高並列競合を構造回避する。
 - **architecture-reviewer（#223）は最もコストが高い**（repo tree・既存モジュール・設計ドキュメントを横断スキャン）。**`--arch` opt-in または pr-workflow の large tier のときのみ** spawn する（＝ #223 の per-PR コスト方針）。
 - **codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT**（`codex:codex-rescue` を起動しない理由もそこに集約。ここでは再掲しない）。レビュー leg は read-only なので `--profile shared` を使う。

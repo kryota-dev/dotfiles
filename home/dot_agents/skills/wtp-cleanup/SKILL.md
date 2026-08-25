@@ -6,6 +6,11 @@ user-invocable: true
 
 # マージ済みワークツリーのクリーンアップ
 
+## Harness contract
+
+削除確認は harness 固有の API ではなく approval capability で行う。Codex の非対話実行では必ず
+`waiting-for-user` で停止し、user の明示承認なしに `wtp rm` や `--force` を実行しない。
+
 ## 概要
 
 `wtp list` で取得したワークツリーのうち、`main` ブランチにマージ済みのものを検出し、ユーザー確認の上で一括削除します。
@@ -38,7 +43,7 @@ git branch --merged main
 ### 4. 結果の報告と削除確認
 
 マージ済み・未マージのブランチをテーブル形式で一覧表示し、削除対象を明示します。
-その後、`AskUserQuestion` ツールを使用して、マージ済みワークツリーを削除してよいかユーザーに確認してください。
+その後、approval capability を使用して、マージ済みワークツリーを削除してよいかユーザーに確認してください。
 
 ### 5. マージ済みワークツリーの削除
 
@@ -51,7 +56,7 @@ wtp rm <BRANCH_1> && wtp rm <BRANCH_2> && ...
 ### 6. エラーハンドリング
 
 - 未コミットの変更やuntrackedファイルがあるワークツリーは削除に失敗します
-- 失敗した場合は `AskUserQuestion` ツールを使用して、`--force` フラグでの強制削除を行うかユーザーに確認してください
+- 失敗した場合は approval capability を使用して、`--force` フラグでの強制削除を行うかユーザーに確認してください
 - ユーザーが承認した場合のみ `wtp rm <BRANCH> --force` で強制削除を実行してください
 
 ### 7. 削除後の確認

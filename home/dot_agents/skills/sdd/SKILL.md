@@ -9,6 +9,17 @@ user-invocable: false
 
 # SDD - Autonomous Spec-Driven Development
 
+## Harness contract (normative)
+
+`~/.agents/workflow/README.md` を優先する。`AskUserQuestion` と Claude Agent の記述は Claude
+adapter であり、Codex は capability contract と `codex exec` child を使う。pr-workflow から呼ばれた
+場合は Phase 0.5 済みの linked worktree を必ず再利用し、この skill の worktree 選択 gate と新規作成を
+skip する。branch は caller が導出した harness 非依存の `feat/` / `fix/` / `refactor/` を維持する。
+
+Codex-only の research worker は read-only `codex exec`、自己完結の実装 worker は linked worktree 内の
+`--profile agent` を使う。親は diff 全体の review 後にだけ検証を実行する。commit/push/PR 作成は
+`agent-workflow` host runner の allowlist action に委ねる。
+
 完全自律型の Spec-Driven Development を実行する。
 あなた（Leader）は **司令塔であり作業者** である。調査はサブエージェントに委任し、ドキュメント作成・実装は自分で行う。実装後のレビューは行わない（レビューは pr-workflow の PR 作成後パイプラインが担う）。
 
@@ -74,44 +85,16 @@ BASE_BRANCH=$(git branch --show-current)
 
 この値を最後まで保持する（コミット・PR作成時に使用）。
 
-### 0-4. ワークツリー戦略の選択
+### 0-4. ワークツリー契約の確認
 
-**SDD の本格着手前に、`AskUserQuestion` でワークツリー戦略をユーザーに確認する。**
-これは SDD 全体で唯一のユーザー確認ポイントであり、これ以降は完全自律で実行する（「重要な注意事項」#1 参照）。
+SDD は単体起動しない。呼出元の pr-workflow が Phase 0.5 で作成済みの linked worktree を必ず
+再利用する。main worktree や任意の現在ディレクトリへのフォールバックはない。
 
-```
-AskUserQuestion:
-  questions:
-    - header: "Worktree"
-      question: "SDD を専用の Git ワークツリーで実行しますか、それとも現在のディレクトリで実行しますか？"
-      multiSelect: false
-      options:
-        - label: "ワークツリーを作成"
-          description: "wtp で専用ワークツリー（新規ブランチ）を作成し、そこへ移動して作業する。メインの作業ディレクトリを汚さずに並行作業できる。"
-        - label: "現在の場所で作業"
-          description: "ワークツリーを作成せず、現在のディレクトリでそのまま作業する。"
-```
-
-#### 「ワークツリーを作成」を選択した場合
-
-`wtp` スキルに従い、Phase 5-1 と同じ命名規約のブランチで専用ワークツリーを作成して移動する:
-
-- ブランチ名: Issue 番号がある場合は `claude/{issue-number}/{spec-name}`、ない場合は `claude/{spec-name}`
-
-```bash
-# 新規ブランチ + ワークツリーを BASE_BRANCH ベースで作成し、絶対パスを取得して移動
-WORKTREE_DIR=$(wtp add -b {branch-name} "$BASE_BRANCH" --quiet)
-cd "$WORKTREE_DIR"
-```
-
-以降の全フェーズ（Spec ディレクトリ作成・実装・コミット・PR 作成）はこのワークツリー内で行う。
-**このケースではブランチが既に作成済みのため、Phase 5-1 のブランチ作成はスキップする。**
-
-`wtp` が利用できない、または作成に失敗した場合は、その旨を踏まえて「現在の場所で作業」にフォールバックする。
-
-#### 「現在の場所で作業」を選択した場合
-
-ワークツリーは作成せず、現在のディレクトリのまま次のステップへ進む。Phase 5-1 で通常どおりブランチを作成する。
+- Claude adapter は `/wtp` で作成済みであることを確認する。
+- Codex は human-owned TTY の `agent-workflow worktree-init` で作成済みであることを確認する。Codex
+  sandbox 内から `wtp add` / `git worktree add` を実行しない。
+- worktree または対応する run state が欠ける場合は `blocked` にして pr-workflow へ戻す。SDD がブランチを
+  作成・切替・再選択してはならない。
 
 ### 0-5. Spec ディレクトリ作成
 
@@ -309,19 +292,8 @@ tasks.md の各タスクを順番に実装:
 
 ### 5-1. ブランチ作成
 
-**Phase 0-4 で「ワークツリーを作成」を選択した場合は、ブランチが既に作成済みのためこのステップをスキップする。**
-
-それ以外の場合:
-
-```bash
-CURRENT=$(git branch --show-current)
-# ベースブランチ（main/master）にいる場合のみ新しいブランチを作成
-if [ "$CURRENT" = "main" ] || [ "$CURRENT" = "master" ]; then
-  # Issue番号がある場合: claude/{issue-number}/{spec-name}
-  # ない場合: claude/{spec-name}
-  git checkout -b {branch-name}
-fi
-```
+Phase 0.5 で branch と linked worktree は作成済みである。現在の branch が caller から渡された branch と
+一致することだけを確認し、新規作成・checkout は行わない。不一致は `blocked` として pr-workflow に戻す。
 
 ### 5-2. 変更内容の分析とコミット計画
 
@@ -333,18 +305,9 @@ fi
 
 ### 5-3. 論理的な粒度でコミット
 
-各コミット:
-
-```bash
-git add {関連ファイル}
-git commit -m "$(cat <<'EOF'
-{type}({scope}): {簡潔な説明}
-
-- {詳細な変更内容1}
-- {詳細な変更内容2}
-EOF
-)"
-```
+各コミットは `/commit` の approval capability と host runner contract に従う。Codex の場合は user が
+TTY で `agent-workflow approve <run-id> commit` を実行した後だけ、linked worktree 内の message file と
+対象 path を指定して `agent-workflow commit` を実行する。直接の `git add` / `git commit` は使わない。
 
 **コミットの原則:**
 - 1コミット1目的（単一責任の原則）
@@ -355,36 +318,23 @@ EOF
 
 ### 5-4. リモートにプッシュ
 
-```bash
-git push -u origin {branch-name}
-```
+Codex は user が TTY で `agent-workflow approve <run-id> push` を実行した後だけ
+`agent-workflow push <run-id>` を使う。Claude adapter も同じ検証済み run state を使い、main worktree から
+push しない。
 
 ### 5-5. PR作成
 
 1. **PR テンプレートの読み込み**:
    `.github/PULL_REQUEST_TEMPLATE.md` が存在すれば読み込み、テンプレートに従う
 
-2. **PR 下書きファイルの保存**:
-   ```bash
-   mkdir -p .claude/pull-requests/drafts/{branchName}
-   ```
-   `.claude/pull-requests/drafts/{branchName}/{timestamp}.md` に保存（timestamp は `YYYYMMDD-HHMMSS` 形式）
+2. **PR 下書きの保存**:
+   title/body は `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に置く。legacy
+   `.claude/pull-requests/` は migration input として読むだけで、新規作成・rename・削除しない。
 
 3. **PR 作成**:
-   ```bash
-   gh pr create \
-     --draft \
-     --title "{type}: {簡潔なタイトル}" \
-     --body-file .claude/pull-requests/drafts/{branchName}/{timestamp}.md \
-     --base "{base-branch}" \
-     --head "{branch-name}" \
-     --assignee "@me"
-   ```
-
-4. **後処理**:
-   - PR 番号を取得
-   - 下書きファイルをリネーム: `.claude/pull-requests/drafts/{branchName}/{timestamp}.md` → `.claude/pull-requests/{prNumber}.md`
-   - 空になったブランチディレクトリを削除
+   `/create-pr` の approval capability を通す。Codex は user が TTY で
+   `agent-workflow approve <run-id> create-pr` を実行した後だけ、`agent-workflow create-pr` の固定 allowlist
+   action で作成する。直接の `gh pr create` は使わない。
 
 ### 5-6. Issue 紐付け
 
@@ -429,15 +379,15 @@ notify
 |---------|------|
 | サブエージェントの調査失敗 | 別のサブエージェントで再試行。3回失敗したら自身で調査 |
 | ビルド・テスト失敗 | エラー内容を分析し自身で修正。修正後再実行 |
-| Git 操作失敗（1Password 等） | `notify` でユーザーに通知後、`AskUserQuestion` で待機し手動介入を依頼。**この場合のみ作業を中断** |
+| Git 操作失敗（署名・認証等） | capability により user へ通知し、手動介入または TTY 承認を待つ。承認なしに別経路で迂回しない |
 | PR 作成失敗 | エラー内容を確認し、修正して再試行。`gh auth status` で認証を確認 |
 
 ## 重要な注意事項
 
-1. **完全自律実行**: ユーザー確認は Phase 0-4 のワークツリー戦略の選択（`AskUserQuestion`）のみ。それ以降は Phase 6 まで承認フローを挟まず一切止まらずに実行する
+1. **自律実行の境界**: 設計・実装は自律で進めるが、host runner が保護する commit / push / PR 作成と外向き操作は approval capability を必ず通す
 2. **MCP ツール不使用**: spec-workflow MCP のツール（approvals, spec-status, log-implementation 等）は一切使用しない
 3. **sleep / polling 禁止**: `sleep` コマンドや `while` ループでの待機は**絶対に使わない**。サブエージェントの結果は完了時に自動で返る
 4. **Leader = 司令塔 + 作業者**: ドキュメント作成と、複数ファイル横断・context 継続が要るコード実装は Leader 自身が行う。調査、および 4-2 の**自己完結タスク**はサブエージェント / Codex worker に委任してよい（判定基準は 4-2）
 5. **コスト最適化 / model・effort tier**: Leader = セッション model（要求水準は `/model-fitness-check` が SSOT。Phase 0 で起動済み。値をここに再掲しない）。**調査はタスク形状別**: retrieval 型（steering docs 転記）= Haiku、pattern-recognition 型（コードベース構造・再利用パターン分析）= Sonnet（Explore に `model` を明示 pin）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスク非依存・並行タスクと共有状態なし）は Sonnet worker or Codex worker に委譲してよい（前提条件・契約は 4-2 を参照。Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT）。
-6. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 6 の完了時のみ。例外は Git 操作エラー時（`notify` + `AskUserQuestion` で待機）
+6. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 6 の完了時と、Git 操作が approval / 手動介入待ちになったときだけ
 7. **gitignore 対象ファイルへのアクセス**: `.spec-workflow/` 配下のファイル（テンプレート・Steering docs 等）は gitignore されている可能性がある。Glob/Grep は ripgrep ベースで gitignore を尊重するため検出できない。必ず Bash `ls` + Read ツールで直接アクセスすること

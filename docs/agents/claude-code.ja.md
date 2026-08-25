@@ -49,7 +49,7 @@
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
 | `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
-| `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
+| `home/dot_claude/agents/*.md` と `*.md.tmpl` | `~/.claude/agents/*.md`（template は chezmoi で render） |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md`（`cldf`/`cldf-r06` が `--append-system-prompt-file` で読み込む） |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (シンボリックリンク) |
 | `home/dot_claude-r06/symlink_*.tmpl` | `~/.claude-r06/{settings.json,CLAUDE.md,statusline.sh,agents,commands,skills}` (シンボリックリンク) |
@@ -447,7 +447,7 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 
 ## レビューサブエージェント
 
-<!-- FACT:claude-agent-count -->13<!-- /FACT --> 個のサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
+<!-- FACT:claude-agent-count -->13<!-- /FACT --> 個のサブエージェント定義ファイルが `home/dot_claude/agents/` に存在し（`*.md.tmpl` adapter は chezmoi で render）、`~/.claude/agents/` にデプロイされます。すべてのシステムプロンプトは日本語のレビュー出力を誘導するために日本語で書かれています。
 
 すべてのエージェントは frontmatter で `model` と `effort` の両方をピン固定しており、呼び出し元セッションのモデルを継承しません（standalone 起動でもピン固定された tier で動作します）。これらの値の SSOT は frontmatter であり、下表は説明用です。
 

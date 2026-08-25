@@ -225,12 +225,12 @@ EOF
 
 # ---------- codex wrapper: --profile injection ----------
 
-@test "codex wrapper: injects --profile shared only when argv carries no profile flag" {
+@test "codex wrapper: injects --profile main only when argv carries no profile flag" {
   _launchers
   # bare cdx -> inject
   run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" "$LDIR/cdx"
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qFx "ARGV=--profile shared"
+  printf '%s\n' "$output" | grep -qFx "ARGV=--profile main"
   # explicit --profile agent -> pass through, no injection
   run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" "$LDIR/codex" --profile agent
   [ "$status" -eq 0 ]
@@ -254,7 +254,7 @@ EOF
     "$LDIR/codex" exec "explain the --profile flag"
   [ "$status" -eq 0 ]
   # injected at the global position, ahead of the subcommand; the prompt survives intact.
-  printf '%s\n' "$output" | grep -qFx "ARGV=--profile shared exec explain the --profile flag"
+  printf '%s\n' "$output" | grep -qFx "ARGV=--profile main exec explain the --profile flag"
 }
 
 @test "codex wrapper: injection stops scanning at -- and is placed before subcommands" {
@@ -262,11 +262,11 @@ EOF
   # `--` stops the scan, so a post-`--` --profile is a positional, not our flag -> still inject.
   run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" "$LDIR/codex" -- --profile agent
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qFx "ARGV=--profile shared -- --profile agent"
+  printf '%s\n' "$output" | grep -qFx "ARGV=--profile main -- --profile agent"
   # exec review form: --profile must land at the global position (before `exec`), where it parses.
   run env HOME="$BATS_TEST_TMPDIR" CODEX_LAUNCHER_BIN="$STUB" "$LDIR/codex" exec review --base main
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qFx "ARGV=--profile shared exec review --base main"
+  printf '%s\n' "$output" | grep -qFx "ARGV=--profile main exec review --base main"
 }
 
 @test "codex wrapper: fails loudly when the real binary cannot be resolved" {

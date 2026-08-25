@@ -7,6 +7,15 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 
 # wtp (Worktree Plus)
 
+## Harness contract
+
+`pr-workflow` から呼ばれた場合、harness にかかわらず linked worktree を必須とする。branch 名は
+`feat/`、`fix/`、`refactor/` など task の意味を表す prefix を使い、harness 名を prefix にしない。
+Codex の workspace-write child は作成済み linked worktree にだけ入れ、main worktree へは書き込まない。
+Codex main session での**新規作成**は sandbox 内の `wtp add` ではなく、main worktree の human-owned TTY で
+`agent-workflow worktree-init <run-id> --branch <branch> --base <base>` を使う。この action は `wtp add -b` と
+run state 初期化を一体で行う。既存 worktree の一覧・移動・削除に本 skill の `wtp` 手順を使える。
+
 `wtp` は `git worktree` の面倒な部分を取り除く Git ワークツリーマネージャーである。
 ブランチ名から適切なパスを自動導出し、リモートブランチを自動追跡し、作成時に
 プロジェクト固有のセットアップフックを実行し、ワークツリー間を即座に `cd` で

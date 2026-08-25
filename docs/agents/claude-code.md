@@ -49,7 +49,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
 | `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
-| `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
+| `home/dot_claude/agents/*.md` and `*.md.tmpl` | `~/.claude/agents/*.md` (templates render through chezmoi) |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md` (appended by `cldf`/`cldf-r06` via `--append-system-prompt-file`) |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (symlink) |
 | `home/dot_claude-r06/symlink_*.tmpl` | `~/.claude-r06/{settings.json,CLAUDE.md,statusline.sh,agents,commands,skills}` (symlinks) |
@@ -449,7 +449,7 @@ Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headl
 
 ## Review subagents
 
-<!-- FACT:claude-agent-count -->13<!-- /FACT --> subagent definition files live in `home/dot_claude/agents/` and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
+<!-- FACT:claude-agent-count -->13<!-- /FACT --> subagent definition files live in `home/dot_claude/agents/` (`*.md.tmpl` adapters render through chezmoi) and deploy to `~/.claude/agents/`. All system prompts are written in Japanese to steer Japanese-language review output.
 
 Every agent pins both `model` and `effort` in its frontmatter — nothing inherits the caller's session model, so a standalone invocation runs at the pinned tier too. The frontmatter is the single source of truth for these values; the table below is descriptive.
 
