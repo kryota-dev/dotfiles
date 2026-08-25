@@ -66,7 +66,10 @@ teardown() {
 @test "agent-workflow: push は linked worktree の run state を要求する" {
   run bash "${RUNNER}" init push-run --worktree "${WORKTREE}"
   [ "$status" -eq 0 ]
-  sed -i '' 's/version\t2/version\t1/' "${AGENT_WORKFLOW_STATE_DIR}/push-run/state.tsv"
+  local legacy_state
+  legacy_state="$(<"${AGENT_WORKFLOW_STATE_DIR}/push-run/state.tsv")"
+  legacy_state="${legacy_state/$'version\t2'/$'version\t1'}"
+  printf '%s\n' "$legacy_state" >"${AGENT_WORKFLOW_STATE_DIR}/push-run/state.tsv"
   printf '%s\n' $'approved_gates\tpush' >>"${AGENT_WORKFLOW_STATE_DIR}/push-run/state.tsv"
   local remote="${TEST_ROOT}/origin.git"
   git init --bare "${remote}" >/dev/null
