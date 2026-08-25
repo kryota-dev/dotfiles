@@ -9,9 +9,10 @@ argument-hint: "[base-branch]"
 ## Harness contract
 
 `~/.agents/workflow/README.md` を優先する。承認は capability として扱い、interactive Codex では
-`agent-workflow create-pr` 自体の native command approval を要求してから host runner が PR を作成する。非対話実行は
-承認待ちで停止する。
-新規 PR 下書きは `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に保存する。legacy
+`agent-workflow prepare-pr` と `agent-workflow create-pr` の native command approval を要求してから host runner が
+下書きを private run state に保存し、PR を作成する。非対話実行は承認待ちで停止する。新規 PR の title/body source は
+linked worktree に置き、`prepare-pr` が `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に 0600 で
+コピーする。legacy
 `.claude/pull-requests/` は読み取り互換だけで、新規作成・移動・削除しない。
 
 ## 概要
@@ -79,19 +80,29 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 
 @.github/PULL_REQUEST_TEMPLATE.md を読み込み、差分分析結果に基づいてテンプレート内の項目を自動的に埋めてください。
 
-### 5. 下書きファイルの保存
+### 5. 下書きファイルの準備
 
 以下の手順で下書きファイルを保存してください：
 
-1. **state ディレクトリ**:
+1. **worktree 内 source**:
 
+   title と body を linked worktree 内の一時 file に別々に保存する。Codex は workspace-write sandbox から
+   XDG state に直接書き込まない。file 名に branch を埋め込まず、run id を唯一の識別子にする。
+
+2. **private state へのコピー**:
+
+   下書き内容を user に表示した後、interactive Codex は次の固定 host action の native command approval を要求する。
+
+   ```bash
+   agent-workflow prepare-pr <run-id> \
+     --title-file <title-file-in-worktree> \
+     --body-file <body-file-in-worktree>
    ```
-   ${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/
-   ```
 
-   title と body を別 file として保存する。ファイル名に branch を埋め込まず、run id を唯一の識別子にする。
+   runner は linked worktree、recorded branch、source path containment、title の非空、出力の mode `0600` を検証して
+   private run state の `title.md` / `body.md` にコピーする。source file は PR 作成後に worktree から削除する。
 
-2. **legacy の扱い**:
+3. **legacy の扱い**:
 
    `.claude/pull-requests/` は既存下書きの参照だけに使う。新規作成、rename、削除は行わない。
 
@@ -100,8 +111,10 @@ gh pr list --head $(git branch --show-current) --state open --json number,title,
 下書きファイルを作成後、以下の確認を行ってください：
 
 1. **下書き内容の表示**: 生成した PR title/body と target branch をユーザーに提示する。
-2. **確認の取得**: approval capability を使う。interactive Codex は create-pr action の native command approval を
+2. **準備の確認**: approval capability を使う。interactive Codex は `prepare-pr` action の native command approval を
    要求する。非対話では `waiting-for-user` として停止する。`--resume` は承認を与えない。
+3. **投稿の確認**: private state へのコピー後、interactive Codex は create-pr action の native command approval を
+   要求する。
 
 ### 7. PR作成の実行
 
@@ -115,7 +128,7 @@ agent-workflow create-pr <run-id> \
 ```
 
 runner は linked worktree、recorded branch、run state 内の title/body path containment、GitHub remote を検証して
-PR URL を返す。agent が任意の `gh pr create` 引数を実行したり、下書きを移動・削除したりしてはならない。
+PR URL を返す。agent が任意の `gh pr create` 引数を実行したり、private state の下書きを移動・削除したりしてはならない。
 
 ## 自動生成ルール
 

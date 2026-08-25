@@ -26,7 +26,7 @@ native approval UI を選ぶ。その linked worktree を次の main session の
 
 interactive `main` session で固定 host action を実行するときは、Codex に **その action だけの sandbox 外実行を
 要求させる**。user に terminal で command を入力させたり、runner 内の prompt で承認させたりしない。対象は
-`worktree-init`、`init`、`commit`、`push`、`create-pr`、`ready-for-review` の manifest action に限る。各 action の前に
+`worktree-init`、`init`、`commit`、`push`、`prepare-pr`、`create-pr`、`ready-for-review` の manifest action に限る。各 action の前に
 対象・影響を会話で示し、native approval が拒否されたら `waiting-for-user` に戻る。`--approve-for-me` は
 workspace-write sandbox へ戻すため host action に使用しない。
 

@@ -7,7 +7,7 @@
 
 interactive main session は `main` profile を使う。これは workspace-write sandbox を維持しつつ、GitHub の
 read API と live web search のための network access を有効にする。worker 用 `agent` profile は network を
-無効のまま維持する。network access は outbound の境界だけを変え、commit / push / PR 作成 / worktree 作成の
+無効のまま維持する。network access は outbound の境界だけを変え、commit / push / PR 下書き準備・作成 / worktree 作成の
 authority を Codex child に渡すものではない。
 
 開始時は Codex が `agent-workflow worktree-init <run-id> --branch <branch> --base <base>` の native command
@@ -30,5 +30,6 @@ approval を要求し、user は Codex UI で承認する。runner が返した 
 
 `codex exec` は approval gate で `waiting-for-user` を返す。user は同じ run を interactive `main` session で
 開き、提示された action の Codex native command approval を選ぶ。`--resume` は phase と result file の場所を
-復元するだけで、approval を追加しない。外向き操作は `agent-workflow` の固定 manifest action に渡し、sandbox の
-緩和や任意 command 実行で代用しない。
+復元するだけで、approval を追加しない。PR 下書きは worktree 内で作成し、native approval を伴う
+`agent-workflow prepare-pr` が private run state へコピーする。外向き操作は `agent-workflow` の固定 manifest action に
+渡し、sandbox の緩和や任意 command 実行で代用しない。

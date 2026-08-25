@@ -18,6 +18,7 @@ Usage:
   agent-workflow status <run-id>
   agent-workflow commit <run-id> --message-file <file> -- <file>...
   agent-workflow push <run-id>
+  agent-workflow prepare-pr <run-id> --title-file <file> --body-file <file>
   agent-workflow create-pr <run-id> --title-file <file> --body-file <file> --base <branch> [--draft]
   agent-workflow checks <run-id> [--watch]
   agent-workflow ready-for-review <run-id> <pr-number>
@@ -102,6 +103,7 @@ repository_slug() {
 
 path_in_worktree() {
   local worktree="$1" path="$2" candidate resolved
+  worktree="$(cd "$worktree" && pwd -P)" || die "worktree does not exist"
   if [[ "$path" = /* ]]; then
     candidate="$path"
   else
@@ -242,6 +244,44 @@ push_run() {
   set_state_value "$state" phase pushed
 }
 
+prepare_pr_run() {
+  local run_id="$1"
+  shift
+  local state title_file="" body_file=""
+  state="$(require_state "$run_id")"
+  while (($#)); do
+    case "$1" in
+      --title-file)
+        (($# >= 2)) || die "--title-file requires a path"
+        title_file="$2"
+        shift 2
+        ;;
+      --body-file)
+        (($# >= 2)) || die "--body-file requires a path"
+        body_file="$2"
+        shift 2
+        ;;
+      *) die "unknown prepare-pr option: $1" ;;
+    esac
+  done
+  [[ -n "$title_file" && -n "$body_file" ]] || die "prepare-pr requires title and body"
+  local worktree branch directory title
+  worktree="$(state_value "$state" worktree)"
+  branch="$(state_value "$state" branch)"
+  require_linked_worktree "$worktree"
+  [[ "$(git -C "$worktree" branch --show-current)" == "$branch" ]] || die "recorded branch is not checked out"
+  title_file="$(path_in_worktree "$worktree" "$title_file")"
+  body_file="$(path_in_worktree "$worktree" "$body_file")"
+  [[ -f "$title_file" && -f "$body_file" ]] || die "PR title or body source file does not exist"
+  title="$(tr -d '\r\n' <"$title_file")"
+  [[ -n "$title" ]] || die "PR title is empty"
+  directory="$(dirname "$state")"
+  umask 077
+  install -m 600 "$title_file" "$directory/title.md"
+  install -m 600 "$body_file" "$directory/body.md"
+  set_state_value "$state" phase pr-drafted
+}
+
 create_pr_run() {
   local run_id="$1"
   shift
@@ -364,6 +404,10 @@ main() {
     push)
       (($# == 1)) || die "push requires a run id"
       push_run "$1"
+      ;;
+    prepare-pr)
+      (($# >= 1)) || die "prepare-pr requires a run id"
+      prepare_pr_run "$@"
       ;;
     create-pr)
       (($# >= 1)) || die "create-pr requires a run id"

@@ -62,8 +62,9 @@ Codex child は `codex/SKILL.md` の `shared` (read-only) または `agent`
 
 ## Host runner manifest
 
-`agent-workflow` は任意 command を受け取らない。`worktree-init`、`init`、`commit`、`push`、`create-pr`、
-`checks`、`ready-for-review` の固定 action だけを実行し、worktree、branch、引数形式を検証する。書き込みを
+`agent-workflow` は任意 command を受け取らない。`worktree-init`、`init`、`commit`、`push`、`prepare-pr`、
+`create-pr`、`checks`、`ready-for-review` の固定 action だけを実行し、worktree、branch、引数形式を検証する。
+`prepare-pr` は linked worktree 内の title/body source を private run state へ 0600 でコピーする。書き込みを
 伴う action（run state を初期化する `init` を含む）は interactive Codex の native command approval または Claude の
 approval capability の直後だけに実行する。runner 自身は二重の TTY prompt や承認済み gate を持たない。sandbox を
 `--yolo` 等で迂回してはならない。

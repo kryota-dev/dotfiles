@@ -327,8 +327,9 @@ Codex は `agent-workflow push <run-id>` の native command approval を要求�
    `.github/PULL_REQUEST_TEMPLATE.md` が存在すれば読み込み、テンプレートに従う
 
 2. **PR 下書きの保存**:
-   title/body は `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に置く。legacy
-   `.claude/pull-requests/` は migration input として読むだけで、新規作成・rename・削除しない。
+   title/body source は linked worktree 内に置き、Codex は native command approval を伴う
+   `agent-workflow prepare-pr` で private run state に 0600 でコピーする。legacy `.claude/pull-requests/` は
+   migration input として読むだけで、新規作成・rename・削除しない。
 
 3. **PR 作成**:
    `/create-pr` の approval capability を通す。Codex は `agent-workflow create-pr` の native command approval を

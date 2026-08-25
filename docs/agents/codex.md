@@ -123,7 +123,7 @@ web_search = "live"
 network_access = true
 ```
 
-The profile preserves the workspace-write filesystem boundary while allowing the main session to read GitHub state and perform live web research. Network access does not authorize repository or GitHub writes: worktree creation, commit, push, pull-request creation, and ready-for-review remain fixed `agent-workflow` host actions, each requiring Codex's one-time native command approval. It is not used by non-interactive children; those use `agent` or `shared` explicitly.
+The profile preserves the workspace-write filesystem boundary while allowing the main session to read GitHub state and perform live web research. Network access does not authorize repository or GitHub writes: worktree creation, commit, push, pull-request draft preparation and creation, and ready-for-review remain fixed `agent-workflow` host actions, each requiring Codex's one-time native command approval. It is not used by non-interactive children; those use `agent` or `shared` explicitly.
 
 ---
 

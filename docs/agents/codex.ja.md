@@ -123,7 +123,7 @@ web_search = "live"
 network_access = true
 ```
 
-このプロファイルは workspace-write の filesystem boundary を維持したまま、main session に GitHub 状態の読み取りと live web 調査を許可します。network access は repository / GitHub への書き込みを許可しません：worktree 作成、commit、push、PR 作成、ready-for-review は、Codex の一回限りの native command approval を必要とする固定 `agent-workflow` host action のままです。非対話 child には使わず、`agent` または `shared` を明示指定します。
+このプロファイルは workspace-write の filesystem boundary を維持したまま、main session に GitHub 状態の読み取りと live web 調査を許可します。network access は repository / GitHub への書き込みを許可しません：worktree 作成、commit、push、PR 下書き準備・作成、ready-for-review は、Codex の一回限りの native command approval を必要とする固定 `agent-workflow` host action のままです。非対話 child には使わず、`agent` または `shared` を明示指定します。
 
 ---
 

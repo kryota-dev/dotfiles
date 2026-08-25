@@ -80,6 +80,23 @@ teardown() {
   [[ "$(bash "${RUNNER}" status push-run)" != *$'approved_gates\t'* ]]
 }
 
+@test "agent-workflow: PR 下書きは linked worktree から private run state に準備する" {
+  run bash "${RUNNER}" init draft-run --worktree "${WORKTREE}"
+  [ "$status" -eq 0 ]
+  printf '%s\n' 'feat: host action test' >"${WORKTREE}/.agent-workflow-pr-title.md"
+  printf '%s\n' 'PR body' >"${WORKTREE}/.agent-workflow-pr-body.md"
+
+  run bash "${RUNNER}" prepare-pr draft-run \
+    --title-file .agent-workflow-pr-title.md --body-file .agent-workflow-pr-body.md
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${AGENT_WORKFLOW_STATE_DIR}/draft-run/title.md")" = 'feat: host action test' ]
+  [ "$(cat "${AGENT_WORKFLOW_STATE_DIR}/draft-run/body.md")" = 'PR body' ]
+  [ "$(_file_mode "${AGENT_WORKFLOW_STATE_DIR}/draft-run/title.md")" = "600" ]
+  [ "$(_file_mode "${AGENT_WORKFLOW_STATE_DIR}/draft-run/body.md")" = "600" ]
+  [[ "$(bash "${RUNNER}" status draft-run)" == *$'phase\tpr-drafted'* ]]
+}
+
 @test "agent-workflow: CI 確認は固定された GitHub action を通す" {
   local state_file="${AGENT_WORKFLOW_STATE_DIR}/ci-run/state.tsv"
   mkdir -p "$(dirname "${state_file}")"
@@ -138,5 +155,6 @@ teardown() {
   grep -qF 'network_access = false' "${HOME_DIR}/.chezmoitemplates/codex-agent-config.toml"
   grep -qF 'web_search = "cached"' "${HOME_DIR}/.chezmoitemplates/codex-agent-config.toml"
   grep -qF 'agent-workflow worktree-init' "${HOME_DIR}/dot_agents/workflow/codex.md"
+  grep -qF 'agent-workflow prepare-pr' "${HOME_DIR}/dot_agents/workflow/codex.md"
   grep -qF 'native command approval' "${HOME_DIR}/dot_agents/workflow/README.md"
 }

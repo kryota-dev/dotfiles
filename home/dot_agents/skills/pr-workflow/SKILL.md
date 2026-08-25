@@ -23,7 +23,7 @@ Codex では同契約の capability に置換する。`--harness=codex|claude` �
   置換し、同族 review であることを統合結果に明記する。
 - 非対話の Codex は gate で `waiting-for-user` を返す。同じ run を interactive `main` session で開き、
   提示された固定 action の native command approval を user が選ぶまで `--resume` しても進めない。
-- worktree 作成、commit、push、PR 作成、ready-for-review は `agent-workflow` の固定 action を使う。任意 command、
+- worktree 作成、commit、push、PR 下書き準備・作成、ready-for-review は `agent-workflow` の固定 action を使う。任意 command、
   sandbox bypass、暗黙の approval は禁止する。
 - 必須 capability の欠落は `blocked` として停止する。optional specialist の欠落だけは明記して続行する。
 
