@@ -17,7 +17,7 @@ user-invocable: true
 ## Harness contract (normative)
 
 `~/.agents/workflow/README.md` を優先する。本文の `AskUserQuestion` は approval capability の Claude
-adapter であり、Codex では会話承認または user-owned `agent-workflow approve` に置換する。人間 reviewer
+adapter であり、Codex では会話承認と native command approval に置換する。人間 reviewer
 への返信、PR への投稿、push は明示承認を保ち、非対話で勝手に再開しない。CI marker は harness 名ではなく
 既存の configured marker を data として収集するため、Claude 名を含む marker を一般規則にしない。
 
@@ -468,7 +468,7 @@ pnpm -F @apps/api test {関連テストファイル}
 
 ```bash
 agent-workflow commit <run-id> --message-file <message-file> -- <変更ファイル>...
-# user が TTY で approve <run-id> push を実行した後だけ許可される
+# push action ごとに Codex native command approval を要求する
 agent-workflow push <run-id>
 ```
 

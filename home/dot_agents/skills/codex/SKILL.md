@@ -14,13 +14,21 @@ argument-hint: "<依頼内容>（日本語可）"
 
 `pr-workflow` からの Codex-only 実行は、子 process の sandbox を緩めない。linked worktree 内の
 `codex exec --profile agent` は実装だけを担い、commit/push/PR/ready-for-review は
-`agent-workflow` の固定 action に委ねる。非対話 approval は user が TTY で行い、`--resume` は
-approval を付与しない。state と action の詳細は `~/.agents/workflow/README.md` を参照する。
+`agent-workflow` の固定 action に委ねる。interactive `main` session は action ごとに Codex native command
+approval を要求し、user は UI で選択する。非対話 `codex exec` は approval 待ちで停止し、`--resume` は approval を
+付与しない。state と action の詳細は `~/.agents/workflow/README.md` を参照する。
 
 Codex を main session として使うときは `--profile main` を使う。main profile は GitHub/read web のため
-network を許可するが、sandbox は workspace-write のまま維持する。最初に人間が TTY で
-`agent-workflow worktree-init <run-id> --branch <branch> --base <base>` を実行し、その linked worktree を
-`--cd` で指定する。Codex sandbox から `git worktree add`、commit、push、PR 作成を直接行わない。
+network を許可するが、sandbox は workspace-write のまま維持する。Codex は
+`agent-workflow worktree-init <run-id> --branch <branch> --base <base>` を昇格 command として要求し、user は
+native approval UI を選ぶ。その linked worktree を次の main session の作業 root にする。Codex sandbox から
+`git worktree add`、commit、push、PR 作成を直接行わない。
+
+interactive `main` session で固定 host action を実行するときは、Codex に **その action だけの sandbox 外実行を
+要求させる**。user に terminal で command を入力させたり、runner 内の prompt で承認させたりしない。対象は
+`worktree-init`、`init`、`commit`、`push`、`create-pr`、`ready-for-review` の manifest action に限る。各 action の前に
+対象・影響を会話で示し、native approval が拒否されたら `waiting-for-user` に戻る。`--approve-for-me` は
+workspace-write sandbox へ戻すため host action に使用しない。
 
 Codex CLI を使用してコードレビュー・分析を実行するスキル。
 現在のセッションとは別の CLI エージェントが起動し、独立したコンテキストで分析が得られる。
@@ -151,8 +159,8 @@ workspace-write 実行は **linked worktree 内でのみ**行う（main worktree
 
 ### 禁止事項
 
-- `danger-full-access` / `--yolo` / `--dangerously-bypass-approvals-and-sandbox` は **skill から一切使用しない**。必要に見える状況が生じたらフラグで回避せず、作業を止めて user にエスカレートする。
-- `workspace-write` でも `<writable_root>/.git` / `.agents` / `.codex` は再帰的に read-only（Codex は commit / push / skill 定義変更ができない）。これは意図した設計であり、`--add-dir` 等で回避しない。コミットは親（Claude）が gitleaks hook + commit signing の通る経路で行う。
+- `danger-full-access` / `--yolo` / `--approve-for-me` / `--dangerously-bypass-approvals-and-sandbox` は **skill から一切使用しない**。必要に見える状況が生じたらフラグで回避せず、作業を止めて user にエスカレートする。
+- `workspace-write` でも `<writable_root>/.git` / `.agents` / `.codex` は再帰的に read-only（Codex は commit / push / skill 定義変更ができない）。これは意図した設計であり、`--add-dir` 等で回避しない。commit は native approval 後の `agent-workflow` host action が gitleaks hook と commit signing の通る host 経路で行う。
 - **plugin の `codex:codex-rescue` は skill / orchestration から一切起動しない**。`--profile` を通さず `CODEX_HOME` も伝播しないため **アカウント分離（個人 `~/.codex` / 業務 `~/.codex-r06`）が破れ**、さらに既定が write + `approval_policy: never` で本 skill の sandbox 契約の外に出る。skill からの Codex 起動は本 skill が定義する bash `codex exec --profile shared|agent` 経路のみとする。`codex-rescue` は user による ad-hoc な手動 rescue 専用。
 
 ### 委任範囲の制約

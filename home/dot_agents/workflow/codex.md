@@ -10,15 +10,11 @@ read API と live web search のための network access を有効にする。wo
 無効のまま維持する。network access は outbound の境界だけを変え、commit / push / PR 作成 / worktree 作成の
 authority を Codex child に渡すものではない。
 
-開始時は、main worktree の人間が TTY で linked worktree を作成する。
-
-```bash
-agent-workflow worktree-init <run-id> --branch <branch> --base <base>
-codex --profile main --cd <linked-worktree>
-```
-
-以降の main session はその linked worktree を作業 root にする。Codex sandbox 内で `git worktree add` を
-実行したり、`--add-dir` や sandbox の緩和で main worktree の `.git` に書き込んだりしない。
+開始時は Codex が `agent-workflow worktree-init <run-id> --branch <branch> --base <base>` の native command
+approval を要求し、user は Codex UI で承認する。runner が返した linked worktree を次の interactive main session
+の作業 root とする。Desktop client ではその worktree を開き、CLI では `--cd <linked-worktree>` を指定するが、
+いずれも user に shell command の入力を要求しない。Codex sandbox 内で `git worktree add` を実行したり、
+`--add-dir` や sandbox の緩和で main worktree の `.git` に書き込んだりしない。
 
 ## Child process
 
@@ -32,13 +28,7 @@ codex --profile main --cd <linked-worktree>
 
 ## Non-interactive approval and resume
 
-`codex exec` は approval gate で `waiting-for-user` を返す。user が TTY で次を実行した後だけ、
-同じ run id を `--resume` できる。
-
-```bash
-agent-workflow approve <run-id> <gate>
-agent-workflow status <run-id>
-```
-
-`--resume` は phase と result file の場所を復元するだけで、approval を追加しない。外向き操作は
-`agent-workflow` の固定 manifest action に渡し、sandbox の緩和や任意 command 実行で代用しない。
+`codex exec` は approval gate で `waiting-for-user` を返す。user は同じ run を interactive `main` session で
+開き、提示された action の Codex native command approval を選ぶ。`--resume` は phase と result file の場所を
+復元するだけで、approval を追加しない。外向き操作は `agent-workflow` の固定 manifest action に渡し、sandbox の
+緩和や任意 command 実行で代用しない。

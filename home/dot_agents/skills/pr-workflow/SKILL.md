@@ -21,8 +21,8 @@ Codex では同契約の capability に置換する。`--harness=codex|claude` �
 
 - Codex-only では Claude leg を省略しない。同じ shared rubric を渡した独立 `codex exec` leg に
   置換し、同族 review であることを統合結果に明記する。
-- 非対話の Codex は gate で `waiting-for-user` を返す。user が TTY で
-  `agent-workflow approve <run-id> <gate>` を実行するまで `--resume` しても進めない。
+- 非対話の Codex は gate で `waiting-for-user` を返す。同じ run を interactive `main` session で開き、
+  提示された固定 action の native command approval を user が選ぶまで `--resume` しても進めない。
 - worktree 作成、commit、push、PR 作成、ready-for-review は `agent-workflow` の固定 action を使う。任意 command、
   sandbox bypass、暗黙の approval は禁止する。
 - 必須 capability の欠落は `blocked` として停止する。optional specialist の欠落だけは明記して続行する。
@@ -78,10 +78,11 @@ Codex では同契約の capability に置換する。`--harness=codex|claude` �
 Phase 0 の分類直後、**tier に関わらず必ず linked worktree を作成し、以降の全 Phase（実装・commit・PR・CI 監視・review・指摘対応）をそのワークツリー内で実行する**。pr-workflow は main worktree を直接変更しない。
 
 1. **ブランチ名の導出**: operation variant + task から命名する（`add-feature`/`change-feature`→`feat/...`、`fix-defect`→`fix/...`、`refactor`→`refactor/...`、`mvp`→`feat/...`）。GitHub Issue 起点なら `#番号` を含めてよい。
-2. **ワークツリー作成**: Claude adapter は `/wtp` に従う。Codex main session は human が main worktree の
-   TTY で `agent-workflow worktree-init <run-id> --branch <branch> --base main` を実行し、出力された絶対パスで
-   `codex --profile main --cd <path>` を開始または再開する。Codex sandbox 内の `wtp add` / `git worktree add` は
-   禁止する。既存 branch の再利用は `agent-workflow init <run-id> --worktree <path>` で state を初期化する。
+2. **ワークツリー作成**: Claude adapter は `/wtp` に従う。Codex main session は
+   `agent-workflow worktree-init <run-id> --branch <branch> --base main` の native command approval を要求し、
+   user は Codex UI で選ぶ。出力された絶対パスを次の interactive main session の worktree とする。Codex sandbox
+   内の `wtp add` / `git worktree add` は禁止する。既存 branch の再利用は
+   `agent-workflow init <run-id> --worktree <path>` の native command approval で state を初期化する。
 3. **既存衝突時**: `wtp list` で既存ワークツリー/ブランチを確認。同名があれば再利用するか別名を選ぶ（`failed to create worktree: exit status 128` は path 既存が主因）。
 4. **後片付け**: マージは user（GATE 3）。マージ後のワークツリー削除は `/wtp-cleanup`（merged worktree の一括整理）に委ねる。pr-workflow は自動削除しない。
 
@@ -97,7 +98,7 @@ Phase 0 の分類直後、**tier に関わらず必ず linked worktree を作成
 |------|------|
 | `trivial` | inline Edit。**ただし spec/planning の skip は「既に承認済みの計画があるとき」のみ**（global 指示「実装前は `$planning`」を上書きしない。曖昧なら `/planning` を通す）。→ `/commit` → `/create-pr` |
 | `small` | **worker に委任（二択）**: (a) general-purpose サブエージェント（`model: sonnet`）に inline prompt で委任、または (b) 実装の cross-model diversity が欲しい／Claude が行き詰まったときは **Codex worker**（`codex exec --profile agent`、workspace-write）。既定は (a)。自己完結タスク（少数ファイル・所有境界内・契約変更なし = small tier 定義そのもの）が Codex 委譲の条件。prompt に **TDD の RED→GREEN 規律**（テスト先行・最小実装。inline protocol、外部 skill ではない）を含める。**Codex を選ぶ場合、呼び出し形・`CODEX_HOME` prelude・worktree ガード・実行順序契約・委任範囲の制約は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が唯一の SSOT**。ここに再掲せず必ずそれに従う（特に **`git diff` 全体レビュー → ホスト側の検証コマンド → commit** の順序。**diff レビュー前にテスト・lint・ビルドを実行しない** —— TDD 委譲では Codex がテストを書くため、それをホストで走らせる前に必ず diff を読む）。→ `/commit` → `/create-pr` |
-| `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を approval capability で 1 回確認。Codex 非対話は TTY approval を待つ）→ `/sdd`（完全自律実行）。**`/sdd` は host runner を介して commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
+| `standard` | **軽量 intent gate**（`/sdd` 起動前に intent + scope + 主要 AC を approval capability で 1 回確認。Codex 非対話は interactive main session の native approval を待つ）→ `/sdd`（完全自律実行）。**`/sdd` は host runner を介して commit + PR 作成まで行う**ため、この path では `/commit`/`/create-pr` を別途呼ばない（二重実行回避）。 |
 | `large` | **intent gate（enforced）**: `/sdd` の前に `/grill-me --mode=auto`（自律審議＋最終 PRD を user が 1 回承認）を pr-workflow から auto-invoke する（`--mode=auto` が「対話型だから auto-invoke しない」を解消。auto でも security/data-migration/contract は grill-me が強制 user エスカレート）→ `/sdd`（完全自律実行）。 |
 
 **intent gate（#222・構造化）**: `standard`/`large` は **human intent check なしに実装フェーズ（`/sdd` Phase 4）へ入れない**。large=`/grill-me --mode=auto` の PRD 承認、standard=軽量 intent gate がそれに当たる。**gate を skip する場合は必ず理由を記録**する（decision log / spec / PR の 1 行）。**PRD 生成は non-trivial（standard/large）の default handoff**とする（生成は default、file 永続化は grill-me の memory ポリシーに従い user 承認必須）。
@@ -106,7 +107,7 @@ Phase 0 の分類直後、**tier に関わらず必ず linked worktree を作成
 
 ## GATE 1: Ready for review
 
-Phase 1-4（実装・commit・PR 作成）完了後、**approval capability で「ready for review に移行するか」をユーザーに確認する**。Claude adapter は `AskUserQuestion` を使い、Codex 非対話は `waiting-for-user` として user-owned TTY approval を待つ。
+Phase 1-4（実装・commit・PR 作成）完了後、**approval capability で「ready for review に移行するか」をユーザーに確認する**。Claude adapter は `AskUserQuestion` を使い、Codex 非対話は `waiting-for-user` として interactive main session の native approval を待つ。
 
 - trivial/small: `/create-pr` 完了後に確認
 - standard/large: `/sdd` 完了（PR 作成済）を検知して pr-workflow 再開後に確認
@@ -228,7 +229,7 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 
 | 局面 | 対処 |
 |------|------|
-| Phase 0.5 ワークツリー作成失敗 | Claude は `wtp list`、Codex は TTY 上の `agent-workflow worktree-init` で既存衝突を確認 → 別ブランチ名で再試行。base ref が無い場合は host 側で fetch してから retry。解決不能 → user |
+| Phase 0.5 ワークツリー作成失敗 | Claude は `wtp list`、Codex は native approval を伴う `agent-workflow worktree-init` で既存衝突を確認 → 別ブランチ名で再試行。base ref が無い場合は host 側で fetch してから retry。解決不能 → user |
 | Phase 4 実装失敗 | RED→GREEN 規律で再試行、3 回 retry → user |
 | Phase 5 CI fail | ログ取得 → 原因分析 → 修正 → retry（pr-workflow が budget 管理、最大 3 回）。3 回 fail → user |
 | Phase 5 commit 失敗（1Password） | `osascript` で通知音付き push 通知 → 中断 |
@@ -241,7 +242,7 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 
 - 本 skill は orchestrator。重い処理は各 skill に委譲し、分類・GATE・統合判断に専念する。
 - **委譲先 skill は起動する（手ロール代替禁止）**: Phase 5〜7 は `/monitor-ci` / `/multi-review` / `/review-resolve-loop` を実際に起動する。同等処理の自前実装は各 skill の経路網羅性（特に `/review-resolve-loop` の CI marker コメント経路）を欠き、指摘を取りこぼす（詳細は冒頭原則・Phase 7）。
-- **ワークツリー作業は必須**（Phase 0.5）。Claude は `/wtp`、Codex は human-owned `agent-workflow worktree-init` を使い、main worktree を直接汚さない。standard/large の `/sdd` には新規ワークツリー作成を抑止するオーバーライドを渡す。
+- **ワークツリー作業は必須**（Phase 0.5）。Claude は `/wtp`、Codex は native approval を伴う `agent-workflow worktree-init` を使い、main worktree を直接汚さない。standard/large の `/sdd` には新規ワークツリー作成を抑止するオーバーライドを渡す。
 - **マージは user**（GATE 3 を通しても自動マージしない）。
 - **CI first**: CI green を確認してからレビューを実施する（Phase 5 → Phase 6 の順）。CI が落ちている状態でのレビューは無駄になる可能性が高い。
 - **Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT**（`codex:codex-rescue` を起動しない理由もそこに集約。ここでは再掲しない）。

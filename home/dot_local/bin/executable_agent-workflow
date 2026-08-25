@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A deliberately narrow host-side executor for non-interactive agent workflows.
+# A deliberately narrow host-side executor for approved agent workflows.
 set -euo pipefail
 
 STATE_ROOT="${AGENT_WORKFLOW_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow}"
@@ -16,7 +16,6 @@ Usage:
   agent-workflow worktree-init <run-id> --branch <name> [--base <ref>]
   agent-workflow init <run-id> [--worktree <path>] [--phase <name>]
   agent-workflow status <run-id>
-  agent-workflow approve <run-id> <gate>
   agent-workflow commit <run-id> --message-file <file> -- <file>...
   agent-workflow push <run-id>
   agent-workflow create-pr <run-id> --title-file <file> --body-file <file> --base <branch> [--draft]
@@ -51,9 +50,14 @@ set_state_value() {
   [[ "$value" != *$'\t'* && "$value" != *$'\n'* ]] || die "invalid state value"
   temp="${file}.tmp"
   awk -F '\t' -v key="$key" -v value="$value" '
+    $1 == "version" { print "version\t2"; version_seen = 1; next }
+    $1 == "approved_gates" { next }
     $1 == key { print key "\t" value; seen = 1; next }
     { print }
-    END { if (!seen) print key "\t" value }
+    END {
+      if (!version_seen) print "version\t2"
+      if (!seen) print key "\t" value
+    }
   ' "$file" >"$temp"
   mv "$temp" "$file"
 }
@@ -127,20 +131,6 @@ path_in_run_state() {
   esac
 }
 
-require_approval() {
-  local state="$1" gate="$2" approved
-  valid_component "$gate" || die "invalid gate"
-  approved="$(state_value "$state" approved_gates)"
-  case ",$approved," in
-    *",$gate,"*) ;;
-    *) die "gate '$gate' is not approved; run 'agent-workflow approve <run-id> $gate' from a TTY" ;;
-  esac
-}
-
-ensure_tty() {
-  [[ -t 0 && -t 1 ]] || die "approval must be made from an interactive TTY"
-}
-
 initialize_state() {
   local run_id="$1" worktree="$2" phase="$3"
   valid_component "$run_id" || die "invalid run id"
@@ -154,7 +144,7 @@ initialize_state() {
   [[ -n "$branch" ]] || die "detached HEAD is not supported"
   umask 077
   mkdir -p "$directory"
-  printf 'version\t1\nrun_id\t%s\nworktree\t%s\nbranch\t%s\nphase\t%s\ncreated_at\t%s\napproved_gates\t\npr_number\t\n' \
+  printf 'version\t2\nrun_id\t%s\nworktree\t%s\nbranch\t%s\nphase\t%s\ncreated_at\t%s\npr_number\t\n' \
     "$run_id" "$worktree" "$branch" "$phase" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$file"
 }
 
@@ -186,7 +176,7 @@ init_run() {
 worktree_init_run() {
   local run_id="$1"
   shift
-  local branch="" base="main" main_worktree worktree answer
+  local branch="" base="main" main_worktree worktree
   while (($#)); do
     case "$1" in
       --branch)
@@ -207,31 +197,11 @@ worktree_init_run() {
   main_worktree="$(require_main_worktree)"
   git -C "$main_worktree" rev-parse --verify --quiet "${base}^{commit}" >/dev/null || die "base ref does not resolve to a commit"
   [[ ! -e "$STATE_ROOT/$run_id" ]] || die "run already exists: $run_id"
-  ensure_tty
   command -v wtp >/dev/null 2>&1 || die "wtp is required to create a worktree"
-  printf "Create linked worktree for branch '%s' from '%s'? [y/N] " "$branch" "$base"
-  read -r answer
-  [[ "$answer" == "y" || "$answer" == "Y" ]] || die "worktree creation declined"
   worktree="$(cd "$main_worktree" && wtp add -b "$branch" "$base" --quiet)"
   require_linked_worktree "$worktree"
   initialize_state "$run_id" "$worktree" "worktree-created"
   printf '%s\n' "$worktree"
-}
-
-approve_run() {
-  local run_id="$1" gate="$2" state answer approved
-  state="$(require_state "$run_id")"
-  valid_component "$gate" || die "invalid gate"
-  ensure_tty
-  printf "Approve gate '%s' for run '%s'? [y/N] " "$gate" "$run_id"
-  read -r answer
-  [[ "$answer" == "y" || "$answer" == "Y" ]] || die "approval declined"
-  approved="$(state_value "$state" approved_gates)"
-  case ",$approved," in
-    *",$gate,"*) ;;
-    *) set_state_value "$state" approved_gates "${approved:+$approved,}$gate" ;;
-  esac
-  printf 'approved %s\n' "$gate"
 }
 
 commit_run() {
@@ -239,7 +209,6 @@ commit_run() {
   shift
   local state message_file=""
   state="$(require_state "$run_id")"
-  require_approval "$state" commit
   (($# >= 3)) || die "commit requires --message-file and file paths"
   [[ "$1" == "--message-file" ]] || die "commit requires --message-file"
   message_file="$2"
@@ -265,7 +234,6 @@ commit_run() {
 push_run() {
   local run_id="$1" state worktree branch
   state="$(require_state "$run_id")"
-  require_approval "$state" push
   worktree="$(state_value "$state" worktree)"
   branch="$(state_value "$state" branch)"
   require_linked_worktree "$worktree"
@@ -279,7 +247,6 @@ create_pr_run() {
   shift
   local state title_file="" body_file="" base="" draft=""
   state="$(require_state "$run_id")"
-  require_approval "$state" create-pr
   while (($#)); do
     case "$1" in
       --title-file)
@@ -353,7 +320,6 @@ checks_run() {
 ready_for_review_run() {
   local run_id="$1" pr_number="$2" state worktree recorded_pr_number repo
   state="$(require_state "$run_id")"
-  require_approval "$state" ready-for-review
   [[ "$pr_number" =~ ^[0-9]+$ ]] || die "invalid PR number"
   recorded_pr_number="$(state_value "$state" pr_number)"
   [[ "$pr_number" == "$recorded_pr_number" ]] || die "PR number does not match the recorded run"
@@ -390,10 +356,6 @@ main() {
     status)
       (($# == 1)) || die "status requires a run id"
       cat "$(require_state "$1")"
-      ;;
-    approve)
-      (($# == 2)) || die "approve requires a run id and gate"
-      approve_run "$@"
       ;;
     commit)
       (($# >= 1)) || die "commit requires a run id"

@@ -91,7 +91,7 @@ SDD は単体起動しない。呼出元の pr-workflow が Phase 0.5 で作成�
 再利用する。main worktree や任意の現在ディレクトリへのフォールバックはない。
 
 - Claude adapter は `/wtp` で作成済みであることを確認する。
-- Codex は human-owned TTY の `agent-workflow worktree-init` で作成済みであることを確認する。Codex
+- Codex は native command approval を伴う `agent-workflow worktree-init` で作成済みであることを確認する。Codex
   sandbox 内から `wtp add` / `git worktree add` を実行しない。
 - worktree または対応する run state が欠ける場合は `blocked` にして pr-workflow へ戻す。SDD がブランチを
   作成・切替・再選択してはならない。
@@ -305,9 +305,9 @@ Phase 0.5 で branch と linked worktree は作成済みである。現在の br
 
 ### 5-3. 論理的な粒度でコミット
 
-各コミットは `/commit` の approval capability と host runner contract に従う。Codex の場合は user が
-TTY で `agent-workflow approve <run-id> commit` を実行した後だけ、linked worktree 内の message file と
-対象 path を指定して `agent-workflow commit` を実行する。直接の `git add` / `git commit` は使わない。
+各コミットは `/commit` の approval capability と host runner contract に従う。Codex の場合は対象 path と
+commit message を先に提示し、`agent-workflow commit` の native command approval を要求して実行する。直接の
+`git add` / `git commit` は使わない。
 
 **コミットの原則:**
 - 1コミット1目的（単一責任の原則）
@@ -318,9 +318,8 @@ TTY で `agent-workflow approve <run-id> commit` を実行した後だけ、link
 
 ### 5-4. リモートにプッシュ
 
-Codex は user が TTY で `agent-workflow approve <run-id> push` を実行した後だけ
-`agent-workflow push <run-id>` を使う。Claude adapter も同じ検証済み run state を使い、main worktree から
-push しない。
+Codex は `agent-workflow push <run-id>` の native command approval を要求してから実行する。Claude adapter も
+同じ検証済み run state を使い、main worktree から push しない。
 
 ### 5-5. PR作成
 
@@ -332,9 +331,8 @@ push しない。
    `.claude/pull-requests/` は migration input として読むだけで、新規作成・rename・削除しない。
 
 3. **PR 作成**:
-   `/create-pr` の approval capability を通す。Codex は user が TTY で
-   `agent-workflow approve <run-id> create-pr` を実行した後だけ、`agent-workflow create-pr` の固定 allowlist
-   action で作成する。直接の `gh pr create` は使わない。
+   `/create-pr` の approval capability を通す。Codex は `agent-workflow create-pr` の native command approval を
+   要求してから固定 allowlist action で作成する。直接の `gh pr create` は使わない。
 
 ### 5-6. Issue 紐付け
 
@@ -379,7 +377,7 @@ notify
 |---------|------|
 | サブエージェントの調査失敗 | 別のサブエージェントで再試行。3回失敗したら自身で調査 |
 | ビルド・テスト失敗 | エラー内容を分析し自身で修正。修正後再実行 |
-| Git 操作失敗（署名・認証等） | capability により user へ通知し、手動介入または TTY 承認を待つ。承認なしに別経路で迂回しない |
+| Git 操作失敗（署名・認証等） | capability により user へ通知し、Codex native approval または通常の認証 UI を待つ。承認なしに別経路で迂回しない |
 | PR 作成失敗 | エラー内容を確認し、修正して再試行。`gh auth status` で認証を確認 |
 
 ## 重要な注意事項

@@ -9,9 +9,9 @@ argument-hint: "[branch-name]"
 ## Harness contract
 
 commit 計画の user 承認は `~/.agents/workflow/README.md` の approval capability で得る。Claude では
-`AskUserQuestion` を使える。Codex の非対話実行は `agent-workflow approve <run-id> commit` の後にだけ
-`agent-workflow commit <run-id> --message-file <file> -- <path>...` を使う。任意 command や main worktree
-への commit は許可しない。
+`AskUserQuestion` を使える。interactive Codex は `agent-workflow commit <run-id> --message-file <file> -- <path>...`
+の native command approval を要求する。非対話実行は承認待ちで停止する。任意 command や main worktree への
+commit は許可しない。
 
 引数: $ARGUMENTS（ブランチ名の提案。未指定の場合は変更内容から自動生成）
 
@@ -53,8 +53,8 @@ commit 計画の user 承認は `~/.agents/workflow/README.md` の approval capa
       - pnpm-lock.yaml
 
    approval capability で、この計画・対象 path・外向き影響を提示して明示承認を得る。Claude adapter は
-   `AskUserQuestion` を使う。Codex 非対話では user が TTY で `agent-workflow approve <run-id> commit` を
-   実行するまで `waiting-for-user` として停止する。
+   `AskUserQuestion` を使う。interactive Codex は commit action の native command approval を要求し、非対話では
+   `waiting-for-user` として停止する。
    ```
 
 4. ブランチの検証：
@@ -77,8 +77,8 @@ commit 計画の user 承認は `~/.agents/workflow/README.md` の approval capa
    agent-workflow commit <run-id> --message-file <message-file> -- <related-file>...
    ```
 
-   runner は worktree・recorded branch・path containment・承認済み gate を検証する。Claude adapter の直接実行も
-   同じ approval contract を満たす必要がある。
+   runner は worktree・recorded branch・path containment を検証する。Claude adapter の直接実行も同じ approval
+   contract を満たす必要がある。
 
 6. コミット作成の原則：
 

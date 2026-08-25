@@ -21,7 +21,7 @@ Codex leg は shared rubric を stdin prompt に注入し、親が採番した r
 Codex-only は全ての Claude leg を独立 Codex leg に置換する。Claude が利用できる場合だけ cross-model
 diversity を使う。必須 generalist/code/security/architecture/adversarial leg が起動または結果回収に失敗した場合は
 `blocked`、optional specialist の失敗は統合結果へ記録して続行する。投稿の承認は harness contract の
-approval capability を使い、非対話の場合は user-owned runner approval を待つ。
+approval capability を使い、非対話の場合は interactive main session の native approval を待つ。
 
 **tier に応じた shared-role roster** を並列でバックグラウンド実行し、結果を統合サマリーにまとめる。
 roster は tier で gating し（過剰起動を抑制）、harness adapter は各 role の実行だけを担当する。
@@ -507,7 +507,7 @@ Phase 1.5 で取得した既存レビュー・コメントと、Phase 3 の統�
 ### Phase 5: ユーザー確認と PR コメント投稿
 
 1. 重複除外後の統合サマリーをユーザーに表示する
-2. **approval capability で投稿方法を確認する**。Claude adapter は `AskUserQuestion` を使う。Codex 非対話は `waiting-for-user` で停止して user-owned TTY approval を待つ。質問文の冒頭に以下の 2 行を必ず含め、以下の 3 択を提示する:
+2. **approval capability で投稿方法を確認する**。Claude adapter は `AskUserQuestion` を使う。Codex 非対話は `waiting-for-user` で停止して interactive main session の native approval を待つ。質問文の冒頭に以下の 2 行を必ず含め、以下の 3 択を提示する:
 
    ```
    Target: <owner>/<repo> PR #<番号>

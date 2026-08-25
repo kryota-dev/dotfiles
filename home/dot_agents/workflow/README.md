@@ -18,7 +18,7 @@ adapter 固有の手順を新しい SSOT として増やしてはならない。
 
 | Capability | 共通契約 | Claude adapter | Codex adapter |
 | --- | --- | --- | --- |
-| approval | 質問、選択肢、影響を表示し、明示承認まで外向き操作をしない | `AskUserQuestion` | 会話で承認を回収。非対話では `agent-workflow approve` を TTY で実行 |
+| approval | 質問、選択肢、影響を表示し、明示承認まで外向き操作をしない | `AskUserQuestion` | interactive `main` session の native command approval。`codex exec` は承認待ちで停止 |
 | worker | 独立 context、最小権限、親が採番した結果 file、失敗時 1 回 retry | custom Agent | `codex exec` child process |
 | review rubric | 共通 reviewer 本文を唯一の SSOT とする | frontmatter 付き Claude adapter | rubric を stdin prompt に注入 |
 | notification | 進捗ではなく必要な承認・block・完了のみ通知する | `notify` があれば使用 | 会話出力。CLI は state を表示 |
@@ -29,15 +29,14 @@ adapter 固有の手順を新しい SSOT として増やしてはならない。
 承認 gate は intent、commit、push、PR 作成、ready-for-review、人間 reviewer への返信、
 merge-ready である。merge は常に user が行う。
 
-対話型 harness は会話で承認を得る。`codex exec` のような非対話実行は
-`waiting-for-user` state を返し、user が TTY で次を実行した後だけ再開できる。
+対話型 harness は会話で承認を得る。interactive Codex は、対象・影響・固定 host action を先に会話で提示し、
+その action を sandbox 外で実行するための **Codex native command approval** を要求する。user は Codex の
+approval UI だけで許可または拒否し、terminal command を実行しない。approval は action ごとに一回限りであり、
+任意 command や persistent allowlist を承認対象にしてはならない。
 
-```bash
-agent-workflow approve <run-id> <gate>
-agent-workflow status <run-id>
-```
-
-`--resume <run-id>` は state を復元するだけで、承認を与えない。
+`codex exec` のような非対話実行は `waiting-for-user` state を返す。user は同じ run を interactive `main`
+session で開き、そこで action の native approval を選ぶ。`--resume <run-id>` は state を復元するだけで、
+approval を与えない。
 
 ## Persistent data
 
@@ -46,8 +45,9 @@ agent-workflow status <run-id>
 - legacy `.claude/{prds,plans,pull-requests}` は read-only migration input としてのみ読む。
   新規ファイルの作成、移動、削除はしない。
 - `state.tsv` には task 本文、review 本文、token、秘密情報を保存しない。run id、phase、PR 番号、
-  branch、承認済み gate、作成時刻だけを保存し、30 日後に削除対象とする。PR title/body の下書きは同じ
+  branch、作成時刻だけを保存し、30 日後に削除対象とする。PR title/body の下書きは同じ
   run directory の transient file に限り、`create-pr` action が path containment を検証して読む。
+  legacy v1 state に残る approval 記録は、次の state-changing host action で v2 に正規化して削除する。
 
 ## Codex-only execution
 
@@ -62,7 +62,8 @@ Codex child は `codex/SKILL.md` の `shared` (read-only) または `agent`
 
 ## Host runner manifest
 
-`agent-workflow` は任意 command を受け取らない。`worktree-init`、`commit`、`push`、`create-pr`、
-`checks`、`ready-for-review` の固定 action だけを実行し、worktree、branch、gate、引数形式を検証する。
-`worktree-init` は main worktree の TTY からだけ新しい linked worktree と run state を作成する。approval が
-必要な action は先に TTY 承認された state を要求する。sandbox を `--yolo` 等で迂回してはならない。
+`agent-workflow` は任意 command を受け取らない。`worktree-init`、`init`、`commit`、`push`、`create-pr`、
+`checks`、`ready-for-review` の固定 action だけを実行し、worktree、branch、引数形式を検証する。書き込みを
+伴う action（run state を初期化する `init` を含む）は interactive Codex の native command approval または Claude の
+approval capability の直後だけに実行する。runner 自身は二重の TTY prompt や承認済み gate を持たない。sandbox を
+`--yolo` 等で迂回してはならない。
