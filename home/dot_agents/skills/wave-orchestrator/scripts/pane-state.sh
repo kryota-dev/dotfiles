@@ -52,7 +52,8 @@ command -v tmux >/dev/null 2>&1 || {
 }
 
 D=$(mktemp -d)
-PANES=$(tmux list-panes -a -F '#{window_name}|#{pane_id}|#{pane_title}' 2>/dev/null | grep "^$PREFIX")
+# prefix は引数由来なので正規表現として解釈させない（固定文字列の前方一致）
+PANES=$(tmux list-panes -a -F '#{window_name}|#{pane_id}|#{pane_title}' 2>/dev/null | awk -v p="$PREFIX" 'index($0, p) == 1')
 
 if [ "$SELF_CHECK" = "1" ]; then
   # 検知器が「今の TUI を読めているか」を確かめる。読めないまま監視に入ると、
@@ -72,7 +73,25 @@ if [ "$SELF_CHECK" = "1" ]; then
     echo "  → pane-state.sh 冒頭の定数表を更新すること" >&2
     exit 4
   fi
-  echo "SELF-CHECK OK: $(printf '%s\n' "$PANES" | wc -l | tr -d ' ') pane, 目印を検出"
+  echo "SELF-CHECK OK: $(printf '%s\n' "$PANES" | wc -l | tr -d ' ') pane, 入力欄の目印を検出"
+  # 分類の本体である 3 つのマーカーが、いま観測できるかを個別に報告する。
+  # 未観測は「壊れている」とは限らない（その状態の pane が無いだけのこともある）が、
+  # 検証できていないことを黙って伏せない。
+  all_cap=$(printf '%s\n' "$PANES" | while IFS='|' read -r _w cp _t; do
+    [ -n "$cp" ] && tmux capture-pane -p -t "$cp" -S -$CAPTURE_LINES 2>/dev/null
+  done)
+  for m in selector ended bgwait; do
+    case "$m" in
+      selector) pat="$MARK_SELECTOR" ;;
+      ended) pat="$MARK_ENDED" ;;
+      bgwait) pat="$MARK_BGWAIT" ;;
+    esac
+    if printf '%s' "$all_cap" | grep -qE "$pat"; then
+      echo "  $m: 観測できた"
+    else
+      echo "  $m: 未観測（この状態の pane が無いだけの可能性あり。検証はできていない）"
+    fi
+  done
   exit 0
 fi
 
