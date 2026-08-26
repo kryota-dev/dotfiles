@@ -63,6 +63,11 @@ draft PR 止まり、trivial〜small）。**「深く × 広く」の象限が�
 - **AC-013** 子セッションの launcher は親の `CLAUDE_CONFIG_DIR` の basename から導出し、親と同じ profile で
   起動する。明示指定があればそれを優先するが、**親と異なる profile で起動する場合は user の明示承認を
   必須**とする。quota が逼迫していても、自動で別 profile へ負荷を逃がさない。
+- **AC-015** 子セッションは専用の tmux セッション（`wave-<owner>__<repo>`）に置く。利用者が普段使っている
+  セッションへウィンドウを足さない。既存の同名セッションは再利用し、kill しない（実作業をホストしている
+  ため、使い捨ての観測用セッションとは扱いが違う）。
+- **AC-016** 各ペインにタイトルを付ける。起動時は子セッション名、PR 作成後は PR 番号を併記した形へ更新する。
+  監視中は多数のペインが並ぶため、タイトルが無いと送信先を取り違える。
 - **AC-014** 子には orchestrator 用の model variant を使わない。子は `pr-workflow` の実行者であって
   オーケストレーターではなく、orchestrator prompt が不要なうえ model floor の判定も変わる。
 
@@ -85,6 +90,8 @@ draft PR 止まり、trivial〜small）。**「深く × 広く」の象限が�
 | 全フェーズを評価対象にする | 実セッション起動・実リポジトリ変更・マージを伴う。ハーネス構築コストが skill 本体を上回る |
 | quota の空いている profile へ自動で振り分ける | quota は profile ごとに独立プールなので構造的に可能だが、**業務を別区分のアカウントで走らせ得る**。`model-fitness-check` も profile 間でセッション状態が分離している旨を警告済み。スループットと引き換えにしてよい性質ではない |
 | launcher を毎回 user に尋ねる | ほぼ常に「親と同じ」が答えになる問いを毎回出すことになる。継承を既定にし、逸脱時のみ承認を取る形で足りる |
+| 利用者の既存 tmux セッションへウィンドウを足す | 無関係な作業と混在し、監視も後始末もしづらい。実際にそう運用したところ、他プロジェクトのウィンドウの間に orchestration 用ウィンドウが挟まる形になった |
+| wave セッションを idempotent に kill + recreate する | `multi-review` の観測用セッションはこの方式でよいが、こちらは実作業をホストする。同名 kill は稼働中の子を殺す |
 | 子も orchestrator variant で起動する | 子は実行者であり orchestrator prompt が不要。当該 variant は model floor を全て pass するため floor 判定が実質無効化される |
 
 ## Out of Scope
@@ -100,8 +107,9 @@ draft PR 止まり、trivial〜small）。**「深く × 広く」の象限が�
 
 ## Open Questions
 
-- 並列度の既定値。`issue-fleet` は 4、実運用では 7 で走らせて週次 quota の閾値帯に入った。
-  quota 従属にするとして初期既定をいくつに置くか
+- ~~並列度の既定値~~ → **解決**: `--max-parallel` の既定を 4（`issue-fleet` に合わせる）とし、quota が
+  閾値帯に入っているときは下方調整する。実運用で 7 並列にしたところ週次 quota の閾値帯に入ったため、
+  上限ではなく既定を絞る側に倒した
 - レビュー roster の絞り込み指示は、実運用では実効がほぼ無かった（`multi-review` が設計上すでに
   別 harness 偏重で、Claude 側の leg が元から最小だったため）。効くレバー／効かないレバーの実測表を
   本 skill に書くか、`multi-review` 側へ寄せるか
