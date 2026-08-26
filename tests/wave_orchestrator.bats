@@ -27,8 +27,13 @@ setup() {
 
 # パーミッションを 3 桁 8 進で返す。CI は Ubuntu (GNU stat)、開発機は macOS
 # (BSD stat) なので両方に対応させる。
+#
+# GNU を先に試すこと。GNU stat の -f は --file-system で、ファイルを渡しても
+# エラーにならず別の値を返すため、BSD 形式を先に置くとフォールバックが働かない
+# (macOS では通るのに CI だけ落ちた)。BSD stat に -c は無いので、この順序なら
+# 双方で正しい値になる。
 perms() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
 # hook を payload (stdin) 付きで実行する
