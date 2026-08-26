@@ -12,8 +12,12 @@ MARK_SELECTOR='Enter to select'
 PROMPT_CHAR='❯'
 SETTLE=2
 
-PANE="$1"; shift
-[ -n "$PANE" ] || { echo "pane を指定すること" >&2; exit 2; }
+PANE="$1"
+shift
+[ -n "$PANE" ] || {
+  echo "pane を指定すること" >&2
+  exit 2
+}
 
 # 入力欄に未送信テキストが残っているか。ペイン全体の grep では判定できない
 # （送信後もトランスクリプトに同じ文字列がエコーとして残るため）。
@@ -32,27 +36,47 @@ case "$1" in
   --select)
     want="$2"
     cap=$(tmux capture-pane -p -t "$PANE")
-    printf '%s' "$cap" | grep -q "$MARK_SELECTOR" || { echo "選択肢が開いていない。送信中止" >&2; exit 1; }
-    printf '%s' "$cap" | grep -qF "$want" || { echo "意図した選択肢 '$want' が見当たらない。送信中止" >&2; exit 1; }
+    printf '%s' "$cap" | grep -q "$MARK_SELECTOR" || {
+      echo "選択肢が開いていない。送信中止" >&2
+      exit 1
+    }
+    printf '%s' "$cap" | grep -qF "$want" || {
+      echo "意図した選択肢 '$want' が見当たらない。送信中止" >&2
+      exit 1
+    }
     tmux send-keys -t "$PANE" Enter
     echo "選択を送信: $want"
     ;;
   --text)
     msg="$2"
-    case "$msg" in *'`'*|*'$'*) echo "送信文に展開されうる文字が含まれる。除去すること" >&2; exit 2 ;; esac
+    case "$msg" in *'`'* | *'$'*)
+      echo "送信文に展開されうる文字が含まれる。除去すること" >&2
+      exit 2
+      ;;
+    esac
     # 選択肢が開いていたら、まず閉じる。自由記述を選択肢経由で送ると解釈が曖昧になる。
     if tmux capture-pane -p -t "$PANE" | grep -q "$MARK_SELECTOR"; then
-      tmux send-keys -t "$PANE" Escape; sleep "$SETTLE"
+      tmux send-keys -t "$PANE" Escape
+      sleep "$SETTLE"
     fi
-    tmux send-keys -t "$PANE" -l "$msg"; sleep "$SETTLE"
-    tmux send-keys -t "$PANE" Enter;     sleep "$SETTLE"
+    tmux send-keys -t "$PANE" -l "$msg"
+    sleep "$SETTLE"
+    tmux send-keys -t "$PANE" Enter
+    sleep "$SETTLE"
     st=$(input_state)
     if [ "$st" = "PENDING" ]; then
-      tmux send-keys -t "$PANE" Enter; sleep "$SETTLE"
+      tmux send-keys -t "$PANE" Enter
+      sleep "$SETTLE"
       st=$(input_state)
     fi
-    [ "$st" = "PENDING" ] && { echo "送信に失敗（入力欄に残存）" >&2; exit 1; }
+    [ "$st" = "PENDING" ] && {
+      echo "送信に失敗（入力欄に残存）" >&2
+      exit 1
+    }
     echo "送信を確認: $st"
     ;;
-  *) echo "--select か --text を指定すること" >&2; exit 2 ;;
+  *)
+    echo "--select か --text を指定すること" >&2
+    exit 2
+    ;;
 esac
