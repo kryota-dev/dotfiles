@@ -15,12 +15,33 @@
 #     are never bricked on a machine before `mise install` runs.
 set -euo pipefail
 
+# The host runner invokes this trusted hook directly before a host-side commit.
+# In that mode it must perform this secret scan but must not chain a repository
+# hook under the runner's elevated authority. The runner supplies this variable
+# only after clearing its inherited environment.
+agent_workflow_scan_only="${AGENT_WORKFLOW_SECRET_SCAN_ONLY:-0}"
+agent_workflow_gitleaks_config="${AGENT_WORKFLOW_GITLEAKS_CONFIG:-}"
+
+# The host runner sets an already-resolved absolute binary only for its
+# scan-only invocation. This avoids resolving a mise shim from an untrusted
+# repository working directory. Ordinary interactive commits keep the normal
+# PATH/mise discovery behavior below.
+if [ "$agent_workflow_scan_only" = "1" ] && [ -n "${AGENT_WORKFLOW_GITLEAKS_BIN:-}" ]; then
+  if [ ! -x "$AGENT_WORKFLOW_GITLEAKS_BIN" ]; then
+    echo "[pre-commit] configured host gitleaks binary is not executable." >&2
+    exit 1
+  fi
+  gitleaks_cmd=("$AGENT_WORKFLOW_GITLEAKS_BIN")
 # Resolve gitleaks: prefer a PATH binary (mise shims), else `mise exec`.
-if command -v gitleaks >/dev/null 2>&1; then
+elif command -v gitleaks >/dev/null 2>&1; then
   gitleaks_cmd=(gitleaks)
 elif command -v mise >/dev/null 2>&1 && mise which gitleaks >/dev/null 2>&1; then
   gitleaks_cmd=(mise exec -- gitleaks)
 else
+  if [ "$agent_workflow_scan_only" = "1" ]; then
+    echo "[pre-commit] gitleaks is required for an agent-workflow host commit." >&2
+    exit 1
+  fi
   echo "[pre-commit] gitleaks not found; skipping secret scan (CI/server-side scan is the backstop)." >&2
   gitleaks_cmd=()
 fi
@@ -38,7 +59,15 @@ if [ "${#gitleaks_cmd[@]}" -gt 0 ]; then
   # they get the base gitleaks.toml (default ruleset + allowlist only).
   toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   scan_args=(git --staged --redact --no-banner)
-  if [ -n "$toplevel" ] && [ -f "${toplevel}/.gitleaks.toml" ]; then
+  if [ "$agent_workflow_scan_only" = "1" ]; then
+    expected_host_config="${HOME}/.config/git/gitleaks.toml"
+    if [ "$agent_workflow_gitleaks_config" != "$expected_host_config" ] || \
+      [ ! -f "$expected_host_config" ] || [ -L "$expected_host_config" ]; then
+      echo "[pre-commit] trusted host gitleaks configuration is unavailable." >&2
+      exit 1
+    fi
+    scan_args+=(--config "$expected_host_config")
+  elif [ -n "$toplevel" ] && [ -f "${toplevel}/.gitleaks.toml" ]; then
     : # gitleaks auto-discovers the repo-local config; do not override it.
   else
     origin_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -71,6 +100,10 @@ To override (NOT recommended): git commit --no-verify
 MSG
     exit 1
   fi
+fi
+
+if [ "$agent_workflow_scan_only" = "1" ]; then
+  exit 0
 fi
 
 # Chain the repo's own pre-commit hook, which core.hooksPath would otherwise

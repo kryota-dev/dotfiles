@@ -123,7 +123,7 @@ web_search = "live"
 network_access = true
 ```
 
-このプロファイルは workspace-write の filesystem boundary を維持したまま、main session に GitHub 状態の読み取りと live web 調査を許可します。network access は repository / GitHub への書き込みを許可しません：worktree 作成、commit、push、PR 下書き準備・作成、ready-for-review は、Codex の一回限りの native command approval を必要とする固定 `agent-workflow` host action のままです。非対話 child には使わず、`agent` または `shared` を明示指定します。
+このプロファイルは workspace-write の filesystem boundary を維持したまま、main session に GitHub 状態の読み取りと live web 調査を許可します。network access は repository / GitHub への書き込みを許可しません：worktree 作成、commit、push、PR 下書き準備・作成、ready-for-review は、Codex の一回限りの native command approval を必要とする固定 `agent-workflow` host action のままです。worktree 作成は clean な `main` worktree だけを受け入れ、repository hook を無効化した `git worktree add` で固定導出した sibling path へ作成します；host privilege で `wtp`、repository 定義の hook、`direnv allow` を実行しません。runner は Git / GitHub CLI を呼ぶ前に最小の固定環境へ再実行し、既存 run の action はその run の canonical linked worktree からだけ実行します。host commit の前には pinned な account 側 gitleaks binary と固定 global config を直接実行し、いずれかが利用できなければ fail-closed とします。worktree 内の `.gitleaks.toml` はこの scan に影響しません。worktree 作成、stage、commit、push では repository / local hook を無効化するため、worktree が host privilege でコードを実行できません。非対話 child には使わず、`agent` または `shared` を明示指定します。
 
 ---
 

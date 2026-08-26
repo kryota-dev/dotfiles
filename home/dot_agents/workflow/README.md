@@ -41,13 +41,18 @@ approval を与えない。
 ## Persistent data
 
 - Git 追跡する handoff: `.agent-workflow/prds/` と `.agent-workflow/plans/`
-- 短期の運用 state: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/`
+- 短期の運用 state: account home 配下の `~/.local/state/agent-workflow/`。runner は `HOME` / `XDG_STATE_HOME`
+  の上書きを採用しないため、workspace-write agent が state の場所を agent-writable な path へ差し替えることはできない。
+  named profile は同じ OS user を共有するため、ここは profile 間の秘密情報隔離ではない。外向き action は state の
+  run id だけで対象を選ばず、実行時の canonical linked worktree が state の repository binding と一致することも要求する。
 - legacy `.claude/{prds,plans,pull-requests}` は read-only migration input としてのみ読む。
   新規ファイルの作成、移動、削除はしない。
 - `state.tsv` には task 本文、review 本文、token、秘密情報を保存しない。run id、phase、PR 番号、
   branch、作成時刻だけを保存し、30 日後に削除対象とする。PR title/body の下書きは同じ
   run directory の transient file に限り、`create-pr` action が path containment を検証して読む。
-  legacy v1 state に残る approval 記録は、次の state-changing host action で v2 に正規化して削除する。
+  legacy v1/v2 state は repository binding がないため、外向き action で拒否する。interactive Codex の native
+  approval を伴う `init <run-id>` を記録済み linked worktree から実行した場合だけ、current worktree を照合して
+  v3 binding を再確立する。
 
 ## Codex-only execution
 
@@ -64,6 +69,17 @@ Codex child は `codex/SKILL.md` の `shared` (read-only) または `agent`
 
 `agent-workflow` は任意 command を受け取らない。`worktree-init`、`init`、`commit`、`push`、`prepare-pr`、
 `create-pr`、`checks`、`ready-for-review` の固定 action だけを実行し、worktree、branch、引数形式を検証する。
+`worktree-init` は clean な main worktree の `main` branch から、固定導出した sibling path へ hook を無効化した
+`git worktree add` を実行する。`wtp`、repository の Git hook / post-create hook、`direnv allow` は host action から実行しない。新規 state は
+canonical worktree path と common Git directory を束縛し、以後の action で照合する。`init` は実行時の linked worktree
+だけを対象にし、任意 path を受け取らない。
+runner は最初に POSIX shell から固定した `env -i` 環境の Bash へ再実行する。これにより `BASH_ENV`、`GIT_*`、
+`GH_*`、agent が差し替えた `PATH` を host action に継承しない。Git は固定 system path、GitHub CLI は既知の
+absolute path だけから解決する。`commit` は stage 後に account 側の pinned mise binary と固定 global config による
+gitleaks pre-commit を scan-only で直接実行し、scanner / config がなければ fail-closed とする。worktree 内の
+`.gitleaks.toml` は host scan に影響しない。worktree 作成、stage、commit、push は `core.hooksPath=/dev/null`（commit は
+さらに `--no-verify`）で repository / local hook を実行しない。`commit`、`push`、`prepare-pr`、`create-pr`、`checks`、`ready-for-review` は、
+canonical current worktree が state の記録値と一致するときだけ実行する。
 `prepare-pr` は linked worktree 内の title/body source を private run state へ 0600 でコピーする。書き込みを
 伴う action（run state を初期化する `init` を含む）は interactive Codex の native command approval または Claude の
 approval capability の直後だけに実行する。runner 自身は二重の TTY prompt や承認済み gate を持たない。sandbox を

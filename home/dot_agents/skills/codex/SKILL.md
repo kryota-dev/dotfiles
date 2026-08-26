@@ -20,9 +20,12 @@ approval を要求し、user は UI で選択する。非対話 `codex exec` は
 
 Codex を main session として使うときは `--profile main` を使う。main profile は GitHub/read web のため
 network を許可するが、sandbox は workspace-write のまま維持する。Codex は
-`agent-workflow worktree-init <run-id> --branch <branch> --base <base>` を昇格 command として要求し、user は
+`agent-workflow worktree-init <run-id> --branch <branch> --base main` を昇格 command として要求し、user は
 native approval UI を選ぶ。その linked worktree を次の main session の作業 root にする。Codex sandbox から
 `git worktree add`、commit、push、PR 作成を直接行わない。
+
+この worktree host action は clean な main branch と固定導出 path だけを受け入れ、`git worktree add` を直接
+実行する。`wtp` / `.wtp.yml` の hook / `direnv allow` を host privilege で起動してはならない。
 
 interactive `main` session で固定 host action を実行するときは、Codex に **その action だけの sandbox 外実行を
 要求させる**。user に terminal で command を入力させたり、runner 内の prompt で承認させたりしない。対象は
@@ -87,7 +90,7 @@ codex exec --profile shared --sandbox read-only --cd <project_directory> "<reque
 
 （実機確認: インストール済みの codex CLI（`codex --version` で確認可能）。`codex exec --help` で `-s, --sandbox <SANDBOX_MODE>`（`read-only` / `workspace-write` / `danger-full-access`）、`-o, --output-last-message <FILE>`、`-p, --profile <CONFIG_PROFILE_V2>` を確認。`--profile shared` で `$CODEX_HOME/shared.config.toml`（chezmoi source: `home/.chezmoitemplates/codex-shared-config.toml`。model/effort pin は `codex-model-pin.toml` が SSOT）の設定が適用されることも実機確認済み。公式: https://developers.openai.com/codex/noninteractive ）
 
-## `--json` ストリーム・session-id 捕捉・resume（multi-review 連携）
+## `--json` ストリーム・session-id 捕捉・resume（対話的な追撃）
 
 `multi-review` のように **Codex レビューをライブ観測**し、**修正後に文脈を引き継いだ再レビュー（resume）**をしたい場合の SSOT。以下はいずれも codex-cli 0.145.0 で smoke test 済み（`--profile shared` / read-only 前提）。
 
@@ -130,10 +133,12 @@ PROMPT
 
 - **文脈を継承する**（前ラウンドで見た差分・自分の指摘・棄却判断を覚えている）。よって呼び出し側の「棄却台帳」注入は resume 経路では不要。
 - `resume` には **`-p/--profile` / `-s/--sandbox` / `-C/--cd` が無い**。これらは元セッションの設定を**継承**する（read-only・対象 worktree のまま再レビューできる）。`--json` / `-o` / `-c` は使える。
-- **profile を明示して resume する**: wrapper の既定は network-enabled な `main` である。review session の
-  sandbox/profile を引き継ぐため、`codex --profile shared exec resume <id>` のように元 profile を明示する。
-  global profile option は resume の session 設定継承と衝突しない。
+- **profile を明示して resume する**: wrapper の既定は network-enabled な `main` であるため、
+  `codex --profile shared exec resume <id>` とする。ただし global profile option は**既存 session の sandbox / worktree を
+  再設定しない**。resume 前に親が管理する immutable manifest から thread id、`profile=shared`、`sandbox=read-only`、
+  canonical worktree を照合し、いずれかが不一致・欠落なら resume せず fresh な shared/read-only review にフォールバックする。
 - **account 分離**: セッションファイルは `CODEX_HOME` 配下に永続する。resume は**同一アカウント（同一 Claude セッション文脈で解決される `CODEX_HOME`）から**行う。別アカウント・別環境からは解決できないため、**session id 欠落・resume 失敗時は fresh 起動にフォールバック**する（呼び出し側の責務）。
+- `$multi-review` は session metadata を認可根拠にできないため、この resume 経路を使わず毎 round fresh な shared/read-only leg を起動する。
 
 ## agent profile（workspace-write 実行）
 

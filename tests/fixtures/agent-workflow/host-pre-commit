@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${HOST_PRE_COMMIT_CAPTURE:?}"
+printf '%s\n' "${AGENT_WORKFLOW_SECRET_SCAN_ONLY:-}" >"${HOST_PRE_COMMIT_CAPTURE}"

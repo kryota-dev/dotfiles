@@ -82,8 +82,9 @@ Phase 0 の分類直後、**tier に関わらず必ず linked worktree を作成
    `agent-workflow worktree-init <run-id> --branch <branch> --base main` の native command approval を要求し、
    user は Codex UI で選ぶ。出力された絶対パスを次の interactive main session の worktree とする。Codex sandbox
    内の `wtp add` / `git worktree add` は禁止する。既存 branch の再利用は
-   `agent-workflow init <run-id> --worktree <path>` の native command approval で state を初期化する。
-3. **既存衝突時**: `wtp list` で既存ワークツリー/ブランチを確認。同名があれば再利用するか別名を選ぶ（`failed to create worktree: exit status 128` は path 既存が主因）。
+   その linked worktree を作業 root にした `agent-workflow init <run-id>` の native command approval で state を初期化する。
+3. **既存衝突時**: `wtp list` で既存ワークツリー/ブランチを確認。同名があれば再利用するか別名を選ぶ。Codex の
+   `worktree-init` は固定導出 path が既に存在すると停止する。
 4. **後片付け**: マージは user（GATE 3）。マージ後のワークツリー削除は `/wtp-cleanup`（merged worktree の一括整理）に委ねる。pr-workflow は自動削除しない。
 
 **`/sdd`（standard/large）連携のオーバーライド**: `/sdd` は内部にワークツリー戦略選択を持つが、pr-workflow から呼ぶ際は委譲プロンプトに次を**明記してオーバーライド**する:

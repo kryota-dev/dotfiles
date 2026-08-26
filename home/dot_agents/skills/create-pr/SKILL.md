@@ -11,7 +11,7 @@ argument-hint: "[base-branch]"
 `~/.agents/workflow/README.md` を優先する。承認は capability として扱い、interactive Codex では
 `agent-workflow prepare-pr` と `agent-workflow create-pr` の native command approval を要求してから host runner が
 下書きを private run state に保存し、PR を作成する。非対話実行は承認待ちで停止する。新規 PR の title/body source は
-linked worktree に置き、`prepare-pr` が `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/` に 0600 で
+linked worktree に置き、`prepare-pr` が account home 配下の `~/.local/state/agent-workflow/<run-id>/` に 0600 で
 コピーする。legacy
 `.claude/pull-requests/` は読み取り互換だけで、新規作成・移動・削除しない。
 
@@ -175,7 +175,7 @@ PR URL を返す。agent が任意の `gh pr create` 引数を実行したり、
 - **PR番号**: #123
 - **タイトル**: feat: ユーザー認証機能の追加
 - **URL**: https://github.com/owner/repo/pull/123
-- **下書きファイル**: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/body.md`
+- **下書きファイル**: `~/.local/state/agent-workflow/<run-id>/body.md`
 - **ベースブランチ**: main
 - **ヘッドブランチ**: feature/auth
 
@@ -187,7 +187,7 @@ PRが正常に作成されました。レビューをお待ちください。
 ```markdown
 📝 **PR下書き保存完了**
 
-- **下書きファイル**: `${XDG_STATE_HOME:-$HOME/.local/state}/agent-workflow/<run-id>/body.md`
+- **下書きファイル**: `~/.local/state/agent-workflow/<run-id>/body.md`
 - **ブランチ**: feature/auth
 - **ベースブランチ**: main
 

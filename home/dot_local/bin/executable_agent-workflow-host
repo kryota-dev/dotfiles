@@ -1,0 +1,548 @@
+#!/bin/bash
+# A deliberately narrow host-side executor for approved agent workflows.
+set -euo pipefail
+
+die() {
+  printf 'agent-workflow: %s\n' "$*" >&2
+  exit 1
+}
+
+# Bootstrap passes this value through `env -i`; do not derive it from HOME or
+# accept an inherited override in the host-action process.
+ACCOUNT_HOME="${AGENT_WORKFLOW_ACCOUNT_HOME:?missing isolated account home}"
+unset AGENT_WORKFLOW_ACCOUNT_HOME
+STATE_ROOT="$ACCOUNT_HOME/.local/state/agent-workflow"
+readonly STATE_ROOT
+GH_BIN=""
+HOST_PRE_COMMIT=""
+
+run_gh() {
+  local candidate
+  if [[ -n "$GH_BIN" ]]; then
+    [[ -x "$GH_BIN" ]] || die "configured gh binary is not executable"
+    "$GH_BIN" "$@"
+    return
+  fi
+  for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
+    if [[ -x "$candidate" ]]; then
+      "$candidate" "$@"
+      return
+    fi
+  done
+  die "could not resolve a trusted gh binary"
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  agent-workflow worktree-init <run-id> --branch <name> [--base <ref>]
+  agent-workflow init <run-id> [--phase <name>]
+  agent-workflow status <run-id>
+  agent-workflow commit <run-id> --message-file <file> -- <file>...
+  agent-workflow push <run-id>
+  agent-workflow prepare-pr <run-id> --title-file <file> --body-file <file>
+  agent-workflow create-pr <run-id> --title-file <file> --body-file <file> --base <branch> [--draft]
+  agent-workflow checks <run-id> [--watch]
+  agent-workflow ready-for-review <run-id> <pr-number>
+  agent-workflow prune
+EOF
+}
+
+valid_component() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]]
+}
+
+valid_branch() {
+  local branch="$1"
+  [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ ]] || return 1
+  git check-ref-format --branch "$branch" >/dev/null 2>&1
+}
+
+state_file() {
+  valid_component "$1" || die "invalid run id"
+  printf '%s/%s/state.tsv\n' "$STATE_ROOT" "$1"
+}
+
+state_value() {
+  local file="$1" key="$2"
+  awk -F '\t' -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$file"
+}
+
+set_state_value() {
+  local file="$1" key="$2" value="$3" temp
+  [[ "$value" != *$'\t'* && "$value" != *$'\n'* ]] || die "invalid state value"
+  temp="${file}.tmp"
+  awk -F '\t' -v key="$key" -v value="$value" '
+    $1 == "version" { print "version\t3"; version_seen = 1; next }
+    $1 == "approved_gates" { next }
+    $1 == key { print key "\t" value; seen = 1; next }
+    { print }
+    END {
+      if (!version_seen) print "version\t3"
+      if (!seen) print key "\t" value
+    }
+  ' "$file" >"$temp"
+  mv "$temp" "$file"
+}
+
+require_state() {
+  local file
+  file="$(state_file "$1")"
+  [[ -f "$file" ]] || die "unknown run id: $1"
+  printf '%s\n' "$file"
+}
+
+require_linked_worktree() {
+  local worktree="$1" git_dir common_dir
+  [[ -d "$worktree" ]] || die "worktree does not exist"
+  git_dir="$(git -C "$worktree" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || die "not a git worktree"
+  common_dir="$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git worktree"
+  [[ "$git_dir" != "$common_dir" ]] || die "refusing to operate on the main worktree"
+}
+
+common_git_dir() {
+  git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || die "not a git worktree"
+}
+
+require_recorded_worktree() {
+  local state="$1" worktree="$2" recorded_common_dir actual_common_dir
+  require_linked_worktree "$worktree"
+  recorded_common_dir="$(state_value "$state" common_git_dir)"
+  [[ -n "$recorded_common_dir" ]] || die "run state is not bound to a repository; re-run init from the linked worktree"
+  actual_common_dir="$(common_git_dir "$worktree")"
+  [[ "$actual_common_dir" == "$recorded_common_dir" ]] || die "worktree does not match the recorded repository"
+}
+
+require_invoking_worktree() {
+  local worktree="$1" current_root expected_root
+  current_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "host action must run from a git worktree"
+  current_root="$(cd "$current_root" && pwd -P)"
+  expected_root="$(cd "$worktree" && pwd -P)"
+  [[ "$current_root" == "$expected_root" ]] || die "host action must run from the recorded worktree"
+}
+
+require_main_worktree() {
+  local root git_dir common_dir
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not in a git worktree"
+  git_dir="$(git -C "$root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || die "not a git worktree"
+  common_dir="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git worktree"
+  [[ "$git_dir" == "$common_dir" ]] || die "worktree-init must run from the main worktree"
+  printf '%s\n' "$root"
+}
+
+repository_slug() {
+  local worktree="$1" remote slug
+  remote="$(git -C "$worktree" config --get remote.origin.url)" || die "origin remote is not configured"
+  case "$remote" in
+    git@github.com:*) slug="${remote#git@github.com:}" ;;
+    https://github.com/*) slug="${remote#https://github.com/}" ;;
+    ssh://git@github.com/*) slug="${remote#ssh://git@github.com/}" ;;
+    *) die "origin must be a GitHub remote" ;;
+  esac
+  slug="${slug%.git}"
+  [[ "$slug" =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] || die "could not determine GitHub repository"
+  printf '%s\n' "$slug"
+}
+
+path_in_worktree() {
+  local worktree="$1" path="$2" candidate resolved
+  worktree="$(cd "$worktree" && pwd -P)" || die "worktree does not exist"
+  if [[ "$path" = /* ]]; then
+    candidate="$path"
+  else
+    candidate="$worktree/$path"
+  fi
+  [[ ! -L "$candidate" ]] || die "symbolic links are not allowed for host action paths"
+  resolved="$(cd "$(dirname "$candidate")" && pwd -P)/$(basename "$candidate")"
+  case "$resolved" in
+    "$worktree"/*) printf '%s\n' "$resolved" ;;
+    *) die "path is outside the recorded worktree" ;;
+  esac
+}
+
+path_in_run_state() {
+  local state="$1" path="$2" directory candidate resolved
+  directory="$(cd "$(dirname "$state")" && pwd -P)"
+  if [[ "$path" = /* ]]; then
+    candidate="$path"
+  else
+    candidate="$directory/$path"
+  fi
+  [[ ! -L "$candidate" ]] || die "symbolic links are not allowed for host action paths"
+  resolved="$(cd "$(dirname "$candidate")" && pwd -P)/$(basename "$candidate")"
+  case "$resolved" in
+    "$directory"/*) printf '%s\n' "$resolved" ;;
+    *) die "path is outside the recorded run state" ;;
+  esac
+}
+
+initialize_state() {
+  local run_id="$1" worktree="$2" phase="$3"
+  valid_component "$run_id" || die "invalid run id"
+  require_linked_worktree "$worktree"
+  valid_component "$phase" || die "invalid phase"
+  local directory file branch common_dir
+  directory="$STATE_ROOT/$run_id"
+  file="$directory/state.tsv"
+  [[ ! -e "$directory" ]] || die "run already exists: $run_id"
+  worktree="$(cd "$worktree" && pwd -P)"
+  branch="$(git -C "$worktree" branch --show-current)"
+  [[ -n "$branch" ]] || die "detached HEAD is not supported"
+  common_dir="$(common_git_dir "$worktree")"
+  umask 077
+  mkdir -p "$directory"
+  printf 'version\t3\nrun_id\t%s\nworktree\t%s\ncommon_git_dir\t%s\nbranch\t%s\nphase\t%s\ncreated_at\t%s\npr_number\t\n' \
+    "$run_id" "$worktree" "$common_dir" "$branch" "$phase" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$file"
+}
+
+migrate_legacy_state() {
+  local run_id="$1" worktree="$2" state recorded_worktree
+  state="$(require_state "$run_id")"
+  recorded_worktree="$(state_value "$state" worktree)"
+  [[ -n "$recorded_worktree" ]] || die "legacy run state has no worktree"
+  [[ -z "$(state_value "$state" common_git_dir)" ]] || die "run already exists: $run_id"
+  require_linked_worktree "$recorded_worktree"
+  require_invoking_worktree "$recorded_worktree"
+  [[ "$(cd "$worktree" && pwd -P)" == "$(cd "$recorded_worktree" && pwd -P)" ]] || die "legacy run state does not match the current worktree"
+  set_state_value "$state" common_git_dir "$(common_git_dir "$worktree")"
+}
+
+init_run() {
+  local run_id="$1"
+  shift
+  local worktree phase state
+  worktree="$(pwd -P)"
+  phase="created"
+  while (($#)); do
+    case "$1" in
+      --phase)
+        (($# >= 2)) || die "--phase requires a name"
+        phase="$2"
+        shift 2
+        ;;
+      *) die "unknown init option: $1" ;;
+    esac
+  done
+  state="$(state_file "$run_id")"
+  if [[ -e "$state" ]]; then
+    [[ "$phase" == "created" ]] || die "legacy run state migration does not accept --phase"
+    migrate_legacy_state "$run_id" "$worktree"
+    printf '%s\n' "$run_id"
+    return
+  fi
+  initialize_state "$run_id" "$worktree" "$phase"
+  printf '%s\n' "$run_id"
+}
+
+worktree_init_run() {
+  local run_id="$1"
+  shift
+  local branch="" base="main" main_worktree worktree worktree_parent
+  while (($#)); do
+    case "$1" in
+      --branch)
+        (($# >= 2)) || die "--branch requires a name"
+        branch="$2"
+        shift 2
+        ;;
+      --base)
+        (($# >= 2)) || die "--base requires a ref"
+        base="$2"
+        shift 2
+        ;;
+      *) die "unknown worktree-init option: $1" ;;
+    esac
+  done
+  valid_component "$run_id" || die "invalid run id"
+  valid_branch "$branch" || die "invalid branch name"
+  [[ "$base" == "main" ]] || die "worktree-init base must be main"
+  main_worktree="$(require_main_worktree)"
+  [[ "$(git -C "$main_worktree" branch --show-current)" == "$base" ]] || die "main worktree must have the main branch checked out"
+  git -C "$main_worktree" diff --quiet || die "main worktree has unstaged changes"
+  git -C "$main_worktree" diff --cached --quiet || die "main worktree has staged changes"
+  git -C "$main_worktree" rev-parse --verify --quiet "refs/heads/${base}^{commit}" >/dev/null || die "base branch does not resolve to a commit"
+  [[ ! -e "$STATE_ROOT/$run_id" ]] || die "run already exists: $run_id"
+  worktree_parent="$(dirname "$main_worktree")/worktrees/$(basename "$main_worktree")"
+  worktree="$worktree_parent/$branch"
+  [[ ! -e "$worktree" ]] || die "worktree path already exists"
+  mkdir -p "$(dirname "$worktree")"
+  git -C "$main_worktree" -c core.hooksPath=/dev/null worktree add -b "$branch" "$worktree" "$base"
+  require_linked_worktree "$worktree"
+  initialize_state "$run_id" "$worktree" "worktree-created"
+  printf '%s\n' "$worktree"
+}
+
+resolve_trusted_gitleaks() {
+  local mise_config version candidate
+  mise_config="$ACCOUNT_HOME/.config/mise/config.toml"
+  [[ -f "$mise_config" && -r "$mise_config" && ! -L "$mise_config" ]] || die "trusted mise configuration is unavailable"
+  version="$(/usr/bin/awk -F '"' '$1 ~ /^[[:space:]]*gitleaks[[:space:]]*=/ { print $2; exit }' "$mise_config")"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "gitleaks version is not pinned in the trusted mise configuration"
+  candidate="$ACCOUNT_HOME/.local/share/mise/installs/gitleaks/$version/gitleaks"
+  [[ -f "$candidate" && -x "$candidate" && ! -L "$candidate" ]] || die "pinned trusted gitleaks binary is unavailable"
+  printf '%s\n' "$candidate"
+}
+
+resolve_trusted_gitleaks_config() {
+  local config="$ACCOUNT_HOME/.config/git/gitleaks.toml"
+  [[ -f "$config" && -r "$config" && ! -L "$config" ]] || die "trusted gitleaks configuration is unavailable"
+  printf '%s\n' "$config"
+}
+
+run_secret_scan() {
+  local worktree="$1" hook gitleaks_bin gitleaks_config
+  if [[ -n "$HOST_PRE_COMMIT" ]]; then
+    hook="$HOST_PRE_COMMIT"
+  else
+    hook="$ACCOUNT_HOME/.config/git/hooks/pre-commit"
+  fi
+  [[ -x "$hook" ]] || die "trusted pre-commit scanner is unavailable"
+  if [[ -z "$HOST_PRE_COMMIT" ]]; then
+    gitleaks_bin="$(resolve_trusted_gitleaks)"
+    gitleaks_config="$(resolve_trusted_gitleaks_config)"
+  fi
+  (
+    cd "$worktree"
+    if [[ -n "$gitleaks_bin" ]]; then
+      PATH='/usr/bin:/bin:/usr/sbin:/sbin' \
+        AGENT_WORKFLOW_SECRET_SCAN_ONLY=1 AGENT_WORKFLOW_GITLEAKS_BIN="$gitleaks_bin" \
+        AGENT_WORKFLOW_GITLEAKS_CONFIG="$gitleaks_config" "$hook"
+    else
+      PATH='/usr/bin:/bin:/usr/sbin:/sbin' AGENT_WORKFLOW_SECRET_SCAN_ONLY=1 "$hook"
+    fi
+  )
+}
+
+commit_run() {
+  local run_id="$1"
+  shift
+  local state message_file=""
+  state="$(require_state "$run_id")"
+  (($# >= 3)) || die "commit requires --message-file and file paths"
+  [[ "$1" == "--message-file" ]] || die "commit requires --message-file"
+  message_file="$2"
+  shift 2
+  [[ "$1" == "--" ]] || die "commit requires -- before file paths"
+  shift
+  (($#)) || die "commit requires at least one file"
+  local worktree branch path
+  worktree="$(state_value "$state" worktree)"
+  branch="$(state_value "$state" branch)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  [[ "$(git -C "$worktree" branch --show-current)" == "$branch" ]] || die "recorded branch is not checked out"
+  git -C "$worktree" diff --cached --quiet || die "refusing to commit with pre-existing staged changes"
+  message_file="$(path_in_worktree "$worktree" "$message_file")"
+  [[ -f "$message_file" ]] || die "commit message file does not exist"
+  for path in "$@"; do
+    path="$(path_in_worktree "$worktree" "$path")"
+    git -C "$worktree" -c core.hooksPath=/dev/null add -- "$path"
+  done
+  run_secret_scan "$worktree"
+  git -C "$worktree" -c core.hooksPath=/dev/null commit --no-verify -F "$message_file"
+  set_state_value "$state" phase committed
+}
+
+push_run() {
+  local run_id="$1" state worktree branch
+  state="$(require_state "$run_id")"
+  worktree="$(state_value "$state" worktree)"
+  branch="$(state_value "$state" branch)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  [[ "$(git -C "$worktree" branch --show-current)" == "$branch" ]] || die "recorded branch is not checked out"
+  git -C "$worktree" -c core.hooksPath=/dev/null push -u origin "$branch"
+  set_state_value "$state" phase pushed
+}
+
+prepare_pr_run() {
+  local run_id="$1"
+  shift
+  local state title_file="" body_file=""
+  state="$(require_state "$run_id")"
+  while (($#)); do
+    case "$1" in
+      --title-file)
+        (($# >= 2)) || die "--title-file requires a path"
+        title_file="$2"
+        shift 2
+        ;;
+      --body-file)
+        (($# >= 2)) || die "--body-file requires a path"
+        body_file="$2"
+        shift 2
+        ;;
+      *) die "unknown prepare-pr option: $1" ;;
+    esac
+  done
+  [[ -n "$title_file" && -n "$body_file" ]] || die "prepare-pr requires title and body"
+  local worktree branch directory title
+  worktree="$(state_value "$state" worktree)"
+  branch="$(state_value "$state" branch)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  [[ "$(git -C "$worktree" branch --show-current)" == "$branch" ]] || die "recorded branch is not checked out"
+  title_file="$(path_in_worktree "$worktree" "$title_file")"
+  body_file="$(path_in_worktree "$worktree" "$body_file")"
+  [[ -f "$title_file" && -f "$body_file" ]] || die "PR title or body source file does not exist"
+  title="$(tr -d '\r\n' <"$title_file")"
+  [[ -n "$title" ]] || die "PR title is empty"
+  directory="$(dirname "$state")"
+  umask 077
+  install -m 600 "$title_file" "$directory/title.md"
+  install -m 600 "$body_file" "$directory/body.md"
+  set_state_value "$state" phase pr-drafted
+}
+
+create_pr_run() {
+  local run_id="$1"
+  shift
+  local state title_file="" body_file="" base="" draft=""
+  state="$(require_state "$run_id")"
+  while (($#)); do
+    case "$1" in
+      --title-file)
+        (($# >= 2)) || die "--title-file requires a path"
+        title_file="$2"
+        shift 2
+        ;;
+      --body-file)
+        (($# >= 2)) || die "--body-file requires a path"
+        body_file="$2"
+        shift 2
+        ;;
+      --base)
+        (($# >= 2)) || die "--base requires a branch"
+        base="$2"
+        shift 2
+        ;;
+      --draft)
+        draft="--draft"
+        shift
+        ;;
+      *) die "unknown create-pr option: $1" ;;
+    esac
+  done
+  [[ -n "$title_file" && -n "$body_file" && -n "$base" ]] || die "create-pr requires title, body, and base"
+  [[ "$base" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$ && "$base" != *..* && "$base" != *//* ]] || die "invalid base branch"
+  local worktree branch title output pr_number repo
+  worktree="$(state_value "$state" worktree)"
+  branch="$(state_value "$state" branch)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  [[ "$(git -C "$worktree" branch --show-current)" == "$branch" ]] || die "recorded branch is not checked out"
+  title_file="$(path_in_run_state "$state" "$title_file")"
+  body_file="$(path_in_run_state "$state" "$body_file")"
+  [[ -f "$title_file" && -f "$body_file" ]] || die "PR title or body file does not exist"
+  title="$(tr -d '\r\n' <"$title_file")"
+  [[ -n "$title" ]] || die "PR title is empty"
+  repo="$(repository_slug "$worktree")"
+  local -a create_args=(pr create --repo "$repo")
+  [[ -z "$draft" ]] || create_args+=(--draft)
+  create_args+=(--title "$title" --body-file "$body_file" --base "$base" --head "$branch")
+  output="$(run_gh "${create_args[@]}")"
+  pr_number="${output##*/}"
+  [[ "$pr_number" =~ ^[0-9]+$ ]] || die "could not parse PR number"
+  set_state_value "$state" pr_number "$pr_number"
+  set_state_value "$state" phase pr-created
+  printf '%s\n' "$output"
+}
+
+checks_run() {
+  local run_id="$1"
+  shift
+  local state worktree pr_number repo
+  state="$(require_state "$run_id")"
+  case "$#" in
+    0) ;;
+    1) [[ "$1" == "--watch" ]] || die "unknown checks option: $1" ;;
+    *) die "checks accepts only --watch" ;;
+  esac
+  worktree="$(state_value "$state" worktree)"
+  pr_number="$(state_value "$state" pr_number)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  [[ "$pr_number" =~ ^[0-9]+$ ]] || die "run has no PR number"
+  repo="$(repository_slug "$worktree")"
+  if (($# == 1)); then
+    run_gh pr checks "$pr_number" --repo "$repo" --watch
+  else
+    run_gh pr checks "$pr_number" --repo "$repo"
+  fi
+}
+
+ready_for_review_run() {
+  local run_id="$1" pr_number="$2" state worktree recorded_pr_number repo
+  state="$(require_state "$run_id")"
+  [[ "$pr_number" =~ ^[0-9]+$ ]] || die "invalid PR number"
+  recorded_pr_number="$(state_value "$state" pr_number)"
+  [[ "$pr_number" == "$recorded_pr_number" ]] || die "PR number does not match the recorded run"
+  worktree="$(state_value "$state" worktree)"
+  require_recorded_worktree "$state" "$worktree"
+  require_invoking_worktree "$worktree"
+  repo="$(repository_slug "$worktree")"
+  run_gh pr ready "$pr_number" --repo "$repo"
+  set_state_value "$state" phase ready-for-review
+}
+
+prune_runs() {
+  [[ -d "$STATE_ROOT" ]] || exit 0
+  [[ "$STATE_ROOT" = */agent-workflow ]] || die "state root must end in /agent-workflow"
+  [[ "$STATE_ROOT" != "/agent-workflow" ]] || die "refusing to prune a broad state root"
+  find "$STATE_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +30 -exec rm -rf {} +
+}
+
+main() {
+  (($#)) || {
+    usage
+    exit 2
+  }
+  local command="$1"
+  shift
+  case "$command" in
+    worktree-init)
+      (($# >= 1)) || die "worktree-init requires a run id"
+      worktree_init_run "$@"
+      ;;
+    init)
+      (($# >= 1)) || die "init requires a run id"
+      init_run "$@"
+      ;;
+    status)
+      (($# == 1)) || die "status requires a run id"
+      cat "$(require_state "$1")"
+      ;;
+    commit)
+      (($# >= 1)) || die "commit requires a run id"
+      commit_run "$@"
+      ;;
+    push)
+      (($# == 1)) || die "push requires a run id"
+      push_run "$1"
+      ;;
+    prepare-pr)
+      (($# >= 1)) || die "prepare-pr requires a run id"
+      prepare_pr_run "$@"
+      ;;
+    create-pr)
+      (($# >= 1)) || die "create-pr requires a run id"
+      create_pr_run "$@"
+      ;;
+    checks)
+      (($# >= 1)) || die "checks requires a run id"
+      checks_run "$@"
+      ;;
+    ready-for-review)
+      (($# == 2)) || die "ready-for-review requires a run id and PR number"
+      ready_for_review_run "$@"
+      ;;
+    prune)
+      (($# == 0)) || die "prune takes no arguments"
+      prune_runs
+      ;;
+    -h | --help | help) usage ;;
+    *) die "unknown command: $command" ;;
+  esac
+}
+
+main "$@"

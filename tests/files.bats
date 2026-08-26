@@ -823,11 +823,12 @@ SHIMEOF
     grep -qE "^\| \*\*${t}\*\*" "$skill" || { echo "missing gating row for tier: $t"; return 1; }
   done
   # Codex observation/offload wiring: --json stream + -o result file + named
-  # concurrency cap + resume's fresh fallback.
+  # concurrency cap + fresh isolation on every review round.
   grep -q -- '--json' "$skill"
   grep -q -- '-o <RESULT_FILE>' "$skill"
   grep -q 'CODEX_MAX_CONCURRENCY' "$skill"
-  grep -q 'fresh フォールバック' "$skill"
+  grep -q 'Codex leg は resume せず' "$skill"
+  grep -q 'fresh 再レビュー' "$skill"
   # #407 robustness — phrase-level assertions that guard semantic regression, not
   # mere word presence (a bare 'fail-open'/'--tier' elsewhere must not satisfy these):
   # fail-open guard — an undefined --tier value is treated as empty, not fail-open.
@@ -843,7 +844,7 @@ SHIMEOF
   grep -q '大文字小文字を無視' "$skill"
   grep -q 'jwt' "$skill"; grep -q 'oauth' "$skill"
   grep -q 'floor であって ceiling ではない' "$skill"
-  # resolved OQ-005 (sessions.json TTL / cleanup).
+  # resolved OQ-005 (scratch TTL / cleanup).
   grep -q 'OQ-005: 解決済み' "$skill"
   # tier auto-inference points at pr-workflow's tier table as SSOT (no paraphrase).
   grep -qE 'size tier の判定軸.*SSOT' "$skill"
@@ -2272,6 +2273,57 @@ _gate_decision() {
   ! grep -qE '^[[:space:]]*paths[[:space:]]*=' "${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl"
   # The client-identifier pattern must be injected from 1Password, never hardcoded.
   grep -q 'onepasswordRead' "${HOME_DIR}/dot_config/git/private_gitleaks-own.toml.tmpl"
+}
+
+# Host actions invoke this hook with an isolated account home.  A repository
+# must not be able to weaken that elevated scan with its own .gitleaks.toml.
+@test "global pre-commit host scan uses the fixed account config" {
+  local sandbox repo account hook scanner capture
+  sandbox=$(mktemp -d)
+  repo="${sandbox}/repo"
+  account="${sandbox}/account"
+  hook="${HOME_DIR}/dot_config/git/hooks/executable_pre-commit"
+  scanner="${sandbox}/gitleaks"
+  capture="${sandbox}/scan-args"
+  mkdir -p "${repo}" "${account}/.config/git"
+  : >"${account}/.config/git/gitleaks.toml"
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
+    'printf "%s\\n" "$@" >"${AGENT_WORKFLOW_GITLEAKS_CAPTURE:?}"' >"$scanner"
+  chmod +x "$scanner"
+  git -C "$repo" init -q
+  printf 'repo-specific config must not be selected\n' >"${repo}/.gitleaks.toml"
+
+  run bash -c 'cd "$1" && HOME="$2" PATH="/usr/bin:/bin" AGENT_WORKFLOW_SECRET_SCAN_ONLY=1 AGENT_WORKFLOW_GITLEAKS_BIN="$3" AGENT_WORKFLOW_GITLEAKS_CONFIG="$2/.config/git/gitleaks.toml" AGENT_WORKFLOW_GITLEAKS_CAPTURE="$4" bash "$5"' \
+    _ "$repo" "$account" "$scanner" "$capture" "$hook"
+  local actual_status=$status
+  local actual_output=$output
+  local config_argument=""
+  [ -f "$capture" ] && config_argument=$(tail -n 1 "$capture")
+  rm -rf "$sandbox"
+  [ "$actual_status" -eq 0 ]
+  [ "$config_argument" = "${account}/.config/git/gitleaks.toml" ]
+  [[ "$actual_output" != *"repo-specific config"* ]]
+}
+
+@test "global pre-commit host scan fails closed without the fixed account config" {
+  local sandbox repo account hook scanner
+  sandbox=$(mktemp -d)
+  repo="${sandbox}/repo"
+  account="${sandbox}/account"
+  hook="${HOME_DIR}/dot_config/git/hooks/executable_pre-commit"
+  scanner="${sandbox}/gitleaks"
+  mkdir -p "$repo" "$account"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$scanner"
+  chmod +x "$scanner"
+  git -C "$repo" init -q
+
+  run bash -c 'cd "$1" && HOME="$2" PATH="/usr/bin:/bin" AGENT_WORKFLOW_SECRET_SCAN_ONLY=1 AGENT_WORKFLOW_GITLEAKS_BIN="$3" AGENT_WORKFLOW_GITLEAKS_CONFIG="$2/.config/git/gitleaks.toml" bash "$4"' \
+    _ "$repo" "$account" "$scanner" "$hook"
+  local actual_status=$status
+  local actual_output=$output
+  rm -rf "$sandbox"
+  [ "$actual_status" -ne 0 ]
+  [[ "$actual_output" == *"trusted host gitleaks configuration is unavailable"* ]]
 }
 
 # Regression (this PR): the chain step must not infinite-loop when core.hooksPath

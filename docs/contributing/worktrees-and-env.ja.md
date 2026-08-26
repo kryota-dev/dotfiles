@@ -42,6 +42,8 @@ hooks:
 
 **前提条件**：`wtp add` を実行する前に、`.env` と `.spec-workflow` がメインチェックアウトに存在していなければなりません。`.spec-workflow` ディレクトリは spec-workflow MCP サーバーが初回使用時に作成します。`.env` は `.env.template` からブートストラップする必要があります（後述）。
 
+> Codex の `agent-workflow worktree-init` host action は意図的に別経路です。clean な `main` checkout から `git worktree add` だけを実行し、`.wtp.yml` を読んだり hook を実行したりしません。したがって `.env` / `.spec-workflow` の link と `direnv allow` も行いません。
+
 ---
 
 ## direnv と `.env`

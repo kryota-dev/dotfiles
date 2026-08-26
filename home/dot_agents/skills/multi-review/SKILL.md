@@ -279,7 +279,7 @@ Claude leg（cc-code-review / cc-security-review / architecture-reviewer）は *
 2. **報告 = SendMessage**: 書き出し後、**`SendMessage(to:"main")` で完了報告**（`<RESULT_FILE>` パス ＋ カテゴリ別件数）を送る。
 3. **フォールバック**: Bash で `<RESULT_FILE>` に書けない場合（sandbox 制約等）は、本文を `SendMessage(to:"main")` の message に直接載せる（回収経路を必ず 1 本確保する）。
 
-**役割分担**: 結果回収は**ファイル**（大きな本文を message に載せない・durable・Codex `-o` と対称）、親↔leg の**追加対話**（clarify・追撃）は **`SendMessage(to:"<leg の name>")`**（Codex leg の対応物は `codex exec resume <thread_id>`。「Codex leg 実行・並列・観測・resume」節）。
+**役割分担**: 結果回収は**ファイル**（大きな本文を message に載せない・durable・Codex `-o` と対称）、親↔leg の**追加対話**（clarify・追撃）は **`SendMessage(to:"<leg の name>")`**。Codex leg は resume せず、必要な追撃を fresh な shared/read-only leg として起動する（「Codex leg 実行・並列・観測」節）。
 
 > `SendMessage` は `tools:` frontmatter に列挙していなくても background subagent には `to:"main"` 送信が使える（coordination-layer capability）。**`tools:` は完全な認可境界ではない**（Bash 非搭載の worker でも `to:"main"` は送れる）ことに留意する。
 
@@ -529,7 +529,7 @@ Phase 1.5 で取得した既存レビュー・コメントと、Phase 3 の統�
 
 ## Codex leg 実行・並列・観測・resume
 
-Codex leg（generalist + specialists）の起動形・並列制御・ライブ観測・再レビュー resume の SSOT。**Codex コマンドの構文的 SSOT は `codex/SKILL.md`**（`--json` / `-o` / `review --base` / heredoc / `resume` / session-id 捕捉節）。ここではそれを multi-review の roster に組み込む運用を定義する。
+Codex leg（generalist + specialists）の起動形・並列制御・ライブ観測・fresh 再レビューの SSOT。**Codex コマンドの構文的 SSOT は `codex/SKILL.md`**（`--json` / `-o` / `review --base` / heredoc 節）。ここではそれを multi-review の roster に組み込む運用を定義する。
 
 ### 実行形（generalist / specialist 共通）
 
@@ -544,18 +544,17 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
 - **specialist / code / security / architecture / adversarial**: heredoc = 「shared rubric 本文 + 対象説明 + 差分取得 command（`--repo` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ spec-context）」。effort は roster table に従う。
 - 親は **`$RESULT_leg` のみ Read**。`$STREAM_leg`（JSONL）は観測用で親コンテキストに載せない。
 
-### session-id 捕捉と状態ファイル
+### Codex leg の lifecycle
 
-- 各 leg 起動後、`$STREAM_leg` 先頭の `thread.started` イベントから `thread_id` を捕捉（codex/SKILL.md の grep 例）。
-- `<scratch>/codex-review/<owner>__<repo>__<PR>/sessions.json`（**非コミット**）に `{leg → thread_id}` を記録する（`multi-review` が所有。round 2+ の resume がこれを読む）。**区切りは `__`（owner/repo にも PR にも出現しない）**にして、`foo/bar-baz#1` と `foo-bar/baz#1` のようなハイフン曖昧による cross-repo 衝突を避ける。
+- Codex leg は各 round で必ず **fresh** な `shared` / read-only process として起動し、session ID を保存・resume しない。resume は既存 session の sandbox / worktree を再設定できず、その真正性を parent が agent-writable な metadata から検証することもできないためである。
+- result と STREAM は従来どおり scratch に置く。result path 以外への書き込みを leg に依頼しない。
 
 #### TTL / クリーンアップ契機（OQ-005: 解決済み）
 
-`sessions.json` と scratch の `codex-review/` 配下は次の方針で寿命管理する（PR #406 の未解決事項 OQ-005 の確定）:
+scratch の `codex-review/` 配下は次の方針で寿命管理する（PR #406 の未解決事項 OQ-005 の確定）:
 
-- **所有と idempotency**: `multi-review` が round 1 開始時に自 `(owner,repo,PR)` の `codex-review/<owner>__<repo>__<PR>/` を idempotent に作り直す（前 run の stale な `sessions.json` を置換）。これにより同一 PR の再レビューで古い `thread_id` が混ざらない。
-- **TTL 掃除（mtime ベース）**: round 1 開始時に、`codex-review/` 直下のサブディレクトリのうち **mtime が 7 日以上前**のものを best-effort で削除する（`find "<scratch>/codex-review" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +` 相当）。scratch はセッション隔離だが、standalone 多用や cross-repo バッチで dir が溜まるのを防ぐ。掃除の失敗（権限・不在）は無視する（レビュー本体を止めない）。
-- **契機は round 1 のみ**: 掃除は round 1 開始時の 1 回に限定し、round 2+ の resume 中には行わない（resume 対象の状態ファイルを消さないため）。
+- **所有と idempotency**: `multi-review` が各 round の開始時に `codex-review/<owner>__<repo>__<PR>/` を idempotent に作り直す。fresh leg だけを使うため、前 round の session ID は引き継がない。
+- **TTL 掃除（mtime ベース）**: 各 round 開始時に、`codex-review/` 直下のサブディレクトリのうち **mtime が 7 日以上前**のものを best-effort で削除する（`find "<scratch>/codex-review" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +` 相当）。掃除の失敗（権限・不在）は無視する（レビュー本体を止めない）。
 
 ### 並列上限とバッチ（CODEX_MAX_CONCURRENCY）
 
@@ -577,24 +576,24 @@ codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json 
   - **create（round 開始）**: `tmux kill-session -t <name> 2>/dev/null` してから `tmux new-session -d`（idempotent。同名の orphan / 前回分を置換し、accumulation を (owner,repo,PR) ごと最大 1 に bound）。
   - **teardown（round 終了 = Phase 5 投稿後）**: multi-review が自分のセッションを `tmux kill-session -t <name> 2>/dev/null` で破棄する。**ただし client が attach 中（`tmux list-clients -t <name>` が非空）なら破棄せず残置**し、「見終わったら手動 kill、または次 run が置換する」と注記する（観測中の画面を消さない）。
   - **caller（pr-workflow）側の teardown は不要**: round ごとに multi-review が自己完結するため、pr-workflow の GATE 3 等での破棄には依存しない（standalone 多用でも PR ごとに溜まらない）。
-- **観測（tmux）と resume（`sessions.json`）は独立**: tmux セッションはライブ観測専用で、round 2+ の resume は `sessions.json` の `thread_id` を使う（tmux セッションに依存しない）。よって teardown で resume は壊れず、round 2 は fresh にセッションを作り直して新 STREAM を tail する。STREAM の JSONL はディスクに残置（post-hoc 検分用。掃除は上記「TTL / クリーンアップ契機（OQ-005: 解決済み）」の scratch TTL に委ねる）。
+- **観測（tmux）と round 間の状態は独立**: tmux セッションはライブ観測専用で、再レビューも fresh process を起動する（tmux session / Codex session ID に依存しない）。STREAM の JSONL はディスクに残置（post-hoc 検分用。掃除は上記「TTL / クリーンアップ契機（OQ-005: 解決済み）」の scratch TTL に委ねる）。
 
-### round 判定と resume 再レビュー
+### round 判定と fresh 再レビュー
 
-- **round 1（`sessions.json` に当該 PR の記録なし）**: 通常起動 + session-id 記録（上記）。
-- **round 2+（記録あり）**: **前ラウンドで open 指摘を持つ Codex leg を resume** する:
+- **round 1**: 通常起動する。
+- **round 2+**: **前ラウンドで open 指摘を持つ Codex leg を fresh 起動**する:
 
   ```bash
-  codex exec resume "$thread_id" --json -o "$RESULT2_leg" - <<'PROMPT' > "$STREAM2_leg" 2>&1
-  前ラウンドの自分の指摘の対応状況を再確認し、未解決のみを再提起してください。
+  codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json \
+    -o "$RESULT2_leg" - <<'PROMPT' > "$STREAM2_leg" 2>&1
+  前ラウンドの open 指摘とその対応状況を再確認し、未解決のみを再提起してください。
   加えて、修正で新たに混入した問題がないか差分を走査してください。
   PROMPT
   ```
 
-  - resume は文脈を継承するため **棄却台帳の注入は不要**（session 継続が再提起を構造的に防ぐ）。
+  - fresh leg には前ラウンドの open 指摘と棄却台帳を注入する。`--profile shared --sandbox read-only --cd "$WT"` を毎回明示し、既存 session の設定継承に依存しない。
   - **clean だった leg は原則スキップ**。ただし修正 diff がその leg のドメイン（拡張子/特性）に触れたら **fresh で追加 spawn**（修正が新たに持ち込む問題を拾う）。
-  - **fresh フォールバック**: `thread_id` 欠落・resume 失敗・別セッション/別アカウントで解決不能なら、その leg は fresh 起動に切り替える（AC 準拠）。
-- **Claude leg は resume しない**（round ごと fresh spawn + 棄却台帳。Codex 専用の非対称対応）。
+- **Claude / Codex のすべての leg は resume しない**（round ごと fresh spawn + 棄却台帳）。
 
 ## PR コメント投稿手順
 

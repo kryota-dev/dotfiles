@@ -13,8 +13,9 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion
 `feat/`、`fix/`、`refactor/` など task の意味を表す prefix を使い、harness 名を prefix にしない。
 Codex の workspace-write child は作成済み linked worktree にだけ入れ、main worktree へは書き込まない。
 Codex main session での**新規作成**は sandbox 内の `wtp add` ではなく、Codex native command approval を伴う
-`agent-workflow worktree-init <run-id> --branch <branch> --base <base>` を使う。この action は `wtp add -b` と
-run state 初期化を一体で行う。user は terminal command を入力しない。既存 worktree の一覧・移動・削除に本 skill の
+`agent-workflow worktree-init <run-id> --branch <branch> --base main` を使う。この action は clean な main branch から
+`git worktree add` と run state 初期化を一体で行い、`wtp` / `.wtp.yml` の hook / `direnv allow` は実行しない。user は
+terminal command を入力しない。既存 worktree の一覧・移動・削除に本 skill の
 `wtp` 手順を使える。
 
 `wtp` は `git worktree` の面倒な部分を取り除く Git ワークツリーマネージャーである。

@@ -261,6 +261,7 @@ marker は harness や workflow filename から推測しない。まず caller �
 MY_LOGIN=$(gh api user --jq .login)
 TMP_CI=$(mktemp)
 TMP_CI_REPLIED=$(mktemp)
+TMP_CI_RAW=$(mktemp)
 
 # caller supplied values take precedence; otherwise inspect repository workflow definitions.
 if [ -n "${CI_REVIEW_MARKERS:-}" ]; then
@@ -272,9 +273,10 @@ fi
 
 # Step 1: marker 付き Issue comment を取得. Empty configuration is an empty result, not a broad match.
 if [ "$(jq 'length' <<<"$MARKERS_JSON")" -gt 0 ]; then
-  gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
+  gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --slurp > "$TMP_CI_RAW"
+  jq --argjson markers "$MARKERS_JSON" '
 [
-  .[]
+  .[][]
   | .body as $body
   | select([$markers[] as $marker | select($body | contains($marker))] | length > 0)
   | {
@@ -285,9 +287,9 @@ if [ "$(jq 'length' <<<"$MARKERS_JSON")" -gt 0 ]; then
       marker: ([$markers[] as $marker | select($body | contains($marker)) | $marker][0]),
       updatedAt: .updated_at,
       body: .body[:1000],
-      url: .html_url
-    }
-]' --argjson markers "$MARKERS_JSON" > "$TMP_CI"
+    url: .html_url
+  }
+]' "$TMP_CI_RAW" > "$TMP_CI"
 else
   printf '[]\n' > "$TMP_CI"
 fi
@@ -302,7 +304,7 @@ jq --slurpfile replied "$TMP_CI_REPLIED" '
   [.[] | select((((.commentId|tostring) + "@" + .updatedAt)) as $key | ($replied[0] | index($key)) | not)]
 ' "$TMP_CI"
 
-rm -f "$TMP_CI" "$TMP_CI_REPLIED"
+rm -f "$TMP_CI" "$TMP_CI_REPLIED" "$TMP_CI_RAW"
 ```
 
 **設計意図**:

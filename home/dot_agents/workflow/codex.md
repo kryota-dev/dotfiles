@@ -10,11 +10,23 @@ read API と live web search のための network access を有効にする。wo
 無効のまま維持する。network access は outbound の境界だけを変え、commit / push / PR 下書き準備・作成 / worktree 作成の
 authority を Codex child に渡すものではない。
 
-開始時は Codex が `agent-workflow worktree-init <run-id> --branch <branch> --base <base>` の native command
+開始時は Codex が `agent-workflow worktree-init <run-id> --branch <branch> --base main` の native command
 approval を要求し、user は Codex UI で承認する。runner が返した linked worktree を次の interactive main session
 の作業 root とする。Desktop client ではその worktree を開き、CLI では `--cd <linked-worktree>` を指定するが、
 いずれも user に shell command の入力を要求しない。Codex sandbox 内で `git worktree add` を実行したり、
 `--add-dir` や sandbox の緩和で main worktree の `.git` に書き込んだりしない。
+
+host action は clean な main branch から固定導出した path へ hook を無効化した `git worktree add` だけを実行する。`wtp`、
+repository の Git hook / `.wtp.yml` / post-create hook、`direnv allow` は実行しない。main profile が network を使う際の
+未検証入力は引き続き parent が検証し、workspace-write の full-disk read という残余リスクを前提に機密に触れる
+作業を child へ委譲しない。
+
+host runner は `BASH_ENV`、`GIT_*`、`GH_*`、呼出元の `PATH` を引き継がない固定環境で起動する。worktree を
+作成済みの action は、state に記録された canonical linked worktree を current worktree として実行することも検証する。
+named profile は同一 OS user を共有するため、profile 名や run id 単体を repository 操作の認可根拠にしない。
+commit は account 側の pinned gitleaks binary と固定 global config の scan を明示的に通し、scanner / config 不在なら停止する。
+worktree 内の `.gitleaks.toml` はこの scan に影響しない。worktree 作成、stage、commit、push は
+repository / local hook を無効化して実行するため、linked worktree 内の hook が host privilege で動くことはない。
 
 ## Child process
 

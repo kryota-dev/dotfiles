@@ -42,6 +42,8 @@ Key points:
 
 **Prerequisite**: `.env` and `.spec-workflow` must exist in the main checkout before `wtp add` is run. The `.spec-workflow` directory is created by the spec-workflow MCP server on first use. `.env` must be bootstrapped from `.env.template` (see below).
 
+> The Codex `agent-workflow worktree-init` host action is intentionally different: it uses only `git worktree add` from a clean `main` checkout and never reads `.wtp.yml` or runs its hooks. It therefore does not link `.env` or `.spec-workflow` and does not run `direnv allow`.
+
 ---
 
 ## direnv and `.env`
