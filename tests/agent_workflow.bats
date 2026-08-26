@@ -223,6 +223,34 @@ teardown() {
   [ "$(sed -n '5p' "${TEST_ROOT}/gh-args")" = "example/repository" ]
 }
 
+@test "agent-workflow: gh は account 側の pinned mise binary だけを使う" {
+  local state_file account runner asset binary
+  state_file="${STATE_DIR}/mise-gh-run/state.tsv"
+  mkdir -p "$(dirname "${state_file}")"
+  printf 'version\t3\nrun_id\tmise-gh-run\nworktree\t%s\ncommon_git_dir\t%s\nbranch\tfeat/runner\nphase\tpr-created\ncreated_at\t2026-01-01T00:00:00Z\npr_number\t123\n' "${WORKTREE}" "$(git -C "${WORKTREE}" rev-parse --path-format=absolute --git-common-dir)" >"${state_file}"
+  chmod 600 "${state_file}"
+  account="${TEST_ROOT}/account"
+  asset="$(case "$(uname -s):$(uname -m)" in Darwin:arm64) printf macOS_arm64 ;; Darwin:x86_64) printf macOS_amd64 ;; Linux:aarch64|Linux:arm64) printf linux_arm64 ;; Linux:x86_64) printf linux_amd64 ;; esac)"
+  binary="${account}/.local/share/mise/installs/gh/1.2.3/gh_1.2.3_${asset}/bin/gh"
+  mkdir -p "${account}/.config/mise" "$(dirname "${binary}")"
+  printf 'gh = "1.2.3"\n' >"${account}/.config/mise/config.toml"
+  printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\\n" "$@" >"${GH_CAPTURE:?}"' >"${binary}"
+  chmod +x "${binary}"
+  runner="${TEST_ROOT}/agent-workflow-host-mise-gh"
+  sed \
+    -e "s|^STATE_ROOT=.*|STATE_ROOT=\"${STATE_DIR}\"|" \
+    -e "s|^HOST_PRE_COMMIT=\"\"|HOST_PRE_COMMIT=\"${GH_FIXTURE}/host-pre-commit\"|" \
+    "${RUNNER_IMPLEMENTATION_SOURCE}" >"${runner}"
+  chmod +x "${runner}"
+
+  run bash -c 'cd "$1" && env -i HOME="$2" USER=test LOGNAME=test AGENT_WORKFLOW_ACCOUNT_HOME="$2" GH_CAPTURE="$3" PATH="/usr/bin:/bin:/usr/sbin:/sbin" /bin/bash "$4" checks mise-gh-run' \
+    _ "${WORKTREE}" "${account}" "${TEST_ROOT}/mise-gh-args" "${runner}"
+
+  [ "$status" -eq 0 ]
+  [ "$(sed -n '1p' "${TEST_ROOT}/mise-gh-args")" = "pr" ]
+  [ "$(sed -n '2p' "${TEST_ROOT}/mise-gh-args")" = "checks" ]
+}
+
 @test "agent-workflow: PR 下書きは run state 内の file だけを host action に渡す" {
   local state_file="${STATE_DIR}/pr-run/state.tsv"
   mkdir -p "$(dirname "${state_file}")"
@@ -329,5 +357,6 @@ teardown() {
   grep -qF 'core.hooksPath=/dev/null commit --no-verify' "${RUNNER_IMPLEMENTATION_SOURCE}"
   grep -qF 'core.hooksPath=/dev/null push -u origin "$branch"' "${RUNNER_IMPLEMENTATION_SOURCE}"
   grep -qF 'resolve_trusted_gitleaks' "${RUNNER_IMPLEMENTATION_SOURCE}"
+  grep -qF 'resolve_trusted_gh' "${RUNNER_IMPLEMENTATION_SOURCE}"
   grep -qF 'AGENT_WORKFLOW_GITLEAKS_BIN' "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit"
 }

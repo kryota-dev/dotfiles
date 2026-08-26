@@ -17,19 +17,32 @@ GH_BIN=""
 HOST_PRE_COMMIT=""
 
 run_gh() {
-  local candidate
   if [[ -n "$GH_BIN" ]]; then
     [[ -x "$GH_BIN" ]] || die "configured gh binary is not executable"
     "$GH_BIN" "$@"
     return
   fi
-  for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do
-    if [[ -x "$candidate" ]]; then
-      "$candidate" "$@"
-      return
-    fi
-  done
-  die "could not resolve a trusted gh binary"
+  "$(resolve_trusted_gh)" "$@"
+}
+
+resolve_trusted_gh() {
+  local mise_config version platform architecture asset candidate
+  mise_config="$ACCOUNT_HOME/.config/mise/config.toml"
+  [[ -f "$mise_config" && -r "$mise_config" && ! -L "$mise_config" ]] || die "trusted mise configuration is unavailable"
+  version="$(/usr/bin/awk -F '"' '$1 ~ /^[[:space:]]*gh[[:space:]]*=/ { print $2; exit }' "$mise_config")"
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "gh version is not pinned in the trusted mise configuration"
+  platform="$(/usr/bin/uname -s)"
+  architecture="$(/usr/bin/uname -m)"
+  case "${platform}:${architecture}" in
+    Darwin:arm64) asset="macOS_arm64" ;;
+    Darwin:x86_64) asset="macOS_amd64" ;;
+    Linux:aarch64 | Linux:arm64) asset="linux_arm64" ;;
+    Linux:x86_64) asset="linux_amd64" ;;
+    *) die "unsupported platform for pinned gh binary: ${platform}/${architecture}" ;;
+  esac
+  candidate="$ACCOUNT_HOME/.local/share/mise/installs/gh/$version/gh_${version}_${asset}/bin/gh"
+  [[ -f "$candidate" && -x "$candidate" && ! -L "$candidate" ]] || die "pinned trusted gh binary is unavailable"
+  printf '%s\n' "$candidate"
 }
 
 usage() {
@@ -290,7 +303,7 @@ resolve_trusted_gitleaks_config() {
 }
 
 run_secret_scan() {
-  local worktree="$1" hook gitleaks_bin gitleaks_config
+  local worktree="$1" hook gitleaks_bin="" gitleaks_config=""
   if [[ -n "$HOST_PRE_COMMIT" ]]; then
     hook="$HOST_PRE_COMMIT"
   else

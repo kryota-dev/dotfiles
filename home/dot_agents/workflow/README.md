@@ -74,8 +74,8 @@ Codex child は `codex/SKILL.md` の `shared` (read-only) または `agent`
 canonical worktree path と common Git directory を束縛し、以後の action で照合する。`init` は実行時の linked worktree
 だけを対象にし、任意 path を受け取らない。
 runner は最初に POSIX shell から固定した `env -i` 環境の Bash へ再実行する。これにより `BASH_ENV`、`GIT_*`、
-`GH_*`、agent が差し替えた `PATH` を host action に継承しない。Git は固定 system path、GitHub CLI は既知の
-absolute path だけから解決する。`commit` は stage 後に account 側の pinned mise binary と固定 global config による
+`GH_*`、agent が差し替えた `PATH` を host action に継承しない。Git は固定 system path、GitHub CLI と gitleaks は
+account 側の pinned mise config から導出した固定 absolute path だけを使う。`commit` は stage 後に固定 global config による
 gitleaks pre-commit を scan-only で直接実行し、scanner / config がなければ fail-closed とする。worktree 内の
 `.gitleaks.toml` は host scan に影響しない。worktree 作成、stage、commit、push は `core.hooksPath=/dev/null`（commit は
 さらに `--no-verify`）で repository / local hook を実行しない。`commit`、`push`、`prepare-pr`、`create-pr`、`checks`、`ready-for-review` は、
