@@ -1,0 +1,82 @@
+[
+  {
+    "query": "assign されてる issue が 6 件たまってて、どれも standard 級で pr-workflow を最後まで回さないといけない。並列でさばきたいんだけど、どういう順で走らせるか計画立てて起動まで面倒みてほしい",
+    "should_trigger": true
+  },
+  {
+    "query": "issue #101 #102 #103 #104 を並列で進めたい。依存とかコンフリクトも見て、波に分けて走らせて",
+    "should_trigger": true
+  },
+  {
+    "query": "複数のブランチを同時に動かして、それぞれ CI とレビューまで通してマージ手前まで持っていきたい。セッションを何本か立てて回す感じで",
+    "should_trigger": true
+  },
+  {
+    "query": "溜まってる issue、並列で最後まで進めて。マージだけは自分で判断したい",
+    "should_trigger": true
+  },
+  {
+    "query": "波で回して",
+    "should_trigger": true
+  },
+  {
+    "query": "この 5 件、tmux でセッション立てて並列で走らせたい。停止したら教えてほしいし、簡単なやつは代わりに答えといて",
+    "should_trigger": true
+  },
+  {
+    "query": "並列開発したいんだけど、issue-fleet だと draft PR で止まるよね。レビュー対応まで各セッションにやらせたい場合ってどうすればいい？",
+    "should_trigger": true
+  },
+  {
+    "query": "先週から assign されっぱなしの issue が 7 件ある。棚卸しして依存関係整理して、並列で流せるものは流したい",
+    "should_trigger": true
+  },
+  {
+    "query": "複数 issue を同時に走らせて、GATE のたびに聞かれるのを代わりに捌いてほしい。マージは自分でやる",
+    "should_trigger": true
+  },
+  {
+    "query": "wave orchestrator で #210 #211 #212 を回して",
+    "should_trigger": true
+  },
+  {
+    "query": "issue #305 を pr-workflow で PR まで回して",
+    "should_trigger": false
+  },
+  {
+    "query": "小さいタイポ修正の issue が 5 件あるから、まとめて片付けて draft PR まで出しといて",
+    "should_trigger": false
+  },
+  {
+    "query": "レビュー依頼が 4 件たまってる。まとめて multi-review かけて",
+    "should_trigger": false
+  },
+  {
+    "query": "今日やることある？ 横断でざっと見て",
+    "should_trigger": false
+  },
+  {
+    "query": "テストが遅いから並列実行して速くしたい。worker 数を増やすとかシャーディングとか",
+    "should_trigger": false
+  },
+  {
+    "query": "PR #434 の CI が終わるまで見張っといて",
+    "should_trigger": false
+  },
+  {
+    "query": "tmux で新しいセッション作ってウィンドウ分割する設定、tmux.conf にどう書けばいい？",
+    "should_trigger": false
+  },
+  {
+    "query": "この関数の実装を並列処理に書き換えたい。Promise.all で並列化するのと worker_threads どっちがいい？",
+    "should_trigger": false
+  },
+  {
+    "query": "複数のサブエージェントを並列で立てて、このコードベースを調査させたい",
+    "should_trigger": false
+  },
+  {
+    "query": "assign されてる issue 一覧を出して。まだ着手はしない",
+    "should_trigger": false
+  }
+]

@@ -79,15 +79,15 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->46<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->47<!-- /FACT --> スキル）
 
-`home/dot_agents/skills/` の 46 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` の 47 スキルをテーマ別にグループ化しています。
 
-### Git、PR、GitHub ワークフロー（13 スキル）
+### Git、PR、GitHub ワークフロー（14 スキル）
 
-日常的な開発サイクルの自動化の中核。2026-07-06 の棚卸しで並列開発トライアド（`repo-radar` → `issue-fleet` / `renovate-sweep`）が追加されました。
+日常的な開発サイクルの自動化の中核。2026-07-06 の棚卸しで並列開発トライアド（`repo-radar` → `issue-fleet` / `renovate-sweep`）が追加されました。`wave-orchestrator` はこの系統を「深く × 広く」へ広げ、独立セッションを並列に回して各々を `pr-workflow` の全長に通します。
 
-`commit`、`create-pr`、`create-issue`、`pr-draft-summary`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`renovate-sweep`、`issue-fleet`、`repo-radar`、`delete-merged-branches`
+`commit`、`create-pr`、`create-issue`、`pr-draft-summary`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`renovate-sweep`、`issue-fleet`、`repo-radar`、`wave-orchestrator`、`delete-merged-branches`
 
 ### コードレビューとマルチエージェントオーケストレーション（7 スキル）
 
