@@ -159,6 +159,18 @@
         ],
         "description": "Detect optimization-worthy (long, task-shaped) prompts and inject additionalContext suggesting $prompt-conform before execution (task #367). No `matcher` field: UserPromptSubmit does not support matchers per the official Hooks reference and always fires on every prompt. Tunable via PROMPT_CONFORM_SUGGEST_MIN_LENGTH / PROMPT_CONFORM_SUGGEST_TASK_REGEX / PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX env vars; falls back to built-in defaults on invalid overrides. Fail-open: never blocks prompt submission.",
         "id": "user-prompt-submit:prompt-conform-suggest"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
+        "id": "userpromptsubmit:wave-session-event"
       }
     ],
     "PreCompact": [
@@ -269,6 +281,19 @@
         ],
         "description": "CLV2 observer (PreToolUse): capture tool_start to observations.jsonl and lazy-start the Haiku observer. observe.sh is invoked directly (not via the ECC observe-runner.js) because the ECC plugin root has no skills/ tree, so the runner cannot locate it; observe.sh resolves its own SKILL_ROOT from $0. async so it never adds per-tool latency.",
         "id": "pre:observe:continuous-learning"
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
+        "id": "pretooluse:wave-session-event"
       }
     ],
     "PostToolUse": [
@@ -422,6 +447,19 @@
         ],
         "description": "Publish attention/completion notifications to the self-hosted ntfy server over Tailscale with repo/branch/account/session attribution (#337). Fail-open: no-op without ~/.config/ntfy/notify-env.",
         "id": "notification:ntfy-notify"
+      },
+      {
+        "matcher": "permission_prompt|idle_prompt|agent_needs_input",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
+        "id": "notification:wave-session-event"
       }
     ],
     "Stop": [
@@ -501,6 +539,19 @@
         ],
         "description": "At Stop, aggregate console.log warnings across git-modified JS/TS files (excluding tests/scripts) (D5, pairs with post:edit:console-warn). Sync (fast grep) so warnings surface.",
         "id": "stop:check-console-log"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
+        "id": "stop:wave-session-event"
       }
     ]
   },
@@ -528,3 +579,4 @@
   },
   "agentPushNotifEnabled": true
 }
+
