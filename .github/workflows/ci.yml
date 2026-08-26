@@ -66,9 +66,12 @@ jobs:
           persist-credentials: false
 
       - name: Install dependencies
+        # jq is needed by the wave-orchestrator hook and its bats suite. The runner
+        # image happens to ship it, but declaring it here keeps the suite from
+        # silently depending on the image's contents.
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats shellcheck zsh
+          sudo apt-get install -y bats shellcheck zsh jq
 
       # tests/files.bats renders the chezmoi script templates and executes them, which is the only
       # way to assert the brew-bundle failure policy as behaviour rather than as text — a purely
