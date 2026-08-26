@@ -2,14 +2,16 @@
 name: wave-orchestrator
 description: |
   複数の issue を依存関係とコンフリクトで「波」に割り、独立した CLI セッションとして tmux で並列起動し、
-  各セッションに pr-workflow を全長（gate → CI → review → 指摘対応）走らせ、停止のたびに検証して代理応答し、
-  マージ判断だけを user へ上げる orchestrator。
-  トリガー: "wave-orchestrator", "波で回して", "複数 issue を並列でマージ手前まで", "セッションを並列で立てて回して",
-  "並列で最後まで進めて"。
-  使用場面: assign 済み issue が複数溜まっていて、それぞれ standard/large 級で pr-workflow を最後まで
-  回す必要があるとき。issue が trivial/small で draft PR 止まりでよいなら issue-fleet を使うこと。
-  「複数の作業を並列で進めたい」「まとめて片付けたい」と言われたら、明示的に skill 名が出ていなくても
-  本 skill と issue-fleet のどちらが適するかを検討すること。
+  各セッションに pr-workflow を全長（gate → CI → レビュー → 指摘対応）走らせ、停止のたびに検証して
+  代理応答し、マージ判断だけを user へ上げる orchestrator。
+  トリガー: "wave-orchestrator", "波で回して", "複数 issue を並列で最後まで", "セッションを並列で立てて回して",
+  "並列で進めてマージ手前まで", "溜まってる issue を並列でさばいて"。
+  使用場面: assign 済みの issue が複数あり、それぞれ standard/large 級で、PR 作成だけでなく CI・レビュー・
+  指摘対応まで各セッションに走らせたいとき。**明示的に skill 名が出ていなくても**、「複数の作業を並列で
+  進めたい」「溜まった issue をさばきたい」と言われたら本 skill を検討すること。
+  使わない場面（近いが別 skill）: 単一 issue を PR まで回すだけなら pr-workflow。trivial/small で
+  draft PR 止まりでよいなら issue-fleet。レビュー依頼を複数さばくなら review-fleet。着手せず状況を
+  把握するだけなら repo-radar。テストやビルドを速くする並列化なら parallel-execution-optimizer。
 argument-hint: "[<issue 番号列> | --from-radar] [--max-parallel=N] [--profile=<launcher>] [--dry-run]"
 ---
 
