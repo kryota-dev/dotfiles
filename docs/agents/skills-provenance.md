@@ -79,15 +79,15 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (<!-- FACT:curated-skill-count -->46<!-- /FACT --> skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->47<!-- /FACT --> skills)
 
-The 46 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The 47 curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
-### Git, PR, and GitHub workflow (13 skills)
+### Git, PR, and GitHub workflow (14 skills)
 
-Core day-to-day development cycle automation, plus the parallel-dev triad (`repo-radar` → `issue-fleet` / `renovate-sweep`) added in the 2026-07-06 stocktake.
+Core day-to-day development cycle automation, plus the parallel-dev triad (`repo-radar` → `issue-fleet` / `renovate-sweep`) added in the 2026-07-06 stocktake. `wave-orchestrator` extends that family into deep-and-wide territory: independent sessions run in parallel, each taken through the full `pr-workflow`.
 
-`commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `delete-merged-branches`
+`commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `wave-orchestrator`, `delete-merged-branches`
 
 ### Code review and multi-agent orchestration (7 skills)
 
