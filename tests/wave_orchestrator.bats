@@ -36,8 +36,14 @@ perms() {
   stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"
 }
 
-# hook を payload (stdin) 付きで実行する
+# hook を payload (stdin) 付きで実行する。記録は opt-in なので
+# WAVE_ORCHESTRATOR_SESSION を立てる（orchestrator が子へ渡すのと同じ）。
 run_hook() {
+  run env WAVE_EVENT_DIR="$EVENT_DIR" WAVE_ORCHESTRATOR_SESSION=1 bash "$HOOK" <<<"$1"
+}
+
+# opt-in なしで hook を実行する（通常セッション相当）
+run_hook_without_optin() {
   run env WAVE_EVENT_DIR="$EVENT_DIR" bash "$HOOK" <<<"$1"
 }
 
@@ -49,24 +55,29 @@ run_events() {
 
 # --- fixture payload -------------------------------------------------------
 
+# prompt_id は同一ターンを束ねる鍵。3 イベントで一致することは実測済みで、
+# 判定はこれを使って到着順への依存を断つ。既定は TURN1。
+TURN1="67563479-3b56-4eea-8226-a2de831d6e66"
+TURN2="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
 payload_notification() {
-  local sid="${1:-$SID}" type="${2:-permission_prompt}"
-  printf '{"session_id":"%s","hook_event_name":"Notification","notification_type":"%s","message":"Claude needs your permission","cwd":"/tmp/wt"}' "$sid" "$type"
+  local sid="${1:-$SID}" type="${2:-permission_prompt}" pid="${3:-$TURN1}"
+  printf '{"session_id":"%s","prompt_id":"%s","hook_event_name":"Notification","notification_type":"%s","message":"Claude needs your permission","cwd":"/tmp/wt"}' "$sid" "$pid" "$type"
 }
 
 payload_prompt_submit() {
-  local sid="${1:-$SID}"
-  printf '{"session_id":"%s","hook_event_name":"UserPromptSubmit","cwd":"/tmp/wt"}' "$sid"
+  local sid="${1:-$SID}" pid="${2:-$TURN1}"
+  printf '{"session_id":"%s","prompt_id":"%s","hook_event_name":"UserPromptSubmit","cwd":"/tmp/wt"}' "$sid" "$pid"
 }
 
 payload_stop() {
-  local sid="${1:-$SID}"
-  printf '{"session_id":"%s","hook_event_name":"Stop","cwd":"/tmp/wt"}' "$sid"
+  local sid="${1:-$SID}" pid="${2:-$TURN1}"
+  printf '{"session_id":"%s","prompt_id":"%s","hook_event_name":"Stop","cwd":"/tmp/wt"}' "$sid" "$pid"
 }
 
 payload_ask_question() {
-  local sid="${1:-$SID}"
-  printf '{"session_id":"%s","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"toolu_1","cwd":"/tmp/wt","tool_input":{"questions":[{"question":"どれにしますか？","header":"選択","multiSelect":false,"options":[{"label":"青","description":"青が好き"},{"label":"赤","description":"赤が好き"},{"label":"緑","description":"緑が好き"}]}]}}' "$sid"
+  local sid="${1:-$SID}" pid="${2:-$TURN1}" first="${3:-青}"
+  printf '{"session_id":"%s","prompt_id":"%s","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"toolu_1","cwd":"/tmp/wt","tool_input":{"questions":[{"question":"どれにしますか？","header":"選択","multiSelect":false,"options":[{"label":"%s","description":"1 番目"},{"label":"赤","description":"2 番目"},{"label":"緑","description":"3 番目"}]}]}}' "$sid" "$pid" "$first"
 }
 
 # --- 記録側 ---------------------------------------------------------------
@@ -115,6 +126,14 @@ payload_ask_question() {
   [ "$output" = "1" ]
 }
 
+@test "hook: opt-in が無い通常セッションでは記録しない" {
+  # hook は全セッションに配線されるが、wave の子でなければ会話内容を残さない
+  run_hook_without_optin "$(payload_notification)"
+  [ "$status" -eq 0 ]
+  run bash -c "ls '$EVENT_DIR' 2>/dev/null | wc -l | tr -d ' '"
+  [ "$output" = "0" ]
+}
+
 @test "hook: jq が無くても Claude 本体を止めない (fail-open)" {
   # jq を PATH から外して実行しても exit 0
   run env WAVE_EVENT_DIR="$EVENT_DIR" PATH="/usr/bin:/bin" \
@@ -144,19 +163,28 @@ payload_ask_question() {
   [ "$output" = "IDLE" ]
 }
 
-@test "events: #436 回帰 — 過去に稼働イベントがあっても最新の停止を見落とさない" {
-  # 稼働 → 応答完了 → 再度プロンプト → 停止、の順。過去のイベントに引きずられない
-  run_hook "$(payload_prompt_submit)"
-  run_hook "$(payload_stop)"
-  run_hook "$(payload_prompt_submit)"
-  run_hook "$(payload_notification)"
+@test "events: #436 回帰 — 過去ターンの完了イベントに引きずられて停止を見落とさない" {
+  # ターン 1 は完了済み。ターン 2 で停止している。過去ターンの Stop を拾わない
+  run_hook "$(payload_prompt_submit "$SID" "$TURN1")"
+  run_hook "$(payload_stop "$SID" "$TURN1")"
+  run_hook "$(payload_prompt_submit "$SID" "$TURN2")"
+  run_hook "$(payload_notification "$SID" permission_prompt "$TURN2")"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK" ]
+}
+
+@test "events: 非同期の到着順が入れ替わっても停止を見落とさない" {
+  # hook は async なので UserPromptSubmit が Notification より後に書かれうる。
+  # 同一ターン内は論理順序で判定するので、到着順に引きずられてはならない
+  run_hook "$(payload_notification "$SID" permission_prompt "$TURN1")"
+  run_hook "$(payload_prompt_submit "$SID" "$TURN1")"
   run_events --session "$SID" --state
   [ "$output" = "ASK" ]
 }
 
 @test "events: #435 回帰 — 状態は notification_type で決まり画面文言に依存しない" {
   # message を空にしても、notification_type だけで ASK と判定される
-  run_hook '{"session_id":"'"$SID"'","hook_event_name":"Notification","notification_type":"agent_needs_input","message":""}'
+  run_hook '{"session_id":"'"$SID"'","prompt_id":"'"$TURN1"'","hook_event_name":"Notification","notification_type":"agent_needs_input","message":""}'
   run_events --session "$SID" --state
   [ "$output" = "ASK" ]
 }
@@ -184,6 +212,7 @@ payload_ask_question() {
 
 @test "events: --key-for が選択肢の位置に対応する数字キーを返す" {
   run_hook "$(payload_ask_question)"
+  run_hook "$(payload_notification)"
   run_events --session "$SID" --key-for "赤"
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
@@ -191,8 +220,58 @@ payload_ask_question() {
 
 @test "events: --key-for は提示されていない選択肢を拒否する" {
   run_hook "$(payload_ask_question)"
+  run_hook "$(payload_notification)"
   run_events --session "$SID" --key-for "黄"
   [ "$status" -ne 0 ]
+}
+
+@test "events: --key-for は応答待ちでないとき拒否する" {
+  # 質問イベントはあるが停止していない（Notification 無し）
+  run_hook "$(payload_ask_question)"
+  run_events --session "$SID" --key-for "赤"
+  [ "$status" -ne 0 ]
+}
+
+@test "events: --key-for は過去ターンの選択肢を使わない" {
+  # ターン 1 の質問は「青/赤/緑」。ターン 2 の質問は「黄/赤/緑」で停止中。
+  # ターン 1 にしかないラベルを指定したら拒否されなければならない
+  run_hook "$(payload_ask_question "$SID" "$TURN1" 青)"
+  run_hook "$(payload_stop "$SID" "$TURN1")"
+  run_hook "$(payload_ask_question "$SID" "$TURN2" 黄)"
+  run_hook "$(payload_notification "$SID" permission_prompt "$TURN2")"
+  run_events --session "$SID" --key-for "青"
+  [ "$status" -ne 0 ]
+  # 現在ターンのラベルは通る
+  run_events --session "$SID" --key-for "黄"
+  [ "$status" -eq 0 ]
+  [ "$output" = "1" ]
+}
+
+@test "events: 読取側も session を UUID 検証する" {
+  run_events --session "../../etc/passwd" --state
+  [ "$status" -ne 0 ]
+}
+
+@test "events: 壊れた行があっても読める分で判定する" {
+  run_hook "$(payload_notification)"
+  printf 'this is not json\n' >> "${EVENT_DIR}/${SID}.jsonl"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK" ]
+}
+
+@test "events: --self-check は記録先を 700 で作る" {
+  # hook より先に self-check が走っても保護が崩れないこと
+  run_events --self-check
+  run perms "$EVENT_DIR"
+  [ "$output" = "700" ]
+}
+
+@test "events: --purge が記録を削除する" {
+  run_hook "$(payload_notification)"
+  [ -f "${EVENT_DIR}/${SID}.jsonl" ]
+  run_events --session "$SID" --purge
+  [ "$status" -eq 0 ]
+  [ ! -e "${EVENT_DIR}/${SID}.jsonl" ]
 }
 
 @test "events: --self-check は検証できていない項目を検証済みと報告しない" {

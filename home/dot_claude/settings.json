@@ -161,7 +161,6 @@
         "id": "user-prompt-submit:prompt-conform-suggest"
       },
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
