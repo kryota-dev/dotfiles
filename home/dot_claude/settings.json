@@ -418,6 +418,19 @@
         ],
         "description": "Warn (with line numbers) when an edited JS/TS file still contains console.log statements (D4)",
         "id": "post:edit:console-warn"
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir. AskUserQuestion が決着したことを tool_use_id のペアリングで判定するため（#448）。PostToolUse は成功時のみ発火するので、通常の tool failure を拾う PostToolUseFailure と対で配線する。なお Esc キャンセルはどちらも発火しない（実機検証で確認）。その遷移だけは send-to-pane.sh --dismiss が画面で閉鎖を確認したうえで決着を書き戻して回復する。",
+        "id": "posttooluse:wave-session-event"
       }
     ],
     "PostToolUseFailure": [
@@ -432,6 +445,19 @@
         ],
         "description": "Track failed MCP tool calls, mark unhealthy servers, and attempt reconnect. CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure is set explicitly because Claude Code does not export it and mcp-health-check.js would otherwise default to the PreToolUse handler.",
         "id": "post:mcp-health-check"
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir. AskUserQuestion が決着したことを tool_use_id のペアリングで判定するため（#448）。PostToolUse は成功時のみ発火するので、通常の tool failure を拾う PostToolUseFailure と対で配線する。なお Esc キャンセルはどちらも発火しない（実機検証で確認）。その遷移だけは send-to-pane.sh --dismiss が画面で閉鎖を確認したうえで決着を書き戻して回復する。",
+        "id": "posttoolusefailure:wave-session-event"
       }
     ],
     "Notification": [
@@ -552,6 +578,21 @@
         ],
         "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
         "id": "stop:wave-session-event"
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/wave-session-event.sh",
+            "async": true,
+            "timeout": 10
+          }
+        ],
+        "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir. API エラーでターンが終わったとき Stop が来ないため、IDLE を判定できるようにする（#447 関連）。",
+        "id": "stopfailure:wave-session-event"
       }
     ]
   },

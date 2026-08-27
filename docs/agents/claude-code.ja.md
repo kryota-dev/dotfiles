@@ -22,6 +22,7 @@
   - [PostToolUseFailure](#posttoolusefailure)
   - [Notification](#notification)
   - [Stop](#stop)
+  - [StopFailure](#stopfailure)
 - [ECC ランチャー — ecc-hook.sh](#ecc-ランチャー--ecc-hooksh)
 - [ECC フック fork (hooks-fork/)](#ecc-フック-fork-hooks-fork)
   - [governance-capture.js](#governance-capturejs)
@@ -45,6 +46,7 @@
 | `home/dot_claude/executable_statusline.sh` | `~/.claude/statusline.sh` (0755) |
 | `home/dot_claude/executable_clv2-session-notify.sh` | `~/.claude/clv2-session-notify.sh` (0755) |
 | `home/dot_claude/executable_morning-radar.sh` | `~/.claude/morning-radar.sh` (0755) |
+| `home/dot_claude/executable_wave-session-event.sh` | `~/.claude/wave-session-event.sh` (0755) |
 | `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
@@ -145,6 +147,7 @@ flowchart TD
     SS --> SS2[clv2-session-notify async]
 
     UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nmatcherなし]
+    UPS --> UPS2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
     PC[PreCompact] --> PC1[ECC pre-compact]
 
@@ -156,6 +159,7 @@ flowchart TD
     PTU --> PTU6[mcp-health-check\nmcp__.*]
     PTU --> PTU7[doc-file-warning\nWrite]
     PTU --> PTU8[CLV2 observe.sh pre async]
+    PTU --> PTU9[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     PoTU[PostToolUse] --> PoTU1[ecc-metrics-bridge]
     PoTU --> PoTU2[ecc-context-monitor]
@@ -167,8 +171,13 @@ flowchart TD
     PoTU --> PoTU8[quality-gate\nEdit Write MultiEdit]
     PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
     PoTU --> PoTU10[console-warn\nEdit]
+    PoTU --> PoTU11[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
+
+    PTUF[PostToolUseFailure] --> PTUF1[mcp-health-check\nall tools]
+    PTUF --> PTUF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
+    NTF --> NTF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\npermission_prompt idle_prompt\nagent_needs_input]
 
     STP[Stop] --> STP1[session-end async]
     STP --> STP2[cost-tracker async]
@@ -176,6 +185,9 @@ flowchart TD
     STP --> STP4[ntfy-notify async]
     STP --> STP5[format-typecheck async]
     STP --> STP6[check-console-log sync]
+    STP --> STP7[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
+
+    STPF[StopFailure] --> STPF1[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 ```
 
 ### SessionStart
@@ -190,6 +202,7 @@ flowchart TD
 | フック ID | Matcher | コマンド | 備考 |
 |---|---|---|---|
 | `user-prompt-submit:prompt-conform-suggest` | なし | `node hooks-fork/prompt-conform-suggest.js`（タイムアウト 5 秒） | 長くタスク性の強いプロンプトを検知し、`$prompt-conform` の実行提案を `additionalContext` として注入する（task #367）。ECC フォークではなく独立スクリプト — 下記の [ECC hook forks](#ecc-フック-fork-hooks-fork) とは別に文書化している。`UserPromptSubmit` は[公式 Hooks reference](https://code.claude.com/docs/en/hooks)上 `matcher` 非サポート（silently ignored）のため、このエントリでは省略している。fail-open: 不正な payload・env でチューニングした不正な正規表現・その他の例外はすべて no-output・exit 0 に縮退する。チューニング項目は [Env vars reference](#env-vars-reference) を参照。 |
+| `userpromptsubmit:wave-session-event` | なし | `wave-session-event.sh`（async、タイムアウト 10 秒） | hook payload をセッションごとのファイルに追記し、wave-orchestrator の親セッションが TUI を走査せずに子セッションの停止を検知できるようにする（#437）。配線は全セッションに入るが**記録は opt-in**: 環境変数 `WAVE_ORCHESTRATOR_SESSION` が設定されているときのみ記録し（orchestrator が起動する子セッションにのみ export される）、通常セッションは何も記録しない。記録先は `${XDG_STATE_HOME:-$HOME/.local/state}/wave-orchestrator/events/<session_id>.jsonl`（ディレクトリ 700 / ファイル 600）。fail-open: `jq` が無い、記録先に書けない、`session_id` が UUID として解釈できない、のいずれでも no-op。 |
 
 ### PreCompact
 
@@ -209,6 +222,7 @@ flowchart TD
 | `pre:mcp-health-check` | `mcp__.*` | MCP サーバーのヘルスをプローブ；MCP 以外のツールのコストを回避するためマッチャーを絞り込み |
 | `pre:write:doc-file-warning` | `Write` | 構造化ディレクトリ外の非標準スクラッチドキュメントファイルに警告 |
 | `pre:observe:continuous-learning` | `*` | CLV2 `observe.sh pre` (async)；`tool_start` を `observations.jsonl` に書き込み |
+| `pretooluse:wave-session-event` | `AskUserQuestion` | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（async、タイムアウト 10 秒；`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。質問が開いたことを記録する；下記の `PostToolUse`/`PostToolUseFailure` 行と `tool_use_id` でペアリングし、後で決着したかを判定する。 |
 
 `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` 正規表現（`env` で設定）は、`pre:bash:dispatcher` が強制する組み込みの破壊的コマンドセットを拡張します：
 
@@ -241,18 +255,21 @@ flowchart TD
 | `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | `.json/.md/.go/.py` を biome/prettier/gofmt/ruff で自動フォーマット |
 | `post:edit:design-quality-check` | `Edit\|Write\|MultiEdit` | No | フロントエンドデザイン品質チェックリスト警告 |
 | `post:edit:console-warn` | `Edit` | No | 編集した JS/TS ファイルの `console.log` に行番号付きで警告 |
+| `posttooluse:wave-session-event` | `AskUserQuestion` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。`AskUserQuestion` に回答があったときに発火する。`tool_response` に回答本文が含まれるため、相関フィールド（`session_id`、`prompt_id`、`hook_event_name`、`tool_name`、`tool_use_id`）のみに射影して記録する — 回答本文はディスクに残らない。 |
 
 ### PostToolUseFailure
 
 | フック ID | 説明 |
 |---|---|
 | `post:mcp-health-check` | 失敗した MCP ツール呼び出しを追跡し、不健全なサーバーをマーク、再接続を試みる。Claude Code はこの env var をエクスポートしないため、`CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure` を明示的に設定している。 |
+| `posttoolusefailure:wave-session-event` | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437；matcher は `AskUserQuestion`）。通常の tool failure で発火する；上記の `PostToolUse` と `tool_use_id` でペアリングし、質問が決着したことを判定する（#448）。`PostToolUse` と同様、相関フィールドのみを射影して記録する — 回答本文はディスクに残らない。 |
 
 ### Notification
 
 | フック ID | マッチャー | Async | 説明 |
 |---|---|---|---|
 | `notification:ntfy-notify` | `permission_prompt\|idle_prompt\|agent_needs_input\|agent_completed` | Yes | repo/branch/account/session の帰属情報付きで、attention/completion 通知を Tailscale 経由の自己ホスト ntfy サーバーへ publish する（#337; [Notifications](../architecture/notifications.ja.md) 参照）。フェイルオープン: `~/.config/ntfy/notify-env` が無ければサイレント no-op |
+| `notification:wave-session-event` | `permission_prompt\|idle_prompt\|agent_needs_input` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。上記 `notification:ntfy-notify` より matcher が狭く、`agent_completed` を含まない。 |
 
 ### Stop
 
@@ -264,6 +281,13 @@ flowchart TD
 | `stop:ntfy-notify` | Yes | セッション停止通知（切り詰め + client-identifier スクラブ済みサマリー）を自己ホスト ntfy サーバーへ publish する（#337） |
 | `stop:format-typecheck` | Yes | 今セッションで編集した JS/TS ファイルを一括フォーマット・型チェック (`tsc --noEmit`、タイムアウト 300 秒) |
 | `stop:check-console-log` | No | git 変更のある全 JS/TS ファイルで `console.log` 警告を集計 |
+| `stop:wave-session-event` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。ターンが idle/完了したことを記録する。 |
+
+### StopFailure
+
+| フック ID | Async | 説明 |
+|---|---|---|
+| `stopfailure:wave-session-event` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。API エラーでターンが `Stop` を経ずに終わったときに発火し、orchestrator が子セッションを固着扱いせず idle と判定できるようにする（#447 関連）。 |
 
 ---
 
