@@ -1,5 +1,7 @@
+import { chmodSync, lstatSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
 
 function toEvidence(row) {
   return {
@@ -18,6 +20,18 @@ export function createStateStore(databasePath) {
   const database = new DatabaseSync(databasePath, {
     enableForeignKeyConstraints: true,
   });
+  if (databasePath !== ":memory:") {
+    const databaseStat = lstatSync(databasePath);
+    if (databaseStat.isSymbolicLink()) {
+      database.close();
+      throw new Error("state database must not be a symbolic link");
+    }
+    chmodSync(databasePath, 0o600);
+  }
+  database.exec("PRAGMA busy_timeout = 5000");
+  if (databasePath !== ":memory:") {
+    database.exec("PRAGMA journal_mode = WAL");
+  }
   database.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
@@ -61,6 +75,9 @@ export function createStateStore(databasePath) {
   const deleteEvidenceBefore = database.prepare(`
     DELETE FROM evidence WHERE created_at < ?
   `);
+  const selectEvidenceBefore = database.prepare(`
+    SELECT artifact_path FROM evidence WHERE created_at < ?
+  `);
   const insertTask = database.prepare(`
     INSERT INTO tasks (id, goal, task_json, created_at) VALUES (?, ?, ?, ?)
   `);
@@ -76,6 +93,26 @@ export function createStateStore(databasePath) {
   `);
 
   return {
+    storageInfo() {
+      const busyTimeout = Number(
+        database.prepare("PRAGMA busy_timeout").get().timeout,
+      );
+      const journalMode = String(
+        database.prepare("PRAGMA journal_mode").get().journal_mode,
+      );
+      return { busyTimeout, journalMode };
+    },
+    withTransaction(callback) {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = callback();
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
     createTask(input) {
       if (typeof input.goal !== "string" || input.goal.length === 0) {
         throw new TypeError("task.goal must be a non-empty string");
@@ -146,7 +183,25 @@ export function createStateStore(databasePath) {
     listEvidence() {
       return selectEvidence.all().map(toEvidence);
     },
-    pruneEvidenceBefore(cutoff) {
+    pruneEvidenceBefore(cutoff, artifactRoot) {
+      if (artifactRoot) {
+        const root = path.resolve(artifactRoot);
+        for (const row of selectEvidenceBefore.all(cutoff)) {
+          if (!row.artifact_path) continue;
+          const target = path.resolve(root, row.artifact_path);
+          if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+            throw new Error("artifact path is outside the evidence root");
+          }
+          try {
+            if (lstatSync(target).isSymbolicLink()) {
+              throw new Error("artifact path must not be a symbolic link");
+            }
+            unlinkSync(target);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+        }
+      }
       return Number(deleteEvidenceBefore.run(cutoff).changes);
     },
     close() {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,6 +7,7 @@ import test from "node:test";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { createDoctorReport } from "../home/dot_local/lib/frontier-harness/doctor.mjs";
+import { probeAntigravity } from "../home/dot_local/lib/frontier-harness/readiness.mjs";
 import { chooseRoute } from "../home/dot_local/lib/frontier-harness/router.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 
@@ -125,6 +126,23 @@ test("state store records evidence without a transcript field", () => {
   store.close();
 });
 
+test("state store keeps persistent evidence database private", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const statePath = path.join(directory, "state.db");
+  const store = createStateStore(statePath);
+  store.close();
+  assert.equal(statSync(statePath).mode & 0o777, 0o600);
+});
+
+test("state store enables concurrent-safe SQLite pragmas", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const store = createStateStore(path.join(directory, "state.db"));
+  assert.deepEqual(store.storageInfo(), { busyTimeout: 5000, journalMode: "wal" });
+  store.close();
+});
+
 test("state store prunes only evidence older than the raw retention cutoff", () => {
   const store = createStateStore(":memory:");
   store.putEvidence({
@@ -142,6 +160,31 @@ test("state store prunes only evidence older than the raw retention cutoff", () 
   assert.equal(store.listEvidence().length, 1);
   assert.equal(store.listEvidence()[0].kind, "test_pass");
   store.close();
+});
+
+test("state store prunes expired artifact files only inside the artifact root", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const artifactRoot = path.join(directory, "evidence");
+  mkdirSync(artifactRoot);
+  const artifactPath = path.join(artifactRoot, "old.log");
+  writeFileSync(artifactPath, "old evidence");
+  const store = createStateStore(path.join(directory, "state.db"));
+  store.putEvidence({
+    kind: "old_log",
+    producer: "fake",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    artifactPath,
+  });
+  store.close();
+
+  const reopened = createStateStore(path.join(directory, "state.db"));
+  assert.equal(
+    reopened.pruneEvidenceBefore("2026-08-01T00:00:00.000Z", artifactRoot),
+    1,
+  );
+  assert.equal(existsSync(artifactPath), false);
+  reopened.close();
 });
 
 test("doctor reports Antigravity as unavailable instead of crossing into r06", () => {
@@ -178,6 +221,24 @@ test("doctor marks an unprobed Antigravity executable as unverified", () => {
   assert.match(report.capabilities["frontend.primary"].reason, /authentication/);
 });
 
+test("Antigravity probe accepts only a successful structured model response", () => {
+  const successful = probeAntigravity("agy", () => ({
+    status: 0,
+    stdout: JSON.stringify({ models: [{ slug: "gemini-3.7-flash-high" }] }),
+    stderr: "",
+  }));
+  assert.equal(successful.verified, true);
+  assert.deepEqual(successful.models, ["gemini-3.7-flash-high"]);
+
+  const failed = probeAntigravity("agy", () => ({
+    status: 1,
+    stdout: "",
+    stderr: "authentication required",
+  }));
+  assert.equal(failed.verified, false);
+  assert.match(failed.reason, /authentication/);
+});
+
 test("fh doctor emits machine-readable capability readiness", () => {
   const output = [];
   const exitCode = runCli(["doctor", "--json"], {
@@ -196,6 +257,35 @@ test("fh doctor emits machine-readable capability readiness", () => {
   const report = JSON.parse(output.join("\n"));
   assert.equal(report.capabilities["frontend.primary"].status, "available");
   assert.equal(report.capabilities["semantic.judge"].model, "claude-opus-5");
+});
+
+test("fh doctor --probe persists readiness without persisting credentials", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const statePath = path.join(directory, "state.db");
+  const readinessPath = path.join(directory, "readiness.json");
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--probe", "--json"], {
+      config,
+      statePath,
+      readinessPath,
+      commandPaths: {
+        antigravity: "/opt/homebrew/bin/agy",
+        claude: "/Users/example/.local/launchers/claude",
+        codex: "/Users/example/.local/launchers/codex",
+      },
+      probeProvider: () => ({
+        verified: true,
+        models: ["gemini-3.7-flash-high"],
+      }),
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const report = JSON.parse(output.pop());
+  assert.equal(report.capabilities["frontend.primary"].status, "available");
+  assert.equal(readFileSync(readinessPath, "utf8").includes("credential"), false);
 });
 
 test("fh run records a shadow route without starting a provider", (context) => {
@@ -237,6 +327,41 @@ test("fh run records a shadow route without starting a provider", (context) => {
   assert.equal(status.routes[0].capability, "frontend.primary");
 });
 
+test("fh run treats a Codex-only r06 environment as r06 for account safety", (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "Implement a browser task",
+      modality: ["browser"],
+      risk: [],
+      hasDeterministicOracle: true,
+    }),
+  );
+  const output = [];
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      environment: {
+        CODEX_HOME: "/Users/example/.codex-r06",
+        PATH: "",
+      },
+      commandPaths: {
+        antigravity: "/opt/homebrew/bin/agy",
+        claude: "/Users/example/.local/launchers/claude",
+        codex: "/Users/example/.local/launchers/codex",
+      },
+      verifiedProviders: ["antigravity"],
+      config,
+      statePath: path.join(directory, "state.db"),
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).decision.provider, "codex");
+});
+
 test("fh onboard writes one approved repository capability manifest", (context) => {
   const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
   context.after(() => rmSync(directory, { force: true, recursive: true }));
@@ -264,6 +389,19 @@ test("fh onboard writes one approved repository capability manifest", (context) 
   assert.match(policy.approvalHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(policy.manifest.commands, ["npm run test"]);
   assert.equal(JSON.parse(output.pop()).policyPath, policyPath);
+});
+
+test("fh onboard rejects unknown manifest keys and unsafe commands", () => {
+  const output = [];
+  assert.throws(
+    () =>
+      runCli(["onboard", "--manifest", "/tmp/unused", "--approve", "--json"], {
+        config,
+        readManifest: () => ({ commands: ["npm run test"], token: "secret" }),
+        write: (line) => output.push(line),
+      }),
+    /manifest/,
+  );
 });
 
 test("fh clean applies the configured raw evidence retention window", (context) => {

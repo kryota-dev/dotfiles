@@ -35,11 +35,15 @@
 | 6 | Evidence state omits transcript and prunes expired records | same | Integration | PASS |
 | 7 | Shadow run/onboard/verify/review/clean persist normalized state without live provider execution | same | Integration | PASS |
 | 8 | Shell launcher, symlink, JSON config, and cask source exist | `bats tests/files.bats --filter 'frontier-harness source files'` | Source integration | PASS |
+| 9 | Persistent state is private and concurrent-safe (0600, WAL, busy timeout) | `node --test tests/frontier_harness.test.mjs` | Integration | PASS |
+| 10 | Manifest keys/commands/domains are strict and credential-free | same | Unit | PASS |
+| 11 | Antigravity readiness probe is structured, fresh, and credential-free | same | Unit/integration | PASS |
+| 12 | Artifact pruning deletes only contained non-symlink files | same | Integration | PASS |
 
 ## Coverage and known gaps
 
 Node's built-in test runner covers the currently implemented config, router, state store, doctor,
-and shadow CLI contracts. The provider write adapter, authenticated Antigravity model probe,
+readiness probe, retention, manifest, and shadow CLI contracts. The provider write adapter,
 candidate worktree apply, wave batch authorization, and learned router are intentionally not
 implemented in this foundation slice.
 

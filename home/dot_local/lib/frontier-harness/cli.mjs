@@ -1,4 +1,4 @@
-import { accessSync, constants, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -8,12 +8,18 @@ import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
 import { chooseRoute } from "./router.mjs";
 import { createStateStore } from "./state-store.mjs";
+import {
+  loadVerifiedProviders,
+  probeAntigravity,
+  writeReadiness,
+} from "./readiness.mjs";
 
 const PROVIDER_COMMANDS = {
   antigravity: "agy",
   claude: "claude",
   codex: "codex",
 };
+const MANIFEST_KEYS = new Set(["commands", "domains", "capabilities"]);
 
 function findCommand(command, searchPath) {
   for (const directory of searchPath.split(path.delimiter)) {
@@ -29,9 +35,21 @@ function findCommand(command, searchPath) {
 }
 
 function resolveAccountScope(environment) {
-  return environment.CLAUDE_CONFIG_DIR?.endsWith(".claude-r06")
-    ? "r06"
-    : "personal";
+  const scopes = [];
+  for (const [key, personalSuffix, workSuffix] of [
+    ["CLAUDE_CONFIG_DIR", ".claude", ".claude-r06"],
+    ["CODEX_HOME", ".codex", ".codex-r06"],
+  ]) {
+    const value = environment[key];
+    if (!value) continue;
+    if (value.endsWith(workSuffix)) scopes.push("r06");
+    else if (value.endsWith(personalSuffix)) scopes.push("personal");
+    else scopes.push("unknown");
+  }
+  const uniqueScopes = [...new Set(scopes)];
+  if (uniqueScopes.length === 0) return "personal";
+  if (uniqueScopes.length > 1) return "unknown";
+  return uniqueScopes[0];
 }
 
 function loadConfig(configPath) {
@@ -65,6 +83,10 @@ function defaultStatePath(cwd) {
   const absoluteCommonDirectory = path.resolve(cwd, commonDirectory);
   const stateDirectory = path.join(absoluteCommonDirectory, "frontier-harness");
   mkdirSync(stateDirectory, { mode: 0o700, recursive: true });
+  if (lstatSync(stateDirectory).isSymbolicLink()) {
+    throw new Error("frontier-harness state directory must not be a symbolic link");
+  }
+  chmodSync(stateDirectory, 0o700);
   return path.join(stateDirectory, "state.db");
 }
 
@@ -109,6 +131,45 @@ function writePolicy(policyPath, policy) {
   renameSync(temporaryPath, policyPath);
 }
 
+function normalizeManifest(input) {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError("manifest must be an object");
+  }
+  const unknownKey = Object.keys(input).find((key) => !MANIFEST_KEYS.has(key));
+  if (unknownKey) {
+    throw new TypeError(`manifest contains unsupported key: ${unknownKey}`);
+  }
+  for (const key of MANIFEST_KEYS) {
+    if (!Array.isArray(input[key])) {
+      throw new TypeError(`manifest.${key} must be an array`);
+    }
+    if (input[key].some((value) => typeof value !== "string" || value.length === 0)) {
+      throw new TypeError(`manifest.${key} entries must be non-empty strings`);
+    }
+  }
+  if (
+    input.commands.some(
+      (command) =>
+        !/^(?:npm run|pnpm run|yarn run|bun run|uv run|pytest|go test|cargo test)(?: [A-Za-z0-9_./:@=-]+)+$/.test(
+          command,
+        ),
+    )
+  ) {
+    throw new TypeError("manifest.commands contains an unsafe command");
+  }
+  if (input.domains.some((domain) => !/^(?:localhost|127\.0\.0\.1|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$/.test(domain))) {
+    throw new TypeError("manifest.domains contains an invalid domain");
+  }
+  if (input.capabilities.some((name) => !/^[a-z][a-z0-9._-]*$/.test(name))) {
+    throw new TypeError("manifest.capabilities contains an invalid capability");
+  }
+  return {
+    commands: [...input.commands],
+    domains: [...input.domains],
+    capabilities: [...input.capabilities],
+  };
+}
+
 function usage() {
   return [
     "Usage: frontier-harness <command> [--json]",
@@ -138,11 +199,26 @@ export function runCli(argumentsList, options = {}) {
   const accountScope = options.accountScope ?? resolveAccountScope(environment);
 
   if (command === "doctor") {
+    const readinessPath =
+      options.readinessPath ??
+      (options.statePath
+        ? options.statePath.replace(/state\.db$/, "readiness.json")
+        : null);
+    let verifiedProviders = options.verifiedProviders;
+    if (flags.includes("--probe")) {
+      const probe = options.probeProvider
+        ? options.probeProvider(commandPaths.antigravity)
+        : probeAntigravity(commandPaths.antigravity);
+      verifiedProviders = probe.verified ? ["antigravity"] : [];
+      if (readinessPath) writeReadiness(readinessPath, probe);
+    } else if (!verifiedProviders && readinessPath) {
+      verifiedProviders = loadVerifiedProviders(readinessPath);
+    }
     const report = createDoctorReport({
       accountScope,
       commandPaths,
       config,
-      verifiedProviders: options.verifiedProviders,
+      verifiedProviders,
     });
     write(asJson ? JSON.stringify(report) : JSON.stringify(report, null, 2));
     return 0;
@@ -150,7 +226,11 @@ export function runCli(argumentsList, options = {}) {
 
   if (command === "onboard") {
     const manifestPath = flagValue(flags, "--manifest");
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const manifest = normalizeManifest(
+      options.readManifest
+        ? options.readManifest(manifestPath)
+        : JSON.parse(readFileSync(manifestPath, "utf8")),
+    );
     if (!flags.includes("--approve")) {
       write(
         JSON.stringify({
@@ -180,25 +260,30 @@ export function runCli(argumentsList, options = {}) {
   }
 
   const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
+  const verifiedProviders =
+    options.verifiedProviders ??
+    loadVerifiedProviders(statePath.replace(/state\.db$/, "readiness.json"));
   const store = createStateStore(statePath);
   try {
     if (command === "run") {
       const taskPath = flagValue(flags, "--task");
       const taskInput = JSON.parse(readFileSync(taskPath, "utf8"));
-      const task = store.createTask(taskInput);
-      const route = chooseRoute({
-        accountScope,
-        availability: providerAvailability(commandPaths, options.verifiedProviders),
-        config,
-        task: taskInput,
+      const result = store.withTransaction(() => {
+        const task = store.createTask(taskInput);
+        const route = chooseRoute({
+          accountScope,
+          availability: providerAvailability(commandPaths, verifiedProviders),
+          config,
+          task: taskInput,
+        });
+        store.recordRoute(task.id, route);
+        return {
+          task,
+          decision: route,
+          executed: false,
+          rollout: config.rollout,
+        };
       });
-      store.recordRoute(task.id, route);
-      const result = {
-        task,
-        decision: route,
-        executed: false,
-        rollout: config.rollout,
-      };
       write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
       return 0;
     }
@@ -225,7 +310,10 @@ export function runCli(argumentsList, options = {}) {
         .filter((evidence) => evidence.createdAt < cutoff).length;
       const prunedEvidence = flags.includes("--dry-run")
         ? 0
-        : store.pruneEvidenceBefore(cutoff);
+        : store.pruneEvidenceBefore(
+            cutoff,
+            path.join(path.dirname(statePath), "evidence"),
+          );
       const result = {
         cutoff,
         dryRun: flags.includes("--dry-run"),
