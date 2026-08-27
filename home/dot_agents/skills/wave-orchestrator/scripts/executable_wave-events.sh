@@ -40,6 +40,8 @@
 #   wave-events.sh --session <uuid> --question          # 現在ターン最後の選択肢を JSON で (回答済みでも返る)
 #   wave-events.sh --session <uuid> --pending-question  # **未回答の**選択肢だけを JSON で
 #   wave-events.sh --session <uuid> --pending-ids       # 未回答の "<tool_use_id>\t<prompt_id>"
+#   wave-events.sh --session <uuid> --is-settled <id>   # その tool_use_id が決着済みか (0/1)
+#   wave-events.sh --session <uuid> --record-dismissal  # Esc で閉じた質問の決着を書き戻す
 #   wave-events.sh --session <uuid> --key-for <label>   # 選択肢に対応する <問い index>:<数字キー>
 #   wave-events.sh --session <uuid> --purge             # 記録を削除する (wave 完了後)
 #   wave-events.sh --self-check                         # 配線・記録先・直接実行可能性の確認
@@ -90,13 +92,29 @@ read_events() {
   jq -R -c 'fromjson? // empty' "$1" 2>/dev/null || true
 }
 
-# 最新ターン (最後に現れた prompt_id) のイベントだけを取り出す。prompt_id を
-# 持たない行は落とす。
+# 最新ターンのイベントだけを取り出す。prompt_id を持たない行は落とす。
+#
+# **「最後に到着した prompt_id」ではなく「初出が最も後の prompt_id」を最新とする**。
+# hook は async なので到着順は発生順と一致しない。到着順で選ぶと、あるターンの
+# 未回答 AskUserQuestion の後に別ターンの遅延 Stop が追記されただけで、遅延側の
+# ターンが「最新」に選ばれ、停止中のセッションを IDLE と報告してしまう
+# (#447 と同じ沈黙する故障をターン境界で再演する。実データで再現済み)。
+#
+# 遅延イベントは必ず**既存の**ターンに属するので、そのターンの初出位置は動かない。
+# よって初出順で並べれば、どの順序でイベントが到着してもターンの選択は変わらない。
+# これで「判定は到着順に依存しない」が、ターン内の述語だけでなくターンの選択
+# まで含めて成立する。
 latest_turn() {
   read_events "$1" | jq -sc '
     [ .[] | select(.prompt_id != null) ] as $evs
     | if ($evs | length) == 0 then []
-      else ($evs | last | .prompt_id) as $pid
+      else
+        # 各 prompt_id の初出 index を求め、その最大を持つ prompt_id を最新とする。
+        ( [ $evs | to_entries[] | {pid: .value.prompt_id, i: .key} ]
+          | group_by(.pid)
+          | map({pid: .[0].pid, first: (map(.i) | min)})
+          | max_by(.first) | .pid
+        ) as $pid
         | [ $evs[] | select(.prompt_id == $pid) ]
       end
   '
@@ -201,6 +219,72 @@ cmd_pending_ids() {
   ids="$(pending_ids "$f")"
   [ -n "$ids" ] || die "未回答の選択肢が無い"
   printf '%s\n' "$ids"
+}
+
+# 指定した tool_use_id が決着済みかを返す (0=決着済み / 1=未回答)。
+#
+# 送信側が「送った選択が確定したか」を判定するために使う。state が
+# ASK_QUESTION でなくなったことを完了と見なすと、UNKNOWN や RUNNING、
+# 別理由の IDLE まで「確定した」と誤報告する。確定の根拠は
+# **その tool_use_id に対応する決着イベントの存在**でなければならない。
+cmd_is_settled() {
+  local f open
+  f="$(event_file "$1")"
+  [ -s "$f" ] || die "イベントが無い。決着を判定できない (UNKNOWN)"
+  # jq はフィルタを 1 引数で受ける。オプションを先に置き、JQ_DEFS と本体は
+  # シェルの文字列連結で 1 つのフィルタにする (cmd_state と同じ形)。
+  # 「未回答に無い」だけを根拠にすると、綴り違い・別ターンの古い id まで
+  # 決着済みと答えてしまう (fail-open)。現在ターンにその質問が実在することを
+  # 先に確かめ、実在しない id は判定不能として拒否する。
+  local known
+  known="$(latest_turn "$f" | jq -r --arg t "$2" "$JQ_DEFS"'
+    [ ask_asks[] | select(.tool_use_id == $t) ] | length
+  ' 2>/dev/null || true)"
+  [ -n "$known" ] || die "決着を判定できない"
+  [ "$known" != "0" ] || die "現在ターンに tool_use_id=$2 の質問が無い。決着を判定できない"
+  open="$(latest_turn "$f" | jq -r --arg t "$2" "$JQ_DEFS"'
+    [ open_questions[] | select(.tool_use_id == $t) ] | length
+  ' 2>/dev/null || true)"
+  [ -n "$open" ] || die "決着を判定できない"
+  [ "$open" = "0" ]
+}
+
+# Esc で閉じた質問の決着を書き戻す。決着イベントの JSON スキーマを知るのは
+# このスクリプトだけに保つため、書き込みも読取と同じ場所に置く。
+#
+# **画面の確認は行わない**。閉鎖を確認するのは tmux を触れる送信側の責務で、
+# ここは「確認できた事実を記録する」だけを担う。tmux にもプロセス状態にも
+# 依存しないという性質は保たれる。
+#
+# 対象は **未回答のうち最後の 1 件**に限る。画面で閉鎖を確認できたのは表示中の
+# 1 つだけであり、未回答集合を一括で決着させると、確認していない質問まで
+# 解決済みにしてしまう (pending_question / --key-for が既に「最後の 1 件」を
+# 前提に動いているので、ここも揃える)。
+#
+# 相関 ID を欠く未回答が対象になった場合は **書かずに非 0 で返す**。読取側の
+# open_questions は tool_use_id 欠落を fail-safe で未回答として残すため、
+# 書けないまま成功を報告すると固着したのに解除したと誤報告することになる。
+cmd_record_dismissal() {
+  local f target tuid pid line
+  f="$(event_file "$1")"
+  [ -s "$f" ] || die "イベントが無い。決着を記録できない (UNKNOWN)"
+  target="$(latest_turn "$f" | jq -c "$JQ_DEFS"'
+    open_questions | last | if . == null then empty else . end
+  ' 2>/dev/null || true)"
+  [ -n "$target" ] || die "未回答の選択肢が無い。記録するものが無い"
+  tuid="$(printf '%s' "$target" | jq -r '.tool_use_id // empty' 2>/dev/null || true)"
+  pid="$(printf '%s' "$target" | jq -r '.prompt_id // empty' 2>/dev/null || true)"
+  # prompt_id を欠くと latest_turn がこの行をターンから外し、決着として読まれない。
+  [ -n "$tuid" ] && [ -n "$pid" ] || die "未回答の質問が相関 ID (tool_use_id / prompt_id) を欠く。決着を記録できない"
+  line="$(jq -c -n --arg s "$1" --arg t "$tuid" --arg p "$pid" '
+    {session_id: $s, prompt_id: $p, hook_event_name: "PostToolUseFailure",
+     tool_name: "AskUserQuestion", tool_use_id: $t, synthetic: "dismiss"}
+  ' 2>/dev/null || true)"
+  [ -n "$line" ] || die "決着イベントを組み立てられない"
+  ensure_event_dir || die "記録先を用意できない"
+  umask 077
+  printf '%s\n' "$line" >>"$f" || die "決着を書き戻せない"
+  echo "記録: 決着 tool_use_id=${tuid}"
 }
 
 cmd_question() {
@@ -356,6 +440,15 @@ while [ $# -gt 0 ]; do
       ACTION="pending-ids"
       shift
       ;;
+    --record-dismissal)
+      ACTION="record-dismissal"
+      shift
+      ;;
+    --is-settled)
+      ACTION="is-settled"
+      LABEL="${2:-}"
+      shift 2
+      ;;
     --key-for)
       ACTION="key-for"
       LABEL="${2:-}"
@@ -395,6 +488,17 @@ case "$ACTION" in
     validate_session "$SESSION"
     cmd_pending_ids "$SESSION"
     ;;
+  record-dismissal)
+    [ -n "$SESSION" ] || die "--session は必須"
+    validate_session "$SESSION"
+    cmd_record_dismissal "$SESSION"
+    ;;
+  is-settled)
+    [ -n "$SESSION" ] || die "--session は必須"
+    [ -n "$LABEL" ] || die "--is-settled には tool_use_id が要る"
+    validate_session "$SESSION"
+    cmd_is_settled "$SESSION" "$LABEL"
+    ;;
   key-for)
     [ -n "$SESSION" ] || die "--session は必須"
     [ -n "$LABEL" ] || die "--key-for にはラベルが要る"
@@ -402,5 +506,5 @@ case "$ACTION" in
     cmd_key_for "$SESSION" "$LABEL"
     ;;
   self-check) cmd_self_check ;;
-  *) die "--state / --question / --pending-question / --pending-ids / --key-for / --purge / --self-check のいずれかを指定すること" ;;
+  *) die "--state / --question / --pending-question / --pending-ids / --is-settled / --record-dismissal / --key-for / --purge / --self-check のいずれかを指定すること" ;;
 esac

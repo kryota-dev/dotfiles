@@ -152,14 +152,34 @@ printf '%s\n' "$*" >>"$STUB_LOG"
 case "$1" in
   display-message) printf '%s\n' "${STUB_PANE_PID:-4242}" ;;
   capture-pane)
+    # STUB_CAPTURE_FAIL=1 で「tmux 自体が失敗する」状況を再現する (既定は従来どおり)。
+    if [ -n "${STUB_CAPTURE_FAIL:-}" ]; then
+      exit 1
+    fi
     if [ -e "$STUB_SENT" ] && [ -s "$STUB_CAPTURE_AFTER" ]; then
       cat "$STUB_CAPTURE_AFTER"
     else
       cat "$STUB_CAPTURE"
     fi
     ;;
-  load-buffer) cat >/dev/null ;;
-  send-keys) : >"$STUB_SENT" ;;
+  load-buffer)
+    # STUB_LOADED が設定されていれば貼り付けられた本文をそこへ保存する
+    # (既定は従来どおり捨てる)。paste_body の制御文字除去を直接検証するために使う。
+    if [ -n "${STUB_LOADED:-}" ]; then
+      cat >"$STUB_LOADED"
+    else
+      cat >/dev/null
+    fi
+    ;;
+  send-keys)
+    : >"$STUB_SENT"
+    # STUB_SETTLE_FILE / STUB_SETTLE_LINE が設定されていればキー送出の副作用として
+    # 決着イベントを書き込む (既定は従来どおり何もしない)。実機では Enter 送出後に
+    # 非同期で hook が決着を記録するので、その時間差を送信側スタブで模す。
+    if [ -n "${STUB_SETTLE_FILE:-}" ] && [ -n "${STUB_SETTLE_LINE:-}" ]; then
+      printf '%s\n' "$STUB_SETTLE_LINE" >>"$STUB_SETTLE_FILE"
+    fi
+    ;;
 esac
 exit 0
 STUB
@@ -214,6 +234,10 @@ run_send() {
     STUB_NO_CHILDREN="${STUB_NO_CHILDREN:-}" \
     STUB_PANE_PID="${STUB_PANE_PID:-}" \
     STUB_CHILD_PID="${STUB_CHILD_PID:-}" \
+    STUB_CAPTURE_FAIL="${STUB_CAPTURE_FAIL:-}" \
+    STUB_LOADED="${STUB_LOADED:-}" \
+    STUB_SETTLE_FILE="${STUB_SETTLE_FILE:-}" \
+    STUB_SETTLE_LINE="${STUB_SETTLE_LINE:-}" \
     bash "$SEND" "$@"
 }
 
@@ -906,5 +930,327 @@ print(" ".join(bad))
   printf 'Enter to select · Esc to cancel\n' >"$STUB_CAPTURE_AFTER"
   run_send "%1" --session "$SID" --dismiss
   [ "$status" -eq 2 ]
+  [ "$(stub_count 'paste-buffer')" -eq 0 ]
+}
+
+# --- 判定側の追加回帰: latest_turn のターン境界選択 -------------------------
+
+@test "events: ターン境界は初出が最も後の prompt_id で選ばれる（遅延 Stop に引きずられない）" {
+  # latest_turn() は「最後に到着した prompt_id」ではなく「初出が最も後の
+  # prompt_id」を現在ターンとする。ターン AAA(TURN1) の後に始まったターン
+  # BBB(TURN2) で止まっているのに、AAA の Stop が遅れて届いても BBB を見失っては
+  # いけない
+  run_hook "$(payload_prompt_submit "$SID" "$TURN1")"
+  run_hook "$(payload_prompt_submit "$SID" "$TURN2")"
+  run_hook "$(payload_ask_question "$SID" "$TURN2" 黄)"
+  run_hook "$(payload_stop "$SID" "$TURN1")"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK_QUESTION" ]
+}
+
+@test "events: 同じ論理内容なら到着順を変えても判定は変わらない" {
+  # 上と同じ論理内容だが、AAA の Stop を先に書く。hook は async なのでこの順序も
+  # 現実にありうる。ターンの選択は各 prompt_id の初出位置だけで決まるので、
+  # 変わってはいけない
+  run_hook "$(payload_stop "$SID" "$TURN1")"
+  run_hook "$(payload_prompt_submit "$SID" "$TURN1")"
+  run_hook "$(payload_prompt_submit "$SID" "$TURN2")"
+  run_hook "$(payload_ask_question "$SID" "$TURN2" 黄)"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK_QUESTION" ]
+}
+
+@test "events: 単一ターンでは UserPromptSubmit → Stop で IDLE のまま（退行なし）" {
+  # latest_turn() を「到着順」から「初出順による集合の切り出し」へ変えたことが、
+  # ターン境界が単一の最も単純なケースまで壊していないことを確認する
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  run_events --session "$SID" --state
+  [ "$output" = "IDLE" ]
+}
+
+# --- 判定側の追加回帰: --is-settled ------------------------------------------
+
+@test "events: --is-settled は未回答の tool_use_id に対して非 0 で返る" {
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  run_events --session "$SID" --is-settled "toolu_1"
+  [ "$status" -ne 0 ]
+}
+
+@test "events: --is-settled は決着イベントの記録後に 0 で返る" {
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  run_hook "$(payload_post_tool_use)"
+  run_events --session "$SID" --is-settled "toolu_1"
+  [ "$status" -eq 0 ]
+}
+
+@test "events: --is-settled は現在ターンに存在しない tool_use_id を拒否する（決着済みと答えない）" {
+  # 「未回答の集合に無い」だけを根拠にすると、綴り違いや無関係な id まで
+  # 決着済みと誤って答えてしまう。現在ターンに実在することを先に確かめる
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  run_events --session "$SID" --is-settled "toolu_ghost"
+  [ "$status" -ne 0 ]
+}
+
+# --- 判定側の追加回帰: --record-dismissal ------------------------------------
+
+@test "events: --record-dismissal は未回答の質問に決着行を追記し ASK_QUESTION を解除する" {
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK_QUESTION" ]
+
+  run_events --session "$SID" --record-dismissal
+  [ "$status" -eq 0 ]
+
+  local line
+  line="$(grep '"synthetic":"dismiss"' "${EVENT_DIR}/${SID}.jsonl")"
+  [ -n "$line" ]
+  [ "$(printf '%s' "$line" | jq -r '.prompt_id')" = "$TURN1" ]
+  [ "$(printf '%s' "$line" | jq -r '.tool_use_id')" = "toolu_1" ]
+
+  run_events --session "$SID" --state
+  [ "$output" != "ASK_QUESTION" ]
+}
+
+@test "events: --record-dismissal は tool_use_id を欠く未回答には非 0 で終了し何も追記しない" {
+  # 相関 id が無いと latest_turn がこの行を束ねられず、決着として読まれない。
+  # 書いたのに解除できない偽の成功を返してはいけない
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question_no_id)"
+  local before after
+  before="$(wc -l <"${EVENT_DIR}/${SID}.jsonl" | tr -d ' ')"
+  run_events --session "$SID" --record-dismissal
+  [ "$status" -ne 0 ]
+  after="$(wc -l <"${EVENT_DIR}/${SID}.jsonl" | tr -d ' ')"
+  [ "$after" = "$before" ]
+}
+
+@test "events: --record-dismissal は複数の未回答があっても最後の 1 件だけを決着させる" {
+  # 画面で閉鎖を確認できたのは表示中の 1 つだけ。一括で決着させると、
+  # 確認していない質問まで解決済みにしてしまう
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question "$SID" "$TURN1" 青)"
+  run_hook '{"session_id":"'"$SID"'","prompt_id":"'"$TURN1"'","hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"toolu_2","cwd":"/tmp/wt","tool_input":{"questions":[{"question":"q2","header":"h2","multiSelect":false,"options":[{"label":"赤","description":"d"}]}]}}'
+  run_events --session "$SID" --record-dismissal
+  [ "$status" -eq 0 ]
+
+  local line
+  line="$(grep '"synthetic":"dismiss"' "${EVENT_DIR}/${SID}.jsonl")"
+  [ "$(printf '%s' "$line" | jq -r '.tool_use_id')" = "toolu_2" ]
+
+  # 1 問目 (toolu_1) は未回答のまま
+  run_events --session "$SID" --is-settled "toolu_1"
+  [ "$status" -ne 0 ]
+  run_events --session "$SID" --is-settled "toolu_2"
+  [ "$status" -eq 0 ]
+}
+
+# --- 判定側の追加回帰: #443 bypassPermissions --------------------------------
+
+@test "events: #443 回帰 — bypassPermissions でも permission_prompt を停止扱いしない" {
+  # AUTO_APPROVE_MODES は auto と bypassPermissions の 2 つ。auto だけのテストでは
+  # 配列比較を単一要素で通ってしまい、この分岐の回帰を検出できない
+  run_hook "$(payload_prompt_submit_mode "$SID" bypassPermissions)"
+  run_hook "$(payload_notification)"
+  run_events --session "$SID" --state
+  [ "$output" = "RUNNING" ]
+}
+
+# --- 判定側の追加回帰: 壊れた JSONL 行の位置 ---------------------------------
+
+@test "events: 壊れた行が先頭にあっても後続の有効イベントで判定する" {
+  # 旧実装 (jq -c '.') は JSON ストリームとして読むため最初の壊れた行で読み込みを
+  # 止める。末尾に壊れた行を置く既存テストだけではこの退行を検出できない
+  run_hook "$(payload_notification)"
+  local f="${EVENT_DIR}/${SID}.jsonl"
+  { printf 'this is not json\n'; cat "$f"; } >"${f}.tmp"
+  mv "${f}.tmp" "$f"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK_PERMISSION" ]
+}
+
+@test "events: 壊れた行が有効イベントの間にあっても前後のイベントで判定する" {
+  run_hook "$(payload_prompt_submit)"
+  printf 'still not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_hook "$(payload_stop)"
+  run_events --session "$SID" --state
+  [ "$output" = "IDLE" ]
+}
+
+# --- 判定側の追加回帰: --self-check の直接実行検証 ---------------------------
+
+@test "events: --self-check は直接実行の可否を実際に検査している（実行ビットを落として確認）" {
+  # 「直接実行」という文字列が出るだけでは、ハードコードされた文言でも通って
+  # しまう。実行ビットを落としたコピーで、報告が実際の実行可能性に追随することを
+  # 確認する
+  local copy="${BATS_TEST_TMPDIR}/wave-events-noexec.sh"
+  cp "$EVENTS" "$copy"
+  chmod -x "$copy"
+  run env WAVE_EVENT_DIR="$EVENT_DIR" WAVE_SETTINGS_FILE="$SETTINGS" bash "$copy" --self-check
+  [[ "$output" == *"直接実行: できない"* ]]
+  [[ "$output" != *"直接実行: 可能"* ]]
+}
+
+# --- send-to-pane の追加回帰: --select の確認画面拒否 ------------------------
+
+@test "send-to-pane: --select は最終確認画面 (Ready to submit) を拒否し send-keys を送らない" {
+  # かつて確認画面を選択肢 UI と誤認し、確認画面へ裸の数字キーを送れてしまって
+  # いた。両者は明確に別画面として扱われなければならない
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'Enter to select · Esc to cancel\nReady to submit your answers?\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --select "赤"
+  [ "$status" -ne 0 ]
+  [ "$(stub_count 'send-keys')" -eq 0 ]
+}
+
+# --- send-to-pane の追加回帰: capture 失敗を「閉じた」と解釈しない -----------
+
+@test "send-to-pane: --dismiss は capture 失敗を閉じたと解釈せず何も送らない" {
+  # capture 失敗と空文字列を区別できないと、「選択肢 UI が無い = 閉じた」と
+  # 誤読して、実際には開いている選択肢の決着を書き戻してしまう
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  export STUB_CAPTURE_FAIL=1
+  run_send "%1" --session "$SID" --dismiss
+  [ "$status" -ne 0 ]
+  [ "$(stub_count 'send-keys')" -eq 0 ]
+  [ "$(stub_count 'paste-buffer')" -eq 0 ]
+}
+
+@test "send-to-pane: --select は capture 失敗時に選択肢 UI を確認できず何も送らない" {
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  export STUB_CAPTURE_FAIL=1
+  run_send "%1" --session "$SID" --select "赤"
+  [ "$status" -ne 0 ]
+  [ "$(stub_count 'send-keys')" -eq 0 ]
+}
+
+# --- send-to-pane の追加回帰: settled() は tool_use_id が根拠 -----------------
+
+@test "send-to-pane: settled() は画面上の進捗ではなく対象 tool_use_id の決着イベントを根拠にする" {
+  # 複数問の TUI は 1 問答えるごとに確定マークが画面上で増えるが、それは
+  # 「対象の tool_use_id が決着した」ことの証拠にはならない (決着は
+  # PostToolUse/Failure でしかわからない)。画面の進捗だけを根拠に
+  # CONFIRMED_CALL_COMPLETE と報告すると、まだ処理されていない回答を
+  # 「呼び出し全体が完了した」と誤報告する
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question_multi)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'Enter to select · Esc to cancel\n' >"$STUB_CAPTURE"
+  # 1 問目に答えた直後の画面: 確定マークは増えているが、tool_use_id=toolu_m の
+  # 決着イベントはまだ記録していない
+  printf '☒ 1問目\nEnter to select · Esc to cancel\n' >"$STUB_CAPTURE_AFTER"
+  run_send "%1" --session "$SID" --select "X"
+  [ "$status" -eq 0 ]
+  [[ "$output" == CONFIRMED_MORE* ]]
+  [[ "$output" != CONFIRMED_CALL_COMPLETE* ]]
+}
+
+# --- send-to-pane の追加回帰: paste_body の制御文字除去 ----------------------
+
+@test "send-to-pane: paste_body は本文から ESC を含む制御文字を除去する" {
+  # 本文中に paste 終端シーケンス ESC[201~ が混ざると、受け手はそこで paste
+  # モードを抜けて残りを通常のキー入力として解釈してしまう (実機で確認済み)。
+  # tmux の load-buffer に渡る本文から ESC が消えていることを直接見る
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '%s\n' '❯ ' >"$STUB_CAPTURE"
+  STUB_LOADED="${BATS_TEST_TMPDIR}/loaded.txt"
+  export STUB_LOADED
+  local esc body
+  esc=$'\033'
+  body="before${esc}[201~after"
+  run_send "%1" --session "$SID" --text "$body"
+  run cat "$STUB_LOADED"
+  [[ "$output" != *$'\033'* ]]
+  [[ "$output" == *"before"* ]]
+  [[ "$output" == *"after"* ]]
+}
+
+# --- send-to-pane の追加回帰: bracketed paste に off スイッチが無い ----------
+
+@test "send-to-pane: bracketed paste は WAVE_PASTE_BRACKETED=0 でも無効化できない" {
+  # -p は #445 (本文がキー入力として解釈され無断で回答が確定する) 対策の本体。
+  # 安全機構に env で切れる off スイッチを持たせてはいけない
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '%s\n' '❯ ' >"$STUB_CAPTURE"
+  export WAVE_PASTE_BRACKETED=0
+  run_send "%1" --session "$SID" --text "本文"
+  run grep -- 'paste-buffer' "$STUB_LOG"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-p"* ]]
+}
+
+# --- send-to-pane の追加回帰: --submit ---------------------------------------
+
+@test "send-to-pane: --submit は確認画面を確定し決着を確認できたら成功する" {
+  # 実機では Enter 送出後に非同期で hook が決着イベントを記録する。その時間差を
+  # 送信側スタブ (send-keys の副作用として決着を書き込む) で模す
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'Ready to submit your answers?\n' >"$STUB_CAPTURE"
+  export STUB_SETTLE_FILE="${EVENT_DIR}/${SID}.jsonl"
+  export STUB_SETTLE_LINE
+  STUB_SETTLE_LINE="$(payload_post_tool_use)"
+  run_send "%1" --session "$SID" --submit
+  [ "$status" -eq 0 ]
+  [[ "$output" == CONFIRMED_CALL_COMPLETE* ]]
+  [ "$(stub_count 'send-keys')" -eq 1 ]
+}
+
+@test "send-to-pane: --submit は確認画面が無ければ何も送らずに終了する" {
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'Enter to select · Esc to cancel\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --submit
+  [ "$status" -ne 0 ]
+  [ "$(stub_count 'send-keys')" -eq 0 ]
+}
+
+@test "send-to-pane: --submit は Enter を送っても決着を観測できなければ UNVERIFIED で失敗する" {
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_ask_question)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'Ready to submit your answers?\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --submit
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  [ "$(stub_count 'send-keys')" -eq 1 ]
+}
+
+# --- send-to-pane の追加回帰: 非 UUID セッションの拒否 -----------------------
+
+@test "send-to-pane: 非 UUID の --session を拒否し何も送らない" {
+  # 非 0 と未送信だけを見ると、読取側の検証に落ちる間接防御でも通ってしまい
+  # 送信側自身の UUID 検証（多層防御）を守れない。**送信側が出すメッセージ**を
+  # 固定して、引数パース直後に自前で弾いていることを保証する。
+  setup_pane_stubs
+  run_send "%1" --session "../../etc/passwd" --text "x"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"session が UUID 形式でない"* ]]
+  [ "$(stub_count 'send-keys')" -eq 0 ]
   [ "$(stub_count 'paste-buffer')" -eq 0 ]
 }

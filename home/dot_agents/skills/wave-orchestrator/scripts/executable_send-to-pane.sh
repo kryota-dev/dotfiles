@@ -8,7 +8,7 @@
 #
 # capture-pane を使う用途を 2 つに分け、**片方だけ**を許容する。
 #
-#   許容: **自分の操作の結果**の検証
+#   許容: **自己検証可能な局所的事実**の確認 (UI の開閉・入力欄の残骸・確定済みの個数)
 #         - 入力欄に本文が残っているか
 #         - 選択肢 UI がまだ開いているか
 #         - どの問いが確定済みか (確定マークの個数)
@@ -78,9 +78,10 @@ QUEUE_MARKER="${WAVE_QUEUE_MARKER:-Press up to edit queued messages}"
 INPUT_PROMPT_MARKER="${WAVE_INPUT_PROMPT_MARKER:-❯}"
 CONFIRMED_MARK="${WAVE_CONFIRMED_MARK:-☒}"
 
-# bracketed paste を使うか。TUI 側が対応しない環境向けの逃げ道として env で
-# 落とせるようにしてあるが、既定は on (これが #445 の対策の本体)。
-PASTE_BRACKETED="${WAVE_PASTE_BRACKETED:-1}"
+# bracketed paste は無効化できない。かつて env で落とせる逃げ道を置いていたが、
+# -p は #445 (本文がキー入力として解釈され無断で回答が確定する) の対策の本体で
+# あり、安全機構に off スイッチを持たせるべきではない。未対応環境では貼り付けを
+# 諦めて送信を拒否する (fail-closed) 方が正しい。
 
 die() {
   echo "$1" >&2
@@ -123,6 +124,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$SESSION" ] || die "--session は必須 (hook イベントの参照に要る)"
+# session_id はイベントログのファイルパスに連結される。記録側・読取側と同じ検証を
+# ここでも行う (多層防御)。現在は state_now() が先に走るので読取側の検証で間接的に
+# 守られているが、それは「全モードで state_now が先に呼ばれる」という暗黙の前提に
+# 依存した間接防御であり、モード追加や順序変更で静かに崩れる。
+UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+printf '%s' "$SESSION" | grep -qE "$UUID_RE" || die "session が UUID 形式でない"
 [ -n "$MODE" ] || die "--select / --submit / --dismiss / --text のいずれかを指定すること"
 case "$MODE" in
   select | text) [ -n "$ARG" ] || die "--${MODE} には値が要る" ;;
@@ -160,16 +167,33 @@ assert_pane_runs_session() {
   die "ペイン $PANE で session $SESSION が動いていない (終了済み / ID 取り違えの可能性)。送信中止"
 }
 
-# --- 画面参照 (自分の操作の結果の検証にのみ使う) ---------------------------
+# --- 画面参照 (自己検証可能な局所的事実の確認にのみ使う) -------------------
 
+# 画面を取得する。**失敗と「取れたが空」を区別する**のが要点。
+# かつて `|| true` で失敗を握り潰していたため、tmux が失敗すると空文字が返り、
+# 「選択肢 UI が無い = 閉じた」と解釈されて、実際には選択肢が残っていても
+# 決着を書き戻してしまった (fail-closed 設計に空いた fail-open の穴)。
+# 取得できなかったことは呼び出し側で必ず非 0 として扱う。
 capture() {
-  tmux_cmd capture-pane -p -t "$PANE" 2>/dev/null || true
+  tmux_cmd capture-pane -p -t "$PANE" 2>/dev/null
 }
 
+# 選択肢 UI (番号を選ぶ画面) が出ているか。**確認画面は含めない**。
+# かつて SUBMIT_MARKER も true にしていたため、--select のガードが最終確認画面を
+# 通過し、確認画面へ裸の数字キーを送れてしまった。確認画面の確定は --submit の
+# 責務なので、両者を明確に分ける。
 option_ui_open() {
   case "$1" in
-    *"$OPTION_UI_MARKER"* | *"$SUBMIT_MARKER"*) return 0 ;;
+    *"$OPTION_UI_MARKER"*) return 0 ;;
   esac
+  return 1
+}
+
+# 選択肢 UI と確認画面のいずれかが出ているか。--dismiss は「質問に関する UI が
+# 画面から消えたこと」を確認したいので、両方を対象にする。
+question_ui_open() {
+  option_ui_open "$1" && return 0
+  submit_screen_open "$1" && return 0
   return 1
 }
 
@@ -226,60 +250,75 @@ state_now() {
   events --session "$SESSION" --state 2>/dev/null || echo UNKNOWN
 }
 
+# 送信対象の質問が決着したかを、**その tool_use_id の決着イベント**で判定する。
+#
+# かつて「state が ASK_QUESTION でなくなったこと」を完了と見なしていたため、
+# UNKNOWN / RUNNING / 別理由の IDLE まで「確定した」と誤報告していた。確定の根拠は
+# 送った選択に対応する決着イベントの存在でなければならない。
+#
+# TARGET_TOOL_USE_ID は送信前に固定する (送信後に引き直すと、次の質問の id を
+# 掴んでしまう)。固定できていない場合は判定不能として非 0 を返す。
+TARGET_TOOL_USE_ID=""
+
 settled() {
-  [ "$(state_now)" != "ASK_QUESTION" ]
+  [ -n "$TARGET_TOOL_USE_ID" ] || return 1
+  events --session "$SESSION" --is-settled "$TARGET_TOOL_USE_ID" >/dev/null 2>&1
 }
 
 # --- 送出 -----------------------------------------------------------------
 
 # 本文を bracketed paste で流し込む。send-keys -l を使わないのが要点 (#442 / #445)。
-# 選択肢の閉鎖を**画面で確認したうえで**、決着イベントを記録側のログへ書き戻す。
+# 選択肢の閉鎖を**画面で確認したうえで**、決着イベントの記録を wave-events.sh へ
+# 委譲する。
 #
-# **なぜ送信側が書くのか**: Esc キャンセルは hook イベントを一切出さない (実機で
-# 確認済み)。--dismiss が Escape を送って閉じた場合も同じで、記録側からは
-# 「質問が閉じた」ことを知る手段が無い。その結果 state は ASK_QUESTION に固着し、
-# --select は「UI が無い」で拒否、--text は「選択肢が開いている」で拒否、
-# --purge しても UNKNOWN で拒否となり、Leader が完全に手詰まりになる (実測)。
+# **なぜ委譲するのか**: 決着イベントの JSON スキーマは記録側 (射影) と読取側
+# (JQ_DEFS の消費) が既に持っている。ここで 3 箇所目としてゼロから組み立てると、
+# 読取側が要求するフィールド集合を変えたときに、ここは構造的に追随を強制されない。
+# スキーマを知るのは wave-events.sh だけに保ち、こちらは「閉鎖を確認できた」という
+# 事実を伝えるだけにする。画面を見るのは tmux を触れるこちらの責務なので、
+# 責務境界は変わらない (確認はここ / 記録はあちら)。
 #
-# 書き戻すのは **閉鎖を capture で直接確認できた場合に限る**。推測では書かない。
-# 記録は synthetic として印を付け、本物の hook イベントと区別できるようにする。
+# **なぜ書き戻しが必要なのか**: Esc キャンセルは hook イベントを一切発火させない
+# (実機で確認)。Escape を送って閉じた場合も同じ。書き戻さないと state が
+# ASK_QUESTION に固着し、--select は「UI が無い」、--text は「選択肢が開いている」、
+# --purge 後は「UNKNOWN」で拒否され、Leader が完全に手詰まりになる。
 record_dismissal() {
-  local ids id f line
-  ids="$(events --session "$SESSION" --pending-ids 2>/dev/null || true)"
-  [ -n "$ids" ] || return 0
-  f="${EVENT_DIR}/${SESSION}.jsonl"
-  # 記録側と同じ 600 / 700 を保つ。
-  umask 077
-  mkdir -p "$EVENT_DIR" 2>/dev/null || return 1
-  local pid
-  while IFS=$'\t' read -r id pid; do
-    [ -n "$id" ] || continue
-    # prompt_id は必須。これを欠くと latest_turn() がこの行をターンから外し、
-    # 決着として読まれない (実機で踏んだ)。
-    [ -n "$pid" ] || return 1
-    line="$(jq -c -n \
-      --arg s "$SESSION" --arg t "$id" --arg p "$pid" \
-      '{session_id: $s, prompt_id: $p, hook_event_name: "PostToolUseFailure",
-        tool_name: "AskUserQuestion", tool_use_id: $t, synthetic: "dismiss"}' \
-      2>/dev/null || true)"
-    [ -n "$line" ] || return 1
-    printf '%s\n' "$line" >>"$f" 2>/dev/null || return 1
-  done <<<"$ids"
-  return 0
+  events --session "$SESSION" --record-dismissal >/dev/null 2>&1
+}
+
+# 本文から制御文字を除去する (改行とタブは残す)。
+#
+# **bracketed paste だけでは本文をキー入力から隔離できない**。本文中に paste の
+# 終端シーケンス ESC [ 201 ~ が含まれていると、受け手はそこで paste モードを抜け、
+# 以降のバイトを通常のキー入力として解釈する。実機検証で、この経路から埋め込んだ
+# コマンドが実際に実行されることを確認した (使い捨ての tmux セッションで再現)。
+#
+# これは tmux の実装バグではなく xterm bracketed paste protocol の仕様どおりの
+# 挙動で、protocol に忠実な consumer ほど同じ弱点を持つ。よって送る側で ESC を
+# 落とすしかない。ANSI 色付きのログ抜粋を転記する用途を壊さないよう、拒否では
+# なく除去にして、除去したことは呼び出し側へ報告する。
+sanitize_body() {
+  # C0 制御文字のうち改行 (\n) と水平タブ (\t) 以外を落とす。
+  LC_ALL=C tr -d '\000-\010\013\014\016-\037\177'
 }
 
 paste_body() {
-  local body="$1" buf opts
+  local body="$1" buf clean removed
+  clean="$(printf '%s' "$body" | sanitize_body)"
+  if [ "$clean" != "$body" ]; then
+    removed=$(($(printf '%s' "$body" | LC_ALL=C wc -c) - $(printf '%s' "$clean" | LC_ALL=C wc -c)))
+    echo "注意: 本文から制御文字を ${removed} バイト除去した (paste 境界の注入を防ぐため)" >&2
+  fi
   buf="wave-$$-${RANDOM}"
-  printf '%s' "$body" | tmux_cmd load-buffer -b "$buf" - ||
+  printf '%s' "$clean" | tmux_cmd load-buffer -b "$buf" - ||
     die "本文をバッファへ読み込めなかった。何も送っていない"
   # -d は貼り付け後にバッファを消す (利用者のバッファを汚さない)。
-  # -p は bracketed paste (TUI に「貼り付け」として扱わせる)。
-  opts="-d"
-  [ "$PASTE_BRACKETED" = "1" ] && opts="-d -p"
-  # shellcheck disable=SC2086  # opts は意図的に単語分割する
-  tmux_cmd paste-buffer $opts -b "$buf" -t "$PANE" ||
+  # -p は bracketed paste。無効化する経路は持たない (安全機構なので)。
+  if ! tmux_cmd paste-buffer -d -p -b "$buf" -t "$PANE"; then
+    # 貼り付けに失敗するとバッファに本文が残る。利用者のバッファを汚さないよう消す。
+    tmux_cmd delete-buffer -b "$buf" 2>/dev/null || true
     die "本文を貼り付けられなかった。何も送っていない"
+  fi
 }
 
 send_key() {
@@ -307,8 +346,11 @@ case "$MODE" in
       echo "ALREADY_DISMISSED 選択肢の応答待ちではない (state=$st)。何も送っていない"
       exit 0
     fi
-    cap="$(capture)"
-    if ! option_ui_open "$cap"; then
+    # 画面が取得できなければ閉鎖を確認できない。「取れなかった」を「閉じた」と
+    # 解釈すると、選択肢が残っているのに決着を書き戻す fail-open になる。
+    cap="$(capture)" ||
+      die "画面を取得できない。閉鎖を確認できないので中止 (何も送っていない)"
+    if ! question_ui_open "$cap"; then
       # 人が Esc で閉じた場合がここに来る。イベントが出ないので state だけが
       # 取り残されている。閉鎖は画面で確認できているので決着を書き戻して回復する。
       if record_dismissal; then
@@ -324,8 +366,9 @@ case "$MODE" in
     send_key Escape || die "Escape を送れなかった"
     ui_closed() {
       local c
-      c="$(capture)"
-      if option_ui_open "$c"; then return 1; fi
+      # 取得できなければ「閉じた」と判定しない (fail-closed)。
+      c="$(capture)" || return 1
+      if question_ui_open "$c"; then return 1; fi
       return 0
     }
     if wait_until ui_closed; then
@@ -344,11 +387,22 @@ case "$MODE" in
   select)
     st="$(state_now)"
     [ "$st" = "ASK_QUESTION" ] || die "選択肢の応答待ちではない (state=$st)。送信中止"
-    cap="$(capture)"
+    # 送信対象の tool_use_id を**送る前に**固定する。送信後に引き直すと、確定して
+    # 次の質問が開いた後にその id を掴み、決着していないものを決着と読み違える。
+    TARGET_TOOL_USE_ID="$(events --session "$SESSION" --pending-ids 2>/dev/null | head -1 | cut -f1)"
+    [ -n "$TARGET_TOOL_USE_ID" ] ||
+      die "未回答の質問の tool_use_id を特定できない。確定を検証できないので中止 (何も送っていない)"
+    cap="$(capture)" ||
+      die "画面を取得できない。選択肢 UI の実在を確認できないので中止 (何も送っていない)"
     # Esc で閉じた後も wave-events.sh の条件は成立しうる。選択肢 UI が実在する
     # ことを確かめないと、閉じた画面へ**裸の数字が入力欄に打ち込まれる** (#448 派生)。
     if ! option_ui_open "$cap"; then
       die "選択肢 UI を画面で確認できない。数字キーが入力欄へ入る危険があるので中止 (何も送っていない)"
+    fi
+    # 最終確認画面では番号を選ぶのではなく Enter で確定する。ここへ裸の数字を送ると
+    # 意図しない操作になるので、--select は確認画面を明示的に拒否する (確定は --submit)。
+    if submit_screen_open "$cap"; then
+      die "画面は最終確認 (${SUBMIT_MARKER}) を表示している。数字キーではなく --submit を使うこと (何も送っていない)"
     fi
 
     before_confirmed="$(confirmed_count "$cap")"
@@ -368,7 +422,8 @@ case "$MODE" in
 
     advanced() {
       local c
-      c="$(capture)"
+      # 取得できなければ「進んだ」と判定しない (fail-closed)。
+      c="$(capture)" || return 1
       if [ "$(confirmed_count "$c")" -gt "$before_confirmed" ]; then return 0; fi
       if submit_screen_open "$c"; then return 0; fi
       return 1
@@ -403,7 +458,11 @@ case "$MODE" in
     ;;
 
   submit)
-    cap="$(capture)"
+    TARGET_TOOL_USE_ID="$(events --session "$SESSION" --pending-ids 2>/dev/null | head -1 | cut -f1)"
+    [ -n "$TARGET_TOOL_USE_ID" ] ||
+      die "未回答の質問の tool_use_id を特定できない。確定を検証できないので中止 (何も送っていない)"
+    cap="$(capture)" ||
+      die "画面を取得できない。確認画面の実在を確認できないので中止 (何も送っていない)"
     if ! submit_screen_open "$cap"; then
       die "確認画面 (${SUBMIT_MARKER}) を画面で確認できない。中止 (何も送っていない)"
     fi
