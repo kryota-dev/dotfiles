@@ -1,4 +1,5 @@
 {{ includeTemplate "codex-model-pin.toml" . -}}
+model_context_window = 872000
 sandbox_mode = "workspace-write"
 approval_policy = "on-request"
 web_search = "live"
