@@ -5,7 +5,7 @@ python = "3.14.7"
 ruby = "4.0.6"
 go = "1.27.0"
 deno = "2.9.5"
-rust = "1.97.1"
+rust = "1.98.0"
 # Android SDK の cmdline-tools（sdkmanager / avdmanager）は Java 製で、JDK が無いと動かない。
 # 21 LTS を選ぶのは Android Studio 同梱の JBR と同世代で、cmdline-tools が前提とする範囲だから。
 java = "temurin-21.0.12+101.0.LTS"
