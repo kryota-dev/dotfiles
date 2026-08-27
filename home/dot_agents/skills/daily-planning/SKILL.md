@@ -42,12 +42,26 @@ END_UTC="${TODAY_JST}T15:00:00Z"
 SEARCH_START="${YESTERDAY_JST}"
 SEARCH_END="${TODAY_JST}"
 
+# 追加で横断集計する GitHub Organization（カレントリポジトリの owner 以外で活動している場合）。
+# クライアント/勤務先固有の org 名を dotfiles（本ファイル）に直書きしない — このリポジトリは
+# own-namespace の公開リポジトリであり、client/employer identifier のコミットは PII ポリシー違反になる
+# （docs/architecture/dev-tooling.md の "Client-identifier rule" 参照。命名は redact-patterns skill 対象）。
+# repo-radar の watchlist と同じ方式で、コミット対象外のローカル設定ファイル
+# ~/.config/daily-planning/extra-orgs（1行1org、# コメント可）から読み込む。
+# ファイルが無い/空なら EXTRA_ORGS は空配列になり、従来通りカレントリポジトリのみの集計になる。
+EXTRA_ORGS=()
+while IFS= read -r org; do
+  EXTRA_ORGS+=("$org")
+done < <(grep -vE '^\s*(#|$)' ~/.config/daily-planning/extra-orgs 2>/dev/null)
+
 # GH_USER — GitHubユーザー名
 # REPO_FULLNAME — "owner/repo" 形式（カレントディレクトリのリポジトリから自動取得）
 # REPO_OWNER / REPO_NAME — GraphQL クエリの repository(owner:, name:) で使用
 # START_UTC / END_UTC — `/repos/.../{commits,reviews,comments,events}` の created_at/submitted_at フィルタに使う
 # SEARCH_START / SEARCH_END — `gh search prs/issues --updated/--created` のレンジに使う
 # YEAR_MONTH — Step 2 の当月 Discussion 検索に使う（YYYY-MM）
+# EXTRA_ORGS — 3a〜3d で `--owner` を使った org 横断検索に使う配列。`~/.config/daily-planning/extra-orgs`
+#              （ローカル専用・コミット禁止）から読み込む（Daily Planning Discussion 自体は REPO_FULLNAME 側にのみ存在する前提）
 ```
 
 ### 2. 今月のDaily Planning Discussionを特定
@@ -113,37 +127,46 @@ JST 今日の範囲（`START_UTC` 〜 `END_UTC`）を使って、以下の情報
 
 ```bash
 # まず候補となるPRを取得（author + assignee、JST 今日に対応する2日間レンジで更新されたもの）
-gh search prs --repo "${REPO_FULLNAME}" --author "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
-gh search prs --repo "${REPO_FULLNAME}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
+# カレントリポジトリ分
+gh search prs --repo "${REPO_FULLNAME}" --author "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+gh search prs --repo "${REPO_FULLNAME}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+
+# EXTRA_ORGS 分（org 配下の複数リポジトリにまたがるため --repo ではなく --owner を使う）
+for ORG in "${EXTRA_ORGS[@]}"; do
+  gh search prs --owner "${ORG}" --author "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+  gh search prs --owner "${ORG}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+done
 
 # 各PRについて、以下6つの指標を確認し、いずれか1以上なら「やったこと」に含める。
+# REPO には各PRの実際の所属リポジトリ（`repository.nameWithOwner`）を入れる
+# （カレントリポジトリ分は REPO_FULLNAME と一致するが、EXTRA_ORGS 分は PR ごとに異なりうる）。
 
 # 1. JST 今日の自分のコミット数
-gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/commits" --paginate \
+gh api "/repos/${REPO}/pulls/${PR_NUM}/commits" --paginate \
   --jq ".[] | select(.author.login == \"${GH_USER}\") | select(.commit.author.date >= \"${START_UTC}\" and .commit.author.date < \"${END_UTC}\") | .sha" | wc -l | tr -d ' '
 
 # 2. JST 今日に自分がマージしたか
-gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
+gh api "/repos/${REPO}/issues/${PR_NUM}/events" --paginate \
   --jq ".[] | select(.actor.login == \"${GH_USER}\") | select(.event == \"merged\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 
 # 3. JST 今日に自分がクローズしたか（merge を伴う close もここでカウントされる）
-gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
+gh api "/repos/${REPO}/issues/${PR_NUM}/events" --paginate \
   --jq ".[] | select(.actor.login == \"${GH_USER}\") | select(.event == \"closed\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 
 # 4. JST 今日の自分のレビュー submit 数（self-review も含む）
-gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/reviews" \
+gh api "/repos/${REPO}/pulls/${PR_NUM}/reviews" \
   --jq "[.[] | select(.user.login == \"${GH_USER}\") | select(.submitted_at >= \"${START_UTC}\" and .submitted_at < \"${END_UTC}\")] | length"
 
 # 5. JST 今日の自分のレビューコメント（インライン）数
-gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/comments" --paginate \
+gh api "/repos/${REPO}/pulls/${PR_NUM}/comments" --paginate \
   --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 
 # 6. JST 今日の自分の PR コメント（issue comment 形式）数
-gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/comments" --paginate \
+gh api "/repos/${REPO}/issues/${PR_NUM}/comments" --paginate \
   --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 ```
 
-1〜6 のいずれかが1以上なら「やったこと」に含める。
+1〜6 のいずれかが1以上なら「やったこと」に含める。URLは `https://github.com/${REPO}/pull/${PR_NUM}` のように実際の所属リポジトリで組み立てる（カレントリポジトリ固定にしない）。
 
 **注意:** 旧版（〜2026-05-08）では 1 と 2（コミット / マージ）のみで判定していたため、レビュー・コメント返信のみで進めた自分のPRや、merge を伴わない close（採用方針変更等で閉じたPR）が漏れていた。今は上記6指標で漏らさず捕捉する。
 
@@ -153,20 +176,24 @@ gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/comments" --paginate \
 
 ```bash
 # 候補PR（reviewed-by、JST 今日に対応する2日間レンジ）
-gh search prs --repo "${REPO_FULLNAME}" --reviewed-by "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
+gh search prs --repo "${REPO_FULLNAME}" --reviewed-by "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
 
-# 各PRについて、以下の3点を確認:
+for ORG in "${EXTRA_ORGS[@]}"; do
+  gh search prs --owner "${ORG}" --reviewed-by "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+done
+
+# 各PRについて、以下の3点を確認（REPO は各PRの `repository.nameWithOwner`）:
 
 # 1. JST 今日の自分のレビュー submit 数
-gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/reviews" \
+gh api "/repos/${REPO}/pulls/${PR_NUM}/reviews" \
   --jq "[.[] | select(.user.login == \"${GH_USER}\") | select(.submitted_at >= \"${START_UTC}\" and .submitted_at < \"${END_UTC}\")] | length"
 
 # 2. JST 今日の自分のレビューコメント（インライン）数
-gh api "/repos/${REPO_FULLNAME}/pulls/${PR_NUM}/comments" --paginate \
+gh api "/repos/${REPO}/pulls/${PR_NUM}/comments" --paginate \
   --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 
 # 3. 自分がレビュワーとしてrequestされたか（コメントしただけのPRは除外）
-gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
+gh api "/repos/${REPO}/issues/${PR_NUM}/events" --paginate \
   --jq ".[] | select(.event == \"review_requested\") | select(.requested_reviewer.login == \"${GH_USER}\") | .id" | wc -l | tr -d ' '
 ```
 
@@ -182,14 +209,18 @@ gh api "/repos/${REPO_FULLNAME}/issues/${PR_NUM}/events" --paginate \
 
 ```bash
 # 自分がassigneeのIssue（JST 今日に対応する2日間レンジで更新分）
-gh search issues --repo "${REPO_FULLNAME}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
+gh search issues --repo "${REPO_FULLNAME}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
 
-# 各Issueについて、JST 今日の自分のコメント数を確認
-gh api "/repos/${REPO_FULLNAME}/issues/${NUM}/comments" --paginate \
+for ORG in "${EXTRA_ORGS[@]}"; do
+  gh search issues --owner "${ORG}" --assignee "${GH_USER}" --updated "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+done
+
+# 各Issueについて、JST 今日の自分のコメント数を確認（REPO は各Issueの `repository.nameWithOwner`）
+gh api "/repos/${REPO}/issues/${NUM}/comments" --paginate \
   --jq ".[] | select(.user.login == \"${GH_USER}\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 
 # 各Issueについて、JST 今日に自分が close したかを確認
-gh api "/repos/${REPO_FULLNAME}/issues/${NUM}/events" --paginate \
+gh api "/repos/${REPO}/issues/${NUM}/events" --paginate \
   --jq ".[] | select(.actor.login == \"${GH_USER}\") | select(.event == \"closed\") | select(.created_at >= \"${START_UTC}\" and .created_at < \"${END_UTC}\") | .id" | wc -l | tr -d ' '
 ```
 
@@ -200,7 +231,11 @@ gh api "/repos/${REPO_FULLNAME}/issues/${NUM}/events" --paginate \
 以下を他の収集ステップ（3a〜3c）と**並列で**実行する。
 
 ```bash
-gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url
+gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+
+for ORG in "${EXTRA_ORGS[@]}"; do
+  gh search issues --owner "${ORG}" --author "${GH_USER}" --created "${SEARCH_START}..${SEARCH_END}" --limit 100 --json number,title,url,repository
+done
 ```
 
 検出された Issue のうち、`created_at` が JST 今日範囲（`START_UTC` 以上 `END_UTC` 未満）に入るもののみを採用する。
@@ -221,6 +256,11 @@ gh search issues --repo "${REPO_FULLNAME}" --author "${GH_USER}" --created "${SE
   - Step 7 投稿直前に**日跨ぎ検証**（`TODAY_JST` と現在 JST 日付の不一致確認）を追加
 - 2026-07 の見直し:
   - Step 4（前日の投稿取得）・Step 7（投稿）を native の `gh discussion view --comments` / `gh discussion comment`（gh 2.94.0+）へ移行し、Discussion Node ID 解決を不要化。`gh discussion` は preview のため、破壊的変更に備え GraphQL 版を各ステップの Fallback として残置（Step 2 の Discussion 検索は `gh discussion list` と非等価のため GraphQL Search のまま）
+- 2026-08 の見直し:
+  - `EXTRA_ORGS`（Step 1）を追加し、カレントリポジトリの owner 以外の org でも活動している場合に 3a〜3d の検索を `--owner` で org 横断化。従来はカレントディレクトリのリポジトリ（`REPO_FULLNAME`）のみを見ていたため、別 org 配下の複数リポジトリでの PR/Issue 活動が丸ごと漏れていた。
+  - 6指標チェック・URL組み立てで固定していた `REPO_FULLNAME` を、各PR/Issueが実際に属するリポジトリ（`repository.nameWithOwner`、変数名 `REPO`）に置き換え。org 横断検索の結果は PR/Issue ごとに所属リポジトリが異なりうるため。
+  - Daily Planning Discussion 自体（Step 2）は `REPO_FULLNAME` 側にのみ存在する前提は変更なし（`EXTRA_ORGS` は活動収集のみに影響）。
+  - **PII 是正**: 初版で `EXTRA_ORGS=(<実際のクライアント org 名>)` のようにクライアント/勤務先の org 名を本ファイルへ直書きしてしまい、dotfiles の PII ポリシー（`docs/architecture/dev-tooling.md` の "Client-identifier rule"。own-namespace 公開リポジトリに client/employer identifier をコミットしてはいけない）に違反した。`repo-radar` の watchlist と同じ方式に修正し、org 名はコミット対象外のローカル設定ファイル `~/.config/daily-planning/extra-orgs`（1行1org、# コメント可）から読み込む形にした。
 
 ### 4. 前日の投稿を取得
 
