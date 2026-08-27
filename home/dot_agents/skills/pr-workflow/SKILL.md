@@ -20,7 +20,7 @@ user-invocable: true
 
 **委譲は「起動」であって「再実装」ではない（手ロール代替の禁止）**: Phase 5〜7 の各ステップは、指定された skill（`/monitor-ci` / `/multi-review` / `/review-resolve-loop`）を **必ず実際に起動する**。「自分でやった方が速い」「重複が少ない」「指摘は自明」等の最適化判断で**同等処理を手ロール（inline の Bash / Agent）で代替してはならない**。オーバーライドは「skill を起動したうえで付加する」ものであり、起動そのものを省く理由にはならない。委譲先 skill は各々が固有の網羅性（例: `/review-resolve-loop` は review thread / review body / **CI marker Issue comment** の 3 経路を体系的に拾う）を持ち、手ロールはその経路網羅を欠いて指摘を取りこぼす。orchestrator の役割は分類・GATE・統合判断であって、委譲先の仕事の肩代わりではない。
 
-**model-tier（task #28 の拡張）**: 分類・設計・統合判断は **Leader**（session model）。機械的実装・CI ログ triage・fact-check は **worker 委譲**（Sonnet / Haiku）。**cross-model diversity は codex** — multi-review では tier に応じて **generalist（全 tier）+ 全 specialist（standard/large）を Codex 実行**し（多様性フロアで Claude≥1 を保証）、adversarial verify は generator と逆族で反証する（Phase 6, cross-model）。加えて **small tier の実装と Phase 5 の CI 修正でも Codex worker（`--profile agent`）を選べる**。要求 model/effort の契約（§4）は `/model-fitness-check` が唯一の SSOT であり、本 skill は値を再掲せず Phase 0 でそれを起動する。
+**execution readiness**: 分類・設計・統合判断は Leader が担うが、provider は固定しない。`/execution-readiness-check` が adapter capability、account scope、rollout、permission manifest を確認し、`frontier-harness` が task state から route する。`/model-fitness-check` は 2 release の compatibility shim に限る。shadow rollout では現行の worker/CI/review path を維持し、route/evidence だけを追加記録する。
 
 **マージは user**: 設計決定（task #21 原案の「merge 自動実行」を上書き）として、本 skill は**絶対に自動マージしない**。GATE 3 は merge-ready の handoff であり、merge は user の明示操作。
 
@@ -35,7 +35,7 @@ user-invocable: true
 
 ## Phase 0: Classify（分類）
 
-**Phase 0 冒頭で（遅くとも実装フェーズ前に）`/model-fitness-check <tier>` を起動する**（§4 model/effort contract の SSOT ゲート）。tier は分類結果をそのまま渡す（分類より前に起動する場合は `orchestration`）。**行種別も要求される具体的な model / effort 値もここに書かない**（テーブルと行種別判定はいずれも `/model-fitness-check` が唯一の SSOT。値を再掲すると Codex pin と同じ drift を再演する）。
+**Phase 0 冒頭で（遅くとも実装フェーズ前に）`/execution-readiness-check <task context>` を起動する**。current session model の floor ではなく、選択候補の adapter capability、account scope、rollout、repository capability manifest、risk を確認する。adapter unavailable、未承認 capability、security/migration/external contract は fail closed とする。
 
 **size tier の判定軸**（text だけで決めず、次を評価。`--size` で override）:
 

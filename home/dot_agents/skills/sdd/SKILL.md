@@ -31,7 +31,7 @@ Phase 0: 準備 → Phase 1: 要件定義 → Phase 2: 設計 → Phase 3: タ�
 
 ## Phase 0: 準備
 
-**Phase 0 冒頭で（遅くとも Phase 1 の spec 執筆より前に）`/model-fitness-check orchestration` を起動する**（§4 model/effort contract の SSOT ゲート。large / PRD 審議相当なら `large` を渡す）。**行種別も要求される model / effort 値もここに書かない**（テーブルと行種別判定はいずれも `/model-fitness-check` が唯一の SSOT）。
+**Phase 0 冒頭で（遅くとも Phase 1 の spec 執筆より前に）`/execution-readiness-check <task context>` を起動する**。current session model を固定 gate にせず、adapter capability、account scope、rollout、permission manifest、risk を確認する。`/model-fitness-check` は legacy invocation の compatibility shim であり、新規 path からは呼ばない。
 
 ### 0-1. 引数の解析
 

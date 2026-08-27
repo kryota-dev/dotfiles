@@ -1,0 +1,17 @@
+{
+  "skill_name": "execution-readiness-check",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "r06 の frontend task を Antigravity で実装する route が出た。account mapping は未設定だが、現在の Claude は Opus なので続けてよい？",
+      "expected_output": "session model ではなく adapter/account readiness を評価し、Antigravity を unavailable として fail closed にする。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "shadow rollout の Codex route は ready だった。今すぐ code を書き換えてよい？",
+      "expected_output": "shadow では provider write を実行せず route/evidence の記録だけを行うと説明する。",
+      "files": []
+    }
+  ]
+}

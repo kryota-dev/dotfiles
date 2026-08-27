@@ -168,7 +168,7 @@ diff 起動の specialist roster とは **別レイヤ**の reviewer。diff 起�
 
 ### Phase 1: 準備
 
-**Phase 1 の前に `/model-fitness-check orchestration` を起動する**（§4 model/effort contract の SSOT ゲート。`multi-review` に Phase 0 は無いため Phase 1 の直前で呼ぶ）。**行種別も要求される model / effort 値もここに書かない**（テーブルと行種別判定はいずれも `/model-fitness-check` が唯一の SSOT）。
+**Phase 1 の前に `/execution-readiness-check <review context>` を起動する**。review provider の adapter capability、account scope、rollout、permission manifest、risk を確認し、current session model だけを理由に roster を block しない。`/model-fitness-check` は legacy invocation の compatibility shim に限る。
 
 1. **引数を解析**して **owner/repo と PR番号** を特定する（「引数の解釈」節）。以降 Phase 1〜5 の全 `gh` 呼び出しに `--repo <owner/repo>` を明示すること。cwd の repo と一致しても明示する（明示コスト < 誤解決コスト）
 2. **差分を取得**する: `gh pr diff --repo <owner/repo> <PR番号>` を実行。差分が空の場合は「レビュー対象の差分がありません」と報告して終了。差分は変数に確保しておく（`DIFF=$(gh pr diff --repo <owner/repo> <PR番号>)`）。用途は **(a) Phase 2 の動的 specialist roster 判定**（変更ファイルのパス一覧を `diff --git` ヘッダから得る。必須）と **(b) codex の fallback 経路**（base がローカルに無く heredoc 方式を採るとき。codex は sandbox 内で `gh pr diff` できないためプロンプトに埋め込む）。サブエージェント（cc-code-review / cc-security-review）はセッション内で自分で差分を取得するため埋め込み不要

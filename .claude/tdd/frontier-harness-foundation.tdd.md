@@ -1,0 +1,49 @@
+# Frontier Harness foundation — TDD evidence
+
+## Source plan
+
+- [Implementation plan](../plans/frontier-harness-pr-workflow.plan.md)
+- [PRD](../prds/frontier-harness-pr-workflow.prd.md)
+
+## User journeys
+
+1. 開発者は `fh doctor --json` で provider executable、account scope、rollout を確認し、
+   personal Antigravity credential が r06 task に自動利用されないことを確認できる。
+2. 開発者は shadow rollout で task を route し、provider を実行せずに SQLite state へ decision を
+   残せる。
+3. 開発者は repository capability manifest を一度承認し、raw evidence を保持期限に従って
+   cleanup できる。
+
+## RED / GREEN evidence
+
+| Behavior | RED evidence | GREEN evidence | Guarantee |
+|---|---|---|---|
+| Config/router/state foundation | `node --test tests/frontier_harness.test.mjs` が `config.mjs` 未存在で `ERR_MODULE_NOT_FOUND` | 同 command で config、route、evidence state の test が pass | invalid config、route、transcript 非保存を固定 |
+| Doctor account boundary | 同 test が unprobed Antigravity を `available` と報告して fail | 同 test が `unverified` を確認して pass | r06 mismatch は unavailable、unprobed personal Antigravity は unverified |
+| Shadow lifecycle | 同 test が未実装 `run` / `onboard` / `clean` / `verify` / `review` で exit 64 | 同 test が shadow evidence/state を確認して pass | provider/shell を起動せず planned evidence を保存 |
+| ChezmoI deploy shape | `bats tests/files.bats --filter 'frontier-harness source files'` が launcher 未存在で fail | 同 command が launcher、symlink、JSON config、Brewfile entry を確認して pass | `fh` と Antigravity policy が source state に存在 |
+
+## Test specification
+
+| # | What is guaranteed | Test command | Type | Result |
+|---|---|---|---|---|
+| 1 | Invalid rollout is rejected before adapter execution | `node --test tests/frontier_harness.test.mjs` | Unit | PASS |
+| 2 | Browser task selects an available personal Antigravity capability | same | Unit | PASS |
+| 3 | r06 never crosses into personal Antigravity | same | Unit | PASS |
+| 4 | Unprobed Antigravity is unverified | same | Unit | PASS |
+| 5 | No deterministic oracle adds independent review | same | Unit | PASS |
+| 6 | Evidence state omits transcript and prunes expired records | same | Integration | PASS |
+| 7 | Shadow run/onboard/verify/review/clean persist normalized state without live provider execution | same | Integration | PASS |
+| 8 | Shell launcher, symlink, JSON config, and cask source exist | `bats tests/files.bats --filter 'frontier-harness source files'` | Source integration | PASS |
+
+## Coverage and known gaps
+
+Node's built-in test runner covers the currently implemented config, router, state store, doctor,
+and shadow CLI contracts. The provider write adapter, authenticated Antigravity model probe,
+candidate worktree apply, wave batch authorization, and learned router are intentionally not
+implemented in this foundation slice.
+
+`make test` reaches the complete lint/Node/Bats stack but has one unrelated failure inherited from
+the pre-existing RunCat worktree change: `tests/files.bats` expects `mas "RunCat Neo"`, while the
+uncommitted source entry is `mas "RunCatNeo"`. This PR does not modify that user-owned change or
+weaken its assertion.

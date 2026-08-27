@@ -1,0 +1,27 @@
+{
+  "enableTerminalSandbox": true,
+  "allowNonWorkspaceAccess": false,
+  "toolPermission": "proceed-in-sandbox",
+  "artifactReviewPolicy": "agent-decides",
+  "permissions": {
+    "allow": [
+      "command(git (status|diff|log|show|grep))",
+      "command(npm run (build|lint|test))",
+      "command(pnpm (build|lint|test))",
+      "command(yarn (build|lint|test))",
+      "command(pytest)",
+      "command(go test)",
+      "command(cargo test)"
+    ],
+    "deny": [
+      "command(sudo)",
+      "command(rm -rf)",
+      "command(curl .*)",
+      "command(git clean)",
+      "command(git reset)",
+      "command(git push (--force|-f))",
+      "write_file(.git/)",
+      "write_file(.ssh/)"
+    ]
+  }
+}
