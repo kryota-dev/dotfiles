@@ -50,7 +50,7 @@ zoxide = "0.10.0"
 # tap/swipe/type が無く、入力には WebDriverAgent が要る（`appium driver install xcuitest` が
 # その WDA のビルドと導入を肩代わりする）。`npm i -g` ではなく mise 管理にするのは、mise の
 # node を上げたときに global npm の中身が消えるのを避けるため。
-"npm:appium" = "3.6.0"
+"npm:appium" = "3.7.0"
 
 pandoc = "3.10.2"
 typst = "0.15.1"
