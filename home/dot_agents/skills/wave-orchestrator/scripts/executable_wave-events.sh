@@ -275,7 +275,10 @@ cmd_record_dismissal() {
   tuid="$(printf '%s' "$target" | jq -r '.tool_use_id // empty' 2>/dev/null || true)"
   pid="$(printf '%s' "$target" | jq -r '.prompt_id // empty' 2>/dev/null || true)"
   # prompt_id を欠くと latest_turn がこの行をターンから外し、決着として読まれない。
-  [ -n "$tuid" ] && [ -n "$pid" ] || die "未回答の質問が相関 ID (tool_use_id / prompt_id) を欠く。決着を記録できない"
+  # `A && B || C` は if-then-else ではないので (SC2015)、明示的な if で書く。
+  if [ -z "$tuid" ] || [ -z "$pid" ]; then
+    die "未回答の質問が相関 ID (tool_use_id / prompt_id) を欠く。決着を記録できない"
+  fi
   line="$(jq -c -n --arg s "$1" --arg t "$tuid" --arg p "$pid" '
     {session_id: $s, prompt_id: $p, hook_event_name: "PostToolUseFailure",
      tool_name: "AskUserQuestion", tool_use_id: $t, synthetic: "dismiss"}
