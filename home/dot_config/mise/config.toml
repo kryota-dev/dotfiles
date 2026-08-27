@@ -36,7 +36,7 @@ starship = "1.26.0"
 terraform = "1.15.8"
 tmux = "3.6a"
 uv = "0.12.6"
-yazi = "26.5.6"
+yazi = "26.8.15"
 zoxide = "0.10.0"
 
 # ubi-backed CLIs (no mise/aqua registry entry)
