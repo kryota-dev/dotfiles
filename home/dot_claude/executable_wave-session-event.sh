@@ -2,9 +2,15 @@
 # Claude Code hook -> wave-orchestrator event recorder (kryota-dev/dotfiles#437).
 #
 # Wired in settings.json for Notification / PreToolUse(AskUserQuestion) / Stop /
-# UserPromptSubmit. Reads the hook payload on stdin and appends it verbatim to a
-# per-session file, so the orchestrator can tell "this child stopped and is
-# waiting" without scraping the TUI.
+# UserPromptSubmit / PostToolUse(AskUserQuestion) / PostToolUseFailure(AskUserQuestion) /
+# StopFailure. Reads the hook payload on stdin and appends it to a per-session
+# file, so the orchestrator can tell "this child stopped and is waiting"
+# without scraping the TUI.
+#
+# PostToolUse / PostToolUseFailure are the exception to "verbatim": their
+# tool_response carries the user's answer text (e.g. AskUserQuestion choices),
+# so only correlation fields are recorded. Everything else is still appended
+# verbatim.
 #
 # Why not scrape the pane: matching on screen text broke three different ways in
 # practice (#435 wrong marker, #436 stale scrollback matched as "busy" and the
@@ -41,11 +47,18 @@ main() {
   # No jq (unprovisioned machine) -> silent no-op rather than a broken hook.
   command -v jq >/dev/null 2>&1 || return 0
 
-  local input session_id
+  local input session_id hook_event_name jq_ids
   input="$(cat 2>/dev/null || true)"
   [ -n "$input" ] || return 0
 
-  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null || true)"
+  # session_id and hook_event_name in one jq call: the former gates the
+  # filename, the latter picks verbatim vs. projected below.
+  # `// ""` (not `// empty`) keeps both positions: `empty` drops the element and
+  # would shift hook_event_name into session_id when session_id is missing.
+  jq_ids="$(printf '%s' "$input" | jq -r '[.session_id // "", .hook_event_name // ""] | @tsv' 2>/dev/null || true)"
+  [ -n "$jq_ids" ] || return 0
+  IFS=$'\t' read -r session_id hook_event_name <<<"$jq_ids"
+
   [ -n "$session_id" ] || return 0
   printf '%s' "$session_id" | grep -qE "$UUID_RE" || return 0
 
@@ -54,9 +67,21 @@ main() {
   umask 077
   mkdir -p "$EVENT_DIR" 2>/dev/null || return 0
 
-  # One payload per line. Per-session files keep concurrent writers from
-  # interleaving, which a single shared file could not guarantee.
-  printf '%s\n' "$input" >>"${EVENT_DIR}/${session_id}.jsonl" 2>/dev/null || return 0
+  if [ "$hook_event_name" = "PostToolUse" ] || [ "$hook_event_name" = "PostToolUseFailure" ]; then
+    # Terminal AskUserQuestion events carry tool_response, which holds the
+    # user's answer text. Project to correlation fields only -- the reader
+    # only needs these to pair against PreToolUse's tool_use_id -- so the
+    # answer body never lands on disk. Projection failure means don't write,
+    # matching the fail-open contract above.
+    local projected
+    projected="$(printf '%s' "$input" | jq -c '{session_id, prompt_id, hook_event_name, tool_name, tool_use_id}' 2>/dev/null || true)"
+    [ -n "$projected" ] || return 0
+    printf '%s\n' "$projected" >>"${EVENT_DIR}/${session_id}.jsonl" 2>/dev/null || return 0
+  else
+    # One payload per line. Per-session files keep concurrent writers from
+    # interleaving, which a single shared file could not guarantee.
+    printf '%s\n' "$input" >>"${EVENT_DIR}/${session_id}.jsonl" 2>/dev/null || return 0
+  fi
 }
 
 main || true
