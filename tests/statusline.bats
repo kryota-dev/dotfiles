@@ -6,6 +6,11 @@ load helpers/setup
 # executed directly. External/network segments (ccusage, ping, curl, pmset)
 # run in the background with stderr suppressed, so they never affect the exit
 # code or the core (host/dir/model/context/cost) output exercised here.
+#
+# The rate-limits snapshot deliberately omits `effort` (#449): the snapshot
+# file is keyed per-profile, so concurrent sessions under one profile would
+# clobber each other's (session-scoped) effort there. Readers use
+# `${CLAUDE_EFFORT}` instead. Line-2 TUI rendering of effort is unaffected.
 
 SCRIPT="${HOME_DIR}/dot_claude/executable_statusline.sh"
 MOCK_JSON='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":1.23},"session_id":"bats-statusline"}'
@@ -17,6 +22,16 @@ MOCK_JSON_RL='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"w
 # Same as MOCK_JSON_RL but five_hour.used_percentage is not a JSON number;
 # seven_day stays valid so we can assert per-field (not whole-write) rejection.
 MOCK_JSON_RL_INVALID='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":1.23},"rate_limits":{"five_hour":{"used_percentage":"not_a_number","resets_at":1700000000},"seven_day":{"used_percentage":17.5,"resets_at":1700600000}},"session_id":"bats-statusline"}'
+
+# Same as MOCK_JSON_RL but rate_limits has only the five_hour window (no
+# seven_day sibling), exercising the single-window JSON-shape branch of
+# write_rate_limits_snapshot (the "%s," trailing-comma trim with nothing to
+# append after it).
+MOCK_JSON_RL_FH_ONLY='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":1.23},"rate_limits":{"five_hour":{"used_percentage":42,"resets_at":1700000000}},"session_id":"bats-statusline"}'
+
+# Same as MOCK_JSON_RL but rate_limits has only the seven_day window (no
+# five_hour sibling).
+MOCK_JSON_RL_SD_ONLY='{"model":{"display_name":"TestModel"},"effort":{"level":"high"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":1.23},"rate_limits":{"seven_day":{"used_percentage":17.5,"resets_at":1700600000}},"session_id":"bats-statusline"}'
 
 # Every test that pipes MOCK_JSON exercises write_harness_cost (the harness-cost
 # contract), which writes a cache file keyed by session_id into the resolved
@@ -94,7 +109,10 @@ teardown() {
 
 # Guards the rate-limits-snapshot contract: model-fitness-check reads
 # $CACHE_DIR/rate_limits_<profile>.json to see measured quota pressure
-# (five_hour/seven_day used_percentage + resets_at) and the current effort.
+# (five_hour/seven_day used_percentage + resets_at). The snapshot must NOT
+# carry `effort` (#449): it's profile-scoped, not session-scoped, so multiple
+# concurrent sessions under one profile would clobber each other's effort
+# there; readers use `${CLAUDE_EFFORT}` instead.
 @test "statusline writes a valid rate-limits snapshot for the default profile" {
   run bash -c "printf '%s' '${MOCK_JSON_RL}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
   [ "$status" -eq 0 ]
@@ -106,8 +124,43 @@ teardown() {
     .five_hour.resets_at == 1700000000 and
     .seven_day.used_percentage == 17.5 and
     .seven_day.resets_at == 1700600000 and
-    .effort == "high"
+    (has("effort") | not)
   ' "$snapshot"
+  [ "$status" -eq 0 ]
+}
+
+# Non-regression for #449: only the *snapshot file* dropped effort. Line 2 of
+# the rendered statusline (the TUI, sourced fresh from stdin each render) must
+# keep showing it.
+@test "statusline still renders the effort level on line 2 (#449 non-regression)" {
+  run bash -c "printf '%s' '${MOCK_JSON}' | bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *high* ]]
+}
+
+# Guards the single-window JSON shape: when only one of five_hour/seven_day is
+# present, write_rate_limits_snapshot must still emit valid, parseable JSON
+# (the "%s," trailing-comma trim on `windows` must leave a well-formed object
+# with no dangling comma) and must not fabricate the missing window.
+@test "statusline writes valid JSON when only the five_hour window is present" {
+  run bash -c "printf '%s' '${MOCK_JSON_RL_FH_ONLY}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  local snapshot="${RL_CACHE_HOME}/claude-statusline/rate_limits_.claude.json"
+  [ -f "$snapshot" ]
+  run jq -e '.' "$snapshot"
+  [ "$status" -eq 0 ]
+  run jq -e '.five_hour.used_percentage == 42 and (has("seven_day") | not)' "$snapshot"
+  [ "$status" -eq 0 ]
+}
+
+@test "statusline writes valid JSON when only the seven_day window is present" {
+  run bash -c "printf '%s' '${MOCK_JSON_RL_SD_ONLY}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  local snapshot="${RL_CACHE_HOME}/claude-statusline/rate_limits_.claude.json"
+  [ -f "$snapshot" ]
+  run jq -e '.' "$snapshot"
+  [ "$status" -eq 0 ]
+  run jq -e '.seven_day.used_percentage == 17.5 and (has("five_hour") | not)' "$snapshot"
   [ "$status" -eq 0 ]
 }
 

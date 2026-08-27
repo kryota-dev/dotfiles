@@ -672,6 +672,24 @@ SHIMEOF
   done
 }
 
+@test "model-fitness-check expands the effort placeholder exactly once" {
+  # Claude Code string-replaces `${CLAUDE_EFFORT}` in SKILL.md at invoke time.
+  # Writing the literal token anywhere else -- including in prose that explains
+  # the mechanism -- expands there too, which turned the rounding-constraint
+  # sentence into "high が high のとき" during live verification. Prose must
+  # refer to the placeholder without the braces.
+  local skill="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
+  local count
+  count="$(grep -c -F '${CLAUDE_EFFORT}' "$skill" || true)"
+  [ "$count" = "1" ] || {
+    echo "expected exactly 1 literal \${CLAUDE_EFFORT} (the detection line), found ${count}"
+    grep -n -F '${CLAUDE_EFFORT}' "$skill"
+    false
+  }
+  # The single occurrence must be the detection line, not stray prose.
+  grep -q -F 'このセッションの effort: ${CLAUDE_EFFORT}' "$skill"
+}
+
 @test "reviewer agents steer to a valid gh pr diff filter idiom" {
   # gh pr diff has no include pathspec (only --exclude / --name-only), so every
   # reviewer agent must reference --name-only rather than the unsupported

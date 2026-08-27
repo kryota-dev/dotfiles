@@ -300,12 +300,15 @@ write_harness_cost() {
   fi
 }
 # Rate-limits snapshot contract: persist the harness-reported quota pressure
-# (five_hour/seven_day used_percentage + resets_at) and the current effort
-# level to a per-profile cache file, the same "statusline -> file -> reader"
-# contract write_harness_cost uses above. model-fitness-check reads this to
-# gate on measured quota pressure instead of guessing from session length.
+# (five_hour/seven_day used_percentage + resets_at) to a per-profile cache
+# file, the same "statusline -> file -> reader" contract write_harness_cost
+# uses above. model-fitness-check reads this to gate on measured quota
+# pressure instead of guessing from session length. Effort is session-scoped
+# and must not live in a profile-scoped file (#449): multiple concurrent
+# sessions under one profile would clobber each other's effort here, so
+# readers use the `${CLAUDE_EFFORT}` skill template variable instead.
 write_rate_limits_snapshot() {
-  local fh_pct="$1" fh_reset="$2" sd_pct="$3" sd_reset="$4" effort="$5"
+  local fh_pct="$1" fh_reset="$2" sd_pct="$3" sd_reset="$4"
   # rate_limits is absent on stdin for API-key auth sessions, and also for
   # subscription sessions before the first API response lands. Either way, skip
   # silently and leave any prior snapshot in place (the reader ages it out via
@@ -327,8 +330,6 @@ write_rate_limits_snapshot() {
   local profile=${CLAUDE_CONFIG_DIR##*/}
   [ -n "$profile" ] || profile=".claude"
   profile=$(printf '%s' "$profile" | tr -c 'A-Za-z0-9._-' '_')
-  local effort_out
-  effort_out=$(printf '%s' "$effort" | tr -c 'A-Za-z0-9_-' '_')
 
   # Build each window fragment only from validated fields; an empty fragment
   # omits the whole window object rather than emit a null/garbage value.
@@ -351,7 +352,7 @@ write_rate_limits_snapshot() {
   # Match write_harness_cost: umask 077 so the temp file is 0600 regardless of
   # the caller's umask. CACHE_DIR is already chmod 700, but that chmod swallows
   # errors (2>/dev/null), so a pre-existing loosely-permissioned XDG_CACHE_HOME
-  # would otherwise leak quota/effort data to group/other. Belt and suspenders.
+  # would otherwise leak quota data to group/other. Belt and suspenders.
   local target="$CACHE_DIR/rate_limits_${profile}.json" tmpf old_umask
   old_umask=$(umask)
   umask 077
@@ -360,15 +361,19 @@ write_rate_limits_snapshot() {
     return 0
   }
   umask "$old_umask"
-  if printf '{"ts":%s,"profile":"%s",%s%s"effort":"%s"}' \
-    "$(date +%s)" "$profile" "$fh_json" "$sd_json" "$effort_out" >"$tmpf" 2>/dev/null; then
+  # fh_json/sd_json each carry a trailing comma when present; strip the one
+  # left dangling after concatenation before closing the object.
+  local windows="${fh_json}${sd_json}"
+  windows="${windows%,}"
+  if printf '{"ts":%s,"profile":"%s",%s}' \
+    "$(date +%s)" "$profile" "$windows" >"$tmpf" 2>/dev/null; then
     mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
   else
     rm -f "$tmpf" 2>/dev/null
   fi
 }
 write_harness_cost "$cost" "$session_id"
-write_rate_limits_snapshot "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset" "$effort"
+write_rate_limits_snapshot "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset"
 
 # ---------------------------------------------------------------------------
 # Line 1: host | dir | branch *dirty ⇡ahead⇣behind | worktree

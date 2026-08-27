@@ -50,20 +50,34 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 - **family + generation** で比較する。
 - 判定不能な unknown 文字列は **fail-safe**（silent pass せず、チェックを提示する）。
 
+## effort の検出
+
+このセッションの effort: ${CLAUDE_EFFORT}
+
+直上の 1 行が、この skill における**唯一の展開箇所**である。Claude Code は skill 本文のテキストに対して実行時に文字列置換を行い、`${...}` 形式のプレースホルダをセッションの値へ置き換える。以降の本文では波括弧を省いて `CLAUDE_EFFORT` と表記する —— **リテラルで書くと解説文の中でも展開されてしまい、文が意味を失う**（実機検証で確認済み）。展開される値は effort レベル文字列（`low` / `medium` / `high` / `xhigh` 等）で、`CLAUDE_SESSION_ID` / `CLAUDE_SKILL_DIR` / `CLAUDE_PROJECT_DIR` も同様に展開される。一方 `CLAUDE_PID` は**展開されずリテラルのまま残る**（実測）。これは Bash の環境変数ではなく**skill 本文限定のテンプレート展開**であり、子プロセス（Bash tool 経由のシェル等）からは読めない（`echo $CLAUDE_EFFORT` は空になる）。
+
+**丸めの制約**: 展開を行う実装は、解決できない値を黙って `high` に丸める（`typeof e==="string") return x(e) ? e : "high"; return "high"`）。そのため `CLAUDE_EFFORT` が `high` を返したとき、「本当に high」と「解決できずに丸められた」を**区別できない**。この制約は判定に反映する:
+
+- **high を要求する行**で `CLAUDE_EFFORT` が `high` のとき: pass 扱いでよい（丸めの結果でも実際の high でも要求は満たされる）。
+- **xhigh を要求する行**で `CLAUDE_EFFORT` が `high` のとき: 乖離を断言せず、「xhigh か、検出できず high に丸められたか」を user に確認する（fail-safe。silent に mismatch とも pass とも決めつけない）。
+
 ## 判定と出力
 
 判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
 ### floor 行（Opus @ high / Opus @ xhigh）で mismatch
 
-`AskUserQuestion` で **blocking** し、次の 3 択を提示する:
+`AskUserQuestion` で **blocking** し、次の 4 択を提示する:
 
-1. **switch して再実行**: literal な切り替えコマンドを表示する（例: `/model opus`、xhigh 行なら加えて `/effort xhigh`）。user が切り替えてから再開。
-2. **continue anyway**: このまま進む。
-3. **abort**: 作業を中止する。
+1. **すでに要求水準を満たしている（変更不要）**: 検出が誤りで、実際には現在の model / effort が要求を満たしている場合に選ぶ。選択後は switch 提案を出さず、そのまま進める。
+2. **switch して再実行**: literal な切り替えコマンドを表示する（例: `/model opus`、xhigh 行なら加えて `/effort xhigh`）。user が切り替えてから再開。
+3. **continue anyway**: 検出通り不足している前提で、このまま進む。
+4. **abort**: 作業を中止する。
+
+選択肢 1 は実運用で「検出が誤りで、実際には要求水準を満たしていた」ケースが起き、提示された 3 択（switch / continue anyway / abort）のどれも正解でなかったために追加した。
 
 - **effort は xhigh を要求する行でのみ言及する**。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
-- effort はセッション内から確実には読めないため、**推論せず提示して確認する**（`effortLevel` は settings.json から読めるが、`/effort` によるセッション内状態と乖離しうるため）。statusline snapshot（「over-provision 閾値ゲート」参照）の `effort` は harness 実出力由来の参考値として使えるが、描画タイミングにより stale がありうるため、これも確定値としては扱わない。
+- effort は `CLAUDE_EFFORT`（「effort の検出」参照）から読む。ただし xhigh 要求行で `CLAUDE_EFFORT` が `high` の場合、丸めの制約により「本当に high」と「解決できなかった」を区別できないため、乖離を断言せず**提示して確認する**（silent に mismatch と決めつけない）。
 
 ### trivial / small 行
 
