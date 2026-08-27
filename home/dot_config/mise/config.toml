@@ -52,7 +52,7 @@ zoxide = "0.10.0"
 # node を上げたときに global npm の中身が消えるのを避けるため。
 "npm:appium" = "3.6.0"
 
-pandoc = "3.10.1"
+pandoc = "3.10.2"
 typst = "0.15.1"
 
 [settings]
