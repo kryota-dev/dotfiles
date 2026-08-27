@@ -22,6 +22,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
   - [PostToolUseFailure](#posttoolusefailure)
   - [Notification](#notification)
   - [Stop](#stop)
+  - [StopFailure](#stopfailure)
 - [ECC launcher — ecc-hook.sh](#ecc-launcher--ecc-hooksh)
 - [ECC hook forks (hooks-fork/)](#ecc-hook-forks-hooks-fork)
   - [governance-capture.js](#governance-capturejs)
@@ -45,6 +46,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/executable_statusline.sh` | `~/.claude/statusline.sh` (0755) |
 | `home/dot_claude/executable_clv2-session-notify.sh` | `~/.claude/clv2-session-notify.sh` (0755) |
 | `home/dot_claude/executable_morning-radar.sh` | `~/.claude/morning-radar.sh` (0755) |
+| `home/dot_claude/executable_wave-session-event.sh` | `~/.claude/wave-session-event.sh` (0755) |
 | `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
 | `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
 | `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
@@ -147,6 +149,7 @@ flowchart TD
     SS --> SS2[clv2-session-notify async]
 
     UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nno matcher]
+    UPS --> UPS2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
     PC[PreCompact] --> PC1[ECC pre-compact]
 
@@ -158,6 +161,7 @@ flowchart TD
     PTU --> PTU6[mcp-health-check\nmcp__.*]
     PTU --> PTU7[doc-file-warning\nWrite]
     PTU --> PTU8[CLV2 observe.sh pre async]
+    PTU --> PTU9[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     PoTU[PostToolUse] --> PoTU1[ecc-metrics-bridge]
     PoTU --> PoTU2[ecc-context-monitor]
@@ -169,8 +173,13 @@ flowchart TD
     PoTU --> PoTU8[quality-gate\nEdit Write MultiEdit]
     PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
     PoTU --> PoTU10[console-warn\nEdit]
+    PoTU --> PoTU11[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
+
+    PTUF[PostToolUseFailure] --> PTUF1[mcp-health-check\nall tools]
+    PTUF --> PTUF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
+    NTF --> NTF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\npermission_prompt idle_prompt\nagent_needs_input]
 
     STP[Stop] --> STP1[session-end async]
     STP --> STP2[cost-tracker async]
@@ -178,6 +187,9 @@ flowchart TD
     STP --> STP4[ntfy-notify async]
     STP --> STP5[format-typecheck async]
     STP --> STP6[check-console-log sync]
+    STP --> STP7[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
+
+    STPF[StopFailure] --> STPF1[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 ```
 
 ### SessionStart
@@ -192,6 +204,7 @@ flowchart TD
 | Hook ID | Matcher | Command | Notes |
 |---|---|---|---|
 | `user-prompt-submit:prompt-conform-suggest` | none | `node hooks-fork/prompt-conform-suggest.js` (timeout 5 s) | Detects long, task-shaped prompts and injects `additionalContext` suggesting `$prompt-conform` (task #367). Not an ECC fork — a standalone script, documented separately from [ECC hook forks](#ecc-hook-forks-hooks-fork) below. `UserPromptSubmit` does not support `matcher` per the [official Hooks reference](https://code.claude.com/docs/en/hooks) (silently ignored), so the entry omits it. Fail-open: a malformed payload, an invalid env-tuned regex, or any other exception all degrade to no output and exit 0. See [Env vars reference](#env-vars-reference) for the tuning knobs. |
+| `userpromptsubmit:wave-session-event` | none | `wave-session-event.sh` (async, timeout 10 s) | Appends the hook payload to a per-session file so wave-orchestrator's parent session can tell a stopped child apart without scraping the TUI (#437). Wired into every session but **opt-in**: it records nothing unless `WAVE_ORCHESTRATOR_SESSION` is set in the environment (the orchestrator exports it only for the child sessions it launches) — ordinary sessions record nothing. Writes to `${XDG_STATE_HOME:-$HOME/.local/state}/wave-orchestrator/events/<session_id>.jsonl` (dir 700, file 600). Fail-open: no-op without `jq`, a writable state dir, or a `session_id` that parses as a UUID. |
 
 ### PreCompact
 
@@ -211,6 +224,7 @@ flowchart TD
 | `pre:mcp-health-check` | `mcp__.*` | Probes MCP server health; matcher is narrowed to avoid paying cost for non-MCP tools |
 | `pre:write:doc-file-warning` | `Write` | Warns on non-standard scratch doc files outside structured directories |
 | `pre:observe:continuous-learning` | `*` | CLV2 `observe.sh pre` (async); writes `tool_start` to `observations.jsonl` |
+| `pretooluse:wave-session-event` | `AskUserQuestion` | Records the same wave-orchestrator payload as [UserPromptSubmit](#userpromptsubmit) above (async, timeout 10 s; opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Marks a question as opened; paired with the `PostToolUse`/`PostToolUseFailure` rows below via `tool_use_id` to detect whether it was later decided. |
 
 The `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` regex (set in `env`) extends the built-in destructive command set that the `pre:bash:dispatcher` enforces. It covers:
 
@@ -243,18 +257,21 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 | `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | Auto-formats `.json/.md/.go/.py` via biome/prettier/gofmt/ruff |
 | `post:edit:design-quality-check` | `Edit\|Write\|MultiEdit` | No | Frontend design-quality checklist warnings |
 | `post:edit:console-warn` | `Edit` | No | Warns (with line numbers) on `console.log` in edited JS/TS files |
+| `posttooluse:wave-session-event` | `AskUserQuestion` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Fires when `AskUserQuestion` is answered. Because `tool_response` carries the answer text, only correlation fields (`session_id`, `prompt_id`, `hook_event_name`, `tool_name`, `tool_use_id`) are projected and recorded — the answer body never lands on disk. |
 
 ### PostToolUseFailure
 
 | Hook ID | Description |
 |---|---|
 | `post:mcp-health-check` | Tracks failed MCP tool calls, marks unhealthy servers, attempts reconnect. `CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure` is set explicitly because Claude Code does not export it and `mcp-health-check.js` selects its handler from that env var. |
+| `posttoolusefailure:wave-session-event` | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437; matcher `AskUserQuestion`). Fires on an ordinary tool failure; paired with `PostToolUse` above via `tool_use_id` to detect that a question was decided (#448). Like `PostToolUse`, only correlation fields are projected — the answer body never lands on disk. |
 
 ### Notification
 
 | Hook ID | Matcher | Async | Description |
 |---|---|---|---|
 | `notification:ntfy-notify` | `permission_prompt\|idle_prompt\|agent_needs_input\|agent_completed` | Yes | Publishes attention/completion notifications to the self-hosted ntfy server over Tailscale with repo/branch/account/session attribution (#337; see [Notifications](../architecture/notifications.md)). Fail-open: silent no-op without `~/.config/ntfy/notify-env` |
+| `notification:wave-session-event` | `permission_prompt\|idle_prompt\|agent_needs_input` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Narrower matcher than `notification:ntfy-notify` above — excludes `agent_completed`. |
 
 ### Stop
 
@@ -266,6 +283,13 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 | `stop:ntfy-notify` | Yes | Publishes a session-stop notification (truncated + client-identifier-scrubbed summary) to the self-hosted ntfy server (#337) |
 | `stop:format-typecheck` | Yes | Batch-formats and typechecks (`tsc --noEmit`) JS/TS files edited this session (timeout 300 s) |
 | `stop:check-console-log` | No | Aggregates `console.log` warnings across all git-modified JS/TS files |
+| `stop:wave-session-event` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Marks the turn as idle/complete. |
+
+### StopFailure
+
+| Hook ID | Async | Description |
+|---|---|---|
+| `stopfailure:wave-session-event` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Fires when a turn ends via an API error without a `Stop` event, so the orchestrator can still detect idle instead of treating the child as stuck (#447-related). |
 
 ---
 
