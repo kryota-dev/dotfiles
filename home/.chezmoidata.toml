@@ -181,7 +181,7 @@ ghq_user = "kryota-dev"
   # Neither is ever auto-merged — this ships executable code that captures the
   # screen and synthesises input on a real device (see renovate.json5 packageRules).
   version = "0.2.0"
-  commit = "47f37a6dd5baae9f10f16e21e50a6898ee42cd22"
+  commit = "b9a1ec6d30454f7a8961719979947652902ae666"
 
 [eli5]
   # eli5 skill — https://github.com/anthropics/claude-plugins-community/tree/main/eli5
