@@ -348,7 +348,7 @@ _assert_lifecycle_scripts_documented() {
     false
   }
 
-  local pair marker constant actual found f val
+  local pair marker constant actual count f val
   for pair in "fh-approval-timeout-ms:DEFAULT_ESCALATION_TIMEOUT_MS" \
     "fh-approval-max-timeout-ms:MAX_ESCALATION_TIMEOUT_MS" \
     "fh-approval-progress-interval-ms:DEFAULT_PROGRESS_INTERVAL_MS"; do
@@ -359,19 +359,20 @@ _assert_lifecycle_scripts_documented() {
       echo "sanity: could not read ${constant} from ${source#"${REPO_ROOT}/"} — the extractor likely broke"
       false
     }
-    found=0
-    while IFS= read -r f; do
+    # 「docs のどこか 1 箇所にあれば通る」だと、片方のミラーからマーカーが消えても
+    # 検出できない。EN と JA の両方にちょうど 1 件ずつあることを要求する。
+    for f in "${DOCS_DIR}/agents/frontier-harness.md" "${DOCS_DIR}/agents/frontier-harness.ja.md"; do
+      count="$(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -c . || true)"
+      [ "$count" = 1 ] || {
+        echo "${f#"${REPO_ROOT}/"}: expected exactly 1 FACT:${marker} marker, found ${count}"
+        false
+      }
       while IFS= read -r val; do
-        found=1
         [ "$val" = "$actual" ] || {
           echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ${constant} is $actual"
           false
         }
       done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
-    done < <(grep -rlF "FACT:${marker}" "${DOCS_DIR}")
-    [ "$found" = 1 ] || {
-      echo "no FACT:${marker} markers found under ${DOCS_DIR#"${REPO_ROOT}/"} — the docs refactor regressed"
-      false
-    }
+    done
   done
 }

@@ -180,15 +180,30 @@ The consequence is a deliberately lopsided design:
   Silently dropping the rules a user deliberately added is the fail-open regression this whole
   arrangement exists to prevent.
 
+Before a rule is matched, the command string is tokenized and its **global options are
+skipped using a per-binary arity table**, so `git -C <path> merge` is recognized exactly
+as `git merge` is. That table is what makes the two hard cases come out right: in
+`git -C merge status` the word `merge` is the *value* of `-C` and the real subcommand is
+the benign `status`, while in `git -p merge` the `-p` takes no value and the `merge` is
+real. Backslash word-splitting and `${IFS}` substitution are normalized away. A command
+whose name or subcommand is built dynamically, or that runs another command through a
+shell or a wrapper like `sudo`, cannot be interpreted at all — those escalate rather
+than falling through to the unmatched default.
+
 Matching a rule does **not** deny. It escalates — the user is asked, synchronously.
 `AskUserQuestion` escalates regardless of any rule, and the approver never answers one itself:
 it cannot check a claim against a primary source, so it is not given the power to try.
 
 Anything that matches no rule is allowed. That direction is fail-open by construction, and two
 things bound it: read-only calls are auto-approved before they ever reach the prompt tool, so
-the channel never sees them, and the baseline set cannot be shrunk. Regular-expression matching
-over shell command strings is a speed bump, not a boundary — a determined command can be
-spelled around it.
+the channel never sees them, and the baseline set cannot be shrunk. Matching over shell command
+strings is a speed bump, not a boundary — normalization closes the cheap tricks and the
+uninterpretable ones escalate, but a command determined to avoid the rules can still be spelled
+in a way no static matcher will catch.
+
+`fh approve-server` takes `--session`, `--approvals-dir`, `--rules`, `--timeout-ms`, and
+`--progress-interval-ms`. Both path flags must be absolute, for the same reason the rules
+file is never resolved from the working directory.
 
 ### Reaching the user
 
@@ -246,7 +261,9 @@ whose request is waiting there. A child that wants to approve itself can, and no
 file permissions changes that; only running the responder under a different uid would. This is
 the same caveat that applies to `approvals.granted_by` in the state schema — the record says
 who granted an approval, it does not prove it. The baseline rule that escalates any command
-referencing the approval directory is defence in depth, not a boundary.
+referencing the approval directory is defence in depth, not a boundary: it is matched over a
+command string, so it inherits the limits above and can be avoided by a command written to
+avoid it.
 
 ## Repository onboarding
 
