@@ -37,7 +37,7 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 |---|---|---|---|
 | `claude` / `cld` | Claude Code | 個人（fill-gaps） | per-account 環境セットで mise 管理の `claude` バイナリを実行；すでに設定済みの `CLAUDE_CONFIG_DIR` を維持（フック起動の子プロセスが親セッションのアカウントに留まるため）、未設定なら `~/.claude` にデフォルト |
 | `cld-r06` | Claude Code | 業務（r06） | 同じラッパー；`CLAUDE_CONFIG_DIR` を無条件に `~/.claude-r06` に強制（override） |
-| `claude-config` | Claude Code | 個人 | zsh ヘルパー：ECC config-protection + gateguard-fact-force ゲートを無効化してから `claude` ラッパーを呼ぶ；意図的な設定編集用 |
+| `claude-config` | Claude Code | 個人 | zsh ヘルパー：ECC config-protection ゲートを無効化してから `claude` ラッパーを呼ぶ；意図的な設定編集用 |
 | `cldf` | Claude Code | 個人 | zsh ヘルパー：`claude` ラッパーを `--model claude-fable-5` と [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで呼ぶ — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
 | `cldf-r06` | Claude Code | 業務（r06） | r06 アカウントでの `cldf` |
 | `codex` / `cdx` | Codex CLI | `CLAUDE_CONFIG_DIR` に追従（fill-gaps） | brew 管理の `codex` バイナリを実行し、argv に `--profile` がなければ `--profile shared` を注入；`CODEX_HOME` は `CLAUDE_CONFIG_DIR` が設定されていればそれに追従（`.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）、未設定なら明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |

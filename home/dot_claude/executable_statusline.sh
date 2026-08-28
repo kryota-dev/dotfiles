@@ -214,19 +214,26 @@ daily_cost() {
   cat "$cache" 2>/dev/null
 }
 
-# Review-ready instinct-cluster count (🧬N). The async SessionStart hook
-# (clv2-session-notify.sh) computes it via the CLV2 engine and caches a single integer to
+# Review-ready instinct-cluster count (🧬N). Reads a single integer cached at
 # "<homunculus>/.review-ready-clusters", so this renderer stays a cheap file read with no
 # python. Mirrors the homunculus-dir precedence and sanitizes to digits (defends against a
 # malformed cache). Empty output => caller hides the segment.
+#
+# The writer is gone: clv2-session-notify.sh ran this count on every SessionStart and was
+# removed in #496 (#473 AC-027) because a session-start nudge is not an action request. The
+# cache is deliberately left in place (#473 scopes that change to stopping new writes), so
+# whatever value it last held is what this segment now shows, unchanging. Removing the segment
+# belongs with the statusline, not with the hook reduction — until then this reads a frozen
+# cache on purpose.
 clv2_cluster_count() {
   local dir="${CLV2_HOMUNCULUS_DIR:-}"
   case "$dir" in
     /*) ;;
     *)
-      # Match the producer's precedence exactly (clv2-session-notify.sh /
-      # scripts/lib/homunculus-dir.sh): a non-absolute XDG_DATA_HOME is ignored,
-      # not used verbatim, so both halves always resolve to the same cache file.
+      # Precedence kept identical to what wrote the cache (the removed
+      # clv2-session-notify.sh, and scripts/lib/homunculus-dir.sh): a non-absolute
+      # XDG_DATA_HOME is ignored, not used verbatim, so a restored writer and this
+      # reader would still resolve to the same file.
       case "${XDG_DATA_HOME:-}" in
         /*) dir="${XDG_DATA_HOME}/ecc-homunculus" ;;
         *) dir="${HOME}/.local/share/ecc-homunculus" ;;

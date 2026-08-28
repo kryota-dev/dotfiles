@@ -16,7 +16,8 @@ left untouched: the `notify` zsh alias (audible chime, also reused by these
 wrappers as their failure alert sound). A second one — `clv2-session-notify.sh`
 (SessionStart, instinct-cluster review nudge) — was removed outright in #496
 (#473 AC-027) rather than migrated: a session-start nudge is not an action
-request, so it had no place in the notification contract this page describes. `morning-radar.sh` (launchd, weekday
+request, so it had no place in the notification contract this page describes.
+`morning-radar.sh` (launchd, weekday
 brief) used to notify via local `osascript`; it now renders the brief to a
 tailnet HTML page and sends an ntfy notification that links to it —
 see [Morning-brief delivery](#morning-brief-delivery-361) below.
