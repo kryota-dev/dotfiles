@@ -270,6 +270,76 @@ load helpers/setup
   grep -qx 'cask "antigravity-cli"' "${HOME_DIR}/dot_Brewfile"
 }
 
+@test "improvement candidate queue ships its CLI, shell face and read-only skill (#501)" {
+  local launcher="${HOME_DIR}/dot_local/bin/executable_agent-improvement"
+  [ -f "$launcher" ]
+  bash -n "$launcher"
+  local lib="${HOME_DIR}/dot_local/lib/agent-improvement"
+  local module
+  for module in paths schema store view cli; do
+    [ -f "${lib}/${module}.mjs" ]
+  done
+
+  # The conversational face (AC-037) is a curated skill; the shell face is zsh functions,
+  # not aliases, so --history / --json pass through.
+  [ -f "${HOME_DIR}/dot_agents/skills/improvement-status/SKILL.md" ]
+  local zshrc="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  grep -q 'improvement-status() { agent-improvement status' "$zshrc"
+  grep -q 'improvement-next() { agent-improvement next' "$zshrc"
+  grep -q 'improvement-resolve() { agent-improvement resolve' "$zshrc"
+
+  # AC-035: the queue never reaches Git. Guard the ignore entry so a later `chezmoi add`
+  # under ~/.local/state cannot pull owner-only state into this public repo.
+  grep -qFx '.local/state/agent-improvement' "${HOME_DIR}/.chezmoiignore"
+
+  # The state path is resolved in exactly one module (#344 keeps the layout movable).
+  # Search every module directly: composing this out of an 'agent-improvement' grep
+  # would miss a module that reads XDG_STATE_HOME without naming the tool. The launcher
+  # and the zsh helpers are in scope too — they are part of the same stack, and a future
+  # edit that resolves the path there would escape a lib-only guard.
+  # Comments that merely document the path are fine; only real resolution counts, so
+  # strip comment text before looking.
+  local resolvers="" f
+  for f in "$lib"/*.mjs "$launcher" "$zshrc"; do
+    if sed -e 's;//.*;;' -e 's;#.*;;' "$f" | grep -qF 'XDG_STATE_HOME'; then
+      resolvers="${resolvers}${resolvers:+ }${f}"
+    fi
+  done
+  [ "$resolvers" = "${lib}/paths.mjs" ] || {
+    echo "state path resolution leaked out of paths.mjs: $resolvers"
+    false
+  }
+
+  # The launcher must reject a non-absolute HOME before it resolves the module path:
+  # otherwise `HOME=.` runs whatever .local/lib/agent-improvement/cli.mjs the current
+  # directory happens to ship.
+  grep -q 'HOME を絶対パスで設定してください' "$launcher"
+}
+
+@test "improvement-* zsh helpers pass their flags through to the CLI (#501)" {
+  # A prefix grep would still pass if "$@" were dropped, which is exactly the bug that
+  # makes the functions useless (--history / --json would silently do nothing).
+  local stub_dir="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$stub_dir"
+  cat >"$stub_dir/agent-improvement" <<'STUB'
+#!/usr/bin/env bash
+printf 'ARGV=%s\n' "$*"
+STUB
+  chmod +x "$stub_dir/agent-improvement"
+
+  run zsh -fc "
+    export PATH='${stub_dir}':\$PATH
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    improvement-status --history --json
+    improvement-next --json
+    improvement-resolve some-id --decision=defer
+  "
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx 'ARGV=status --history --json'
+  printf '%s\n' "$output" | grep -qFx 'ARGV=next --json'
+  printf '%s\n' "$output" | grep -qFx 'ARGV=resolve some-id --decision=defer'
+}
+
 @test "morning-radar wrapper keeps the explicit permission allowlist" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   bash -n "$wrapper"

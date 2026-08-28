@@ -27,6 +27,7 @@
 - [ステータスライン](#ステータスライン)
 - [CLV2 オブザーバー配線](#clv2-オブザーバー配線)
 - [朝次レーダーのスケジュール実行](#朝次レーダーのスケジュール実行)
+- [改善候補キュー](#改善候補キュー)
 - [レビューサブエージェント](#レビューサブエージェント)
 - [r06 ワークアカウント](#r06-ワークアカウント)
 - [環境変数リファレンス](#環境変数リファレンス)
@@ -389,6 +390,31 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 - **縮退モード。** claude.ai の Gmail/Calendar コネクタは headless で OAuth を完了できないため、brief は取得失敗を明記して GitHub + ローカルコンテキストへ縮退します（morning-brief SKILL.md に記載の挙動）。
 - **権限とコスト。** wrapper は明示的な `--allowedTools` allowlist（read-only の `gh`/`git` とファイル読み取り、`Write` は brief 出力先のみ）を渡し、`--dangerously-skip-permissions` は使いません。モデルは `sonnet` に固定、`--max-turns` でターン上限、600 秒の watchdog が課金バックストップです。平日 5 回/週の費用は #257 で事前承認済みです。
 - **出力契約。** brief は `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md` に保存され、最終応答は `HEADLINE:` の 1 行のみ。wrapper がそれを ntfy 通知に載せ、click で tailnet 上に serve された brief ページを開きます（tailnet-only、#361 — [notifications](../architecture/notifications.ja.md#朝ブリーフの配信-361) 参照）。
+
+---
+
+## 改善候補キュー
+
+Issue kryota-dev/dotfiles#501（#473 のサブ issue）: ECC 継続的改善ループは、候補を通知で押し付けるのではなく、ローカルの所有者専用キューに保持します。候補は複数を同時に保持し、1 件に絞られるのは**提示の場面だけ**です。
+
+| 構成要素 | パス | 役割 |
+|---|---|---|
+| ランチャー | `home/dot_local/bin/executable_agent-improvement` → `~/.local/bin/agent-improvement` | mise pin の node で CLI モジュールを exec する |
+| CLI モジュール | `home/dot_local/lib/agent-improvement/{paths,schema,store,view,cli}.mjs` | パス解決と所有者専用書き込み、境界検証、保存、導出ビュー、サブコマンド dispatch |
+| 状態 | `${XDG_STATE_HOME:-~/.local/state}/agent-improvement/queue.json` | ディレクトリ 0700 / ファイル 0600。`.chezmoiignore` で除外し、public リポジトリへ取り込まれないようにする |
+| シェル面 | `home/dot_config/zsh/claude.zsh` の `improvement-status` / `improvement-next` / `improvement-resolve` | フラグを透過させるため alias ではなく zsh 関数 |
+| 会話面 | curated skill `improvement-status` | `agent-improvement status` の出力をセッション内に整形表示する |
+
+**サブコマンド**: `status [--history]` と `next` は厳密に読み取り専用で、書き込むのは `resolve` と `upsert` だけです。
+
+- **表示は評価しない。** `status` と `next` は state ディレクトリを作らず、キューファイルにも触れず、週次 evaluator を起動しません。失効と延期期限は読み取り時の導出ビューとして計算し、書き戻しません。つまり「表示したせいで状態が変わる」経路が存在しません。
+- **順位は保存せず導出する。** 候補は evaluator が順位付けに使った 5 指標（頻度・影響・根拠の強さ・実装コスト/リスク・期待効果）を記録し、順位は固定の重み付けから毎回再計算します。同点は根拠の新しい順 → id 昇順で解決します。順位を保存すると、要約元の指標と乖離しうるためです。
+- **回答は三択固定。** `resolve <id> --decision=adopt|defer|reject` が判断面のすべてです。採用には成功指標・変更前の基準値・再評価日・効果不十分時の調整/revert 条件が必須です。延期の既定は 7 日です。
+- **失効と終端状態。** 新しい根拠が 28 日無い active 候補は失効として表示します。`rejected` と `promoted` は終端で、後から `upsert` されても復活せず skip として報告されます。
+- **Issue 化は payload を捨てる。** 採用に `--issue-url` を添えると、候補は id・タイトル・作成日時・Issue URL だけになります。GitHub Issue を唯一の正本とし、キュー側に二重の正本を残さないためです。
+- **provenance のみを持つ。** 候補が持つ account 情報は `evidence_accounts`（根拠がどのアカウント由来か）だけです。どのアカウントに影響する変更かは、採用後の planning で判断します。
+
+このキューを埋める週次 evaluator（#506）と、読み取って提示する完了時の経路（#507）は別の変更です。キューは単体で動作します（`agent-improvement upsert` に候補を流し込めば、採用・延期・見送り・Issue 化の一巡をどちらも無しに検証できます）。
 
 ---
 

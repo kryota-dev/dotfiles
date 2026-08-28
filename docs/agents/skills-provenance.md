@@ -79,7 +79,7 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (<!-- FACT:curated-skill-count -->49<!-- /FACT --> skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->50<!-- /FACT --> skills)
 
 The curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
@@ -89,11 +89,11 @@ Core day-to-day development cycle automation, plus the parallel-dev triad (`repo
 
 `commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `wave-orchestrator`, `delete-merged-branches`
 
-### Code review and multi-agent orchestration (7 skills)
+### Code review and multi-agent orchestration (9 skills)
 
-Review pipelines that spawn subagents or coordinate multiple reviewers, plus the shared model/effort gate they all call before implementation.
+Review pipelines that spawn subagents or coordinate multiple reviewers, plus the two orthogonal gates they all call before implementation (`model-fitness-check` for the session's own model/effort floor, `execution-readiness-check` for adapter capability and rollout) and the routing harness those gates consult.
 
-`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`
+`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`, `execution-readiness-check`, `frontier-harness`
 
 ### Planning and spec-driven development (5 skills)
 
@@ -101,11 +101,11 @@ Structured task decomposition, requirement analysis, and end-to-end delivery flo
 
 `planning`, `sdd`, `grill-me`, `prompt-conform`, `pr-workflow`
 
-### Session and context management (5 skills)
+### Session and context management (6 skills)
 
-Managing conversation state, compacting transcripts, and post-session capture. `session-summary` has both a lightweight default mode and a `--archive` deep-mode (JSONL archive + subagent summary) folded in from the retired `save-session` skill. `knowledge-distill` audits the ECC learning loop weekly and routes accumulated learnings to their promotion targets (proposals only).
+Managing conversation state, compacting transcripts, and post-session capture. `session-summary` has both a lightweight default mode and a `--archive` deep-mode (JSONL archive + subagent summary) folded in from the retired `save-session` skill. `knowledge-distill` audits the ECC learning loop weekly and routes accumulated learnings to their promotion targets (proposals only). `improvement-status` is the read-only conversational view over the [improvement candidate queue](claude-code.md#improvement-candidate-queue) — it displays state and never re-runs the evaluator.
 
-`session-summary`, `prune-session-transcript`, `compact-docs`, `retrospective-codify`, `knowledge-distill`
+`session-summary`, `prune-session-transcript`, `compact-docs`, `retrospective-codify`, `knowledge-distill`, `improvement-status`
 
 ### Worktree and dotfiles tooling (4 skills)
 

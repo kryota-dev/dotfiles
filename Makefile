@@ -49,15 +49,17 @@ test: lint lint-node test-node test-bats
 test-bats:
 	@bats tests/*.bats
 
-## Syntax-check Node.js harness modules and tests
+## Syntax-check Node.js modules and tests
+# Globbed rather than enumerated: a new home/dot_local/lib/<tool>/ or tests/<tool>.test.mjs
+# must not need a Makefile edit to be linted (the literal list silently skipped new files).
 lint-node:
-	@for f in home/dot_local/lib/frontier-harness/*.mjs tests/frontier_harness.test.mjs; do \
+	@for f in home/dot_local/lib/*/*.mjs tests/*.test.mjs; do \
 		node --check "$$f" || exit 1; \
 	done
 
-## Run Node.js harness tests without invoking live provider credentials
+## Run Node.js tests without invoking live provider credentials
 test-node:
-	@node --test tests/frontier_harness.test.mjs
+	@node --test tests/*.test.mjs
 
 ## Type-check, lint, and format-check the ntfy dashboard's Deno code (kryota-dev/dotfiles#371)
 lint-deno:
