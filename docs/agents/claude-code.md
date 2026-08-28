@@ -27,6 +27,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 - [Statusline](#statusline)
 - [CLV2 observer wiring](#clv2-observer-wiring)
 - [Scheduled morning radar](#scheduled-morning-radar)
+- [Improvement candidate queue](#improvement-candidate-queue)
 - [Review subagents](#review-subagents)
 - [r06 work account](#r06-work-account)
 - [Env vars reference](#env-vars-reference)
@@ -391,6 +392,31 @@ Issue kryota-dev/dotfiles#257: a launchd LaunchAgent runs `/morning-brief` headl
 - **Degraded mode.** The claude.ai Gmail/Calendar connectors cannot complete OAuth headless, so the brief degrades to GitHub + local context with an explicit fetch-failure note — the behavior documented in morning-brief SKILL.md.
 - **Permissions & cost.** The wrapper passes an explicit `--allowedTools` allowlist (read-only `gh`/`git` and file reads; `Write` scoped to the brief output dir) and never uses `--dangerously-skip-permissions`. The model is pinned to `sonnet`, turns are capped with `--max-turns`, and a 600 s watchdog is the billing backstop. The weekday 5-runs/week spend was pre-approved on #257.
 - **Output contract.** The brief lands in `~/dotfiles/.kryota-dev/morning-brief/<YYYY-MM-DD>.md`; the final response is a single `HEADLINE:` line the wrapper puts in an ntfy notification whose click opens the rendered brief page served on the tailnet (tailnet-only, #361 — see [notifications](../architecture/notifications.md#morning-brief-delivery-361)).
+
+---
+
+## Improvement candidate queue
+
+Issue kryota-dev/dotfiles#501 (sub-issue of #473): the ECC continuous-improvement loop keeps its candidates in a local, owner-only queue instead of pushing them at you through notifications. Multiple candidates are held at once; only the *presentation* is ever narrowed to one.
+
+| Piece | Path | Role |
+|---|---|---|
+| Launcher | `home/dot_local/bin/executable_agent-improvement` → `~/.local/bin/agent-improvement` | Execs the mise-pinned node against the CLI module |
+| CLI modules | `home/dot_local/lib/agent-improvement/{paths,schema,store,view,cli}.mjs` | Path resolution + owner-only writes, boundary validation, storage, derived views, subcommand dispatch |
+| State | `${XDG_STATE_HOME:-~/.local/state}/agent-improvement/queue.json` | Directory 0700, file 0600; ignored by `.chezmoiignore` so it can never be pulled into this public repo |
+| Shell face | `improvement-status` / `improvement-next` / `improvement-resolve` in `home/dot_config/zsh/claude.zsh` | zsh functions (not aliases) so flags pass through |
+| Conversational face | `improvement-status` curated skill | Renders `agent-improvement status` output in-session |
+
+**Subcommands.** `status [--history]` and `next` are strictly read-only; `resolve` and `upsert` are the only writers.
+
+- **Reading never evaluates.** `status` and `next` do not create the state directory, do not touch the queue file, and never trigger the weekly evaluator. Expiry and deferral windows are computed as a derived view at read time and are never written back, so there is no path by which displaying state changes it.
+- **Ranking is derived, not stored.** Candidates record the five inputs the evaluator ranked them by (frequency, impact, evidence strength, implementation cost/risk, expected effect); the order is recomputed from a fixed weighting each run, with ties broken by evidence recency then id. A stored rank could drift from the inputs it claims to summarise.
+- **Fixed three-way answer.** `resolve <id> --decision=adopt|defer|reject` is the whole decision surface. Adopting requires a success metric, a pre-change baseline, a review date, and the condition under which the change is adjusted or reverted. Deferring defaults to seven days.
+- **Expiry and terminal states.** An active candidate with no fresh evidence for 28 days is shown as expired. `rejected` and `promoted` are terminal: a later `upsert` reports them as skipped rather than resurrecting them.
+- **Issue promotion discards the payload.** Adding `--issue-url` to an adopt keeps only the candidate's id, title, creation time and the issue URL — the GitHub issue becomes the single source of truth rather than a second copy living in the queue.
+- **Provenance only.** A candidate carries `evidence_accounts` (which accounts the evidence came from) and nothing else about accounts; which account a change would affect is a planning decision made after adoption.
+
+The weekly evaluator that populates this queue (#506) and the end-of-task presentation path that reads it (#507) are separate changes. The queue works standalone: pipe a candidate into `agent-improvement upsert` and the whole adopt / defer / reject / promote cycle is exercisable without either.
 
 ---
 
