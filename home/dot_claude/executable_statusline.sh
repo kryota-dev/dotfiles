@@ -100,9 +100,15 @@ SESSION_STATE_TTL_DAYS=7
 # service-status segments on Linux. BSD stat has no -c and fails cleanly on
 # stderr, so this order is correct on both. The digit guard keeps any future
 # platform quirk from reaching $(( )) at all.
+# $OSTYPE is a bash builtin, so picking the platform's own form costs nothing
+# and keeps this to a single stat per call. A blind `-c || -f` chain would spawn
+# two processes on macOS, and this runs five-plus times per render.
 file_mtime() {
   local m
-  m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null)
+  case "$OSTYPE" in
+    darwin*) m=$(stat -f %m "$1" 2>/dev/null) ;;
+    *) m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) ;;
+  esac
   case "$m" in
     '' | *[!0-9]*) printf '0' ;;
     *) printf '%s' "$m" ;;
@@ -451,12 +457,48 @@ write_rate_limits_snapshot() {
 # effort. The `billing` wrapper key leaves room for other session-scoped
 # statusline state to join the same file later.
 
-# Drop this session's baseline and age out the ones left behind by sessions that
-# have ended. The leading glob is a shell builtin, so a machine that never
-# exceeds its quota -- and therefore never writes a baseline -- pays no fork at
-# all for this, on any render.
+# billing_state_path <session_id> -> this session's state file, empty when the
+# id is unusable. Session ids are UUIDs, i.e. already filesystem-safe, so the
+# common case is resolved with parameter expansion alone -- important because
+# this sits on the render path. Only an unusual id pays the shared sanitizer's
+# subshell, and for a [A-Za-z0-9_-] id the two agree by construction: `tr -c`
+# has nothing to map and `cut -c1-64` is `${sid:0:64}`.
+billing_state_path() {
+  local sid="$1" safe
+  case "$sid" in
+    '') return 0 ;;
+    *[!A-Za-z0-9_-]*)
+      safe=$(sanitize_session_id "$sid")
+      [ -n "$safe" ] || return 0
+      ;;
+    *) safe=${sid:0:64} ;;
+  esac
+  printf '%s/session_%s.json' "$CACHE_DIR" "$safe"
+}
+
+# Drop this session's baseline: the windows have room again, so the next overage
+# has to start from a fresh one.
 billing_state_reset() {
-  local sid="$1" f found=0
+  local target
+  target=$(billing_state_path "$1")
+  [ -n "$target" ] && [ -e "$target" ] && rm -f "$target" 2>/dev/null
+  return 0
+}
+
+# Age out the baselines left behind by sessions that have ended. Sessions never
+# signal "done", so they are pruned by mtime. Called on every render regardless
+# of quota state -- a baseline written during an overage must still be collected
+# once that session is gone, and the overage may outlive it.
+#
+# The leading glob is a shell builtin, so a machine with no baseline on disk --
+# every machine that never exceeds its quota -- pays no fork at all here. Once
+# some baseline does exist the daily stamp check costs a `date` and a `stat`,
+# which is the price of collecting it.
+#
+# Note `find -mtime +N` compares whole 24h periods with a strict `>`, so the
+# effective retention is up to N+1 days. That slack is fine for a sweep.
+billing_state_prune() {
+  local f found=0
   for f in "$CACHE_DIR"/session_*.json; do
     if [ -e "$f" ]; then
       found=1
@@ -465,13 +507,8 @@ billing_state_reset() {
   done
   [ "$found" = 1 ] || return 0
 
-  local sid_safe
-  sid_safe=$(sanitize_session_id "$sid")
-  [ -n "$sid_safe" ] && rm -f "$CACHE_DIR/session_${sid_safe}.json" 2>/dev/null
-
-  # Once a day (the same stamp-file TTL idiom the caches above use), sweep the
-  # baselines no session has touched for a week. Backgrounded so the render
-  # never waits on the directory walk.
+  # Once a day, the same stamp-file TTL idiom the caches above use.
+  # Backgrounded so the render never waits on the directory walk.
   local stamp="$CACHE_DIR/.session-gc" now mtime
   now=$(date +%s)
   mtime=$(file_mtime "$stamp")
@@ -562,13 +599,12 @@ billing_delta() {
     return 0
   fi
 
-  local sid_safe state_file
-  sid_safe=$(sanitize_session_id "$sid")
+  local state_file
+  state_file=$(billing_state_path "$sid")
   # With no usable session id there is nowhere to keep a baseline, and a delta
   # cannot be invented. Fall back to the raw totals rather than show a number
   # with nothing behind it.
-  [ -n "$sid_safe" ] || return 0
-  state_file="$CACHE_DIR/session_${sid_safe}.json"
+  [ -n "$state_file" ] || return 0
 
   # Anchor on the exhausted window that resets last: it is the one keeping the
   # overage alive, so the baseline outlives the shorter window rolling over.
@@ -623,6 +659,12 @@ billing_delta() {
       st_reset="$anchor_reset"
     fi
   else
+    # Fresh anchor. A session that was already running when the window ran out
+    # is the common case, so the baseline is this render's spend: anchoring at 0
+    # would bill everything it spent while still inside quota. The cost is that
+    # a session which *starts* mid-overage loses its first turn from the total,
+    # since there is no way to tell the two apart without state we do not have.
+    # Under-reporting by one turn beats over-reporting a whole session.
     st_win="$anchor_win"
     st_reset="$anchor_reset"
     st_sess=""
@@ -660,9 +702,10 @@ billing_delta() {
     st_last="$daily"
   fi
 
-  # One awk pass for all the money: bash 3.2 has no float arithmetic. Both
-  # deltas are clamped at 0 so a ccusage correction or a resumed session can
-  # never render a negative charge.
+  # One awk pass for all the money: bash 3.2 has no float arithmetic. Every
+  # delta is clamped at 0 -- including after the carry is added, since the carry
+  # comes back out of the state file and a corrupted one must not be able to
+  # render a negative charge for even a single frame.
   IFS=$'\x1f' read -r BILLED_SESSION BILLED_DAILY < <(
     awk -v cost="$cost" -v sb="$st_sess" -v dn="$daily" -v db="$st_base" -v dc="$st_carry" '
       BEGIN {
@@ -676,6 +719,7 @@ billing_delta() {
           d = dn - db
           if (d < 0) d = 0
           d = d + dc
+          if (d < 0) d = 0
         }
         printf "%s\037%s\n", s, d
       }'
@@ -765,6 +809,10 @@ fi
 # be taken the instant a quota window runs out.
 daily=$(daily_cost)
 billing_delta "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset" "$cost" "$daily" "$session_id"
+# Collect ended sessions' baselines regardless of this session's quota state: a
+# machine sitting in a long overage would otherwise never sweep, and a session
+# that is inside quota is not the only one that can leave a baseline behind.
+billing_state_prune
 case "$BILLING_STATE" in
   billed)
     [ -n "$BILLED_SESSION" ] && line2+="${SEP}${I_COST} $(fmt_cost "$BILLED_SESSION") ${DIM}(session)${RST}"
