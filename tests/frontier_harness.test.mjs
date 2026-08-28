@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -34,6 +36,11 @@ import {
   normalizeTelemetryEvent,
   normalizeVerificationResult,
 } from "../home/dot_local/lib/frontier-harness/records.mjs";
+import {
+  ensureDirectory,
+  ensureStateFileMode,
+  writeJsonAtomic,
+} from "../home/dot_local/lib/frontier-harness/paths.mjs";
 import {
   DEFAULT_AGGREGATE_TELEMETRY_RETENTION_DAYS,
   DEFAULT_RAW_ARTIFACT_RETENTION_DAYS,
@@ -2760,4 +2767,107 @@ test("the approvals table rejects a non-user grantor written outside the store",
     /CHECK constraint failed/,
   );
   raw.close();
+});
+
+// paths.mjs は symlink ガードと atomic write の唯一の SSOT。ここでは「最終要素だけを見る検査は
+// 中間の祖先を symlink に差し替えられると素通りする」欠陥（#541）と、権限固定を記述子に対して
+// 行うこと（check-then-act を作らないこと）を固定する。
+
+test("ensureDirectory refuses to create through a symlinked ancestor", (context) => {
+  const directory = temporaryDirectory(context);
+  const outside = path.join(directory, "outside");
+  mkdirSync(outside);
+  symlinkSync(outside, path.join(directory, "link"));
+
+  assert.throws(
+    () => ensureDirectory(path.join(directory, "link", "state"), "state directory"),
+    /symbolic link/,
+  );
+  // 拒否より先に symlink 先へディレクトリを作らないこと。
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test("writeJsonAtomic refuses to write through a symlinked ancestor", (context) => {
+  const directory = temporaryDirectory(context);
+  const outside = path.join(directory, "outside");
+  mkdirSync(outside);
+  symlinkSync(outside, path.join(directory, "link"));
+
+  assert.throws(
+    () =>
+      writeJsonAtomic(
+        path.join(directory, "link", "state", "readiness.json"),
+        { version: 1 },
+        "readiness cache",
+      ),
+    /symbolic link/,
+  );
+  assert.deepEqual(readdirSync(outside), []);
+});
+
+test("ensureDirectory refuses a target whose parent does not exist", (context) => {
+  const directory = temporaryDirectory(context);
+
+  // 検証していない祖先チェーンを辿って作らない（fail closed）。
+  assert.throws(
+    () => ensureDirectory(path.join(directory, "missing", "state"), "state directory"),
+    /parent directory/,
+  );
+  assert.equal(existsSync(path.join(directory, "missing")), false);
+});
+
+test("ensureStateFileMode refuses a symlinked target and leaves the link target untouched", (context) => {
+  const directory = temporaryDirectory(context);
+  const target = path.join(directory, "target.json");
+  const link = path.join(directory, "state.json");
+  writeFileSync(target, "{}\n");
+  chmodSync(target, 0o644);
+  symlinkSync(target, link);
+
+  assert.throws(() => ensureStateFileMode(link, "state file"), /symbolic link/);
+  assert.equal(statSync(target).mode & 0o777, 0o644);
+});
+
+test("ensureDirectory restores owner-only mode when umask strips it", (context) => {
+  const directory = temporaryDirectory(context);
+  const stateDirectory = path.join(directory, "state");
+
+  // umask が owner ビットまで削ると mkdirSync は mode 000 のディレクトリを作る。放置すると
+  // 以後 open もできず、壊れたディレクトリが残り続ける（自己回復しない）。
+  const previousUmask = process.umask(0o700);
+  try {
+    ensureDirectory(stateDirectory, "state directory");
+  } finally {
+    process.umask(previousUmask);
+  }
+
+  assert.equal(statSync(stateDirectory).mode & 0o777, 0o700);
+});
+
+test("writeJsonAtomic keeps the state file owner-only under a restrictive umask", (context) => {
+  const directory = temporaryDirectory(context);
+  const targetPath = path.join(directory, "readiness.json");
+
+  const previousUmask = process.umask(0o377);
+  try {
+    writeJsonAtomic(targetPath, { version: 1 }, "readiness cache");
+  } finally {
+    process.umask(previousUmask);
+  }
+
+  assert.equal(statSync(targetPath).mode & 0o777, 0o600);
+});
+
+test("writeJsonAtomic leaves no temporary file behind when the rename fails", (context) => {
+  const directory = temporaryDirectory(context);
+  const targetPath = path.join(directory, "readiness.json");
+  // 宛先がディレクトリだと rename が失敗する。symlink ではないので事前検査は通過し、
+  // 一時ファイルの後始末だけが問われる。
+  mkdirSync(targetPath);
+
+  assert.throws(() => writeJsonAtomic(targetPath, { version: 1 }, "readiness cache"));
+  assert.deepEqual(
+    readdirSync(directory).filter((entry) => entry.endsWith(".tmp")),
+    [],
+  );
 });

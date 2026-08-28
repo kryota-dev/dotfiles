@@ -1,9 +1,9 @@
-import { chmodSync, lstatSync, unlinkSync } from "node:fs";
+import { lstatSync, unlinkSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 import { migrate, schemaVersion } from "./migrations.mjs";
-import { assertNotSymlink } from "./paths.mjs";
+import { assertNotSymlink, ensureStateFileMode } from "./paths.mjs";
 import { newId } from "./record-validation.mjs";
 import { evidenceContentHash, normalizeEvidence } from "./records.mjs";
 import { createRecordAccessors } from "./state-records.mjs";
@@ -36,7 +36,7 @@ export function createStateStore(databasePath) {
     enableForeignKeyConstraints: true,
   });
   if (databasePath !== ":memory:") {
-    chmodSync(databasePath, 0o600);
+    ensureStateFileMode(databasePath, "state database");
   }
   database.exec("PRAGMA busy_timeout = 5000");
   if (databasePath !== ":memory:") {
