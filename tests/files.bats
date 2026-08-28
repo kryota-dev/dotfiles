@@ -261,9 +261,12 @@ load helpers/setup
   [ "$(cat "${HOME_DIR}/dot_local/bin/symlink_fh")" = "frontier-harness" ]
   [ -f "${HOME_DIR}/dot_local/lib/frontier-harness/cli.mjs" ]
   [ -f "${HOME_DIR}/dot_config/frontier-harness/config.json" ]
-  [ -f "${HOME_DIR}/dot_gemini/antigravity-cli/settings.json" ]
+  # private_ プレフィックスで 0600 を維持する。Antigravity の sandbox 設定を
+  # 0644 で配備すると、実機で 0600 だった設定のパーミッションが緩む。
+  [ -f "${HOME_DIR}/dot_gemini/antigravity-cli/private_settings.json" ]
+  [ ! -e "${HOME_DIR}/dot_gemini/antigravity-cli/settings.json" ]
   jq empty "${HOME_DIR}/dot_config/frontier-harness/config.json"
-  jq empty "${HOME_DIR}/dot_gemini/antigravity-cli/settings.json"
+  jq empty "${HOME_DIR}/dot_gemini/antigravity-cli/private_settings.json"
   grep -qx 'cask "antigravity-cli"' "${HOME_DIR}/dot_Brewfile"
 }
 
