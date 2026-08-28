@@ -74,8 +74,66 @@ face value. The two are resolved differently:
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
 recordings, and accepted decisions. It never uses a model transcript or hidden
-reasoning as its interchange format. Raw evidence has a 30-day retention window;
-aggregate telemetry has a 180-day window.
+reasoning as its interchange format.
+
+### Normalized state schema
+
+The SQLite state is at schema version 2. Every record class is normalized, and
+each one belongs to exactly one retention class:
+
+| Table | Holds | Retention |
+|---|---|---|
+| `tasks` | the normalized task a run was started from | kept |
+| `route_decisions` | the chosen capability, provider, **model, effort**, and reviewer | kept |
+| `evidence` | raw payload references, a SHA-256 `content_hash` over the record's content fields, and the task/route it belongs to | raw |
+| `adapter_runs` | one adapter execution: capability, provider, model, effort, status, start/finish, exit code | raw |
+| `verification_results` | one deterministic check: kind, status, command, exit code, evidence reference | raw |
+| `review_findings` | one finding: severity, uncertainty, summary, discriminating experiment, evidence reference | raw |
+| `approvals` | what was authorized: kind, subject hash, scope, grantor, grant/expiry | **never pruned** |
+| `telemetry_events` | content-free aggregate measurements (category, risk, provider/model/effort, timings, token counts, outcome) | aggregate |
+
+`adapter_runs` deliberately records **no launch-mechanism detail** — no argv,
+sandbox settings, profile path, interactive/non-interactive mode, conversation
+ID, working directory, or environment. Those belong to the adapter, not to the
+schema, so a later change in how adapters are started does not force a second
+migration.
+
+`content_hash` identifies the evidence **record**, not the artifact it points at. Its
+input includes the artifact *path*, never the artifact's bytes, so rewriting a file on
+disk does not change the hash. It is a deduplication and record-identity key, not
+tamper-evidence; anything that needs byte-level integrity must carry its own digest
+produced by the adapter that wrote the file.
+
+`approvals.granted_by` is a recorded label, not proof of provenance: any code in the
+harness can write `granted_by = 'user'`, and the column constraint only pins the
+vocabulary. A consumer that exempts an escalation on the strength of an approval row
+therefore must establish provenance itself — the schema does not carry it. Deciding how
+an approval is proved and verified belongs to the onboarding work that will write these
+rows, not to the schema that stores them.
+
+`telemetry_events` has no free-form column at all. Every text column is either a
+closed enum or a short lowercase token, so "aggregate telemetry contains no
+content" is enforced by the schema rather than by convention. That is what makes
+the longer aggregate window safe.
+
+### Retention
+
+Raw evidence and the per-run record classes have a
+<!-- FACT:fh-raw-retention-days -->30<!-- /FACT -->-day window; content-free
+aggregate telemetry has a <!-- FACT:fh-telemetry-retention-days -->180<!-- /FACT -->-day
+window. Both values are configurable in `config.json` and are checked against the
+named defaults in `retention.mjs`. Approvals are an audit trail and belong to
+neither window: `fh clean` never deletes them.
+
+Migrations run as ordered steps inside a single transaction. A failure rolls the
+database back to its previous version *and* column layout, so an interrupted
+upgrade cannot leave a half-migrated state. The version that decides which steps to
+apply is read **after** the write lock is taken, because the state is shared by every
+worktree: a version read before the lock can be stale by the time the steps run.
+
+Every command that opens the state migrates it, `fh clean --dry-run` included. Dry run
+means "delete nothing", not "open nothing" — a dry run against a v1 database could not
+otherwise count the record classes v2 introduces.
 
 ## Repository onboarding
 
@@ -105,7 +163,8 @@ fh clean --dry-run --json
 
 In shadow mode `run`, `verify`, and `review` persist a normalized plan without
 starting a provider or arbitrary shell command. `clean` reports and removes
-expired raw evidence; use `--dry-run` to inspect its impact first.
+expired raw records and expired aggregate telemetry on their own windows, and
+leaves approvals alone; use `--dry-run` to inspect its impact first.
 
 ## Worktrees and rollout
 

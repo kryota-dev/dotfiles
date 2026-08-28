@@ -1,12 +1,14 @@
 import { accessSync, chmodSync, constants, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
+import { sha256Hex } from "./hash.mjs";
 import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
 import { PROVIDER_COMMANDS } from "./providers.mjs";
+import { requireObject } from "./record-validation.mjs";
+import { retentionCutoffs } from "./retention.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
 import {
@@ -22,6 +24,13 @@ import {
 } from "./readiness.mjs";
 
 const MANIFEST_KEYS = new Set(["commands", "domains", "capabilities"]);
+// --dry-run は state を変更しないので、削除件数はすべて 0 で返す。
+const EMPTY_RAW_PRUNE_COUNTS = Object.freeze({
+  evidence: 0,
+  adapterRuns: 0,
+  verificationResults: 0,
+  reviewFindings: 0,
+});
 const UNKNOWN_ACCOUNT_SCOPE = "unknown";
 // account scope は readiness キャッシュのファイル名に入るため、
 // パス区切りや相対参照が混ざらないことを保証する。
@@ -171,30 +180,8 @@ function providerAvailability(commandPaths, verifiedModels = {}) {
   );
 }
 
-function canonicalize(value) {
-  if (Array.isArray(value)) {
-    return value.map(canonicalize);
-  }
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, canonicalize(value[key])]),
-    );
-  }
-  return value;
-}
-
-function approvalHash(manifest) {
-  return createHash("sha256")
-    .update(JSON.stringify(canonicalize(manifest)))
-    .digest("hex");
-}
-
 function normalizeManifest(input) {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new TypeError("manifest must be an object");
-  }
+  requireObject(input, "manifest");
   const unknownKey = Object.keys(input).find((key) => !MANIFEST_KEYS.has(key));
   if (unknownKey) {
     throw new TypeError(`manifest contains unsupported key: ${unknownKey}`);
@@ -236,7 +223,7 @@ function usage() {
     "",
     "Commands:",
     "  doctor  Report adapter and capability readiness",
-    "  clean   Prune expired raw evidence",
+    "  clean   Prune expired raw evidence and aggregate telemetry",
     "  onboard Approve one repository capability manifest",
     "  run     Record a shadow route for a task JSON file",
     "  status  Show recorded route decisions",
@@ -309,7 +296,7 @@ export function runCli(argumentsList, options = {}) {
     const policy = {
       version: 1,
       approvedAt: new Date().toISOString(),
-      approvalHash: approvalHash(manifest),
+      approvalHash: sha256Hex(manifest),
       manifest,
     };
     // `.harness` が symlink の repository で書き込み先が脱出しないよう、
@@ -368,22 +355,33 @@ export function runCli(argumentsList, options = {}) {
       if (Number.isNaN(now.getTime())) {
         throw new TypeError("--now must be an ISO 8601 timestamp");
       }
-      const cutoff = new Date(
-        now.getTime() - config.retention.rawArtifactsDays * 24 * 60 * 60 * 1000,
-      ).toISOString();
+      // raw（evidence と実行系レコード）と集約テレメトリでは保持期間が異なる。
+      // approvals は承認の監査証跡なので、どちらの cutoff でも削除しない。
+      const { rawCutoff, telemetryCutoff } = retentionCutoffs(
+        config.retention,
+        now,
+      );
       const dryRun = flags.includes("--dry-run");
-      const expiredEvidence = store.countEvidenceBefore(cutoff);
+      const expired = store.countExpired({ rawCutoff, telemetryCutoff });
       const pruned = dryRun
-        ? { prunedEvidence: 0, skippedArtifacts: [] }
-        : store.pruneEvidenceBefore(
-            cutoff,
-            path.join(path.dirname(statePath), "evidence"),
-          );
+        ? { raw: EMPTY_RAW_PRUNE_COUNTS, telemetry: 0, skippedArtifacts: [] }
+        : store.pruneExpired({
+            rawCutoff,
+            telemetryCutoff,
+            artifactRoot: path.join(path.dirname(statePath), "evidence"),
+          });
       emit({
-        cutoff,
+        // cutoff / expiredEvidence / prunedEvidence は既存の消費側との互換のため
+        // 名前と意味をそのまま残し、2 クラス分の内訳を追加で出す。
+        cutoff: rawCutoff,
+        telemetryCutoff,
         dryRun,
-        expiredEvidence,
-        prunedEvidence: pruned.prunedEvidence,
+        expiredEvidence: expired.raw.evidence,
+        prunedEvidence: pruned.raw.evidence,
+        expiredRaw: expired.raw,
+        prunedRaw: pruned.raw,
+        expiredTelemetry: expired.telemetry,
+        prunedTelemetry: pruned.telemetry,
         skippedArtifacts: pruned.skippedArtifacts,
       });
       return 0;

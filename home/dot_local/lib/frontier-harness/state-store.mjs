@@ -1,48 +1,13 @@
 import { chmodSync, lstatSync, unlinkSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
+import { migrate, schemaVersion } from "./migrations.mjs";
 import { assertNotSymlink } from "./paths.mjs";
+import { newId } from "./record-validation.mjs";
+import { evidenceContentHash, normalizeEvidence } from "./records.mjs";
+import { createRecordAccessors } from "./state-records.mjs";
 import { normalizeTask } from "./task.mjs";
-
-// schema を変更したらこの値を上げ、migration を追加する。
-const SCHEMA_VERSION = 1;
-
-const SCHEMA_DDL = `
-  CREATE TABLE IF NOT EXISTS tasks (
-    id TEXT PRIMARY KEY,
-    goal TEXT NOT NULL,
-    task_json TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  ) STRICT;
-
-  CREATE TABLE IF NOT EXISTS route_decisions (
-    id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL REFERENCES tasks(id),
-    kind TEXT NOT NULL,
-    capability TEXT,
-    provider TEXT,
-    reason TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  ) STRICT;
-
-  CREATE TABLE IF NOT EXISTS evidence (
-    id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    producer TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    command TEXT,
-    exit_code INTEGER,
-    artifact_path TEXT,
-    claims_supported TEXT NOT NULL
-  ) STRICT;
-
-  CREATE INDEX IF NOT EXISTS evidence_created_at_id_idx
-    ON evidence (created_at, id);
-  CREATE INDEX IF NOT EXISTS route_decisions_created_at_id_idx
-    ON route_decisions (created_at, id);
-`;
 
 function toEvidence(row) {
   return {
@@ -54,32 +19,10 @@ function toEvidence(row) {
     exitCode: row.exit_code,
     artifactPath: row.artifact_path,
     claimsSupported: JSON.parse(row.claims_supported),
+    contentHash: row.content_hash,
+    taskId: row.task_id,
+    routeId: row.route_id,
   };
-}
-
-export function schemaVersion(database) {
-  return Number(database.prepare("PRAGMA user_version").get().user_version);
-}
-
-// migration は単一 transaction で適用し、失敗時は既存 state を変更せずに throw する。
-function migrate(database) {
-  const current = schemaVersion(database);
-  if (current === SCHEMA_VERSION) return;
-  if (current > SCHEMA_VERSION) {
-    throw new Error(
-      `state database schema version ${current} is newer than supported version ${SCHEMA_VERSION}`,
-    );
-  }
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    database.exec(SCHEMA_DDL);
-    // PRAGMA はプレースホルダを取れないため、検証済みの定数のみを埋め込む。
-    database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
 }
 
 export function createStateStore(databasePath) {
@@ -101,13 +44,17 @@ export function createStateStore(databasePath) {
   }
   migrate(database);
 
+  const records = createRecordAccessors(database);
+
   const insertEvidence = database.prepare(`
     INSERT INTO evidence (
-      id, kind, producer, created_at, command, exit_code, artifact_path, claims_supported
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, kind, producer, created_at, command, exit_code, artifact_path,
+      claims_supported, content_hash, task_id, route_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectEvidence = database.prepare(`
-    SELECT id, kind, producer, created_at, command, exit_code, artifact_path, claims_supported
+    SELECT id, kind, producer, created_at, command, exit_code, artifact_path,
+           claims_supported, content_hash, task_id, route_id
     FROM evidence
     ORDER BY created_at, id
   `);
@@ -125,16 +72,69 @@ export function createStateStore(databasePath) {
   `);
   const insertRoute = database.prepare(`
     INSERT INTO route_decisions (
-      id, task_id, kind, capability, provider, reason, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      id, task_id, kind, capability, provider, reason, created_at,
+      model, effort, reviewer_capability
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectRoutes = database.prepare(`
-    SELECT id, task_id, kind, capability, provider, reason, created_at
+    SELECT id, task_id, kind, capability, provider, reason, created_at,
+           model, effort, reviewer_capability
     FROM route_decisions
     ORDER BY created_at, id
   `);
 
+  // 期限切れ evidence の artifact を、evidence root の中に限って削除する。
+  // FS 操作は DB transaction の外で行い、書き込みロックの保持を最小化する。
+  function removeExpiredArtifacts(cutoff, artifactRoot) {
+    const skipped = [];
+    if (!artifactRoot) return skipped;
+    // 中間ディレクトリの symlink も解決したうえで containment を判定する。
+    // path.resolve は symlink を解決しないため、文字列比較だけでは root 外へ出られる。
+    const root = realpathOrNull(artifactRoot) ?? path.resolve(artifactRoot);
+    for (const row of selectEvidenceBefore.all(cutoff)) {
+      if (!row.artifact_path) continue;
+      try {
+        removeContainedArtifact(root, row.artifact_path);
+      } catch (error) {
+        // 1 件の不正 path で retention 全体を止めない。個別に隔離して継続する。
+        skipped.push({ artifactPath: row.artifact_path, reason: error.message });
+      }
+    }
+    return skipped;
+  }
+
+  // transaction の張り方はここ 1 箇所に集約し、再入を安全にする。
+  // pruneExpired が自前で BEGIN すると、withTransaction の内側から呼ばれたときに
+  // 内側の BEGIN が "cannot start a transaction within a transaction" で失敗し、
+  // その catch の ROLLBACK が外側の transaction ごと巻き戻す（外側の書き込みが静かに消え、
+  // 例外メッセージは原因を指さない）。SQLite は入れ子 transaction を持たないため、
+  // 最外周だけが BEGIN / COMMIT を発行し、内側は外側の原子性に相乗りする。
+  let transactionDepth = 0;
+  function runInTransaction(callback) {
+    if (transactionDepth > 0) {
+      transactionDepth += 1;
+      try {
+        return callback();
+      } finally {
+        transactionDepth -= 1;
+      }
+    }
+    database.exec("BEGIN IMMEDIATE");
+    transactionDepth = 1;
+    try {
+      const result = callback();
+      database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      transactionDepth = 0;
+    }
+  }
+
   return {
+    ...records,
     schemaVersion() {
       return schemaVersion(database);
     },
@@ -148,34 +148,32 @@ export function createStateStore(databasePath) {
       return { busyTimeout, journalMode };
     },
     withTransaction(callback) {
-      database.exec("BEGIN IMMEDIATE");
-      try {
-        const result = callback();
-        database.exec("COMMIT");
-        return result;
-      } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-      }
+      return runInTransaction(callback);
     },
     createTask(input) {
       // 境界で正規化し、呼び出し側が渡した id や未知フィールドを持ち込ませない。
       const task = normalizeTask(input);
       const stored = {
         ...task,
-        id: `task_${randomUUID().replaceAll("-", "")}`,
+        id: newId("task"),
         createdAt: new Date().toISOString(),
       };
       insertTask.run(stored.id, stored.goal, JSON.stringify(task), stored.createdAt);
       return stored;
     },
+    // chooseRoute が返す model / effort / reviewerCapability も保存する。
+    // 以前は捨てていたため、どの capability の「どの model を」選んだ route だったかを
+    // 後から再現できなかった。escalation route はこれらを持たないので NULL になる。
     recordRoute(taskId, route) {
       const stored = {
-        id: `route_${randomUUID().replaceAll("-", "")}`,
+        id: newId("route"),
         taskId,
         kind: route.kind,
         capability: route.capability,
         provider: route.provider,
+        model: route.model ?? null,
+        effort: route.effort ?? null,
+        reviewerCapability: route.reviewerCapability ?? null,
         reason: route.reason,
         createdAt: new Date().toISOString(),
       };
@@ -187,6 +185,9 @@ export function createStateStore(databasePath) {
         stored.provider,
         stored.reason,
         stored.createdAt,
+        stored.model,
+        stored.effort,
+        stored.reviewerCapability,
       );
       return stored;
     },
@@ -197,21 +198,25 @@ export function createStateStore(databasePath) {
         kind: route.kind,
         capability: route.capability,
         provider: route.provider,
+        model: route.model,
+        effort: route.effort,
+        reviewerCapability: route.reviewer_capability,
         reason: route.reason,
         createdAt: route.created_at,
       }));
     },
     putEvidence(input) {
+      const content = normalizeEvidence(input);
       const evidence = {
-        id: `ev_${randomUUID().replaceAll("-", "")}`,
-        kind: input.kind,
-        producer: input.producer,
-        createdAt: input.createdAt ?? new Date().toISOString(),
-        command: input.command ?? null,
-        exitCode: input.exitCode ?? null,
-        artifactPath: input.artifactPath ?? null,
-        claimsSupported: input.claimsSupported ?? [],
+        id: newId("ev"),
+        ...content,
+        claimsSupported: [...content.claimsSupported],
+        // hash は必ず store 側で導出する。呼び出し側の値を採用すると
+        // 「保存された hash が内容と一致しない」状態を作れてしまう。
+        contentHash: evidenceContentHash(content),
       };
+      // task と route の両方を指定した evidence は、その route が同じ task のものであること。
+      records.assertProvenance({ label: "evidence", ...evidence });
       insertEvidence.run(
         evidence.id,
         evidence.kind,
@@ -221,33 +226,42 @@ export function createStateStore(databasePath) {
         evidence.exitCode,
         evidence.artifactPath,
         JSON.stringify(evidence.claimsSupported),
+        evidence.contentHash,
+        evidence.taskId,
+        evidence.routeId,
       );
       return evidence;
     },
     listEvidence() {
       return selectEvidence.all().map(toEvidence);
     },
-    countEvidenceBefore(cutoff) {
-      return Number(countEvidenceBefore.get(cutoff).expired);
+    // raw クラス（30 日）と集約テレメトリ（180 日）の件数を返す。
+    // approvals は承認の監査証跡なのでどちらのクラスにも含めない。
+    countExpired({ rawCutoff, telemetryCutoff }) {
+      return {
+        raw: {
+          evidence: Number(countEvidenceBefore.get(rawCutoff).expired),
+          ...records.countExpiredRecords(rawCutoff),
+        },
+        telemetry: records.countExpiredTelemetry(telemetryCutoff),
+      };
     },
-    pruneEvidenceBefore(cutoff, artifactRoot) {
-      const skipped = [];
-      if (artifactRoot) {
-        // 中間ディレクトリの symlink も解決したうえで containment を判定する。
-        // path.resolve は symlink を解決しないため、文字列比較だけでは root 外へ出られる。
-        const root = realpathOrNull(artifactRoot) ?? path.resolve(artifactRoot);
-        for (const row of selectEvidenceBefore.all(cutoff)) {
-          if (!row.artifact_path) continue;
-          try {
-            removeContainedArtifact(root, row.artifact_path);
-          } catch (error) {
-            // 1 件の不正 path で retention 全体を止めない。個別に隔離して継続する。
-            skipped.push({ artifactPath: row.artifact_path, reason: error.message });
-          }
-        }
-      }
-      const prunedEvidence = Number(deleteEvidenceBefore.run(cutoff).changes);
-      return { prunedEvidence, skippedArtifacts: skipped };
+    pruneExpired({ rawCutoff, telemetryCutoff, artifactRoot }) {
+      const skippedArtifacts = removeExpiredArtifacts(rawCutoff, artifactRoot);
+      // 複数テーブルの削除は単一 transaction で行い、途中で失敗しても
+      // 「一部だけ消えた」状態を残さない。
+      return runInTransaction(() => {
+        // 子 → 親の順。期限内の子が期限切れの親を参照していても
+        // ON DELETE SET NULL が参照を外すため、FK 違反にはならない。
+        const recordCounts = records.deleteExpiredRecords(rawCutoff);
+        const evidence = Number(deleteEvidenceBefore.run(rawCutoff).changes);
+        const telemetry = records.deleteExpiredTelemetry(telemetryCutoff);
+        return {
+          raw: { evidence, ...recordCounts },
+          telemetry,
+          skippedArtifacts,
+        };
+      });
     },
     close() {
       database.close();
