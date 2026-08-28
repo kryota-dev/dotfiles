@@ -270,6 +270,37 @@ load helpers/setup
   grep -qx 'cask "antigravity-cli"' "${HOME_DIR}/dot_Brewfile"
 }
 
+@test "improvement candidate queue ships its CLI, shell face and read-only skill (#501)" {
+  local launcher="${HOME_DIR}/dot_local/bin/executable_agent-improvement"
+  [ -f "$launcher" ]
+  bash -n "$launcher"
+  local lib="${HOME_DIR}/dot_local/lib/agent-improvement"
+  local module
+  for module in paths schema store view cli; do
+    [ -f "${lib}/${module}.mjs" ]
+  done
+
+  # The conversational face (AC-037) is a curated skill; the shell face is zsh functions,
+  # not aliases, so --history / --json pass through.
+  [ -f "${HOME_DIR}/dot_agents/skills/improvement-status/SKILL.md" ]
+  local zshrc="${HOME_DIR}/dot_config/zsh/claude.zsh"
+  grep -q 'improvement-status() { agent-improvement status' "$zshrc"
+  grep -q 'improvement-next() { agent-improvement next' "$zshrc"
+  grep -q 'improvement-resolve() { agent-improvement resolve' "$zshrc"
+
+  # AC-035: the queue never reaches Git. Guard the ignore entry so a later `chezmoi add`
+  # under ~/.local/state cannot pull owner-only state into this public repo.
+  grep -qFx '.local/state/agent-improvement' "${HOME_DIR}/.chezmoiignore"
+
+  # The state path is resolved in exactly one module (#344 keeps the layout movable).
+  local resolvers
+  resolvers="$(grep -rlF 'agent-improvement' "$lib" | xargs grep -lF 'XDG_STATE_HOME')"
+  [ "$resolvers" = "${lib}/paths.mjs" ] || {
+    echo "state path resolution leaked out of paths.mjs: $resolvers"
+    false
+  }
+}
+
 @test "morning-radar wrapper keeps the explicit permission allowlist" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   bash -n "$wrapper"
