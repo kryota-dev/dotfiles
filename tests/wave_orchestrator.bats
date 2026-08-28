@@ -18,6 +18,10 @@
 #   #447 Stop 以降に出た AskUserQuestion を隠さないこと
 #   #448 回答・キャンセルで ASK_QUESTION が解除されること
 #   #471 --resume で再開したセッションへ送信できること
+#   #472 dim で描かれたプレースホルダを実入力と読まないこと
+#   #476 壊れた行を落とした結果を「稼働中」と読まないこと
+#   #477 使われないフィールド (prompt / message) を永続化しないこと
+#   #486 auto mode の permission_prompt を非停止と断定しないこと
 
 load helpers/setup
 
@@ -51,9 +55,13 @@ run_hook() {
   run env WAVE_EVENT_DIR="$EVENT_DIR" WAVE_ORCHESTRATOR_SESSION=1 bash "$HOOK" <<<"$1"
 }
 
-# opt-in なしで hook を実行する（通常セッション相当）
+# opt-in なしで hook を実行する（通常セッション相当）。
+#
+# **明示的に unset する**のが要点。この suite は wave の子セッションからも走る
+# （orchestrator が WAVE_ORCHESTRATOR_SESSION=1 を export して起動する）ため、
+# 継承したままだと opt-in ゲートのテストが黙って通らなくなる。
 run_hook_without_optin() {
-  run env WAVE_EVENT_DIR="$EVENT_DIR" bash "$HOOK" <<<"$1"
+  run env -u WAVE_ORCHESTRATOR_SESSION WAVE_EVENT_DIR="$EVENT_DIR" bash "$HOOK" <<<"$1"
 }
 
 # 判定スクリプトを実行する。settings も worktree 側を見せる（実環境の
@@ -323,13 +331,36 @@ stub_count() {
 }
 
 @test "events: 応答完了後は IDLE を返す" {
-  # auto mode では permission_prompt が自動承認され停止扱いにならないので、
-  # Stop がそのまま IDLE を決める
+  # auto mode の permission_prompt は単独では判別不能 (#486) だが、idle_prompt が
+  # 出ていれば「次の指示を待っている」と確定できるので IDLE に戻る。
+  # 実イベント 23 セッションの実測でも、待機に入ったターンは必ず idle_prompt を
+  # 伴っていた
+  run_hook "$(payload_prompt_submit_mode "$SID" auto)"
+  run_hook "$(payload_notification)"
+  run_hook "$(payload_notification "$SID" idle_prompt)"
+  run_hook "$(payload_stop)"
+  run_events --session "$SID" --state
+  [ "$output" = "IDLE" ]
+}
+
+@test "events: #486 回帰 — auto mode の permission_prompt は idle_prompt で解除される" {
+  # 解除しないと permission_prompt が出た全ターンが永久に UNKNOWN になり、
+  # --text が通らなくなって子へ二度と指示を送れない（自己解除しない詰み）
+  run_hook "$(payload_prompt_submit_mode "$SID" auto)"
+  run_hook "$(payload_notification)"
+  run_hook "$(payload_notification "$SID" idle_prompt)"
+  run_events --session "$SID" --state
+  [ "$output" = "IDLE" ]
+}
+
+@test "events: #486 回帰 — Stop だけでは auto mode の permission_prompt を解除しない" {
+  # Stop はターンの終わりを意味しない (#447: サブエージェント委任では途中で出る)。
+  # Stop で解除すると、再開後に承認待ちで止まった子を IDLE と報告する
   run_hook "$(payload_prompt_submit_mode "$SID" auto)"
   run_hook "$(payload_notification)"
   run_hook "$(payload_stop)"
   run_events --session "$SID" --state
-  [ "$output" = "IDLE" ]
+  [ "$output" = "UNKNOWN" ]
 }
 
 @test "events: 未解決の権限確認は Stop より優先される（fail-safe）" {
@@ -547,12 +578,16 @@ stub_count() {
   [ "$output" = "ASK_QUESTION" ]
 }
 
-@test "events: #443 回帰 — auto mode の permission_prompt を停止扱いしない" {
-  # auto mode では自動承認されて子は止まらないのに通知は発火する
+@test "events: #486 回帰 — auto mode の permission_prompt は UNKNOWN（RUNNING と断定しない）" {
+  # auto mode では自動承認されて止まらないこともある (#443 実測) が、公式仕様が
+  # 明記するとおり止まることもある (#486: ask ルール / protected path /
+  # classifier の連続ブロックによる一時停止)。通知だけでは判別できないので、
+  # RUNNING と断定して停止を見落とすことも、ASK_PERMISSION と断定して稼働中の
+  # ペインへ送ることもしない
   run_hook "$(payload_prompt_submit_mode "$SID" auto)"
   run_hook "$(payload_notification)"
   run_events --session "$SID" --state
-  [ "$output" = "RUNNING" ]
+  [ "$output" = "UNKNOWN" ]
 }
 
 @test "events: #443 回帰 — 非 auto mode の permission_prompt は停止扱いする" {
@@ -653,7 +688,51 @@ stub_count() {
   [[ "$output" != *"SECRET_ERROR"* ]]
 }
 
+@test "hook: #477 回帰 — UserPromptSubmit の prompt を記録しない" {
+  run_hook '{"session_id":"'"$SID"'","prompt_id":"'"$TURN1"'","hook_event_name":"UserPromptSubmit","permission_mode":"auto","prompt":"SECRET_INSTRUCTION","cwd":"/tmp/wt"}'
+  run cat "${EVENT_DIR}/${SID}.jsonl"
+  [[ "$output" != *"SECRET_INSTRUCTION"* ]]
+  [[ "$output" != *'"prompt"'* ]]
+  [[ "$output" != *"/tmp/wt"* ]]
+  # permission_mode は機能上必須。落とすと #443 / #486 の判定が壊れる
+  [[ "$output" == *'"permission_mode":"auto"'* ]]
+  [[ "$output" == *'"hook_event_name":"UserPromptSubmit"'* ]]
+  [[ "$output" == *"$TURN1"* ]]
+}
+
+@test "hook: #477 回帰 — Notification の message を記録しない" {
+  run_hook "$(payload_notification)"
+  run cat "${EVENT_DIR}/${SID}.jsonl"
+  [[ "$output" != *"Claude needs your permission"* ]]
+  [[ "$output" != *'"message"'* ]]
+  [[ "$output" == *'"notification_type":"permission_prompt"'* ]]
+}
+
+@test "hook: #477 回帰 — 射影しても auto mode の判定が退行しない" {
+  # 素朴な allowlist の流用は permission_mode を落として #443 / #486 を壊す。
+  # 射影を通した実データで判定が成立することを固定する
+  run_hook "$(payload_prompt_submit_mode "$SID" auto)"
+  run_hook "$(payload_notification)"
+  run_events --session "$SID" --state
+  [ "$output" = "UNKNOWN" ]
+
+  run_hook "$(payload_prompt_submit_mode "$SID2" default)"
+  run_hook "$(payload_notification "$SID2")"
+  run_events --session "$SID2" --state
+  [ "$output" = "ASK_PERMISSION" ]
+}
+
+@test "hook: #477 回帰 — 射影は JSON 1 行として読み戻せる" {
+  # 射影が壊れた行を生むと #476 の降格が常時発火して検知が死ぬ
+  run_hook "$(payload_prompt_submit_mode "$SID" auto)"
+  run_hook "$(payload_notification)"
+  run_hook "$(payload_post_tool_use)"
+  run_events --self-check
+  [[ "$output" == *"壊れた行: 無し"* ]]
+}
+
 @test "hook: 決着イベント以外は従来どおり verbatim で記録する" {
+  # PreToolUse は tool_input（質問文と選択肢）を読取側が必要とするため射影しない
   local p
   p="$(payload_ask_question)"
   run_hook "$p"
@@ -721,6 +800,9 @@ print(" ".join(bad))
   run_hook "$(payload_prompt_submit)"
   run_hook "$(payload_stop)"
   STUB_PS_ARGS="claude --model=opus --effort high --resume ${SID}"
+  # 実機の画面には必ず入力欄が描かれる。空画面は「判定不能」が正しい挙動なので
+  # (#472)、ここでは空の入力欄を置いて生存確認そのものを見る
+  printf '\xe2\x9d\xaf \n' >"$STUB_CAPTURE"
   run_send "%1" --session "$SID" --text "補足指示"
   # ガードを通過して送信まで進んだこと（3 値のいずれかが出る）
   [[ "$output" == QUEUED_UNCONFIRMED* || "$output" == DELIVERED* ]]
@@ -732,6 +814,7 @@ print(" ".join(bad))
   run_hook "$(payload_prompt_submit)"
   run_hook "$(payload_stop)"
   STUB_PS_ARGS="claude --model=opus --session-id ${SID} -n ident"
+  printf '\xe2\x9d\xaf \n' >"$STUB_CAPTURE"
   run_send "%1" --session "$SID" --text "補足指示"
   [[ "$output" == QUEUED_UNCONFIRMED* || "$output" == DELIVERED* ]]
 }
@@ -810,6 +893,167 @@ print(" ".join(bad))
   [ "$(stub_count 'load-buffer')" -eq 1 ]
   # 確定キーは初回 + 1 回だけの再送
   [ "$(stub_count 'Enter')" -eq 2 ]
+}
+
+@test "#472 回帰: dim で描かれたプレースホルダを実入力と読まない（Enter を再送しない）" {
+  # TUI は入力欄が空のとき「次に送りそうな指示」を ESC[2m (dim) で薄く描く。
+  # -e 無しの capture-pane では色が落ちて実入力と同じ平文に見えるため、これを
+  # 本文残存と誤読して Enter を送ると、**誰も書いていない提案文が確定送信される**
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '\033[39m\xe2\x9d\xaf \033[2mCI green になったらその内容で投稿して\033[0m\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 10 ]
+  [[ "$output" == QUEUED_UNCONFIRMED* ]]
+  # 確定キーは初回の 1 回だけ。プレースホルダを確定させる 2 回目を送っていない
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 実入力（dim なし）は従来どおり本文残存として扱う" {
+  # プレースホルダ除去が効きすぎて実入力まで落とすと、#442 の手当て（Enter を
+  # 1 回だけ送る）が死ぬ
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '\033[39m\xe2\x9d\xaf \033[0m送れなかった本文がここに残っている\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "長文の指示"
+  [ "$status" -eq 11 ]
+  [[ "$output" == *"PENDING_CONFIRM"* ]]
+  [ "$(stub_count 'Enter')" -eq 2 ]
+}
+
+@test "#472 回帰: 行全体が dim でも会話領域のエコーを入力欄と取り違えない" {
+  # dim を先に落としてから行を選ぶと、その行ごと消えて過去の送信本文（行頭が同じ
+  # プロンプトマーカー）を掴む。行の選択は dim を落とす前に行う必要がある
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  {
+    printf '\xe2\x9d\xaf 送信済みの過去の本文\n'
+    printf '\033[2m\xe2\x9d\xaf フォローアップ issue を 4 件起票して\033[0m\n'
+  } >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 10 ]
+  [[ "$output" == QUEUED_UNCONFIRMED* ]]
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 入力欄の行が読めないときは「空」と断定しない" {
+  # 画面が取れない・入力欄が写っていないのに「入力欄は空。配信された可能性が高い」
+  # と報告すると、根拠のない断定になる（実運用で踏んだ fail-open と同じ形）
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf 'ここには入力欄が写っていない\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  [[ "$output" != *"入力欄は空"* ]]
+  # 確定キーは初回の 1 回だけ
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 判定器が失敗しても「実入力」と読まない（fail-closed）" {
+  # 実運用で書かれた判定ワンライナーは 2 通りとも、エラー時に「実入力」側へ落ちた。
+  # 判定器が壊れたときに送信を許す構造になっていないことを固定する
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  # dim なし = 本来なら「実入力あり」と判定される画面を置く
+  printf '\xe2\x9d\xaf 送れなかった本文がここに残っている\n' >"$STUB_CAPTURE"
+  local broken="${BATS_TEST_TMPDIR}/broken-bin"
+  mkdir -p "$broken"
+  printf '#!/bin/sh\nexit 1\n' >"${broken}/awk"
+  chmod +x "${broken}/awk"
+  PATH="${broken}:$PATH"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  # 「実入力あり」と読んでいたら Enter が 2 回送られる
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 選択肢 UI のカーソル ❯ を入力欄の実入力と読まない" {
+  # AskUserQuestion の TUI は「選択中の項目」を指すカーソルにも入力欄と同じ ❯ を
+  # 使う。取り違えると**選択肢のラベルを user が入力した本文として報告**する
+  # （実測。方向はまたも fail-open）
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  {
+    printf '問い: 次にどうするか\n'
+    printf '\xe2\x9d\xaf 1. ready に移行\n'
+    printf '  2. Draft のまま\n'
+    printf 'Enter to select \xc2\xb7 Esc to cancel\n'
+  } >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  [[ "$output" == *"選択肢 UI"* ]]
+  # 選択肢 UI へ確定キーが飛んでいない（初回の 1 回だけ）
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 状態が RUNNING / IDLE でなければ入力欄を判定しない" {
+  # 貼り付けから確認までの間に子が新しい質問を開くことがある。状態が確定して
+  # いないまま画面を読むと別の UI 要素を拾う
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '\xe2\x9d\xaf 何かの文字列\n' >"$STUB_CAPTURE"
+  # send-keys の副作用として、同じターンに未回答の質問が現れる状況を作る
+  STUB_SETTLE_FILE="${EVENT_DIR}/${SID}.jsonl"
+  STUB_SETTLE_LINE="$(payload_ask_question)"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 入力欄の本文が不可逆操作を指示していたら自動で確定しない" {
+  # 実測されたプレースホルダは「#478 をマージして」だった。dim 判定が 1 つでも
+  # 取りこぼすと、安全原則 1（マージは代理しない）を迂回してマージが実行される。
+  # dim 判定は必要条件であって十分条件ではない
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  # dim なし = 実入力と判定される画面。それでも確定キーを送らないこと
+  printf '\xe2\x9d\xaf #478 をマージして\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 11 ]
+  [[ "$output" == *"不可逆操作"* ]]
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: capture-pane は属性つき (-e) で取得する" {
+  # -e が無いと dim を判別できない。フラグの欠落は「プレースホルダを実入力と
+  # 読む」形で沈黙するので、呼び出し形そのものを固定する
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  printf '\xe2\x9d\xaf \n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  run grep -c -- 'capture-pane -p -e -t' "$STUB_LOG"
+  [ "$output" -ge 1 ]
+  run grep -c -- 'capture-pane -p -t' "$STUB_LOG"
+  [ "$output" -eq 0 ]
+}
+
+@test "#472 回帰: SKILL.md がプレースホルダの見分け方を書いている" {
+  # 判定手順が実装にしか無いと、issue コメントや手順書へ誤った読み方が広まる
+  # （#450 に投稿された判定手順が実際にそうなった）
+  grep -q 'ESC\[2m' "$SKILL_MD"
+  grep -q 'capture-pane -p -e' "$SKILL_MD"
 }
 
 @test "#450 回帰: 入力欄が空なら配信済みとして扱い再送を促さない" {
@@ -1051,11 +1295,21 @@ print(" ".join(bad))
 
 # --- 判定側の追加回帰: #443 bypassPermissions --------------------------------
 
-@test "events: #443 回帰 — bypassPermissions でも permission_prompt を停止扱いしない" {
-  # AUTO_APPROVE_MODES は auto と bypassPermissions の 2 つ。auto だけのテストでは
-  # 配列比較を単一要素で通ってしまい、この分岐の回帰を検出できない
+@test "events: #486 回帰 — bypassPermissions でも permission_prompt は UNKNOWN" {
+  # AUTO_MODES は auto と bypassPermissions の 2 つ。auto だけのテストでは配列比較を
+  # 単一要素で通ってしまい、この分岐の回帰を検出できない。
+  # bypassPermissions でも「Actions no mode auto-approves」(ask ルール /
+  # requiresUserInteraction の MCP ツール / critical path の rm) は自動承認されない
   run_hook "$(payload_prompt_submit_mode "$SID" bypassPermissions)"
   run_hook "$(payload_notification)"
+  run_events --session "$SID" --state
+  [ "$output" = "UNKNOWN" ]
+}
+
+@test "events: #486 回帰 — auto mode でも permission_prompt が無ければ RUNNING のまま" {
+  # UNKNOWN 化を permission_prompt のあるターンに限定する（auto mode の全ターンを
+  # UNKNOWN にすると検知が丸ごと死ぬ）
+  run_hook "$(payload_prompt_submit_mode "$SID" auto)"
   run_events --session "$SID" --state
   [ "$output" = "RUNNING" ]
 }
@@ -1074,11 +1328,61 @@ print(" ".join(bad))
 }
 
 @test "events: 壊れた行が有効イベントの間にあっても前後のイベントで判定する" {
+  # 最後のイベントまで読めていることを、降格の対象にならない状態 (ASK_QUESTION) で
+  # 確かめる。IDLE で確かめると #476 の降格と区別がつかない
   run_hook "$(payload_prompt_submit)"
   printf 'still not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
-  run_hook "$(payload_stop)"
+  run_hook "$(payload_ask_question)"
   run_events --session "$SID" --state
-  [ "$output" = "IDLE" ]
+  [ "$output" = "ASK_QUESTION" ]
+}
+
+@test "events: #476 回帰 — 壊れた行を落とした結果が RUNNING なら UNKNOWN へ降格する" {
+  # 落ちた行が未回答の AskUserQuestion だった可能性を排除できない以上、
+  # 「稼働中」とは言えない (#436 と同じ沈黙する故障を防ぐ)
+  run_hook "$(payload_prompt_submit)"
+  printf 'this is not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_events --session "$SID" --state
+  [ "$output" = "UNKNOWN" ]
+}
+
+@test "events: #476 回帰 — 壊れた行を落とした結果が IDLE でも UNKNOWN へ降格する" {
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  printf 'this is not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_events --session "$SID" --state
+  [ "$output" = "UNKNOWN" ]
+}
+
+@test "events: #476 回帰 — 停止側の判定は壊れた行があっても降格しない" {
+  # ASK_QUESTION / ASK_PERMISSION は既に見落とさない向きなので、降格させると
+  # 応答すべき問いを取りこぼす
+  run_hook "$(payload_ask_question)"
+  printf 'this is not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_events --session "$SID" --state
+  [ "$output" = "ASK_QUESTION" ]
+}
+
+@test "events: #476 回帰 — 空行は破損として数えない" {
+  # 追記の境界や末尾改行で普通に生じる。これを破損と数えると常時 UNKNOWN になる
+  run_hook "$(payload_prompt_submit)"
+  printf '\n\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_events --session "$SID" --state
+  [ "$output" = "RUNNING" ]
+}
+
+@test "events: #476 回帰 — --self-check が壊れた行を報告して非 0 で終わる" {
+  run_hook "$(payload_prompt_submit)"
+  printf 'this is not json\n' >>"${EVENT_DIR}/${SID}.jsonl"
+  run_events --self-check
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"壊れた行: 1 行"* ]]
+}
+
+@test "events: #476 回帰 — --self-check は壊れた行が無ければそう報告する" {
+  run_hook "$(payload_prompt_submit)"
+  run_events --self-check
+  [[ "$output" == *"壊れた行: 無し"* ]]
 }
 
 # --- 判定側の追加回帰: --self-check の直接実行検証 ---------------------------

@@ -22,6 +22,22 @@
 # fail-closed であり、TUI が変わったときに起きるのは機能停止であって無言の誤送信
 # ではない。
 #
+# ### 画面には「誰も入力していない文字列」が出る (#472)
+#
+# TUI は入力欄が空のとき「次に送りそうな指示」をプレースホルダとして **ANSI dim
+# 属性 (ESC[2m) で薄く描く**。`capture-pane -p` は色と属性を落とすので、これが
+# 実入力とまったく同じ平文で返る。実測されたプレースホルダは直前の問いへの的確な
+# 回答に見える文言だったため、内容からも見分けられなかった。
+#
+# 見分けずに「本文が入力欄に残っている」と読むと Enter を送ることになり、確定
+# されるのは自分が送った本文ではなく **TUI が生成した提案文**になる。この skill が
+# 設計目的に掲げる事故 (誰も答えていない指示が成果物に残る) と同じ性質で、経路が
+# 違うだけ。
+#
+# よって画面は `-e` 付きで取得し、**dim 区間を落としてから**入力欄を判定する
+# (capture_raw / input_box_has_body)。判定ロジックは 1 箇所に置く —— 呼び出し側へ
+# 散らすと、誤った手順が SKILL.md や issue コメントへそのまま広まる。
+#
 # ## 送出は bracketed paste
 #
 # 以前は send-keys -l で本文を流し込んでいた。これは 2 通りに壊れた:
@@ -77,6 +93,9 @@ SUBMIT_MARKER="${WAVE_SUBMIT_MARKER:-Ready to submit}"
 QUEUE_MARKER="${WAVE_QUEUE_MARKER:-Press up to edit queued messages}"
 INPUT_PROMPT_MARKER="${WAVE_INPUT_PROMPT_MARKER:-❯}"
 CONFIRMED_MARK="${WAVE_CONFIRMED_MARK:-☒}"
+
+# ESC (0x1b)。capture-pane -e が返す属性シーケンスの解析に使う (#472)。
+ESC=$'\033'
 
 # bracketed paste は無効化できない。かつて env で落とせる逃げ道を置いていたが、
 # -p は #445 (本文がキー入力として解釈され無断で回答が確定する) の対策の本体で
@@ -174,8 +193,30 @@ assert_pane_runs_session() {
 # 「選択肢 UI が無い = 閉じた」と解釈されて、実際には選択肢が残っていても
 # 決着を書き戻してしまった (fail-closed 設計に空いた fail-open の穴)。
 # 取得できなかったことは呼び出し側で必ず非 0 として扱う。
+# **-e を付けて属性ごと取る**のが要点 (#472)。色を落とした画面では、TUI が dim で
+# 描くプレースホルダと実入力を区別できない。属性が要るのは入力欄の判定だけだが、
+# 取得を 2 回に分けると 2 時点の画面を混ぜることになるので、取得は 1 本にして
+# 用途ごとに整形する (capture が文言マッチ用、こちらが属性つきの生データ)。
+#
+# `-e` を解さない tmux では capture-pane 自体が失敗し、呼び出し側は fail-closed へ
+# 落ちる (何も送らない)。属性を読めないまま平文として扱う経路は作らない。
+capture_raw() {
+  tmux_cmd capture-pane -p -e -t "$PANE" 2>/dev/null
+}
+
+# 文言マッチに使う素のテキスト。属性シーケンスを落として `-e` 以前と同じ形に戻す。
+# マーカー照合に属性が混ざると、TUI が文言の途中で色を変えた瞬間にマッチしなく
+# なる (fail-closed に落ちて送信できなくなる) ため、ここで必ず落とす。
 capture() {
-  tmux_cmd capture-pane -p -t "$PANE" 2>/dev/null
+  local raw
+  raw="$(capture_raw)" || return 1
+  printf '%s\n' "$raw" | strip_ansi
+}
+
+# CSI シーケンス (ESC[ ... 英字) を落とす。capture-pane -e が返すのは色と属性なので
+# これで足りる。
+strip_ansi() {
+  LC_ALL=C sed "s/${ESC}\[[0-9;:?]*[a-zA-Z]//g"
 }
 
 # 選択肢 UI (番号を選ぶ画面) が出ているか。**確認画面は含めない**。
@@ -220,16 +261,121 @@ confirmed_count() {
   printf '%s' "$n"
 }
 
-# 入力欄に本文が残っているか。最後の入力プロンプト行の、マーカー以降に非空白が
-# あれば「残っている」と見なす。**送信済みの本文が会話領域にエコーされている**
-# ことと区別するため、行頭がプロンプトマーカーの行だけを見る。
+# 入力欄の行を **capture_raw の出力から** 1 行だけ取り出し、プレースホルダを
+# 除いた素のテキストにして返す (#472)。引数は属性つきの生画面。
+#
+# 手順は 2 段階で、**順序に意味がある**:
+#
+#   1. 属性を落とした形で「最後の入力プロンプト行」を選ぶ
+#   2. その行の dim (ESC[2m) 以降を捨ててから属性を落とす
+#
+# 先に dim を捨てると、行全体が dim のときその行ごと消える。すると tail が
+# **会話領域にエコーされた過去の送信本文**（行頭が同じプロンプトマーカー）を
+# 掴み、入力欄と取り違えて「本文が残っている」と誤判定する。
+#
+# dim 以降を行末まで捨てるのは、プレースホルダが入力欄の末尾を占めるから。
+# 実入力があるときプレースホルダは描かれないので、両者が同じ行に混在しない。
+#
+# 出力は必ず 1 行で、先頭トークンが結果を表す (`NONE` / `LINE<行>`)。**「出力が
+# 空」を「入力欄が空」と読ませない**ため —— awk が無い・落ちた・PATH が壊れて
+# いるといった判定器側の失敗も空文字になるので、区別できないと呼び出し側が
+# 「実入力なし」と「判定できない」を混同する。
+input_box_line() {
+  LC_ALL=C awk -v esc="$ESC" -v marker="$INPUT_PROMPT_MARKER" '
+    function plain(s) { gsub(esc "\\[[0-9;:?]*[a-zA-Z]", "", s); return s }
+    { if (plain($0) ~ ("^[ \t]*" marker)) last = $0 }
+    END {
+      if (last == "") { print "NONE"; exit 0 }
+      sub(esc "\\[2m.*$", "", last)
+      print "LINE" plain(last)
+    }
+  '
+}
+
+# 入力欄に**人が入力した本文**が残っているか。最後の入力プロンプト行の、マーカー
+# 以降に非空白があれば「残っている」と見なす。**送信済みの本文が会話領域に
+# エコーされている**ことと区別するため、行頭がプロンプトマーカーの行だけを見る。
+#
+# プレースホルダ (dim) は本文と見なさない (#472)。
+#
+# 戻り値は 4 値: **0=実入力あり / 1=入力欄は空 / 2=判定不能 / 3=適用不可**。
+#
+# 実運用で、その場で書かれた判定ワンライナーが 4 通り壊れた。**4 通りとも
+# 「実入力（＝送ってよい）」側へ落ちた** (fail-open):
+#
+#   1. `grep -q $'\033\[2m'` —— zsh のクォート解釈で `\[` がリテラル化し、grep が
+#      パースエラーで非 0。`if` が else に落ちて「dim が無い ＝ 実入力」と判定した
+#   2. `capture-pane -p -e | grep "S0 " | head -1` —— 入力欄ではなく画面に残って
+#      いた**報告本文**の行にマッチした。その行に dim は無いので「実入力」と判定した
+#   3. `sed` が illegal byte sequence (マルチバイト) で失敗し、本文が空と判定された
+#   4. 選択肢 UI (AskUserQuestion) の**選択中の項目を指すカーソル**も `❯` で描かれる。
+#      入力欄マーカーと取り違え、選択肢のラベルを「user が入力した本文」と報告した
+#
+# 共通するのは「判定器が失敗したとき、または対象を取り違えたときに、送信を許す側へ
+# 落ちる」こと。よってこの関数は **失敗を必ず『送るな』へ写像する**ことを最優先に
+# する。具体的には:
+#
+#   (a) 対象行を入力欄の行に限定する (画面全体を grep しない)         → 誤り 2
+#   (b) 判定器が失敗したら 2 を返す。0 として返す経路を作らない       → 誤り 1
+#   (c) バイト単位で処理する (LC_ALL=C)。ロケール依存の失敗を作らない → 誤り 3
+#   (d) 選択肢 / 確認 UI が開いている間は**判定そのものを行わない**   → 誤り 4
+#
+# (d) は状態でも画面でも見る。`--state` が RUNNING / IDLE でないとき (ASK_QUESTION /
+# ASK_PERMISSION / UNKNOWN) は入力欄を読まない —— 状態が確定していないまま画面を
+# 読むと、今回のように別の UI 要素を拾う。呼び出し側は `--text` の入口でも状態を
+# 見ているが、貼り付けから確認までの間に子が新しい質問を開くことがあるので、
+# 読む直前にもう一度見る。
 input_box_has_body() {
-  local line rest
-  line="$(printf '%s' "$1" | grep -E "^[[:space:]]*${INPUT_PROMPT_MARKER}" | tail -1 || true)"
-  [ -n "$line" ] || return 1
-  rest="${line#*"${INPUT_PROMPT_MARKER}"}"
+  local out rest plain st
+  # (d) 選択肢 UI / 確認画面が出ている間は入力欄を判定しない (適用不可)。
+  plain="$(printf '%s\n' "$1" | strip_ansi)"
+  if question_ui_open "$plain"; then
+    return 3
+  fi
+  # (d) 状態が確定していないときも読まない。
+  st="$(state_now)"
+  case "$st" in
+    RUNNING | IDLE) ;;
+    *) return 3 ;;
+  esac
+  out="$(printf '%s\n' "$1" | input_box_line)" || return 2
+  case "$out" in
+    # 入力欄の行そのものが見つからない。空だったのか画面が取れなかったのかを
+    # 区別できないので、空とは言わない。
+    NONE) return 2 ;;
+    LINE*) ;;
+    # 想定外の出力 = 判定器が期待どおり動いていない。
+    *) return 2 ;;
+  esac
+  rest="${out#LINE}"
+  rest="${rest#*"${INPUT_PROMPT_MARKER}"}"
+  # 内容ガード (irreversible_instruction) が読めるように、空白除去前の本文を残す。
+  INPUT_BOX_BODY="$rest"
   rest="${rest//[[:space:]]/}"
   [ -n "$rest" ]
+}
+
+# 入力欄から取り出した本文。input_box_has_body が設定する。
+INPUT_BOX_BODY=""
+
+# 取り消せない / 取り消しが目立つ操作を指示する本文か。
+#
+# **実入力と判定できても自動では確定しない**ための最後の砦 (#472)。プレースホルダは
+# 「セッションが直前に尋ねた問いへの回答」だけでなく、**マージのような不可逆操作を
+# 提案してくる**ことが実測されている（PR のレビューを終えた子の入力欄に
+# `❯ #478 をマージして` が dim で描かれていた。user は一度も入力していない）。
+#
+# これは安全原則 1（マージは代理しない）に対する実効的な迂回路になる。orchestrator は
+# 「user が入力したが Enter を押していない」と読み、内容が妥当に見えるぶん自分では
+# 気付けない。**内容が妥当に見えるかどうかで送信可否を決めてはならない。**
+#
+# dim 判定は必要条件であって十分条件ではない。判定が正しくても、その入力が user の
+# 意図である保証にはならない（入力途中で放置された / 別の話題への入力の可能性）。
+# よってここは env で無効化できるようにしない（安全機構に off スイッチを持たせない）。
+IRREVERSIBLE_RE='(マージ|merge|force[- ]?push|push --force|--force-with-lease|クローズ|close|リリース|release|デプロイ|deploy)'
+
+irreversible_instruction() {
+  printf '%s' "$1" | LC_ALL=C grep -qiE "$IRREVERSIBLE_RE"
 }
 
 count_prompt_submits() {
@@ -507,14 +653,36 @@ case "$MODE" in
 
     # UserPromptSubmit はキュー経由の配信では発火しない (#450 実測)。ここから先は
     # 「自分の本文が入力欄を離れたか」だけを画面で見る。セッション状態は見ない。
-    cap="$(capture)"
+    # 入力欄の判定には属性つきの画面が要る (#472)。同じ 1 回の取得から、文言
+    # マッチ用の素のテキストを派生させる (2 回取ると別時点の画面を混ぜてしまう)。
+    raw="$(capture_raw)"
+    cap="$(printf '%s\n' "$raw" | strip_ansi)"
     if queue_shown "$cap"; then
       echo "QUEUED_UNCONFIRMED キューに入った。ターン開始は未確認。**再送しないこと** (二重キューになる)"
       exit 10
     fi
-    if ! input_box_has_body "$cap"; then
-      echo "QUEUED_UNCONFIRMED 入力欄は空。配信された可能性が高いがターン開始は未確認。**再送しないこと**"
-      exit 10
+    # `set -e` 下では素の呼び出しが非 0 を返した時点で落ちるので、必ず条件文脈で受ける。
+    body_rc=0
+    input_box_has_body "$raw" || body_rc=$?
+    case "$body_rc" in
+      1)
+        echo "QUEUED_UNCONFIRMED 入力欄は空。配信された可能性が高いがターン開始は未確認。**再送しないこと**"
+        exit 10
+        ;;
+      2)
+        echo "UNVERIFIED 入力欄の状態を判定できない。本文は送信済みなので **本文も Enter も再送しないこと**。画面を確認すること" >&2
+        exit 2
+        ;;
+      3)
+        echo "UNVERIFIED 選択肢 UI が開いている / 状態を確定できないため入力欄を判定できない。本文は送信済みなので **本文も Enter も再送しないこと**。画面を確認すること" >&2
+        exit 2
+        ;;
+    esac
+
+    # 実入力と判定できても、内容が不可逆操作を指示しているなら自動確定しない (#472)。
+    if irreversible_instruction "$INPUT_BOX_BODY"; then
+      echo "PENDING_CONFIRM 入力欄の本文が不可逆操作（マージ / 強制 push / クローズ等）を指示している。**Enter を自動で送らない**。誰が書いた本文かを画面と UserPromptSubmit で確かめ、user へ上げること" >&2
+      exit 11
     fi
 
     # 本文は届いており、失われたのは確定キーだけ (#442)。**入力欄をクリアしない** --
@@ -524,11 +692,23 @@ case "$MODE" in
       echo "DELIVERED 送信を確認した (Enter 再送後)"
       exit 0
     fi
-    cap="$(capture)"
-    if ! input_box_has_body "$cap"; then
-      echo "QUEUED_UNCONFIRMED 入力欄は空になった。ターン開始は未確認。**再送しないこと**"
-      exit 10
-    fi
+    raw="$(capture_raw)"
+    body_rc=0
+    input_box_has_body "$raw" || body_rc=$?
+    case "$body_rc" in
+      1)
+        echo "QUEUED_UNCONFIRMED 入力欄は空になった。ターン開始は未確認。**再送しないこと**"
+        exit 10
+        ;;
+      2)
+        echo "UNVERIFIED 入力欄の状態を判定できない。**再送しないこと**。画面を確認すること" >&2
+        exit 2
+        ;;
+      3)
+        echo "UNVERIFIED 選択肢 UI が開いている / 状態を確定できないため入力欄を判定できない。**再送しないこと**。画面を確認すること" >&2
+        exit 2
+        ;;
+    esac
     echo "PENDING_CONFIRM 本文が入力欄に残っている。**本文を再送しないこと** (連結して二重入力になる)。Enter のみ送るか画面を確認すること" >&2
     exit 11
     ;;
