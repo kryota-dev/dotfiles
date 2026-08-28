@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -8,8 +8,11 @@ import { antigravityAdapter } from "../home/dot_local/lib/frontier-harness/adapt
 import { claudeAdapter } from "../home/dot_local/lib/frontier-harness/adapter-claude.mjs";
 import { codexAdapter } from "../home/dot_local/lib/frontier-harness/adapter-codex.mjs";
 import {
+  FAILURE_REASON_MAX_LENGTH,
   adapterRunStatusFor,
   assertAdapterShape,
+  normalizeAdapterResult,
+  sealInvocation,
   toAdapterRunInput,
 } from "../home/dot_local/lib/frontier-harness/adapter-contract.mjs";
 import {
@@ -39,15 +42,11 @@ const ADAPTERS = [
 ];
 
 // adapter 層。ここに child_process が入ると「プロセスを起動しない」が規約だけの保証になる。
-const ADAPTER_LAYER_FILES = [
-  "adapter-antigravity.mjs",
-  "adapter-claude.mjs",
-  "adapter-codex.mjs",
-  "adapter-contract.mjs",
-  "adapter-fake.mjs",
-  "adapters.mjs",
-  "sandbox.mjs",
-];
+// 手で列挙すると、新しい adapter を足したときに追記を忘れて安全網から外れる。
+const ADAPTER_LAYER_FILES = readdirSync(LIB_DIR).filter(
+  (name) =>
+    name === "adapters.mjs" || name === "sandbox.mjs" || name.startsWith("adapter-"),
+);
 
 function readLibSource(fileName) {
   return readFileSync(path.join(LIB_DIR, fileName), "utf8");
@@ -223,6 +222,13 @@ test("codex pins the sandbox with a flag on launch and a config override on resu
   assert.ok(resume.argv.includes('sandbox_mode="workspace-write"'));
   assert.equal(resume.argv[1], "resume");
   assert.equal(resume.argv[2], "thread-1");
+  // model も再開形で pin する（`codex exec resume --help` が -m/--model を受け付ける）。
+  // pin しないと adapter run に記録した model と実際に走る model が食い違いうる。
+  assert.deepEqual(
+    resume.argv.slice(resume.argv.indexOf("-m"), resume.argv.indexOf("-m") + 2),
+    ["-m", "gpt-5.6-terra"],
+  );
+  assert.ok(resume.argv.includes("model_reasoning_effort=xhigh"));
 });
 
 test("codex reads back no sandbox when a resume invocation would weaken it", () => {
@@ -257,7 +263,7 @@ test("codex refuses a positional prompt that would parse as a flag", () => {
       codexAdapter.launch(
         requestFor(codexAdapter, "read-only", { prompt: "--help me" }),
       ),
-    /begins with/,
+    /beginning with/,
   );
 });
 
@@ -303,7 +309,22 @@ test("claude carries the identical sandbox settings into a resumed run", () => {
     invocation.argv[invocation.argv.indexOf("--settings") + 1];
 
   assert.equal(settingsOf(launch), settingsOf(resume));
-  assert.deepEqual(JSON.parse(settingsOf(launch)).sandbox.failIfUnavailable, true);
+  // presence だけでなく設定オブジェクト全体を固定する（1 キーの取り違え・欠落を検出する）。
+  assert.deepEqual(JSON.parse(settingsOf(launch)).sandbox, {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: { strictAllowlist: true },
+  });
+  // model / effort が argv に反映されていること（flag と値の対で確認する）。
+  const pairOf = (argv, flag) => argv.slice(argv.indexOf(flag), argv.indexOf(flag) + 2);
+  assert.deepEqual(pairOf(launch.argv, "--model"), ["--model", "gpt-5.6-terra"]);
+  assert.deepEqual(pairOf(launch.argv, "--effort"), ["--effort", "xhigh"]);
+  assert.deepEqual(pairOf(launch.argv, "--output-format"), [
+    "--output-format",
+    "stream-json",
+  ]);
   // 呼び出し側が採番したときは --session-id、再開は --resume。
   assert.ok(launch.argv.includes("--session-id"));
   assert.ok(!launch.argv.includes("--resume"));
@@ -331,7 +352,13 @@ test("claude distinguishes read-only from workspace-write by permission mode", (
   // サンドボックスが包むのは Bash だけで、ファイル系ツールは権限システム側にある。
   const readOnly = claudeAdapter.launch(requestFor(claudeAdapter, "read-only"));
   const writable = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
-  assert.ok(readOnly.argv.includes("--permission-mode"));
+  assert.deepEqual(
+    readOnly.argv.slice(
+      readOnly.argv.indexOf("--permission-mode"),
+      readOnly.argv.indexOf("--permission-mode") + 2,
+    ),
+    ["--permission-mode", "dontAsk"],
+  );
   assert.ok(!writable.argv.includes("--permission-mode"));
 });
 
@@ -471,7 +498,13 @@ test("antigravity emits neither its ineffective sandbox flag nor a permission by
   );
   assert.ok(!invocation.argv.includes("--sandbox"));
   assert.ok(!invocation.argv.includes("--dangerously-skip-permissions"));
-  assert.ok(invocation.argv.includes("--output-format"));
+  assert.deepEqual(
+    invocation.argv.slice(
+      invocation.argv.indexOf("--output-format"),
+      invocation.argv.indexOf("--output-format") + 2,
+    ),
+    ["--output-format", "json"],
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -591,13 +624,28 @@ test("the registry refuses two adapters for one provider", () => {
   );
 });
 
-function fakeExecutor({ availability, sandboxMode = "read-only", results, request = {} }) {
+const FAKE_CAPABILITY = Object.freeze({
+  provider: "fake",
+  model: "gpt-5.6-terra",
+  effort: "xhigh",
+});
+
+function fakeExecutor({
+  accountScope,
+  availability,
+  capability = FAKE_CAPABILITY,
+  clock,
+  sandboxMode = "read-only",
+  results,
+  request = {},
+}) {
   const adapter = createFakeAdapter();
   const runner = createFakeRunner(results);
   const executor = createAdapterExecutor({
+    accountScope,
     registry: createAdapterRegistry({ adapters: [adapter] }),
     availability,
-    capability: { provider: "fake", model: "gpt-5.6-terra", effort: "xhigh" },
+    capability,
     capabilityName: "executor.default",
     request: {
       prompt: "run the suite",
@@ -606,6 +654,7 @@ function fakeExecutor({ availability, sandboxMode = "read-only", results, reques
       ...request,
     },
     runner,
+    ...(clock ? { clock } : {}),
   });
   return { executor, runner };
 }
@@ -708,4 +757,343 @@ test("the router holds no vendor command name or provider literal", () => {
     assert.ok(!source.includes(literal), `router.mjs mentions ${literal}`);
   }
   assert.ok(!/\bagy\b/.test(source), "router.mjs mentions the agy executable");
+});
+
+// ---------------------------------------------------------------------------
+// sealInvocation の封印そのもの（要件 2 の中核不変条件）
+// ---------------------------------------------------------------------------
+
+test("sealInvocation refuses an invocation whose argv would run under another sandbox", () => {
+  // これを直接固定しないと、sealInvocation の照合を削除しても adapter 経由のテストは
+  // すべて通ってしまう（各 adapter の reader は正しいままなので）。本 PR の中核を守る 1 本。
+  const base = {
+    provider: "fake",
+    executable: "/usr/local/bin/fake",
+    argv: ["--sandbox", "read-only"],
+    phase: "resume",
+    sandbox: { mode: "read-only" },
+  };
+  assert.throws(
+    () =>
+      sealInvocation({
+        ...base,
+        readEffectiveSandbox: () => ({ mode: "workspace-write" }),
+      }),
+    /would run under workspace-write instead of the requested read-only/,
+  );
+  // 読み戻せない（null）ときも一致とみなさない。
+  assert.throws(
+    () => sealInvocation({ ...base, readEffectiveSandbox: () => null }),
+    /unreadable sandbox/,
+  );
+  assert.doesNotThrow(() =>
+    sealInvocation({ ...base, readEffectiveSandbox: () => ({ mode: "read-only" }) }),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// argv へ載る識別子の検証（フラグ注入）
+// ---------------------------------------------------------------------------
+
+test("codex refuses a resume key that would land in the argv as a flag", () => {
+  // Codex は session id を位置引数で受け取るため、`-` 始まりの値はそのままフラグになる。
+  // sandbox の読み戻しは値の妥当性を見ないので、入力側で塞がないと素通りする。
+  for (const injected of ["--full-auto", "-c", "--json"]) {
+    assert.throws(
+      () =>
+        codexAdapter.resume(
+          requestFor(codexAdapter, "workspace-write", { resumeKey: injected }),
+        ),
+      /resumeKey|positional/,
+      injected,
+    );
+  }
+});
+
+test("every adapter refuses a resume key that could be re-read as a flag", () => {
+  for (const adapter of ADAPTERS) {
+    assert.throws(
+      () =>
+        adapter.resume(requestFor(adapter, "read-only", { resumeKey: "--debug" })),
+      /resumeKey|positional/,
+      adapter.provider,
+    );
+    // 引用符・等号・空白は `-c key=value` の構造を壊す。
+    assert.throws(
+      () =>
+        adapter.resume(
+          requestFor(adapter, "read-only", { resumeKey: 'a" sandbox_mode="x' }),
+        ),
+      /resumeKey/,
+      adapter.provider,
+    );
+  }
+});
+
+test("claude refuses an unsafe session id and permission prompt tool name", () => {
+  assert.throws(
+    () =>
+      claudeAdapter.launch(
+        requestFor(claudeAdapter, "read-only", { sessionId: "--debug" }),
+      ),
+    /sessionId/,
+  );
+  assert.throws(
+    () =>
+      claudeAdapter.launch(
+        requestFor(claudeAdapter, "read-only", { permissionPromptTool: "--debug" }),
+      ),
+    /permissionPromptTool/,
+  );
+  // MCP ツール名のアンダースコアは通す（実運用の名前を弾かない）。
+  assert.doesNotThrow(() =>
+    claudeAdapter.launch(
+      requestFor(claudeAdapter, "read-only", {
+        permissionPromptTool: "mcp__fh__approve",
+      }),
+    ),
+  );
+});
+
+test("codex reads back no sandbox when an unexpected flag appears in the argv", () => {
+  // denylist（既知の危険フラグの列挙）は新フラグの追随漏れで素通りする。allowlist の backstop。
+  const readBack = (argv) => codexAdapter.readEffectiveSandbox({ argv });
+  assert.equal(
+    readBack(["exec", "--sandbox", "read-only", "--json", "--full-auto", "go"]),
+    null,
+  );
+  assert.equal(
+    readBack(["exec", "resume", "t1", "--json", "-c", 'sandbox_mode="read-only"', "--yolo", "go"]),
+    null,
+  );
+  // adapter 自身が出すフラグだけなら読み戻せる。
+  assert.deepEqual(
+    readBack([
+      "exec",
+      "resume",
+      "t1",
+      "--json",
+      "-c",
+      'sandbox_mode="read-only"',
+      "-m",
+      "gpt-5.6-terra",
+      "go",
+    ]),
+    { mode: "read-only" },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 結果解釈の失敗分岐（成功を誤記録しない）
+// ---------------------------------------------------------------------------
+
+test("claude reports a failure even when a terminal result event is present", () => {
+  const failed = claudeAdapter.interpret({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      type: "result",
+      is_error: true,
+      subtype: "error_max_turns",
+      session_id: "session-3",
+      permission_denials: [],
+    }),
+    stderr: "",
+  });
+  assert.equal(failed.outcome, "failed");
+  assert.match(failed.failureReason, /error_max_turns/);
+  assert.equal(failed.resumeKey, "session-3");
+});
+
+test("codex reports a failure when the run completed but exited non-zero", () => {
+  const result = codexAdapter.interpret({
+    exitCode: 1,
+    stdout: [
+      JSON.stringify({ type: "thread.started", thread_id: "thread-2" }),
+      JSON.stringify({ type: "turn.completed" }),
+    ].join("\n"),
+    stderr: "",
+  });
+  assert.equal(result.outcome, "failed");
+  assert.match(result.failureReason, /exited with code 1/);
+  assert.equal(result.resumeKey, "thread-2");
+});
+
+test("antigravity reports every failure status it can determine", () => {
+  for (const status of ["ERROR", "CANCELED", "INTERRUPTED", "INVALID"]) {
+    const result = antigravityAdapter.interpret({
+      exitCode: 0,
+      stdout: JSON.stringify({ conversation_id: "conv-5", status }),
+      stderr: "",
+    });
+    assert.equal(result.outcome, "failed", status);
+    assert.match(result.failureReason, new RegExp(status));
+  }
+  // 非終端 status のまま終了した実行も成功とはみなさない。
+  for (const status of ["WAITING", "RUNNING"]) {
+    assert.equal(
+      antigravityAdapter.interpret({
+        exitCode: 0,
+        stdout: JSON.stringify({ conversation_id: "conv-6", status }),
+        stderr: "",
+      }).outcome,
+      "indeterminate",
+      status,
+    );
+  }
+});
+
+test("antigravity treats output without a status envelope as failed", () => {
+  const result = antigravityAdapter.interpret({
+    exitCode: 0,
+    stdout: "not json at all",
+    stderr: "",
+  });
+  assert.equal(result.outcome, "failed");
+  assert.match(result.failureReason, /no status envelope/);
+});
+
+test("a provider failure reason is bounded before it reaches state", () => {
+  // denials からツール入力を落としたのと同じ配慮を長さにも効かせる。
+  const long = "x".repeat(FAILURE_REASON_MAX_LENGTH + 200);
+  const result = normalizeAdapterResult(
+    { outcome: "failed", failureReason: long },
+    "fake",
+  );
+  assert.equal(result.failureReason.length, FAILURE_REASON_MAX_LENGTH);
+  assert.ok(result.failureReason.endsWith("…"));
+});
+
+// ---------------------------------------------------------------------------
+// 拒否経路（executor から runner へ到達しないこと）
+// ---------------------------------------------------------------------------
+
+test("every refusal reason stops before the runner is called", () => {
+  // 「利用不可時のフォールバック」は一例では足りない。拒否理由ごとに runner 非呼び出しを固定する。
+  const cases = [
+    {
+      label: "provider unavailable",
+      availability: { fake: { available: false, models: null } },
+      expect: /unavailable/,
+    },
+    {
+      label: "availability unknown",
+      availability: {},
+      expect: /availability is unknown/,
+    },
+    {
+      label: "model not discovered",
+      availability: { fake: { available: true, models: ["gpt-5.6-sol"] } },
+      expect: /model discovery did not report/,
+    },
+    {
+      label: "effort outside the shipped vocabulary",
+      availability: { fake: { available: true, models: null } },
+      capability: { provider: "fake", model: "gpt-5.6-terra", effort: "extreme" },
+      expect: /effort/,
+    },
+    {
+      label: "model that would inject a config override",
+      availability: { fake: { available: true, models: null } },
+      capability: {
+        provider: "fake",
+        model: 'gpt-5.6-terra" sandbox_mode="danger-full-access',
+        effort: "xhigh",
+      },
+      expect: /model/,
+    },
+    {
+      label: "relative executable path",
+      availability: { fake: { available: true, models: null } },
+      request: { executable: "fake" },
+      expect: /absolute path/,
+    },
+    {
+      label: "account scope mismatch",
+      accountScope: "r06",
+      availability: { fake: { available: true, models: null } },
+      capability: {
+        provider: "fake",
+        model: "gpt-5.6-terra",
+        effort: "xhigh",
+        accountScope: "personal",
+      },
+      expect: /account scope/,
+    },
+    {
+      label: "no adapter for the provider",
+      availability: { other: { available: true, models: null } },
+      capability: { provider: "other", model: "gpt-5.6-terra", effort: "xhigh" },
+      expect: /no adapter is registered/,
+    },
+  ];
+
+  for (const { label, expect, ...options } of cases) {
+    const { executor, runner } = fakeExecutor({ results: [], ...options });
+    const execution = executor();
+    assert.equal(execution.outcome, "refused", label);
+    assert.equal(execution.ranProvider, false, label);
+    assert.match(execution.reason, expect, label);
+    assert.equal(runner.calls.length, 0, label);
+  }
+});
+
+test("a personal-only capability runs when the account scope matches", () => {
+  // 拒否側だけを固定すると「常に拒否する」実装でもテストが通る。
+  const { executor, runner } = fakeExecutor({
+    accountScope: "personal",
+    availability: { fake: { available: true, models: null } },
+    capability: {
+      provider: "fake",
+      model: "gpt-5.6-terra",
+      effort: "xhigh",
+      accountScope: "personal",
+    },
+    results: [{ exitCode: 0, stdout: JSON.stringify({ outcome: "succeeded" }), stderr: "" }],
+  });
+  assert.equal(executor().outcome, "succeeded");
+  assert.equal(runner.calls.length, 1);
+});
+
+test("an empty resume key fails loudly instead of becoming a fresh launch", () => {
+  // truthiness で分岐すると、壊れた再開キーが黙って新規セッションの二重起動に化ける。
+  const { runner, executor } = fakeExecutor({
+    availability: { fake: { available: true, models: null } },
+    request: { resumeKey: "" },
+    results: [{ exitCode: 0, stdout: "", stderr: "" }],
+  });
+  assert.throws(() => executor(), /resumeKey/);
+  assert.equal(runner.calls.length, 0);
+});
+
+test("availability can be re-read at execution time instead of frozen at creation", () => {
+  // docs が謳う「実行直前の再検査」は、生成時スナップショットのままでは成立しない。
+  let available = false;
+  const { executor, runner } = fakeExecutor({
+    availability: () => ({ fake: { available, models: null } }),
+    results: [{ exitCode: 0, stdout: JSON.stringify({ outcome: "succeeded" }), stderr: "" }],
+  });
+  assert.equal(executor().outcome, "refused");
+  assert.equal(runner.calls.length, 0);
+  available = true;
+  assert.equal(executor().outcome, "succeeded");
+  assert.equal(runner.calls.length, 1);
+});
+
+test("an execution records the clock it was given", () => {
+  const stamps = ["2026-08-01T00:00:00.000Z", "2026-08-01T00:05:00.000Z"];
+  let index = 0;
+  const { executor } = fakeExecutor({
+    availability: { fake: { available: true, models: null } },
+    clock: () => stamps[index++],
+    results: [{ exitCode: 0, stdout: JSON.stringify({ outcome: "succeeded" }), stderr: "" }],
+  });
+  const execution = executor();
+  assert.equal(execution.startedAt, stamps[0]);
+  assert.equal(execution.finishedAt, stamps[1]);
+  const input = toAdapterRunInput(execution, { taskId: "task_2", routeId: "route_2" });
+  assert.deepEqual(
+    { startedAt: input.startedAt, finishedAt: input.finishedAt, status: input.status },
+    { startedAt: stamps[0], finishedAt: stamps[1], status: "succeeded" },
+  );
+  assert.doesNotThrow(() => normalizeAdapterRun(input));
 });
