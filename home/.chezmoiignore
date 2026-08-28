@@ -78,6 +78,14 @@
 # recorded while driving a real phone.
 .local/share/phone-harness
 
+# Improvement candidate queue state (#501, sub-issue of #473). Same reasoning as
+# .local/share/ecc-homunculus-* and .local/share/phone-harness above: this is a public repo,
+# and a stray `chezmoi add` under ~/.local/state must not be able to pick up the queue. The
+# candidates summarise observed agent behaviour, the file is owner-only (0700 dir / 0600
+# file) by design, and #473 AC-035 requires it never be published to Git or any external
+# service. Its writer is ~/.local/lib/agent-improvement/, which manages the state itself.
+.local/state/agent-improvement
+
 # Codex runtime data
 # config.toml is intentionally unmanaged (Codex writes trust_level etc. dynamically);
 # auth.json holds login tokens and must never be added to the source tree.

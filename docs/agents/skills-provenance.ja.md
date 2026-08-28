@@ -89,11 +89,11 @@
 
 `commit`、`create-pr`、`create-issue`、`pr-draft-summary`、`github-pr-comments`、`github-projects`、`github-sub-issues`、`monitor-ci`、`renovate-analyzer`、`renovate-sweep`、`issue-fleet`、`repo-radar`、`wave-orchestrator`、`delete-merged-branches`
 
-### コードレビューとマルチエージェントオーケストレーション（7 スキル）
+### コードレビューとマルチエージェントオーケストレーション（9 スキル）
 
-サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。加えて、それらが実装前に呼ぶ共有の model／effort ゲート。
+サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。加えて、実装前に必ず呼ばれる直交する 2 つのゲート（セッション自身の model／effort floor を見る `model-fitness-check` と、adapter capability・rollout を見る `execution-readiness-check`）と、それらが参照する routing harness。
 
-`cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`、`review-fleet`、`model-fitness-check`
+`cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`、`review-fleet`、`model-fitness-check`、`execution-readiness-check`、`frontier-harness`
 
 ### 計画とスペック駆動開発（5 スキル）
 
@@ -101,11 +101,11 @@
 
 `planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 
-### セッションとコンテキスト管理（5 スキル）
+### セッションとコンテキスト管理（6 スキル）
 
-会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。
+会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。`improvement-status` は[改善候補キュー](claude-code.ja.md#改善候補キュー)の読み取り専用ビューで、状態を表示するだけで evaluator を再実行しません。
 
-`session-summary`、`prune-session-transcript`、`compact-docs`、`retrospective-codify`、`knowledge-distill`
+`session-summary`、`prune-session-transcript`、`compact-docs`、`retrospective-codify`、`knowledge-distill`、`improvement-status`
 
 ### ワークツリーと dotfiles ツール（4 スキル）
 
