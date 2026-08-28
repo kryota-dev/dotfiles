@@ -25,8 +25,11 @@ gh pr checks --watch
 # 代替: 一度だけステータスを確認
 gh pr checks
 
-# 必要に応じて特定チェックの詳細を表示
-gh pr checks --verbose
+# 失敗したチェックとその実行 URL を特定する
+gh pr checks --json name,state,link --jq '.[] | select(.state != "SUCCESS")'
+
+# 上で得た link の run ID から、失敗したステップのログだけを取得する
+gh run view <run-id> --log-failed
 ```
 
 ## ワークフロー
@@ -35,7 +38,7 @@ gh pr checks --verbose
 2. **進捗の追跡**: このコマンドは全 CI チェックの状態をリアルタイムで表示する
 3. **完了**: すべてのチェックが ✓（成功）または X（失敗）になるまで待つ
 4. **失敗時の対応**:
-   - チェックが失敗したら `gh pr checks --verbose` で詳細ログを取得する
+   - チェックが失敗したら `gh pr checks --json name,state,link` で失敗したチェックと実行 URL を特定し、その run ID を `gh run view <run-id> --log-failed` に渡して失敗ステップのログを取得する
    - 失敗内容を分析し、修正を提案または実装する
    - 修正後、変更を push して再度監視する
 
