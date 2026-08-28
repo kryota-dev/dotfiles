@@ -646,9 +646,11 @@ billing_delta() {
     anchor_reset="$sd_reset"
   fi
 
-  local st_win="" st_reset="" st_sess="" st_date="" st_base="" st_carry="" st_last=""
+  local st_win="" st_reset="" st_sess="" st_date="" st_base="" st_carry="" st_last="" st_ctx=""
   if [ -f "$state_file" ]; then
-    IFS=$'\x1f' read -r st_win st_reset st_sess st_date st_base st_carry st_last < <(
+    # st_ctx rides along in the same jq pass (no extra fork). It is not part of
+    # the billing state machine below -- only of the write decision.
+    IFS=$'\x1f' read -r st_win st_reset st_sess st_date st_base st_carry st_last st_ctx < <(
       jq -r '[
         (.billing.window // ""),
         (.billing.resets_at // "" | tostring),
@@ -656,7 +658,8 @@ billing_delta() {
         (.billing.daily_date // ""),
         (.billing.daily_baseline // "" | tostring),
         (.billing.daily_carry // "" | tostring),
-        (.billing.daily_last // "" | tostring)
+        (.billing.daily_last // "" | tostring),
+        (.context.remaining_percentage // "" | tostring)
       ] | join("\u001f")' "$state_file" 2>/dev/null
     )
   fi
@@ -761,7 +764,13 @@ billing_delta() {
   # write even when the billing half is unchanged -- otherwise a session
   # sitting in a stable overage would freeze its persisted context at whatever
   # it was on the render that last moved the baseline.
-  if [ "$now_state" != "$was" ] || [ ! -f "$state_file" ] || [ -n "$SESSION_CTX_BODY" ]; then
+  # The stored-context test is the other half of that: every write embeds the
+  # *current* body, so when the harness stops reporting context_window the key
+  # has to be actively dropped -- a skipped write would leave the last reported
+  # value on disk. Self-terminating: once the key is gone both tests are empty
+  # and the write is skipped again.
+  if [ "$now_state" != "$was" ] || [ ! -f "$state_file" ] ||
+    [ -n "$SESSION_CTX_BODY" ] || [ -n "$st_ctx" ]; then
     billing_state_write "$state_file" "$st_win" "$st_reset" "$st_sess" \
       "$st_date" "$st_base" "$st_carry" "$st_last"
   fi

@@ -336,6 +336,24 @@ EOF
   [ "$output" -eq 0 ]
 }
 
+# instinct-cli.py compares `file.suffix.lower()` against its allowed
+# extensions, so an upper/mixed-case suffix is a valid instinct to the engine.
+# `find -name` is case-sensitive; `-iname` keeps the two counts aligned.
+@test "count_instincts matches extensions case-insensitively (as instinct-cli.py does)" {
+  local h="${BATS_TEST_TMPDIR}/case"
+  mkdir -p "${h}/projects/proj1/instincts/personal"
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/lower.md"
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/upper.MD"
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/upper.YAML"
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/mixed.YmL"
+  # MEMORY.md is excluded case-insensitively too (the engine parses zero
+  # instincts out of a memory index whatever its casing).
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/memory.MD"
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" = "4" ]
+}
+
 @test "wrapper and SKILL.md Phase 0 instinct-count expressions agree" {
   # #491 completion condition: the wrapper's independent precheck and the
   # skill's own Phase 0 diagnostic must never silently disagree again. Extract

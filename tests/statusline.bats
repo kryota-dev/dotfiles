@@ -644,6 +644,31 @@ STATE
 # Non-regression: context is session-scoped state and must never leak into the
 # profile-scoped rate-limits snapshot (#449's failure mode for `effort`, now
 # guarded for `context` too).
+# Every write embeds the *current* context body, so `ts` and `context` always
+# move together and a stale value can never sit behind a fresh timestamp. The
+# remaining hazard is the write being skipped entirely: during an overage the
+# billing half can be unchanged, so without an explicit test on the stored
+# value the last reported percentage would stay on disk after the harness
+# stopped sending `context_window` at all.
+@test "statusline drops a stale context key once the harness stops reporting it" {
+  _seed_billing_cache
+  local without='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"cost":{"total_cost_usd":1.23},"rate_limits":{"five_hour":{"used_percentage":100,"resets_at":1700000000},"seven_day":{"used_percentage":17.5,"resets_at":1700600000}},"session_id":"bats-statusline"}'
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  run jq -e '.context.remaining_percentage == 50' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+
+  # Same billing state, no context_window on stdin: the key must go, not linger.
+  _render "$without"
+  run jq -e '(.context | not) and .billing.session_baseline == 1.23' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+
+  # Self-terminating: with nothing left to drop the write is skipped again, so
+  # the file keeps the billing half rather than being churned every render.
+  _render "$without"
+  run jq -e '(.context | not) and .billing.session_baseline == 1.23' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
 @test "statusline never mixes context into the profile-scoped rate-limits snapshot" {
   run bash -c "printf '%s' '${MOCK_JSON_RL}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
   [ "$status" -eq 0 ]

@@ -159,9 +159,18 @@ topic (no dedicated topic was added).
   tiers would double-count already-promoted instincts (#491). The count is
   compared against the skill's own `--min-instincts` default (10). This dry/
   healthy determination is made **independently of claude's own free-text
-  response**, so a week with an under-accumulated pipeline is never silently
-  reported as a normal week — the notification always says so explicitly
-  (`[縮退] instinct N/10 — ...`).
+  response**, so a pipeline that has not accumulated enough material is never
+  silently reported as a normal week — the notification always says so
+  explicitly (`[縮退] instinct N/10 — ...`).
+  Note what this threshold does and does not measure: it is a **cumulative**
+  count over all projects and all time, i.e. a "is there enough material to
+  cluster at all" gate for the skill's Phase 2, not a weekly-delta signal.
+  Before #491 it read a tier that is always empty, so it fired every week and
+  the distillation phase never ran; after #491 the real store is far above 10,
+  so in practice it will stop firing. "Is the loop still running *this* week"
+  is answered by the skill's other Phase 0 diagnostics — observations
+  freshness, archive progress, timeout / turn-exhaustion traces — not by this
+  threshold.
 - **Report**: the skill still runs either way (a dry week still gets the
   skill's own Phase 0/1 degraded diagnostic report) and writes to
   `~/dotfiles/.kryota-dev/knowledge-distill/<YYYY-Www>.md`. The wrapper

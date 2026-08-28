@@ -122,7 +122,21 @@ notify_error() {
 # double-count an already-promoted instinct. Extensions match instinct-
 # cli.py's ALLOWED_INSTINCT_EXTENSIONS; MEMORY.md is excluded because it's a
 # memory index, not an instinct (no `id:` frontmatter -- instinct-cli.py's own
-# parser counts it as zero).
+# parser counts it as zero); -iname mirrors the CLI's case-insensitive
+# `suffix.lower()` comparison.
+#
+# This counts *files*, not parsed instincts, and the two can differ: the CLI
+# parses each file and counts every `id:` block in it, so a multi-instinct file
+# undercounts here and an id-less .yaml overcounts. The approximation is
+# deliberate -- this precheck only has to decide one threshold (10), the real
+# store sits three orders of magnitude above it, and parsing frontmatter in
+# bash would buy nothing the skill's own CLI-backed diagnostics do not already
+# provide. Delegating the count to the CLI is not available either: `status` is
+# cwd-scoped (one project + global, not the cross-project total this precheck
+# needs) and `projects` carries mutating subcommands, so allow-listing it would
+# break the read-mostly design. Cross-checked against the CLI on the real
+# store: this expression returns 250 for the dotfiles project, exactly what
+# `instinct-cli.py status` reports as `Project instincts`.
 #
 # The `H` param name and the find pipeline below are kept byte-identical
 # (modulo indentation) to SKILL.md's Phase 0 diagnostic between the same
@@ -152,8 +166,8 @@ count_instincts() {
     # knowledge-distill-instinct-count:begin
     find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
       \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
-      \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
-      ! -name 'MEMORY.md' 2>/dev/null | wc -l
+      \( -iname '*.md' -o -iname '*.yaml' -o -iname '*.yml' \) \
+      ! -iname 'MEMORY.md' 2>/dev/null | wc -l
     # knowledge-distill-instinct-count:end
   } | tr -d ' ' || true
 }

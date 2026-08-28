@@ -49,8 +49,8 @@ jq '.observer' "$H/config.json"                              # enabled / run_int
 # knowledge-distill-instinct-count:begin
 find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
   \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
-  \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
-  ! -name 'MEMORY.md' 2>/dev/null | wc -l
+  \( -iname '*.md' -o -iname '*.yaml' -o -iname '*.yml' \) \
+  ! -iname 'MEMORY.md' 2>/dev/null | wc -l
 # knowledge-distill-instinct-count:end
 ls -lt "$H"/projects/*/observations.jsonl 2>/dev/null | head -3   # 観測の鮮度（記録が進んでいるか）
 ls "$H"/projects/*/observations.archive/ 2>/dev/null | tail -3    # 分析の処理痕跡（processed-<時刻> 名はソート=時系列のため tail が直近）
@@ -107,12 +107,15 @@ instinct 蓄積数 < `--min-instincts` の場合、**縮退レポート**を出�
 ```bash
 find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
   \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
-  \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
-  ! -name 'MEMORY.md' -mtime -7 2>/dev/null | head -30
+  \( -iname '*.md' -o -iname '*.yaml' -o -iname '*.yml' \) \
+  ! -iname 'MEMORY.md' -mtime -7 2>/dev/null | head -30
 ```
 
-  - `-mtime -7` は「対象週」の粗い近似（日次精度の期間フィルタは行わない）。`--week=last` 実行時も同じ
-    7日窓を使う。`-newermt` は使わない（macOS/Linux 両対応のため）。
+  - `-mtime -7` は「対象週」の粗い近似で、`--week=last` 実行時も同じ 7 日窓を使う。ズレは日次精度では
+    なく**最大で 1 週間分**になりうる（例: 週の半ばに `--week=last` を手動実行すると、7 日窓は今週前半を
+    含み、先週前半を取りこぼす）。影響は Phase 2 で個別 Read する対象の選定に留まり、Phase 0 の集計値と
+    `evolve` のクラスタ検出（累積プール全体を見る）には及ばない。`-newermt` は使わない（macOS/Linux
+    両対応のため）。
   - `find | head` で完結させる（`xargs`・`ls -t` は使わない）。理由は 2 つ: (1) headless 実行時の
     `--allowedTools` は `find`/`head` は許可するが `xargs` は許可しない、(2) 件数が多いと `xargs` が
     引数を分割し、`ls -t` のソートがバッチ内に閉じて `head` の結果が「全体の直近 N 件」にならない。
