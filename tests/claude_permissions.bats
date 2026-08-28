@@ -16,6 +16,42 @@ load helpers/setup
 #
 # See: https://code.claude.com/docs/en/permissions
 
+# Anchor radius (issue #320).
+#
+# A file permission rule only matches under its anchor, and the anchor comes from the rule's
+# own path syntax, not from the settings file it is declared in. Measured on CLI 2.1.247,
+# one deny rule per probe session, verdict read from the tool result rather than from prose:
+#
+#   rule form         | in cwd | under $HOME, outside cwd | outside $HOME
+#   ------------------|--------|--------------------------|--------------
+#   Read(**/.env*)    | DENIED | ALLOWED                  | ALLOWED
+#   Read(~/**/.env*)  | DENIED | DENIED                   | ALLOWED
+#   Read(//**/.env*)  | DENIED | DENIED                   | DENIED
+#   Read(/**/.env*)   | -      | ALLOWED - a single leading slash anchors at the settings
+#                     |        | source, so in user settings it lands under ~/.claude
+#   Read(~/.env*)     | -      | ALLOWED - a ~/-anchored single trailing segment does not
+#                     |        | match at depth; only the ~/**/ form does
+#
+# The cwd-anchored form does not reach even the parent of the working directory, so it
+# missed every real work path outside the session's own tree: sibling worktrees, the main
+# checkout, other repositories, directories added with --add-dir, and the repository root
+# whenever a session starts in a subdirectory. `//` was the only form observed to hold
+# regardless of where the session was started, which is why every Read/Edit deny rule is
+# written that way and why the second guard below enforces it. Inside the working directory
+# the two forms match the same files, so widening the anchor changed nothing there.
+#
+# The harness does not already cover this. Its `protected paths` are a write-only check over
+# repository and tool config (.git, .claude, .zshrc, .npmrc, ...) and list no credential file
+# at all, and `critical paths` only gate rm/rmdir targets. The auto-mode classifier does ship
+# credential rules, but they are soft (clearable once the user names specifics), model-judged,
+# and auto-mode only - not a deterministic deny. So these rules are not redundant with it.
+#
+# Not established by observation, and deliberately not asserted here: whether /cd relocates
+# the anchor, and whether the permissions.additionalDirectories settings key behaves like the
+# --add-dir flag (only the flag was probed).
+#
+# See: https://code.claude.com/docs/en/permission-modes#protected-paths
+
 # Emit permission rules from the Claude Code settings SSOT — every rule across allow/deny/ask,
 # or only one array's rules when a section name is passed. Scoped to the top-level
 # "permissions" object so an unrelated block gaining an "allow" key can't perturb the result.
@@ -71,6 +107,33 @@ _claude_permission_rules() {
     echo "settings.json declares rules that are accepted but never matched by file permission checks:"
     echo "$offenders"
     echo "use Edit(<path>) for Write(<path>)/NotebookEdit(<path>), Read(<path>) for Glob(<path>)"
+    false
+  }
+}
+
+@test "claude permissions: file deny rules are anchored at the filesystem root" {
+  [ -f "${HOME_DIR}/dot_claude/settings.json" ]
+
+  local file_rules count offenders
+  file_rules="$(_claude_permission_rules deny | grep -E '^(Read|Edit)\(' || true)"
+  count="$(printf '%s' "$file_rules" | grep -c . || true)"
+
+  # Same vacuous-pass guard as above: an extractor break must fail loudly rather than report
+  # a clean sheet it never looked at.
+  [ "$count" -ge 1 ] || {
+    echo "sanity: permissions.deny yielded no Read/Edit rules — the extractor broke"
+    false
+  }
+
+  offenders="$(printf '%s\n' "$file_rules" | grep -vE '^(Read|Edit)\(//' || true)"
+  [ -z "$offenders" ] || {
+    echo "settings.json declares file deny rules whose anchor is narrower than it looks:"
+    echo "$offenders"
+    echo "a rule only matches under its anchor: '//path' is the filesystem root, '~/path' is"
+    echo "the home directory, '/path' is the settings source (~/.claude for user settings),"
+    echo "and a bare 'path' or '**/path' is the session's working directory — which leaves"
+    echo "sibling worktrees, other repos and --add-dir targets unguarded."
+    echo "write //<pattern> so the rule holds wherever the session was started (issue #320)"
     false
   }
 }
