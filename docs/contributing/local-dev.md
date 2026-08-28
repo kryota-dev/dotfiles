@@ -17,8 +17,10 @@ The `Makefile` is the single source of truth for all local dev commands. The def
 | `help` (default) | Prints the target list via `awk` on `## ` doc-comment lines |
 | `lint` | shellcheck + shfmt diff-check + `zsh -n` syntax (see below) |
 | `fmt` | `shfmt -w -i 2 -ci` on `.sh` files in place; `.sh.tmpl` files are diff-reported only |
-| `test` | `lint` then `test-bats` |
+| `test` | `lint`, `lint-node`, `test-node`, then `test-bats` |
 | `test-bats` | `bats tests/*.bats` |
+| `lint-node` | `node --check` for frontier-harness modules and tests |
+| `test-node` | `node --test tests/frontier_harness.test.mjs` without live provider credentials |
 | `benchmark` | `scripts/benchmark.sh` (cold start + 10-iteration average) |
 | `sync-ghq-completion` | Fetches the vendored `_ghq` from upstream at the mise-pinned ghq version |
 | `lint-deno` | `deno check` + `deno lint` + `deno fmt --check` on the ntfy dashboard (kryota-dev/dotfiles#371); best-effort, skips if `deno` is absent. Not part of `lint`/CI |

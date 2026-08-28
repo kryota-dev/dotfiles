@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Node 本体は mise の pin を使い、PATH 上の別 version を実行しない。
+set -euo pipefail
+
+node_bin="${FH_NODE_BIN:-$(mise which node 2>/dev/null || true)}"
+if [ ! -x "$node_bin" ]; then
+  echo "frontier-harness: mise-managed node を解決できません。mise install node を実行してください。" >&2
+  exit 127
+fi
+
+program="$HOME/.local/lib/frontier-harness/cli.mjs"
+if [ ! -r "$program" ]; then
+  echo "frontier-harness: CLI module が見つかりません。chezmoi apply を実行してください。" >&2
+  exit 127
+fi
+
+exec "$node_bin" "$program" "$@"

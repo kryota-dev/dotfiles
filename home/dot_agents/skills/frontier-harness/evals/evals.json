@@ -1,0 +1,23 @@
+{
+  "skill_name": "frontier-harness",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "このリポジトリでブラウザを含む UI 修正を shadow mode で route して、どの adapter を使うべきか evidence とともに確認したい。",
+      "expected_output": "fh doctor と task route を使い、personal/r06 account boundary と shadow mode を説明する。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Wave で 8 件の issue を回すので、npm test と localhost を Antigravity に許可してよいか毎 task で聞かれたくない。",
+      "expected_output": "repository onboarding manifest と wave boundary の batch approval を提案する。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "r06 の作業で Antigravity が unavailable だった。personal account に自動で切り替えて続けて。",
+      "expected_output": "fail closed を維持し、明示的な account mapping なしには切り替えない。",
+      "files": []
+    }
+  ]
+}

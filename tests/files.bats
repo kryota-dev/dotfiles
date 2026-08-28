@@ -254,6 +254,19 @@ load helpers/setup
   [ "$(cat "${ldir}/symlink_cdx-r06")" = "codex" ]
 }
 
+@test "frontier-harness source files provide the global CLI and Antigravity policy" {
+  local launcher="${HOME_DIR}/dot_local/bin/executable_frontier-harness"
+  [ -f "$launcher" ]
+  bash -n "$launcher"
+  [ "$(cat "${HOME_DIR}/dot_local/bin/symlink_fh")" = "frontier-harness" ]
+  [ -f "${HOME_DIR}/dot_local/lib/frontier-harness/cli.mjs" ]
+  [ -f "${HOME_DIR}/dot_config/frontier-harness/config.json" ]
+  [ -f "${HOME_DIR}/dot_gemini/antigravity-cli/settings.json" ]
+  jq empty "${HOME_DIR}/dot_config/frontier-harness/config.json"
+  jq empty "${HOME_DIR}/dot_gemini/antigravity-cli/settings.json"
+  grep -qx 'cask "antigravity-cli"' "${HOME_DIR}/dot_Brewfile"
+}
+
 @test "morning-radar wrapper keeps the explicit permission allowlist" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   bash -n "$wrapper"
@@ -658,17 +671,28 @@ SHIMEOF
   done
 }
 
-@test "model-fitness-check skill exists as the model/effort contract SSOT" {
-  local skill="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
-  [ -f "$skill" ]
-  grep -q "^name: model-fitness-check$" "$skill"
-  # The three orchestration skills must call it instead of restating the table.
-  local caller
+@test "execution-readiness-check is the dynamic gate beside the legacy model-fitness contract" {
+  local readiness="${HOME_DIR}/dot_agents/skills/execution-readiness-check/SKILL.md"
+  local shim="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
+  [ -f "$readiness" ]
+  [ -f "$shim" ]
+  grep -q "^name: execution-readiness-check$" "$readiness"
+  grep -q "^name: model-fitness-check$" "$shim"
+  grep -q "Frontier Harness への段階移行" "$shim"
+  # AC-034: during the migration window the shim itself must invoke the dynamic gate.
+  grep -q 'execution-readiness-check' "$shim"
+  # The dynamic gate must state that it does not replace the model/effort floor.
+  grep -q 'model-fitness-check' "$readiness"
+  # Both gates are orthogonal, so every orchestration path must invoke BOTH.
+  # Dropping the model-fitness-check call would silently disable the blocking floor gate.
+  local caller gate
   for caller in pr-workflow sdd multi-review; do
-    grep -q 'model-fitness-check' "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
-      echo "${caller}/SKILL.md does not invoke model-fitness-check"
-      false
-    }
+    for gate in execution-readiness-check model-fitness-check; do
+      grep -q "${gate}" "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+        echo "${caller}/SKILL.md does not invoke ${gate}"
+        false
+      }
+    done
   done
 }
 

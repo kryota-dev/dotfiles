@@ -14,6 +14,34 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 **§4 contract テーブルはこの skill が唯一の SSOT**。`pr-workflow` / `sdd` / `multi-review` はこのテーブルを複製せず、各 entry から本 skill を 1 行で呼ぶだけにする（複製すると Codex pin が 3 箇所で drift した失敗を Claude 側で再演することになる）。
 
+## Frontier Harness への段階移行（AC-034 compatibility shim）
+
+`frontier-harness` は route の readiness を `/execution-readiness-check` で確認する。これは
+**adapter capability・account scope・rollout・permission manifest** を見る gate であり、
+**セッション自身の model / effort floor は判定しない**（`execution-readiness-check` 本文が
+「current session が特定 model かどうかを判定しない」と明言している）。両者は**直交する**ため、
+片方が他方を代替しない。
+
+### shim 契約（移行期間中の挙動）
+
+本 skill は 2 release の間、`execution-readiness-check` を呼ぶ compatibility shim として振る舞う。
+すなわち **本 skill が起動されたら、§4 の floor 判定に加えて
+`/execution-readiness-check <呼び出し元の task / review context>` も起動する**（同一セッションで
+既に起動済みなら再起動しない —— 「idempotency」節と同じ扱い）。これにより `wave-orchestrator` や
+user の直接起動といった legacy invocation でも readiness gate が働く。
+
+### 移行期間中の呼び出し側の責務
+
+`pr-workflow` / `sdd` / `multi-review` は、移行期間中 **両方の gate を明示的に呼ぶ**。floor 判定を
+readiness gate で置き換えてはならない —— それは blocking gate の静かな無効化であり、
+`wave-orchestrator` が名指しで禁じている退行そのものになる。
+
+### 削除条件
+
+全 legacy caller が `/execution-readiness-check` を直接呼ぶよう移行し、pilot telemetry が
+十分に蓄積されるまで、この §4 contract と over-provision gate を削除・弱体化してはならない。
+shim の撤去は、その条件が満たされたことを確認したうえで別 PR で行う。
+
 ## §4 contract（Model/effort テーブル）
 
 テーブルが規定するのは**セッション自身**の model / effort であり、**委譲先 worker の tier は各 agent 定義の frontmatter が SSOT**（例: adversarial verification 行は「その作業を主導するセッション」に Opus @ xhigh を要求するのであって、`adversarial-verifier` agent が Opus であるべきという意味ではない）。
