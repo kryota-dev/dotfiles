@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { PROVIDER_COMMANDS } from "./providers.mjs";
+
 // state へ書き込むレコードの列挙値と、汎用の境界検証プリミティブ。
 // entity ごとの normalizer は records.mjs にある（ここは entity を知らない）。
 
@@ -50,9 +52,14 @@ export const APPROVAL_KINDS = new Set([
   "wave_batch",
 ]);
 
-// 承認者は user だけ。model が自分自身を承認者として記録できると、
-// 「merge / migration / credential は user escalation」という安全境界が
-// state の側から静かに無効化される。値の拡張は migration で行う。
+// 承認者は user だけ。model が「自分が承認した」と自称する経路を塞ぐ。
+//
+// ただしこれは承認者ラベルの語彙を縛るだけで、承認の出所の証明ではない。
+// harness 内のコードはどれも grantedBy: "user" を書けるため、承認 1 行を根拠に
+// escalation を免除する consumer は、この列だけを信頼してはならない。
+// 出所をどう証明・検証するかは #494（onboarding 承認の実効化）が決める。
+// 検証方式が決まる前に取得経路の語彙をここで固定すると、#494 が実際に必要とする
+// 形と食い違ったまま NOT NULL 列だけが残る。
 export const APPROVAL_GRANTORS = new Set(["user"]);
 
 export const TELEMETRY_VERIFICATION_RESULTS = new Set([
@@ -73,7 +80,16 @@ export const TELEMETRY_OUTCOMES = new Set([
 // telemetry は「内容を含まない集約」でなければならない（180 日保持されるため）。
 // 自由記述列を一切持たせず、TEXT はすべて enum か下記 token に制限する。
 export const TELEMETRY_TOKEN_PATTERN = /^[a-z][a-z0-9._-]*$/;
-export const TELEMETRY_TOKEN_MAX_LENGTH = 64;
+// token は小文字 hex や base32 を素通りさせるため、長さがそのまま「符号化して運べる容量」になる。
+// 出荷 config の最長 model 名は 21 文字なので、実用を損なわない範囲まで詰める。
+export const TELEMETRY_TOKEN_MAX_LENGTH = 32;
+// 要素数を縛らないと、token 配列がそのまま長さ無制限の TEXT 列になり、
+// 「内容を含まない」という 180 日保持の根拠が崩れる。出荷 config の alwaysEscalate は 8 件。
+export const TELEMETRY_RISK_MAX_ENTRIES = 16;
+
+// provider は providers.mjs の PROVIDER_COMMANDS が唯一の語彙。ここで再定義しない。
+export const TELEMETRY_PROVIDERS = new Set(Object.keys(PROVIDER_COMMANDS));
+export const TELEMETRY_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 // ---------------------------------------------------------------------------
 // 汎用 validator
@@ -147,6 +163,25 @@ export function optionalTimestamp(value, label) {
   return requireTimestamp(value, label);
 }
 
+// 端末間の時計ずれとして許容する幅。
+export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+// 「起きた時刻」は未来であってはならない。retention は created_at < cutoff の比較なので、
+// 未来日時の行は永久に prune されず、自由記述列（command / failure_reason 等）が
+// 保持期間を越えて残留する。失効時刻（expiresAt）は未来が正常なので requireTimestamp を使う。
+export function requireOccurredAt(value, label) {
+  const timestamp = requireTimestamp(value, label);
+  if (Date.parse(timestamp) > Date.now() + MAX_CLOCK_SKEW_MS) {
+    throw new TypeError(`${label} must not be in the future`);
+  }
+  return timestamp;
+}
+
+export function optionalOccurredAt(value, label) {
+  if (value === undefined || value === null) return null;
+  return requireOccurredAt(value, label);
+}
+
 export function optionalInteger(value, label) {
   if (value === undefined || value === null) return null;
   if (!Number.isInteger(value)) {
@@ -200,10 +235,13 @@ export function optionalToken(value, label) {
   return requireToken(value, label);
 }
 
-export function optionalTokenArray(value, label) {
+export function optionalTokenArray(value, label, maxEntries) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
     throw new TypeError(`${label} must be an array`);
+  }
+  if (maxEntries !== undefined && value.length > maxEntries) {
+    throw new TypeError(`${label} must have at most ${maxEntries} entries`);
   }
   return value.map((entry, index) => requireToken(entry, `${label}[${index}]`));
 }

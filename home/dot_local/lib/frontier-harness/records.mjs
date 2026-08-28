@@ -5,7 +5,10 @@ import {
   APPROVAL_KINDS,
   REVIEW_SEVERITIES,
   REVIEW_UNCERTAINTIES,
+  TELEMETRY_EFFORTS,
   TELEMETRY_OUTCOMES,
+  TELEMETRY_PROVIDERS,
+  TELEMETRY_RISK_MAX_ENTRIES,
   TELEMETRY_VERIFICATION_RESULTS,
   TERMINAL_ADAPTER_RUN_STATUSES,
   VERIFICATION_CHECK_KINDS,
@@ -16,6 +19,7 @@ import {
   optionalInteger,
   optionalNonEmptyString,
   optionalNonNegativeInteger,
+  optionalOccurredAt,
   optionalStringArray,
   optionalTimestamp,
   optionalToken,
@@ -25,6 +29,7 @@ import {
   requireEnum,
   requireNonEmptyString,
   requireObject,
+  requireOccurredAt,
   requireTimestamp,
   requireToken,
 } from "./record-validation.mjs";
@@ -54,6 +59,11 @@ const EVIDENCE_KEYS = new Set([
 // 「evidence の内容とは何か」の唯一の定義。id と createdAt は内容ではないので含めない。
 // putEvidence と migration の backfill が同じ規則で hash を導出するために共有する
 // （2 箇所で別々に組み立てると、legacy 行と新規行の hash が静かに食い違う）。
+//
+// これは evidence **レコード**の同一性を表す hash であって、artifact の改竄検知ではない。
+// 入力に含まれるのは artifactPath（パス文字列）であり、artifact のバイト列は読まない。
+// artifact を後から書き換えても hash は変わらないため、同一性判定に使ってはならない
+// （バイト列の digest が要るなら、それを産出する adapter 側が別列として持つべき。#493）。
 export function evidenceContentHash(content) {
   return sha256Hex({
     kind: content.kind,
@@ -88,7 +98,7 @@ export function normalizeEvidence(input) {
     taskId: optionalNonEmptyString(input.taskId, "evidence taskId"),
     routeId: optionalNonEmptyString(input.routeId, "evidence routeId"),
     createdAt:
-      optionalTimestamp(input.createdAt, "evidence createdAt") ?? nowIso(),
+      optionalOccurredAt(input.createdAt, "evidence createdAt") ?? nowIso(),
   });
 }
 
@@ -124,8 +134,8 @@ export function normalizeAdapterRun(input) {
     ADAPTER_RUN_STATUSES,
     "adapter run status",
   );
-  const startedAt = requireTimestamp(input.startedAt, "adapter run startedAt");
-  const finishedAt = optionalTimestamp(
+  const startedAt = requireOccurredAt(input.startedAt, "adapter run startedAt");
+  const finishedAt = optionalOccurredAt(
     input.finishedAt,
     "adapter run finishedAt",
   );
@@ -162,7 +172,7 @@ export function normalizeAdapterRun(input) {
       "adapter run failureReason",
     ),
     createdAt:
-      optionalTimestamp(input.createdAt, "adapter run createdAt") ?? nowIso(),
+      optionalOccurredAt(input.createdAt, "adapter run createdAt") ?? nowIso(),
   });
 }
 
@@ -212,7 +222,7 @@ export function normalizeVerificationResult(input) {
       "verification result evidenceId",
     ),
     createdAt:
-      optionalTimestamp(input.createdAt, "verification result createdAt") ??
+      optionalOccurredAt(input.createdAt, "verification result createdAt") ??
       nowIso(),
   });
 }
@@ -271,7 +281,7 @@ export function normalizeReviewFinding(input) {
       "review finding evidenceId",
     ),
     createdAt:
-      optionalTimestamp(input.createdAt, "review finding createdAt") ?? nowIso(),
+      optionalOccurredAt(input.createdAt, "review finding createdAt") ?? nowIso(),
   });
 }
 
@@ -303,7 +313,7 @@ export function normalizeApproval(input) {
     throw new TypeError("approval subjectHash must be a SHA-256 hex digest");
   }
 
-  const grantedAt = requireTimestamp(input.grantedAt, "approval grantedAt");
+  const grantedAt = requireOccurredAt(input.grantedAt, "approval grantedAt");
   const expiresAt = optionalTimestamp(input.expiresAt, "approval expiresAt");
   if (expiresAt !== null && expiresAt < grantedAt) {
     throw new TypeError("approval expiresAt must not precede grantedAt");
@@ -322,7 +332,7 @@ export function normalizeApproval(input) {
     grantedAt,
     expiresAt,
     createdAt:
-      optionalTimestamp(input.createdAt, "approval createdAt") ?? nowIso(),
+      optionalOccurredAt(input.createdAt, "approval createdAt") ?? nowIso(),
   });
 }
 
@@ -363,10 +373,23 @@ export function normalizeTelemetryEvent(input) {
     taskId: optionalNonEmptyString(input.taskId, "telemetry event taskId"),
     category: requireToken(input.category, "telemetry event category"),
     scope: optionalToken(input.scope, "telemetry event scope"),
-    risk: Object.freeze(optionalTokenArray(input.risk, "telemetry event risk")),
-    provider: requireToken(input.provider, "telemetry event provider"),
+    risk: Object.freeze(
+      optionalTokenArray(
+        input.risk,
+        "telemetry event risk",
+        TELEMETRY_RISK_MAX_ENTRIES,
+      ),
+    ),
+    // provider と effort は語彙が閉じている。開いた token のままにすると、
+    // 64 文字の小文字 hex などが素通りし「内容を含まない」保証が規約依存に落ちる。
+    provider: requireEnum(
+      input.provider,
+      TELEMETRY_PROVIDERS,
+      "telemetry event provider",
+    ),
+    // model 名は provider 側の都合で増えるため token のままにする（長さで上限を課す）。
     model: requireToken(input.model, "telemetry event model"),
-    effort: requireToken(input.effort, "telemetry event effort"),
+    effort: requireEnum(input.effort, TELEMETRY_EFFORTS, "telemetry event effort"),
     wallClockMs: optionalNonNegativeInteger(
       input.wallClockMs,
       "telemetry event wallClockMs",
@@ -407,7 +430,7 @@ export function normalizeTelemetryEvent(input) {
       "telemetry event outcome",
     ),
     createdAt:
-      optionalTimestamp(input.createdAt, "telemetry event createdAt") ??
+      optionalOccurredAt(input.createdAt, "telemetry event createdAt") ??
       nowIso(),
   });
 }

@@ -113,7 +113,10 @@ const EVIDENCE_BUS_DDL = `
     subject_hash TEXT NOT NULL,
     scope TEXT NOT NULL,
     task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
-    granted_by TEXT NOT NULL,
+    -- normalizer を通さない直接書き込み（sqlite3 CLI 等）に対するガードレール。
+    -- 同一 UID のプロセスは DB ファイルごと差し替えられるので「境界」ではなく、
+    -- 事故と手抜きを弾くための多層防御として置く。
+    granted_by TEXT NOT NULL CHECK (granted_by = 'user'),
     granted_at TEXT NOT NULL,
     expires_at TEXT,
     created_at TEXT NOT NULL
@@ -128,15 +131,19 @@ const EVIDENCE_BUS_DDL = `
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
     effort TEXT NOT NULL,
-    wall_clock_ms INTEGER,
-    input_tokens INTEGER,
-    output_tokens INTEGER,
-    tool_calls INTEGER,
-    tool_failures INTEGER,
+    wall_clock_ms INTEGER CHECK (wall_clock_ms IS NULL OR wall_clock_ms >= 0),
+    input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0),
+    output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0),
+    tool_calls INTEGER CHECK (tool_calls IS NULL OR tool_calls >= 0),
+    tool_failures INTEGER CHECK (tool_failures IS NULL OR tool_failures >= 0),
     verification_result TEXT,
-    review_precision REAL,
-    human_corrections INTEGER,
-    rollback INTEGER NOT NULL,
+    review_precision REAL
+      CHECK (review_precision IS NULL OR (review_precision >= 0.0 AND review_precision <= 1.0)),
+    human_corrections INTEGER
+      CHECK (human_corrections IS NULL OR human_corrections >= 0),
+    -- STRICT は storage class しか強制しない。accessor を迂回した書き込みで 2 のような値が
+    -- 入ると、読み出し時に静かに false へ潰れる。真偽の domain は SQL 側でも縛る。
+    rollback INTEGER NOT NULL CHECK (rollback IN (0, 1)),
     outcome TEXT,
     created_at TEXT NOT NULL
   ) STRICT;
@@ -208,19 +215,31 @@ export function schemaVersion(database) {
   return Number(database.prepare("PRAGMA user_version").get().user_version);
 }
 
+function unsupportedVersionError(version) {
+  return new Error(
+    `state database schema version ${version} is newer than supported version ${SCHEMA_VERSION}`,
+  );
+}
+
 // migration は単一 transaction で適用し、失敗時は既存 state を変更せずに throw する。
 // SQLite では DDL も PRAGMA user_version も transaction の対象なので、ROLLBACK すれば
 // 列構成とバージョンの両方が移行前へ戻る。
 export function migrate(database) {
-  const current = schemaVersion(database);
-  if (current === SCHEMA_VERSION) return;
-  if (current > SCHEMA_VERSION) {
-    throw new Error(
-      `state database schema version ${current} is newer than supported version ${SCHEMA_VERSION}`,
-    );
-  }
+  // ロックを取る前の版数は「migration が要るか」の早期判定にだけ使う。
+  // これを適用範囲の根拠にしてはならない（下記の再読を参照）。
+  const observed = schemaVersion(database);
+  if (observed === SCHEMA_VERSION) return;
+  if (observed > SCHEMA_VERSION) throw unsupportedVersionError(observed);
+
   database.exec("BEGIN IMMEDIATE");
   try {
+    // 書き込みロックを取ってから user_version を読み直す。state は Git common directory に
+    // 置かれ複数の worktree / 並列セッションで共有されるため、BEGIN より前に読んだ版数は
+    // 「別プロセスが同じ DB を同時に開いて先に migration を終えた」場合に stale になる。
+    // stale な版数を適用範囲の根拠にすると、適用済みのステップを再実行して
+    // duplicate column で起動そのものが落ちる。
+    const current = schemaVersion(database);
+    if (current > SCHEMA_VERSION) throw unsupportedVersionError(current);
     for (let version = current + 1; version <= SCHEMA_VERSION; version += 1) {
       MIGRATIONS[version - 1](database);
     }

@@ -7,6 +7,7 @@ import { createDoctorReport } from "./doctor.mjs";
 import { sha256Hex } from "./hash.mjs";
 import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
 import { PROVIDER_COMMANDS } from "./providers.mjs";
+import { requireObject } from "./record-validation.mjs";
 import { retentionCutoffs } from "./retention.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
@@ -180,9 +181,7 @@ function providerAvailability(commandPaths, verifiedModels = {}) {
 }
 
 function normalizeManifest(input) {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new TypeError("manifest must be an object");
-  }
+  requireObject(input, "manifest");
   const unknownKey = Object.keys(input).find((key) => !MANIFEST_KEYS.has(key));
   if (unknownKey) {
     throw new TypeError(`manifest contains unsupported key: ${unknownKey}`);

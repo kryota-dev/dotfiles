@@ -68,16 +68,28 @@ SQLite state は schema version 2 です。各レコード種別は正規化さ�
 |---|---|---|
 | `tasks` | 実行の起点になった正規化済み task | 保持 |
 | `route_decisions` | 選択した capability、provider、**model、effort**、reviewer | 保持 |
-| `evidence` | raw payload への参照、SHA-256 の `content_hash`、所属する task / route | raw |
+| `evidence` | raw payload への参照、内容フィールドに対する SHA-256 の `content_hash`、所属する task / route | raw |
 | `adapter_runs` | adapter 実行 1 回分: capability、provider、model、effort、状態、開始/終了、exit code | raw |
 | `verification_results` | 決定的チェック 1 件: 種別、状態、command、exit code、evidence 参照 | raw |
 | `review_findings` | 所見 1 件: severity、uncertainty、要約、discriminating experiment、evidence 参照 | raw |
-| `approvals` | user が承認した内容: 種別、subject hash、scope、承認者、承認/失効時刻 | **削除しない** |
+| `approvals` | 承認された内容: 種別、subject hash、scope、承認者、承認/失効時刻 | **削除しない** |
 | `telemetry_events` | 内容を含まない集約値（category、risk、provider/model/effort、所要時間、token 数、結果） | 集約 |
 
 `adapter_runs` には **adapter の起動方式に属する情報を意図的に持たせません**。argv、sandbox 設定、
 profile path、対話/非対話モード、conversation ID、作業ディレクトリ、環境変数はいずれも adapter 側の
 関心事であり、schema に焼き込むと起動方式が変わるたびに migration をやり直すことになります。
+
+`content_hash` が同定するのは evidence **レコード**であり、その先の artifact ではありません。
+hash の入力に含まれるのは artifact の**パス**であってバイト列ではないため、ディスク上のファイルを
+後から書き換えても hash は変わりません。重複排除とレコード同一性のための鍵であって改竄検知では
+ないので、バイト列の完全性が必要なら、そのファイルを書いた adapter 側が別途 digest を持つ必要が
+あります。
+
+`approvals.granted_by` は記録されたラベルであって、承認の出所の証明ではありません。harness 内の
+どのコードも `granted_by = 'user'` を書けますし、列の制約が縛るのは語彙だけです。したがって
+承認 1 行を根拠に escalation を免除する実装は、出所を自分で確立しなければなりません。schema は
+それを運びません。承認をどう証明し検証するかは、これらの行を書く onboarding 側の設計であって、
+行を保存する schema 側の設計ではありません。
 
 `telemetry_events` には自由記述の列が 1 つもありません。TEXT 列はすべて閉じた enum か短い小文字
 token であり、「集約テレメトリは内容を含まない」を規約ではなく schema で強制しています。
@@ -93,6 +105,12 @@ raw evidence と実行系レコードは
 
 migration は単一 transaction 内で順序付きステップとして適用します。失敗するとバージョンと
 列構成の両方が移行前へ巻き戻るため、中断した更新が中途半端な state を残すことはありません。
+どのステップを適用するかを決めるバージョンは、**書き込みロックを取った後**に読みます。state は
+全 worktree で共有されるため、ロック前に読んだバージョンはステップ実行時には古くなりえます。
+
+state を開くコマンドはすべて migration を行います。`fh clean --dry-run` も例外ではありません。
+dry-run が意味するのは「何も削除しない」であって「何も開かない」ではありません。そうしないと、
+v1 の DB に対する dry-run は v2 で追加されたレコード種別を数えられないからです。
 
 ## onboarding と shadow command
 

@@ -168,6 +168,41 @@ export function createRecordAccessors(database) {
     ORDER BY created_at, id
   `);
 
+  // 来歴（provenance）の整合検証。FK は「その id が存在するか」しか見ないため、
+  // task A の verification_result に task B の adapter run を紐付ける、といった
+  // 「参照先はどれも実在するが所属 task が食い違う」行が正当に挿入できてしまう。
+  // Evidence Bus は task 単位の来歴を正本にするので、書き込み境界で所属の一致を見る。
+  const selectRouteTask = database.prepare(
+    "SELECT task_id FROM route_decisions WHERE id = ?",
+  );
+  const selectAdapterRunTask = database.prepare(
+    "SELECT task_id FROM adapter_runs WHERE id = ?",
+  );
+  const selectEvidenceTask = database.prepare(
+    "SELECT task_id FROM evidence WHERE id = ?",
+  );
+
+  function assertOwnedByTask(label, taskId, reference, referenceLabel, lookup) {
+    if (!reference) return;
+    const row = lookup.get(reference);
+    // 参照先が存在しない場合は INSERT 時に FK 制約が弾く。ここで二重に実装しない。
+    if (!row) return;
+    // evidence.task_id は nullable（v1 由来の行は NULL）。未紐付けは食い違いではない。
+    if (row.task_id === null || row.task_id === undefined) return;
+    if (row.task_id !== taskId) {
+      throw new TypeError(
+        `${label} ${referenceLabel} ${reference} belongs to task ${row.task_id}, not ${taskId}`,
+      );
+    }
+  }
+
+  function assertProvenance({ label, taskId, routeId, adapterRunId, evidenceId }) {
+    if (!taskId) return;
+    assertOwnedByTask(label, taskId, routeId, "routeId", selectRouteTask);
+    assertOwnedByTask(label, taskId, adapterRunId, "adapterRunId", selectAdapterRunTask);
+    assertOwnedByTask(label, taskId, evidenceId, "evidenceId", selectEvidenceTask);
+  }
+
   // retention（raw クラス）。approvals は承認の監査証跡なのでここに含めない。
   const countAdapterRunsBefore = database.prepare(
     "SELECT COUNT(*) AS expired FROM adapter_runs WHERE created_at < ?",
@@ -197,8 +232,10 @@ export function createRecordAccessors(database) {
   );
 
   return {
+    assertProvenance,
     recordAdapterRun(input) {
       const run = { id: newId("arun"), ...normalizeAdapterRun(input) };
+      assertProvenance({ label: "adapter run", ...run });
       insertAdapterRun.run(
         run.id,
         run.taskId,
@@ -225,6 +262,7 @@ export function createRecordAccessors(database) {
         id: newId("vres"),
         ...normalizeVerificationResult(input),
       };
+      assertProvenance({ label: "verification result", ...result });
       insertVerificationResult.run(
         result.id,
         result.taskId,
@@ -244,6 +282,7 @@ export function createRecordAccessors(database) {
 
     recordReviewFinding(input) {
       const finding = { id: newId("rfind"), ...normalizeReviewFinding(input) };
+      assertProvenance({ label: "review finding", ...finding });
       insertReviewFinding.run(
         finding.id,
         finding.taskId,

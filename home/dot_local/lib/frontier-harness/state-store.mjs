@@ -103,6 +103,36 @@ export function createStateStore(databasePath) {
     return skipped;
   }
 
+  // transaction の張り方はここ 1 箇所に集約し、再入を安全にする。
+  // pruneExpired が自前で BEGIN すると、withTransaction の内側から呼ばれたときに
+  // 内側の BEGIN が "cannot start a transaction within a transaction" で失敗し、
+  // その catch の ROLLBACK が外側の transaction ごと巻き戻す（外側の書き込みが静かに消え、
+  // 例外メッセージは原因を指さない）。SQLite は入れ子 transaction を持たないため、
+  // 最外周だけが BEGIN / COMMIT を発行し、内側は外側の原子性に相乗りする。
+  let transactionDepth = 0;
+  function runInTransaction(callback) {
+    if (transactionDepth > 0) {
+      transactionDepth += 1;
+      try {
+        return callback();
+      } finally {
+        transactionDepth -= 1;
+      }
+    }
+    database.exec("BEGIN IMMEDIATE");
+    transactionDepth = 1;
+    try {
+      const result = callback();
+      database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    } finally {
+      transactionDepth = 0;
+    }
+  }
+
   return {
     ...records,
     schemaVersion() {
@@ -118,15 +148,7 @@ export function createStateStore(databasePath) {
       return { busyTimeout, journalMode };
     },
     withTransaction(callback) {
-      database.exec("BEGIN IMMEDIATE");
-      try {
-        const result = callback();
-        database.exec("COMMIT");
-        return result;
-      } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-      }
+      return runInTransaction(callback);
     },
     createTask(input) {
       // 境界で正規化し、呼び出し側が渡した id や未知フィールドを持ち込ませない。
@@ -193,6 +215,8 @@ export function createStateStore(databasePath) {
         // 「保存された hash が内容と一致しない」状態を作れてしまう。
         contentHash: evidenceContentHash(content),
       };
+      // task と route の両方を指定した evidence は、その route が同じ task のものであること。
+      records.assertProvenance({ label: "evidence", ...evidence });
       insertEvidence.run(
         evidence.id,
         evidence.kind,
@@ -226,23 +250,18 @@ export function createStateStore(databasePath) {
       const skippedArtifacts = removeExpiredArtifacts(rawCutoff, artifactRoot);
       // 複数テーブルの削除は単一 transaction で行い、途中で失敗しても
       // 「一部だけ消えた」状態を残さない。
-      database.exec("BEGIN IMMEDIATE");
-      try {
+      return runInTransaction(() => {
         // 子 → 親の順。期限内の子が期限切れの親を参照していても
         // ON DELETE SET NULL が参照を外すため、FK 違反にはならない。
         const recordCounts = records.deleteExpiredRecords(rawCutoff);
         const evidence = Number(deleteEvidenceBefore.run(rawCutoff).changes);
         const telemetry = records.deleteExpiredTelemetry(telemetryCutoff);
-        database.exec("COMMIT");
         return {
           raw: { evidence, ...recordCounts },
           telemetry,
           skippedArtifacts,
         };
-      } catch (error) {
-        database.exec("ROLLBACK");
-        throw error;
-      }
+      });
     },
     close() {
       database.close();
