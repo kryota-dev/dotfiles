@@ -4,6 +4,7 @@ feature: wave-orchestrator と frontier-harness の agent 実行を CLI 非対�
 created_at: 2026-08-29T00:20:00+09:00
 issue: 526
 parent: 525
+grill_session: n/a (investigation report — not a grill-me output)
 status: finalized
 ---
 
@@ -12,6 +13,15 @@ status: finalized
 本書は #526 の成果物である。**実装は含まない。** 3 つの CLI（Claude Code / Codex / Antigravity）の
 非対話モード・サンドボックス・Remote Control 併用可否を一次ソースで確認し、`wave-orchestrator` と
 `frontier-harness` の移行可否と範囲を決める。後続 issue は「候補の列挙」までに留める（issue 化は user 承認を経る）。
+
+> **この文書の位置づけ（`.claude/prds/` の PRD 契約からの意図的な逸脱）**
+> `.claude/prds/` は本来 `grill-me` が出力する PRD の置き場で、`grill_session` frontmatter と
+> Background / User Story / Acceptance Criteria（`AC-NNN`）/ Considered Alternatives・Rejection Rationale /
+> Out of Scope / Open Questions の骨格を契約とする（`grill-me/SKILL.md`）。本書は grill-me の対話成果物ではなく
+> **調査報告**なので、`grill_session` は `n/a` とし、Acceptance Criteria は issue #526 の完了条件との対応表として持つ。
+> **`/planning --input-prd` の入力としては使わないこと**（AC が実装タスクの受け入れ条件ではなく、調査の網羅性チェックだから）。
+> 契約のうち意味のある要素（User Story / Considered Alternatives・Rejection Rationale / Out of Scope / Open Questions）は
+> 満たしている。
 
 ## Background
 
@@ -27,6 +37,26 @@ status: finalized
 いずれも「**対話 UI を外部から操作する**」ことに由来する。`frontier-harness` は provider adapter が未実装
 （#493）で、`runWithRolloutGuard(config, context, executor)` の `executor` を**これから決める**段階にある。
 両者が同じ実行基盤を共有できるなら、片方が決め打つ前に揃えて設計する価値がある。
+
+## User Story
+
+orchestrator の運用者として、子 agent の実行を「TUI を外から操作する」形から離せるかどうかを、
+**推測ではなく一次ソースと実機挙動**で判断したい。そうすれば、移行する場合も見送る場合も、
+その判断を後から根拠ごと辿れる（#472 / #486 のように、事故のたびにガードを足す前に「この経路自体を続けるべきか」を問える）。
+
+## Acceptance Criteria（issue #526 の完了条件との対応）
+
+`AC-NNN` は実装タスクの受け入れ条件ではなく、**調査の網羅性チェック**である。
+
+| ID | 条件（issue #526 より） | 満たした箇所 |
+| --- | --- | --- |
+| AC-001 | 3 CLI の非対話モードを公式ドキュメントを一次ソースとして網羅的に調査し、機能と制約を裏取りする | §1.1 / §2.1 / §3.1、付録 B |
+| AC-002 | 承認・選択肢など対話を要する経路が非対話モードでどう扱われるかを確認し、tmux 経路の「停止の検知と代理応答」の代替可否を判断する | §1.2（実測）／§2.2 / §3.2 / §6 |
+| AC-003 | 長時間実行の中断・再開、成果物の受け取り、レビュー指摘への対応が非対話モードで成立するかを確認する | §1.3 / §1.4 / §2.3 / §3.4 |
+| AC-004 | 各 CLI のサンドボックス機能を調査し、採否を検討する | §1.5 / §2.4 / §3.3 / §7.2 |
+| AC-005 | Remote Control と非対話モードを併用できるかを調査する | §4（実測で併用不可を確認） |
+| AC-006 | 移行の可否と範囲を決め、実装対象を後続 issue として分解する（issue 化はしない） | §7 / §8 |
+| AC-007 | すべてが一次ソースで裏取りされ、参照先を含む根拠が文書に残る | 各節の［実測］/［原文］表記、付録 A（再現手順）・付録 B（参照一覧） |
 
 ## 調査方法
 
@@ -252,6 +282,11 @@ sandbox: read-only
 | 設定を読まない | `--ignore-user-config` / `--ignore-rules` |
 | 作業ディレクトリ | `-C/--cd <DIR>` / `--add-dir <DIR>` |
 
+`codex exec` 自体は 1 プロセスで複数ターンを回す入力形式（Claude の `--input-format stream-json` 相当）を持たない。
+ただし `codex queue --thread <UUID|name> --message <TEXT>`（既存セッションへのメッセージ投入）と
+`codex exec-server`（experimental）という別経路が CLI に存在する［`--help` で確認］。**本調査では挙動を検証していない**ので、
+「多ターンができない」とは断定しない。adapter を常駐プロセス方式で作るなら、この 2 つの検証が前提になる（Open Questions 参照）。
+
 ### 2.2 承認モデル ── orchestrator が「回答する」経路は無い
 
 Claude Code の `--permission-prompt-tool` に相当する「**外部プロセスが承認要求を受け取って返す**」チャネルは、
@@ -290,6 +325,11 @@ macOS Seatbelt での実効性を確認した。
 
 - 書き込み可能ルート内でも `.git` / `.agents` / `.codex` は read-only で保護される［原文］。
 - `workspace-write` のネットワークは既定 off（`[sandbox_workspace_write] network_access = true` で開ける）［原文］。
+- **非シェル経路（組み込み patch ツール）も sandbox mode で塞がれる**［実測］: `--sandbox read-only` で
+  「シェルではなく組み込みの編集機能で書け」と指示すると、tool router が
+  `patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings` を返して拒否し、
+  ファイルは作られなかった。Claude Code の「サンドボックスは Bash のみ、file tools は権限システム」という
+  非対称は Codex には当てはまらない（ただしこの経路の拒否は OS 強制ではなく tool router の policy 判定である）。
 - Linux は `bwrap` + `seccomp`。
 - **ドキュメントと CLI の drift**［実測］: 公式は `codex sandbox macos [COMMAND]...` の形を示すが、0.150.1 の
   `codex sandbox` はプラットフォーム別サブコマンドを持たず、`--permission-profile <NAME>` を必須とし、
@@ -397,11 +437,11 @@ Remote Control は「非対話実行の手段」ではなく「**人が別デバ
 | --- | --- | --- | --- |
 | 非対話起動 | `-p` | `codex exec` | `-p` |
 | 構造化出力 | `json` / `stream-json` / `--json-schema` | `--json`(JSONL) / `--output-schema` / `-o` | `json` / `stream-json` / `--json-schema` |
-| 1 プロセス多ターン | `--input-format stream-json`［実測］ | 無（`exec resume` で別プロセス） | `--input-format stream-json`［原文］ |
+| 1 プロセス多ターン | `--input-format stream-json`［実測］ | `exec` には stdin 多ターン入力が無く `exec resume` は別プロセス。別経路として `codex queue --thread` / `exec-server`（experimental）があるが**本調査では未検証** | `--input-format stream-json`［原文］ |
 | セッション再開 | `--session-id` / `--resume`［実測］ | `exec resume --last\|<id>`［実測］ | `--continue` / `--conversation`［実測］ |
 | **承認を外部へ往復** | **可**（`--permission-prompt-tool`、`AskUserQuestion` も含む）［実測］ | 不可（`auto_review` agent か `never`） | **不可**（`control_request` は ERROR）［原文］ |
 | 承認不能時の既定 | prompt tool 無しなら黙って未実行のまま継続［原文］ | 失敗を model に返す［原文］ | ソフト拒否・**exit 0 / status SUCCESS**［実測］ |
-| OS 強制サンドボックス | Bash のみ（Seatbelt / bubblewrap）［実測］ | 全シェル実行（Seatbelt / bwrap+seccomp）［実測］ | **ファイル書き込みは対象外**［実測］ |
+| サンドボックスの適用範囲 | **Bash のみ** OS 強制（Seatbelt / bubblewrap）。Read/Edit/Write は権限システム側［実測］ | シェル実行は OS 強制（Seatbelt / bwrap+seccomp）。**組み込み patch ツールも sandbox mode で拒否される**（tool router の policy 判定）［実測］ | **ファイル書き込みは対象外**（`--sandbox` は terminal 限定）［実測］ |
 | サンドボックス指定 | 設定 JSON（`--settings` 可） | `-s` フラグ（**resume では不可**、`-c sandbox_mode`）［実測］ | `--sandbox`（実効性に難）［実測］ |
 | ネットワーク既定 | 許可ドメイン無し（prompt / strictAllowlist） | `workspace-write` で off | 未確認（`--sandbox` 下で shell 自体が不可） |
 | model / effort の pin | `--model` / `--effort` | `-m` / `-c model_reasoning_effort` | `--model` / `--effort` |
@@ -446,8 +486,24 @@ Remote Control は「非対話実行の手段」ではなく「**人が別デバ
 | 新規リスク | 内容 | 対処 |
 | --- | --- | --- |
 | R1 | prompt tool を配線しないと `AskUserQuestion` 自体が消え、**pr-workflow の blocking gate が静かに無効化される**［実測］ | prompt tool の配線を必須にし、`system/init` の tools に `AskUserQuestion` があることを起動時に検査する |
-| R2 | `-p` は workspace trust を出さず、**不正な設定ファイルを黙って無視する**［原文］。`--bare` なしでは repo の hooks / MCP が動く | 起動時に `mcp_server_errors` / `plugin_errors` を検査して fail する |
+| R2 | `-p` は workspace trust を出さず、**不正な設定ファイルを黙って無視する**［原文］。`--bare` なしでは repo の hooks / MCP が動く | **起動時のフラグで事前に遮断する**（下記） |
 | R3 | subagent 内では `AskUserQuestion` が使えない［原文］ | 親セッションに gate を集約する設計を維持する（`pr-workflow` は現状そうなっている） |
+
+**R2 の緩和は事後検査では足りない。** 当初は「起動後に `system/init` の `mcp_server_errors` / `plugin_errors` を
+検査して fail する」で足りると考えたが、これは**接続・パースに失敗したものしか捕まえられない**。正常に接続して
+応答する（＝エラーを出さない）hook / MCP server は素通りする。さらに `SessionStart` / `Setup` hook は
+`system/init` **より前**に走る［原文: headless「Read session metadata」］ので、init を読んだ時点では既に実行済みである。
+対話モードの初回 trust ダイアログが「実行**前**の人間の承認」であるのに対し、init 検査は「実行**後**のログ確認」で
+性質が異なる。よって R2 の対処は**起動フラグによる事前遮断**とする:
+
+| 手段 | 効果 |
+| --- | --- |
+| `--setting-sources user`（または `--bare`） | repo の `.claude/settings.json` を読まない ＝ project hooks が走らない |
+| `--strict-mcp-config` ＋ `--mcp-config <approver>` | repo の `.mcp.json` を無視し、orchestrator が明示した MCP server だけを接続する（allowlist 方式） |
+| 上記が使えない（repo の hooks / skills が必要）場合 | その worktree を**人が一度は明示的に trust した記録**を orchestrator 側に持ち、起動前に照合する |
+
+`system/init` の `mcp_server_errors` / `plugin_errors` 検査は**この事前遮断を前提としたうえでの二次的な健全性確認**
+として残す（設定ミスの検出には有効だが、単独では安全境界にならない）。
 
 ## 7. Decision
 
@@ -456,11 +512,26 @@ Remote Control は「非対話実行の手段」ではなく「**人が別デバ
 - **移行する**: 「停止の検知 ＋ 画面参照 ＋ キー送出」を、`claude -p --permission-prompt-tool <MCP tool>` の
   **同期的な承認/回答チャネル**へ置き換える。根拠は §1.2.3 の実測（`AskUserQuestion` の構造化往復）と §6 の対応表
   （ガードの大半が不要化し、移植対象は policy と台帳に限られる）。
+- **直前の決定との関係（重要）**: `.claude/prds/wave-orchestrator-hook-based-detection.prd.md`（`status: finalized`,
+  2026-08-26）は「**検知**は hook payload、**応答**は payload の options index + 1 を数字キーで送る」と確定し、
+  そのとき「SDK へ移行する」案を「**独立した対話型セッションを立て、人が覗いて介入できる**という skill の中核と衝突する」
+  という理由で却下している。本書は **検知側の決定（画面テキストではなく hook payload を根拠にする）を維持したまま、
+  応答側の決定（数字キー送出）を置き換える**。旧 PRD の却下理由（人が覗ける導線の喪失）は本書でもガード 21 として
+  正面から扱い、`--session-id` を控えて `claude --resume <id>` で対話セッションとして開き直せること［実測］、
+  および tmux ペインを「窓」として残すことで代替する。**旧 PRD の却下判断を覆すのはこの 1 点であり、
+  その理由は §1.2.3 の実測（構造化往復が成立する）と §6（TUI 由来ガードの不要化）にある。**
 - **移行しない**: tmux そのもの。**人が覗く窓としての価値は残る**（ガード 21）。実行を headless にしても、
   ペインで子プロセスを走らせて stream をそのまま流せば、可視性は保てる。
   「tmux を捨てる」ことは本調査の目的ではない。
-- **前提条件（満たさないなら移行しない）**: prompt tool の配線を必須化し、起動時に `AskUserQuestion` の
-  存在検査を行うこと（R1）。この検査が無い移行は、gate を静かに失う退行になる。
+- **前提条件（満たさないなら移行しない）**:
+  1. prompt tool の配線を必須化し、起動時に `AskUserQuestion` の存在検査を行うこと（R1）。この検査が無い移行は、
+     gate を静かに失う退行になる。
+  2. **`--strict-mcp-config` を必須化し、approver 以外の MCP server が子セッションに入らないようにすること。**
+     承認チャネルは新しい信頼境界なので、子が任意の MCP server を注入できる状態では承認の迂回・詐称が成立しうる。
+  3. **repo 由来の hooks / MCP を事前に遮断すること**（`--setting-sources user` または `--bare`。R2 の表を参照）。
+     ワークツリーは issue 由来のブランチを含みうるので、`.claude/settings.json` / `.mcp.json` は信頼境界の外から来る前提で扱う。
+  4. **gate を親セッションに集約する設計を維持すること**（R3）。subagent 内では `AskUserQuestion` が使えないため、
+     承認を要する判断を subagent へ降ろすと gate が消える。`pr-workflow` は現状この形を満たしている。
 - **段階**: `--input-format stream-json` を使えば 1 プロセスで多ターン（＝レビュー指摘対応まで）を回せる［実測］が、
   まずは 1 タスク 1 プロセス ＋ `--session-id` / `--resume` で始めるほうが state が単純になる。
 
@@ -470,7 +541,7 @@ Remote Control は「非対話実行の手段」ではなく「**人が別デバ
 
 | provider | 起動方式の推奨 | 承認 | 書き込みを伴う実行 |
 | --- | --- | --- | --- |
-| `claude` | `-p` ＋ `--permission-prompt-tool` ＋ `--output-format stream-json` | **外部往復可** | 可（sandbox は設定 JSON で hard fail 化） |
+| `claude` | `-p` ＋ `--permission-prompt-tool` ＋ `--output-format stream-json` ＋ `--strict-mcp-config`（＋ `--setting-sources user`） | **外部往復可** | 可（sandbox は設定 JSON で hard fail 化。**ただし包むのは Bash のみ**。Read/Edit/Write は権限システム側なので `--dangerously-skip-permissions` と併用しない） |
 | `codex` | `codex exec --sandbox <mode> --json`、再開は `resume` ＋ `-c sandbox_mode` | 不可（`never` / `auto_review`） | 可（OS 強制サンドボックスが実測で有効） |
 | `antigravity` | `-p --output-format json`、**`response` 非空と stderr を必ず検査** | 不可 | **非推奨**（`--sandbox` が書き込みを止めない。外側の隔離が無い限り read-only 用途に限定） |
 
@@ -514,14 +585,26 @@ adapter が満たすべき最小要件（#493 の設計入力）:
 
 | # | 候補 | 依存 |
 | --- | --- | --- |
-| C1 | 承認 MCP server（permission prompt tool）の実装 ── `allow` / `deny` / `answers` の返却、無条件エスカレート集合の deny ルール、progress 通知による idle timeout 対策 | 本書 |
+| C1 | 承認 MCP server（permission prompt tool）の実装 ── `allow` / `deny` / `answers` の返却、無条件エスカレート集合の deny ルール、progress 通知による idle timeout 対策、**idle timeout 到達時の安全な fallback（自動 deny ＋ 子セッション状態の保存）**、`--strict-mcp-config` 前提の接続要件 | 本書 |
 | C2 | `wave-orchestrator` の子起動を `claude -p --permission-prompt-tool` へ切り替え、起動時に `AskUserQuestion` 存在検査を入れる | C1 |
-| C3 | 起動時ヘルスチェック（`mcp_server_errors` / `plugin_errors` / sandbox 実効性）を子起動シーケンスに追加 | C2 |
-| C4 | `scripts/wave-events.sh` / `scripts/send-to-pane.sh` の縮退方針決定（tmux 併用時のみ残す / 撤去する） | C2 |
+| C3 | 子起動フラグの固定（`--setting-sources user` / `--strict-mcp-config` の allowlist 方式）＋ 起動時ヘルスチェック（`AskUserQuestion` 存在・`mcp_server_errors` / `plugin_errors`・sandbox 実効性）を子起動シーケンスに追加 | C2 |
+| C4 | `scripts/executable_wave-events.sh` / `scripts/executable_send-to-pane.sh` の縮退方針決定（tmux 併用時のみ残す / 撤去する）と、`wave-orchestrator-hook-based-detection.prd.md` への forward pointer 追記 | C2 |
 | C5 | `frontier-harness` の provider adapter 実装（#493）に §7.2 の 4 要件を反映 | 本書 |
 | C6 | capability registry に承認チャネル軸を追加し、`risk.alwaysEscalate` の route を塞ぐ | C5 |
 | C7 | サンドボックス実効性の回帰テスト（Claude / Codex の 4 ケースを bats 化） | C5 |
 | C8 | Antigravity adapter の成功判定（`response` 非空 ＋ stderr 走査）と read-only 制限 | C5 |
+
+## Considered Alternatives / Rejection Rationale（決定ログ）
+
+| # | 検討した代替案 | 却下理由 |
+| --- | --- | --- |
+| 1 | **現状維持**（tmux 対話セッション ＋ 画面参照での代理応答を続ける） | #472（プレースホルダ誤読）・Esc 固着・#486（判別不能）は個別のバグではなく「TUI を外から操作する」構造に由来する。ガードを足しても再発の形が変わるだけである。構造化往復が実測で成立した以上、維持する理由は実装コストだけになる。**ただし §7.1 の前提条件（R1〜R3）を満たせないなら見送るのが正しい** —— その場合は gate を静かに失う退行になる |
+| 2 | **全面移行**（tmux を撤去し headless のみにする） | ガード 21（人が覗いて介入する導線）を失う。`--resume` で対話セッションとして開き直せる［実測］とはいえ、詰まった子を即座に覗ける窓の運用価値は高い。実行だけを headless にし、可視化は tmux ペインに残す形を採る |
+| 3 | **Claude Agent SDK（TypeScript / Python）へ移行する** | SDK の `canUseTool` は CLI の `--permission-prompt-tool` と同じ能力を提供する［原文］。CLI で必要な能力が揃った以上、`wave-orchestrator` を SDK ホストプロセスとして書き直す変更量に見合わない。将来の選択肢としては残す（`wave-orchestrator-hook-based-detection.prd.md` が同案を却下した理由 ——「人が覗ける導線と衝突する」—— は、代替案 2 と同じ論点で本書でも維持される） |
+| 4 | **Codex / Antigravity を wave の実行基盤にする** | 承認要求を外部へ往復させるチャネルが無い（Codex は `auto_review` という別 agent への委譲、Antigravity は `control_request` が ERROR）。「gate は人（または orchestrator）が握る」という要件と両立しない。両者は frontier-harness の worker としては使える（§7.2） |
+| 5 | **Remote Control のサーバモード（`--spawn worktree`）を実行基盤にする** | Remote Control は人が別デバイスから**対話する**手段であって、プログラムから駆動する API ではない。`-p` との併用も実測で成立しない（§4.2）。監視面の選択肢としては残す |
+| 6 | **Antigravity の `--sandbox` に封じ込めを任せる** | 実測で workspace 外へのファイル書き込みが素通りした（2 回再現）。`--sandbox` は terminal 限定であり、封じ込めは権限ポリシー層にしかない |
+| 7 | **承認チャネルを持たず `--permission-mode dontAsk` で完全自動化する** | `dontAsk` は `AskUserQuestion` を allow ルールがあっても拒否する［原文］。R1 と同じ「gate が静かに消える」失敗になる。CI のような使い捨て実行には妥当だが、マージ手前まで走らせる wave の子には使えない |
 
 ## Out of Scope
 
@@ -541,6 +624,8 @@ adapter が満たすべき最小要件（#493 の設計入力）:
 4. quota 逼迫時の中断・再開を非対話でどう行うか（SIGTERM でターンが未完了のまま残る挙動を利用する形になる）。
 5. Codex の `approvals_reviewer = "auto_review"` を wave の一部として使うか（人の代わりに agent が承認する形を
    本リポジトリの規律に組み込んでよいか）。
+6. Codex の `codex queue --thread` と `codex exec-server`（experimental）が常駐プロセス方式の多ターン実行に
+   使えるか（本調査では `--help` の存在確認のみで挙動未検証）。使えるなら Codex adapter の形が変わる。
 
 ## 付録 A: 再現手順
 
@@ -561,10 +646,17 @@ probe --sandbox                      # => unknown option '--sandbox'          �
 ### A-2. `AskUserQuestion` の可用性（2×2 対照）
 
 ```sh
-claude -p --setting-sources '' --permission-mode <default|auto> \
-  [--mcp-config "$MCP" --strict-mcp-config --permission-prompt-tool mcp__approver__approve] \
-  --output-format stream-json --verbose --max-turns 1 --model sonnet "reply ok" \
+# $MCP は A-3 の approver を宣言した --mcp-config の JSON 文字列
+ask_probe() {  # $1 = permission mode, $2.. = 追加フラグ
+  local mode="$1"; shift
+  claude -p --setting-sources '' --permission-mode "$mode" "$@" \
+    --output-format stream-json --verbose --max-turns 1 --model sonnet "reply ok" \
   | jq -c 'select(.subtype=="init")|{permissionMode,hasAsk:(.tools|index("AskUserQuestion")!=null)}'
+}
+ask_probe default
+ask_probe auto
+ask_probe default --mcp-config "$MCP" --strict-mcp-config --permission-prompt-tool mcp__approver__approve
+ask_probe auto    --mcp-config "$MCP" --strict-mcp-config --permission-prompt-tool mcp__approver__approve
 ```
 
 結果: prompt tool 無し → `hasAsk:false`（`default` / `auto` とも）。prompt tool 有り → `hasAsk:true`（同）。
@@ -610,6 +702,16 @@ codex exec --sandbox workspace-write --skip-git-repo-check --ephemeral -C "$DIR"
    2) echo WROTE > "$HOME/.codex-sandbox-outside-probe.txt"  3) curl ... https://example.com'
 ```
 
+非シェル経路（組み込み patch ツール）も同じ sandbox mode で塞がれることの確認:
+
+```sh
+codex exec --sandbox read-only --skip-git-repo-check --ephemeral -C "$DIR" \
+  'Use your built-in file editing capability (apply_patch or the equivalent non-shell tool), NOT a shell command,
+   to create a file named patched.txt containing the single word PATCHED. Then report whether it was blocked and
+   quote the exact error.'
+# => patch rejected: writing is blocked by read-only sandbox; rejected by user approval settings
+```
+
 ### A-6. Codex の再開とサンドボックス pin
 
 ```sh
@@ -643,7 +745,8 @@ exit 0・4 秒で終了・`init` に Remote Control を示すフィールド無�
 ```sh
 U=$(uuidgen | tr 'A-Z' 'a-z')
 claude -p --session-id "$U" --output-format json --max-turns 1 --model sonnet "Remember the word: banana. Reply OK."
-cd /elsewhere && claude -p --resume "$U" --output-format json --max-turns 1 --model sonnet "What word?"   # => banana
+OTHER=$(mktemp -d) && cd "$OTHER"
+claude -p --resume "$U" --output-format json --max-turns 1 --model sonnet "What word?"   # => banana
 ```
 
 ## 付録 B: 参照した一次ソース
@@ -680,9 +783,14 @@ cd /elsewhere && claude -p --resume "$U" --output-format json --max-turns 1 --mo
 ### CLI 自身の出力
 
 `claude --help` / `claude agents --help`（2.1.250）、`codex --help` / `codex exec --help` /
-`codex exec resume --help` / `codex sandbox --help`（0.150.1）、`agy --help`（1.1.22）。
+`codex exec resume --help` / `codex sandbox --help` / `codex queue --help` / `codex exec-server --help`（0.150.1）、
+`agy --help`（1.1.22）。
 
 ### 本リポジトリ
 
-`home/dot_agents/skills/wave-orchestrator/SKILL.md`、同 `scripts/wave-events.sh`、同 `scripts/send-to-pane.sh`、
-`home/dot_local/lib/frontier-harness/{cli,rollout,router,config,doctor,readiness,providers,task}.mjs`。
+`home/dot_agents/skills/wave-orchestrator/SKILL.md`、同 `scripts/executable_wave-events.sh`、
+同 `scripts/executable_send-to-pane.sh`（chezmoi source の実名。deploy 後は `executable_` 接頭辞が外れる）、
+`home/dot_local/lib/frontier-harness/{cli,rollout,router,config,doctor,readiness,providers,task,paths,state-root,state-store}.mjs`
+（§7.3 の報告項目は `state-store.mjs` の schema に接続する）、
+`.claude/prds/wave-orchestrator-hook-based-detection.prd.md`、`.claude/prds/frontier-harness-pr-workflow.prd.md`、
+`home/dot_agents/skills/grill-me/SKILL.md`（`.claude/prds/` の PRD 契約）。
