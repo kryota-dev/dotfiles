@@ -23,13 +23,34 @@ fh doctor --json
 Antigravity は vendor-supported な業務 account mapping を実測するまで personal scope 専用です。
 `r06` session では personal credential へ自動 fallback せず、unavailable として fail closed にします。
 
+account scope は `cld` / `codex` launcher が呼び出しごとに設定する `CLAUDE_CONFIG_DIR` と
+`CODEX_HOME` の suffix から判定します。両方が未設定のとき、2 つが食い違うとき、想定外の値のときは
+いずれも `unknown` に解決し、`accountScope` を宣言した capability は unavailable のままにします。
+launcher はこれらを global には export しないため、素の shell から `fh doctor` を実行すると
+`accountScope: "unknown"` になります。これは設定漏れではなく意図した fail closed の既定です。
+
 ## state と evidence
 
 | 場所 | 内容 | 管理 |
 |---|---|---|
-| `~/.config/frontier-harness/config.json` | capability registry、rollout、retention | chezmoi |
+| `$HOME/.config/frontier-harness/config.json`、または絶対パスの `FH_CONFIG_PATH` | capability registry、rollout、retention | chezmoi |
 | `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込む。参照して強制するのは onboarding step から） | repository policy |
-| `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
+| 検証済みの `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
+
+`fh` は untrusted な checkout の上で動くことを前提とするため、いずれの置き場所も
+作業ディレクトリの内容から解決しません。
+
+- `HOME` は絶対パスである必要があり、`FH_CONFIG_PATH` による上書きも絶対パスに限ります。
+  相対値は作業ディレクトリ基準で解決されるため、checkout 済み repository が自前の
+  escalation 方針を差し込めてしまいます。
+- git の common directory は、絶対パスであること、symlink でないこと、真正な git metadata
+  ディレクトリであること、そして **現在の作業ツリーが所有していること** を確認してから使います。
+  所有と認めるのは `<toplevel>/.git`、登録済み linked worktree の common directory、
+  superproject の metadata 配下にある submodule のディレクトリの 3 形態です。
+  作業ツリー配下にあること（containment）は意図的に要求しません。linked worktree の
+  common directory は作業ツリーの外にあるのが正常だからです。
+- readiness の probe 結果は `readiness.<scope>.json` として account scope ごとに保存し、
+  あるプロファイルで確定した結果を別プロファイルが流用しないようにします。
 
 Evidence Bus には diff、command result、log、trace、screenshot、browser recording、accepted decision
 を入れます。全文 transcript や hidden reasoning は保存・受け渡ししません。raw evidence は 30 日、
