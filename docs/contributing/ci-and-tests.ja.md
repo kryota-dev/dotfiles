@@ -18,7 +18,7 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 | `test` | `make test-node` の後に `make test-bats` | `ubuntu-latest`（needs: lint） |
 | `sync-ghq-completion` | `make sync-ghq-completion`（ベンダリングした `_ghq` が変更された場合は自動コミット） | `ubuntu-latest`、同一リポジトリの PR のみ |
 
-lint ジョブは `make lint` を実行する前に、shfmt（`v3.13.1`）を GitHub リリースから、`zsh` を `apt-get` でインストールします。test ジョブは `bats`、`shellcheck`、`zsh` を `apt-get` でインストールします。その後、両ジョブとも `*-node` ターゲット用に Node.js をセットアップします。`run` ステップが `home/dot_config/mise/config.toml` から pin されたバージョンを読み取って `actions/setup-node` に渡すため、バージョンの宣言箇所は mise の pin ただ 1 つのままです。他に CI 固有のロジックは存在しません — `Makefile` が単一情報源です。
+両ジョブとも、シェル系ツールを mise の pin から解決します。`run` ステップが `home/dot_config/mise/config.toml` からバージョンを読み取り、インストールステップがその GitHub リリースを取得し、インストール済みバイナリが pin どおりのバージョンを報告することを検証します。lint ジョブは shellcheck と shfmt について、test ジョブは shellcheck について（`tests/shellcheck.bats` と `tests/brew_launcher.bats` が直接実行するため）これを行います。`zsh` は両ジョブとも、`bats` と `jq` は test ジョブで、引き続き `apt-get` から入ります。Node.js も同じ「pin を読む」パターンで `actions/setup-node` に渡されます。したがって、これらのバージョンの宣言箇所は mise の pin ただ 1 つです。#475 以前は lint ジョブが shellcheck を一切インストールせず、ランナーイメージ同梱のビルドで暗黙に検査していたため、同じ差分でもローカルの `make lint` が通って CI が落ちることがありました。ワークフローにバージョン literal が復活しないよう、現在は `tests/files.bats` がガードしています。他に CI 固有のロジックは存在しません — `Makefile` が単一情報源です。
 
 コントリビューターはプッシュ前にローカルで `make test` を実行してください — CI が実行するのと同じ 4 つのターゲットを連鎖させます。
 

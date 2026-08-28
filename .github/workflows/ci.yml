@@ -39,11 +39,42 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install shfmt
+      # The mise pins are the only place these two versions are declared, and this job used
+      # to ignore both: it installed no shellcheck at all and silently linted with whatever
+      # build the runner image shipped, while shfmt's version was repeated here as a
+      # literal. `make lint` locally runs the pinned builds, so the two could disagree --
+      # the pinned shellcheck deliberately stopped reporting SC2015 on `A && B || C`, which
+      # the image's older build still reports -- and a change could only fail after a push
+      # (#475). Reading the pins keeps the "declare it, never inherit it from the image"
+      # intent of the apt steps while making a local `make lint` a faithful proxy for this
+      # job. Version numbers stay out of this file on purpose; tests/files.bats guards that.
+      - name: Resolve the pinned lint tool versions
+        id: lint-tools
         run: |
-          SHFMT_VERSION=3.13.1
-          curl -sS -L "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64" -o /usr/local/bin/shfmt
+          shellcheck_version=$(sed -n 's/^shellcheck = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          shfmt_version=$(sed -n 's/^shfmt = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$shellcheck_version" ] || { echo "shellcheck pin not found in mise config" >&2; exit 1; }
+          [ -n "$shfmt_version" ] || { echo "shfmt pin not found in mise config" >&2; exit 1; }
+          echo "shellcheck=$shellcheck_version" >>"$GITHUB_OUTPUT"
+          echo "shfmt=$shfmt_version" >>"$GITHUB_OUTPUT"
+
+      - name: Install shellcheck
+        env:
+          VERSION: ${{ steps.lint-tools.outputs.shellcheck }}
+        run: |
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${VERSION}/shellcheck-v${VERSION}.linux.x86_64.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/shellcheck-v${VERSION}/shellcheck" /usr/local/bin/shellcheck
+          # Fail here rather than lint the whole tree with an unexpected build.
+          shellcheck --version | grep -qx "version: ${VERSION}"
+
+      - name: Install shfmt
+        env:
+          VERSION: ${{ steps.lint-tools.outputs.shfmt }}
+        run: |
+          curl -fsSL "https://github.com/mvdan/sh/releases/download/v${VERSION}/shfmt_v${VERSION}_linux_amd64" -o /usr/local/bin/shfmt
           chmod +x /usr/local/bin/shfmt
+          shfmt --version | grep -qx "v${VERSION}"
 
       - name: Install zsh
         run: sudo apt-get install -y zsh
@@ -87,10 +118,31 @@ jobs:
       - name: Install dependencies
         # jq is needed by the wave-orchestrator hook and its bats suite. The runner
         # image happens to ship it, but declaring it here keeps the suite from
-        # silently depending on the image's contents.
+        # silently depending on the image's contents. shellcheck is deliberately not
+        # in this list: the apt build is unpinned, and the step below installs the
+        # same pinned build the Lint job uses.
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats shellcheck zsh jq
+          sudo apt-get install -y bats zsh jq
+
+      # tests/shellcheck.bats runs shellcheck unconditionally and tests/brew_launcher.bats
+      # runs it when present, both with the exact flags `make lint` uses. Without the pin
+      # this job would check the same files as the Lint job with a different shellcheck.
+      - name: Resolve the pinned shellcheck version
+        id: shellcheck-version
+        run: |
+          version=$(sed -n 's/^shellcheck = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$version" ] || { echo "shellcheck pin not found in mise config" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Install shellcheck
+        env:
+          VERSION: ${{ steps.shellcheck-version.outputs.version }}
+        run: |
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${VERSION}/shellcheck-v${VERSION}.linux.x86_64.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/shellcheck-v${VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version | grep -qx "version: ${VERSION}"
 
       # tests/files.bats renders the chezmoi script templates and executes them, which is the only
       # way to assert the brew-bundle failure policy as behaviour rather than as text — a purely
