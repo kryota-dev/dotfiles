@@ -159,6 +159,14 @@ invocation が持つのは provider、実行ファイルの絶対パス、argv �
 環境変数や credential の欄はそもそも存在しません。認証は各 CLI 自身のランチャーと keychain が持ち、
 harness は token もプロファイルパスも扱いません。
 
+argv へ載る値はすべて先に形を検査します。capability の model と effort は Codex の `-c key=value` の
+**値の中**へ入るため、引用符や等号を含む値は別の設定（`sandbox_mode` を含む）を注入しうるからです。
+resume 識別子・session id・prompt tool 名にも同じ検査を課しますが、理由は別で、**Codex は session id を
+位置引数で受け取る**ため `-` で始まる値がフラグの位置に着地します。Codex ではさらに、argv 中で `-` から
+始まる要素を **この adapter 自身が出す集合に限る allowlist** を張っています。どの位置から紛れ込んだ
+フラグもサンドボックスの読み戻しで弾かれるので、CLI に新しいフラグが増えるたび追随が要る denylist に
+依存しません。
+
 ### サンドボックスは構築時に封印される
 
 Codex は起動時には `-s/--sandbox` を受け付けますが、再開時には受け付けません。`codex exec resume` が
@@ -172,8 +180,10 @@ sandbox policy を必須引数として受け取るので、「policy 無しの�
 
 policy の語彙は意図的に小さくしてあります。`read-only` と `workspace-write` の 2 値で、
 「サンドボックス無し」に相当する値は持ちません（持てば再開経路がそこへ落ちうるため）。
-ネットワークの軸も持ちません。許可リストの記法が実測されていないので、3 つの adapter とも
-ネットワークを閉じた形だけを描画します。
+ネットワークの軸も持ちません（許可リストの記法が実測されていないため）。ただし
+**ネットワークの実効性は provider ごとに異なり、harness はそれを一律とは主張しません**。
+Claude は設定 JSON の strict allowlist、Codex は `workspace-write` の既定 off（いずれも実測）ですが、
+**Antigravity のネットワーク既定は確認されておらず、adapter もそれを制御する argv を出しません**。
 
 ### Antigravity は実装するが read-only に留める
 
@@ -198,10 +208,15 @@ exact model ID を再検査します（route 決定から実行までの間に r
   引用符や等号を含む値は別の設定（`sandbox_mode` を含む）を注入しうる。
 - `effort` は harness が既に出荷している語彙に属すること。adapter が 2 つ目の語彙を作らない。
   provider ごとの受理値は実測されていないので、provider 別の集合も主張しない。
+- capability の account scope が解決済みの scope と一致すること。これは router 側の規則でもあり、
+  ここで落とすと多層防御が軸ごとに非対称になります（出荷 registry は実際に personal 限定の capability を
+  宣言しており、`r06` セッションがそこへ fallback してはいけません）。
 - 封じ込めを保証できない adapter に対しては、書き込みを伴う実行を拒否する。
 
 拒否は例外ではなく戻り値としての判定です。runner は呼ばれず、結果には provider が起動しなかったことが
-残り、route の選び直しは呼び出し側の判断のままです。この層は capability registry の schema を変更しません。
+残り、route の選び直しは呼び出し側の判断のままです。`availability` は関数でも渡せます。値で渡すと
+executor の生成時に固定され、「実行直前に再検査する」が規約頼みになるためです。
+この層は capability registry の schema を変更しません。
 
 ## worktree と rollout
 

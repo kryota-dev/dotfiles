@@ -189,6 +189,14 @@ An invocation carries a provider, an absolute executable path, an argv array, op
 its phase. It has no environment or credential field at all: authentication stays with each CLI's
 own launcher and keychain, and the harness never handles a token or a profile path.
 
+Everything that reaches argv is shape-checked first. A capability's model and effort go inside
+Codex's `-c key=value`, so a value carrying a quote or an equals sign could inject a different
+setting — `sandbox_mode` included. Resume identifiers, session ids, and prompt-tool names get the
+same treatment for a different reason: Codex takes its session id as a *positional* argument, so a
+value beginning with `-` lands where a flag would. Codex additionally allows only the flags this
+adapter itself emits, so a flag smuggled through any position fails the sandbox read-back rather
+than relying on a denylist that has to chase every new CLI flag.
+
 ### The sandbox is sealed at construction
 
 Codex accepts `-s/--sandbox` when it starts a run and rejects it when it resumes one; the only
@@ -203,8 +211,10 @@ without a policy" has no representation.
 
 The policy vocabulary is deliberately small: `read-only` and `workspace-write`, with no value
 meaning "no sandbox" — a resume path could otherwise fall into it — and no network axis, because the
-allowlist syntax has never been measured and all three adapters render network-closed containment
-only.
+allowlist syntax has never been measured. Network containment is *not* uniform across providers, and
+the harness does not claim it is: Claude renders a strict allowlist in its settings blob and Codex
+leaves `workspace-write` networking off by default, both measured, but Antigravity's network default
+was never established and the adapter emits nothing that controls it.
 
 ### Antigravity is implemented but stays read-only
 
@@ -230,11 +240,16 @@ between routing and execution — and adds the checks the router cannot make:
 - `effort` must belong to the vocabulary the harness already ships; adapters do not declare a
   second one. Per-provider accepted values have not been measured, so no per-provider set is
   claimed either.
+- The capability's account scope must match the resolved scope. This is the router's rule too, and
+  dropping it here would make the second line of defence asymmetric: the shipped registry really
+  does declare a personal-only capability, and an `r06` session must never fall back to it.
 - A write-capable run is refused when the adapter cannot enforce containment.
 
 A refusal is a returned verdict rather than an exception: the runner is never called, the result
-records that the provider did not run, and re-routing stays the caller's decision. Nothing in this
-layer changes the capability registry schema.
+records that the provider did not run, and re-routing stays the caller's decision. Availability may
+be passed as a function so the check reads it when the run happens rather than when the executor was
+built — a value would freeze it at construction and quietly turn "re-checked before running" into a
+convention. Nothing in this layer changes the capability registry schema.
 
 ## Worktrees and rollout
 
