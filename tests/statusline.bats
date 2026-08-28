@@ -396,3 +396,23 @@ STATE
   [ -f "$(_billing_state)" ]
   [ "$(_file_mode "$(_billing_state)")" = "600" ]
 }
+
+# Pins the platform ordering inside file_mtime, a trap this repo has hit twice
+# (see the perms() note in tests/wave_orchestrator.bats). GNU `stat -f` is
+# --file-system and prints its report on STDOUT before failing, so a BSD-first
+# order corrupts every TTL check on Linux -- and a corrupt $(( )) tears down the
+# enclosing function's subshell, so usd_jpy_rate and daily_cost return nothing
+# and their segments silently vanish. Asserting that a seeded rate actually
+# reaches the rendered amount catches that on the Linux CI leg.
+@test "statusline honors the cached FX rate (file_mtime platform ordering)" {
+  _seed_billing_cache
+  _render "$(_billing_json 1.23 42 1700000000 17.5 1700600000)"
+  # Inside quota there is no amount, so drive the raw-total path instead: with
+  # the seeded rate of 10, 1.23 USD renders as JPY, not as the $N.NN fallback.
+  run bash -c "printf '%s' '${MOCK_JSON}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"¥12 "* ]]
+  [[ "$output" != *"\$1.23"* ]]
+  # A failed setlocale must not leak a warning into the rendered status line.
+  [[ "$output" != *setlocale* ]]
+}
