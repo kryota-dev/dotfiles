@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import {
   assertNotSymlink,
+  assertStateDirectoryNotSymlink,
   healthPath,
   queuePath,
   writeJsonAtomic,
@@ -18,7 +19,10 @@ import {
 
 const HEALTH_STATUSES = Object.freeze(["ok", "failed"]);
 
-function readIfPresent(filePath, label) {
+function readIfPresent(environment, filePath, label) {
+  // 葉のファイルだけを検査すると、state ディレクトリ自体を symlink に差し替えられた
+  // ときにリンク先の内容を無警告で読んでしまう。読み取りも書き込みと同じ拒否条件にする。
+  assertStateDirectoryNotSymlink(environment);
   assertNotSymlink(filePath, label);
   try {
     return readFileSync(filePath, "utf8");
@@ -30,7 +34,7 @@ function readIfPresent(filePath, label) {
 
 export function readQueue(environment, nowIso) {
   const filePath = queuePath(environment);
-  const raw = readIfPresent(filePath, "queue file");
+  const raw = readIfPresent(environment, filePath, "queue file");
   // 未作成は初回起動の正常な状態。ここでファイルもディレクトリも作らない。
   if (raw === null) return emptyQueueDocument(nowIso);
   let parsed;
@@ -43,9 +47,29 @@ export function readQueue(environment, nowIso) {
   return parseQueueDocument(parsed);
 }
 
+// 読んだ時点の revision を期待値として、書き込み直前に読み直して突き合わせる（CAS）。
+//
+// `rename` は原子的だが、それが守るのは「書きかけが見えないこと」だけで、
+// read-modify-write の競合は防げない。`upsert` が active な候補を読んだ後、
+// 別プロセスが同じ候補を `reject` して保存し、その後で `upsert` が古い snapshot を
+// 書き戻すと、終端状態のはずの候補が active に復活する（AC-036 違反）。
+//
+// 残る窓は「revision を読み直してから rename するまで」で、人が採否を判断する
+// 時間（秒〜分）に対して桁違いに短い。書き込み側が週次 evaluator と対話操作の
+// 2 つしかないこの用途では、ロックファイルの寿命管理を持ち込むより釣り合う。
 export function writeQueue(environment, document) {
+  const expectedRevision = document.revision;
   // 保存前に自分の出力をもう一度検証する（不正な形をディスクに残さない）。
-  const validated = parseQueueDocument(document);
+  const validated = parseQueueDocument({
+    ...document,
+    revision: expectedRevision + 1,
+  });
+  const current = readQueue(environment, validated.updated_at);
+  if (current.revision !== expectedRevision) {
+    throw new TypeError(
+      `queue was modified concurrently (expected revision ${expectedRevision}, found ${current.revision}); re-run the command`,
+    );
+  }
   writeJsonAtomic(queuePath(environment), validated, "queue file");
   return validated;
 }
@@ -57,7 +81,7 @@ export function readHealth(environment) {
   const filePath = healthPath(environment);
   let raw;
   try {
-    raw = readIfPresent(filePath, "health file");
+    raw = readIfPresent(environment, filePath, "health file");
   } catch (error) {
     return Object.freeze({ available: false, reason: error.message });
   }

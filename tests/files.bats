@@ -293,8 +293,10 @@ load helpers/setup
   grep -qFx '.local/state/agent-improvement' "${HOME_DIR}/.chezmoiignore"
 
   # The state path is resolved in exactly one module (#344 keeps the layout movable).
+  # Search every module directly: composing this out of an 'agent-improvement' grep
+  # would miss a module that reads XDG_STATE_HOME without naming the tool.
   local resolvers
-  resolvers="$(grep -rlF 'agent-improvement' "$lib" | xargs grep -lF 'XDG_STATE_HOME')"
+  resolvers="$(grep -rlF 'XDG_STATE_HOME' "$lib")"
   [ "$resolvers" = "${lib}/paths.mjs" ] || {
     echo "state path resolution leaked out of paths.mjs: $resolvers"
     false

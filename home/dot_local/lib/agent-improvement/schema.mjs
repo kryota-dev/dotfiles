@@ -72,6 +72,9 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // account ラベルは設定由来で増減しうるため、閉じた enum ではなく字種で縛る。
 const ACCOUNT_PATTERN = /^[a-z][a-z0-9-]*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// 秒までを必須にし、ミリ秒とタイムゾーン指定（Z か ±HH:MM）だけを追加で許す。
+const ISO_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 const ISSUE_PATH_PATTERN = /^\/[^/]+\/[^/]+\/issues\/[1-9]\d*$/;
 
 const MAX_ID_LENGTH = 100;
@@ -116,13 +119,23 @@ function requirePattern(value, pattern, label, maxLength) {
   return text;
 }
 
-// ISO8601 として実際に解釈できることまで確認し、正規形へ揃えて保存する。
+// ISO 8601 の形まで縛ってから解釈し、正規形へ揃えて保存する。
+// `Date.parse` 単体では実装依存の非 ISO 表記（"August 29, 2026" / "2026/08/29"）を
+// ローカルタイムゾーンで受理し、存在しない日（2026-02-31）も静かに繰り上げる。
+// 失効判定と順位の tiebreak がこの値に乗るため、境界で形式・実在日の両方を弾く。
 export function requireTimestamp(value, label) {
-  const text = requireText(value, label, MAX_TITLE_LENGTH);
+  const text = requirePattern(
+    value,
+    ISO_TIMESTAMP_PATTERN,
+    label,
+    MAX_TITLE_LENGTH,
+  );
   const parsed = Date.parse(text);
   if (!Number.isFinite(parsed)) {
     throw new TypeError(`${label} must be an ISO 8601 timestamp`);
   }
+  // 日付部分を暦日として突き合わせ、繰り上げ（2026-02-31 -> 2026-03-03）を弾く。
+  requireDate(text.slice(0, 10), `${label} (date part)`);
   return new Date(parsed).toISOString();
 }
 
@@ -147,7 +160,13 @@ export function parseIssueUrl(value) {
   } catch {
     throw new TypeError("issue_url must be a valid URL");
   }
-  if (url.protocol !== "https:" || url.hostname !== "github.com") {
+  // port を検査しないと `https://github.com:8443/...` が通り、正規の Issue URL と
+  // 見分けのつかない文字列として保存・表示される。
+  if (
+    url.protocol !== "https:" ||
+    url.hostname !== "github.com" ||
+    url.port !== ""
+  ) {
     throw new TypeError("issue_url must be an https://github.com/... URL");
   }
   if (!ISSUE_PATH_PATTERN.test(url.pathname)) {
@@ -281,13 +300,17 @@ const PROMOTED_KEYS = Object.freeze([
   "promotion",
 ]);
 
-const STORED_KEYS = Object.freeze([
-  ...CANDIDATE_INPUT_KEYS,
-  "state",
-  "decision",
-  "deferred_until",
-  "adoption",
-]);
+// 状態ごとに「どの決定を伴い、どの追加フィールドを持つか」を固定する。
+// これが無いと `state: "active"` と `decision.kind: "reject"` の組み合わせや、
+// active 候補に紛れ込んだ `adoption` を受理してしまう（前者は見送り済み候補が
+// active として再提示され、後者は書き戻しで静かに欠落する）。
+const STATE_CONTRACTS = Object.freeze({
+  // 未判断の候補。decision をまだ持たない。
+  active: { decisionKind: null, extraKeys: [] },
+  deferred: { decisionKind: "defer", extraKeys: ["deferred_until"] },
+  adopted: { decisionKind: "adopt", extraKeys: ["adoption"] },
+  rejected: { decisionKind: "reject", extraKeys: [] },
+});
 
 function normalizeStoredCandidate(value) {
   const stored = requireObject(value, "candidate");
@@ -308,7 +331,15 @@ function normalizeStoredCandidate(value) {
     });
   }
 
-  rejectUnknownKeys(stored, STORED_KEYS, "candidate");
+  const contract = STATE_CONTRACTS[stored.state];
+  const allowedKeys = [
+    ...CANDIDATE_INPUT_KEYS,
+    "state",
+    ...(contract.decisionKind === null ? [] : ["decision"]),
+    ...contract.extraKeys,
+  ];
+  rejectUnknownKeys(stored, allowedKeys, `${stored.state} candidate`);
+
   const base = normalizeCandidateInput(
     Object.fromEntries(
       CANDIDATE_INPUT_KEYS.filter((key) => stored[key] !== undefined).map(
@@ -319,8 +350,15 @@ function normalizeStoredCandidate(value) {
     undefined,
   );
   const candidate = { ...base, state: stored.state };
-  if (stored.decision !== undefined) {
-    candidate.decision = normalizeDecision(stored.decision);
+
+  if (contract.decisionKind !== null) {
+    const decision = normalizeDecision(stored.decision);
+    if (decision.kind !== contract.decisionKind) {
+      throw new TypeError(
+        `candidate.decision.kind must be ${contract.decisionKind} for a ${stored.state} candidate`,
+      );
+    }
+    candidate.decision = decision;
   }
   if (stored.state === "deferred") {
     candidate.deferred_until = requireTimestamp(
@@ -334,11 +372,19 @@ function normalizeStoredCandidate(value) {
   return Object.freeze(candidate);
 }
 
-const QUEUE_KEYS = Object.freeze(["version", "updated_at", "candidates"]);
+const QUEUE_KEYS = Object.freeze([
+  "version",
+  "revision",
+  "updated_at",
+  "candidates",
+]);
 
+// 書き込みのたびに 1 ずつ増える。read-modify-write の競合検出（CAS）に使う。
+// 未作成の queue は revision 0 とし、最初の書き込みが 1 になる。
 export function emptyQueueDocument(nowIso) {
   return Object.freeze({
     version: QUEUE_VERSION,
+    revision: 0,
     updated_at: nowIso,
     candidates: Object.freeze([]),
   });
@@ -353,6 +399,9 @@ export function parseQueueDocument(value) {
       `queue.version must be ${QUEUE_VERSION} (found ${JSON.stringify(document.version)})`,
     );
   }
+  if (!Number.isInteger(document.revision) || document.revision < 0) {
+    throw new TypeError("queue.revision must be a non-negative integer");
+  }
   if (!Array.isArray(document.candidates)) {
     throw new TypeError("queue.candidates must be an array");
   }
@@ -366,6 +415,7 @@ export function parseQueueDocument(value) {
   }
   return Object.freeze({
     version: QUEUE_VERSION,
+    revision: document.revision,
     updated_at: requireTimestamp(document.updated_at, "queue.updated_at"),
     candidates: Object.freeze(candidates),
   });

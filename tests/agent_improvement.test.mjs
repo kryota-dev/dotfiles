@@ -7,17 +7,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   assertNotSymlink,
@@ -28,8 +33,10 @@ import {
   writeJsonAtomic,
 } from "../home/dot_local/lib/agent-improvement/paths.mjs";
 import {
+  ADOPTION_KEYS,
   DEFAULT_DEFER_DAYS,
   EXPIRY_DAYS,
+  normalizeAdoption,
   normalizeCandidateInput,
   parseIssueUrl,
   parseQueueDocument,
@@ -38,9 +45,12 @@ import {
 import {
   readHealth,
   readQueue,
+  writeQueue,
 } from "../home/dot_local/lib/agent-improvement/store.mjs";
 import {
   deriveCandidate,
+  formatNext,
+  formatStatus,
   partitionQueue,
   rankScore,
   selectNext,
@@ -263,6 +273,7 @@ test("issue URLs are restricted to GitHub issue permalinks", () => {
 test("a stored queue with a duplicate id is rejected rather than deduplicated", () => {
   const stored = {
     version: 1,
+    revision: 1,
     updated_at: NOW.toISOString(),
     candidates: [
       { ...candidateInput(), state: "active", created_at: NOW.toISOString(), evidence_updated_at: NOW.toISOString() },
@@ -284,12 +295,18 @@ test("a stored promoted candidate keeps only its identity and issue URL", () => 
     },
   };
   assert.doesNotThrow(() =>
-    parseQueueDocument({ version: 1, updated_at: NOW.toISOString(), candidates: [promoted] }),
+    parseQueueDocument({
+      version: 1,
+      revision: 1,
+      updated_at: NOW.toISOString(),
+      candidates: [promoted],
+    }),
   );
   assert.throws(
     () =>
       parseQueueDocument({
         version: 1,
+        revision: 1,
         updated_at: NOW.toISOString(),
         candidates: [{ ...promoted, summary: "leftover payload" }],
       }),
@@ -414,18 +431,50 @@ test("status and next never create or touch the state directory", () => {
   assert.equal(existsSync(directory), false);
 });
 
-test("status and next leave an existing queue byte-for-byte unchanged", () => {
+// state ディレクトリ配下すべての「名前・内容・mtime」を取る。queue.json だけを見ると、
+// 表示系が health.json や別ファイルを書き始めた回帰を見逃す。
+function snapshotStateDirectory(directory) {
+  return readdirSync(directory)
+    .sort()
+    .map((name) => {
+      const target = path.join(directory, name);
+      return {
+        name,
+        content: readFileSync(target, "utf8"),
+        mtimeMs: statSync(target).mtimeMs,
+      };
+    });
+}
+
+test("status and next leave the whole state directory unchanged", () => {
   const environment = makeEnvironment();
   seed(environment, [candidateInput()]);
-  const file = queuePath(environment);
-  const before = readFileSync(file, "utf8");
-  const beforeStat = statSync(file);
+  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  writeFileSync(
+    healthPath(environment),
+    JSON.stringify({ status: "ok", last_run_at: NOW.toISOString() }),
+    { mode: 0o600 },
+  );
+  const directory = environment.AGENT_IMPROVEMENT_STATE_DIR;
+  const before = snapshotStateDirectory(directory);
 
-  invoke(environment, ["status", "--history"]);
-  invoke(environment, ["next"]);
+  // 表示が失敗していれば「変更なし」も自明に成り立つので、exit code も固定する。
+  for (const argumentsList of [
+    ["status"],
+    ["status", "--json"],
+    ["status", "--history"],
+    ["status", "--history", "--json"],
+    ["next"],
+    ["next", "--json"],
+  ]) {
+    assert.equal(
+      invoke(environment, argumentsList).code,
+      0,
+      `${argumentsList.join(" ")} did not succeed`,
+    );
+  }
 
-  assert.equal(readFileSync(file, "utf8"), before);
-  assert.equal(statSync(file).mtimeMs, beforeStat.mtimeMs);
+  assert.deepEqual(snapshotStateDirectory(directory), before);
 });
 
 test("a missing or malformed health file degrades the display without failing", () => {
@@ -742,4 +791,471 @@ test("next --json returns a single candidate or null", () => {
     JSON.parse(invoke(environment, ["next", "--json"]).output).candidate.id,
     "reduce-ci-log-refetch",
   );
+});
+
+// ============================================================ review round 1
+// 以下は PR #528 の multi-review round 1 で挙がった指摘に対する回帰テスト。
+
+// ------------------------------------------------- boundaries (exact ticks)
+
+test("expiry fires exactly at EXPIRY_DAYS, not a tick later", () => {
+  // AC-036「新しい根拠がなければ 4 週間で失効する」に従い、4 週間ちょうどは失効側。
+  // 比較演算子を `<=` から `<` に変えるとこのテストが落ちる。
+  const candidate = storedCandidate();
+  const exactly = new Date(NOW.getTime() + EXPIRY_DAYS * DAY_MS);
+  assert.equal(deriveCandidate(candidate, exactly).derived_state, "expired");
+  assert.equal(
+    deriveCandidate(candidate, new Date(exactly.getTime() - 1)).derived_state,
+    "active",
+  );
+});
+
+test("a deferral ends exactly at deferred_until", () => {
+  const until = new Date(NOW.getTime() + 7 * DAY_MS);
+  const candidate = storedCandidate({
+    state: "deferred",
+    decision: { kind: "defer", at: NOW.toISOString() },
+    deferred_until: until.toISOString(),
+  });
+  assert.equal(
+    deriveCandidate(candidate, new Date(until.getTime() - 1)).derived_state,
+    "deferred",
+  );
+  assert.equal(deriveCandidate(candidate, until).derived_state, "active");
+});
+
+// --------------------------------------------------------------- permissions
+
+test("existing loose permissions are tightened on use, not just on creation", () => {
+  const root = makeStateRoot();
+  const directory = path.join(root, "agent-improvement");
+  const target = path.join(directory, "queue.json");
+  mkdirSync(directory, { mode: 0o755 });
+  chmodSync(directory, 0o755);
+  writeFileSync(target, "{}\n", { mode: 0o644 });
+  chmodSync(target, 0o644);
+
+  writeJsonAtomic(target, { ok: true }, "queue file");
+
+  // 要件は「作成または利用する」ときの 0700/0600 なので、既存の緩い権限も矯正する。
+  assert.equal(statSync(directory).mode & 0o777, 0o700);
+  assert.equal(statSync(target).mode & 0o777, 0o600);
+});
+
+// ------------------------------------------------------------ symlink (read)
+
+test("a symlinked state directory is refused on read, not only on write", () => {
+  const root = makeStateRoot();
+  const real = path.join(root, "real");
+  mkdirSync(real, { recursive: true });
+  writeFileSync(path.join(real, "queue.json"), "{}\n", { mode: 0o600 });
+  const linked = path.join(root, "linked");
+  symlinkSync(real, linked);
+  const environment = { AGENT_IMPROVEMENT_STATE_DIR: linked };
+
+  for (const read of [
+    () => readQueue(environment, NOW.toISOString()),
+    () => invoke(environment, ["status"]),
+    () => invoke(environment, ["next"]),
+  ]) {
+    assert.throws(read, /state directory must not be a symbolic link/);
+  }
+  // readHealth は表示要素として降格させるので throw せず reason で返す。
+  assert.equal(readHealth(environment).available, false);
+});
+
+test("chmod cannot be redirected through a symlinked state directory", () => {
+  const root = makeStateRoot();
+  const victim = path.join(root, "victim");
+  mkdirSync(victim, { mode: 0o755 });
+  chmodSync(victim, 0o755);
+  const linked = path.join(root, "linked");
+  symlinkSync(victim, linked);
+
+  assert.throws(
+    () => ensureStateDirectory(linked),
+    /state directory must not be a symbolic link/,
+  );
+  assert.equal(statSync(victim).mode & 0o777, 0o755);
+});
+
+// -------------------------------------------------------- timestamp strictness
+
+test("timestamps must be ISO 8601 and name a real calendar day", () => {
+  const nowIso = NOW.toISOString();
+  for (const bad of [
+    "August 29, 2026",
+    "2026/08/29",
+    "29 Aug 2026",
+    "2026-08-29",
+    "2026-02-31T00:00:00.000Z",
+    "2026-08-29T25:00:00.000Z",
+  ]) {
+    assert.throws(
+      () => normalizeCandidateInput(candidateInput({ created_at: bad }), nowIso),
+      TypeError,
+      `expected ${bad} to be rejected`,
+    );
+  }
+  // 受理する形（Z と数値オフセット、ミリ秒あり・なし）。
+  for (const good of [
+    "2026-08-29T00:00:00Z",
+    "2026-08-29T00:00:00.123Z",
+    "2026-08-29T09:00:00+09:00",
+  ]) {
+    assert.doesNotThrow(() =>
+      normalizeCandidateInput(candidateInput({ created_at: good }), nowIso),
+    );
+  }
+});
+
+test("issue URLs with an explicit port are refused", () => {
+  assert.throws(
+    () => parseIssueUrl("https://github.com:8443/o/r/issues/1"),
+    /must be an https:\/\/github\.com/,
+  );
+});
+
+// --------------------------------------------------- stored-state contracts
+
+test("a stored candidate whose decision contradicts its state is refused", () => {
+  const base = {
+    version: 1,
+    revision: 1,
+    updated_at: NOW.toISOString(),
+  };
+  // 見送り済みの決定を持ちながら active を名乗る候補が通ると、その候補が
+  // 改善候補として再提示されてしまう。
+  assert.throws(
+    () =>
+      parseQueueDocument({
+        ...base,
+        candidates: [
+          storedCandidate({
+            state: "active",
+            decision: { kind: "reject", at: NOW.toISOString() },
+          }),
+        ],
+      }),
+    /active candidate has unknown keys: decision/,
+  );
+  assert.throws(
+    () =>
+      parseQueueDocument({
+        ...base,
+        candidates: [
+          storedCandidate({
+            state: "deferred",
+            decision: { kind: "adopt", at: NOW.toISOString() },
+            deferred_until: NOW.toISOString(),
+          }),
+        ],
+      }),
+    /decision\.kind must be defer for a deferred candidate/,
+  );
+});
+
+test("state-specific payload cannot ride along on the wrong state", () => {
+  assert.throws(
+    () =>
+      parseQueueDocument({
+        version: 1,
+        revision: 1,
+        updated_at: NOW.toISOString(),
+        candidates: [
+          storedCandidate({
+            state: "active",
+            adoption: {
+              success_metric: "m",
+              baseline: "b",
+              review_on: "2026-09-01",
+              fallback: "f",
+            },
+          }),
+        ],
+      }),
+    /active candidate has unknown keys: adoption/,
+  );
+});
+
+test("required state-specific fields cannot be omitted", () => {
+  assert.throws(
+    () =>
+      parseQueueDocument({
+        version: 1,
+        revision: 1,
+        updated_at: NOW.toISOString(),
+        candidates: [
+          storedCandidate({
+            state: "adopted",
+            decision: { kind: "adopt", at: NOW.toISOString() },
+          }),
+        ],
+      }),
+    /adoption must be an object/,
+  );
+});
+
+// ----------------------------------------------------- schema field coverage
+
+test("every required candidate field is validated by name", () => {
+  const nowIso = NOW.toISOString();
+  const cases = [
+    ["title", { title: "" }, /candidate\.title must be a non-empty string/],
+    ["summary", { summary: 42 }, /candidate\.summary must be a non-empty string/],
+    ["id", { id: "" }, /candidate\.id must be a non-empty string/],
+    [
+      "evidence_accounts",
+      { evidence_accounts: ["Bad Account"] },
+      /evidence_accounts\[0\] must match/,
+    ],
+    ["ranking", { ranking: null }, /ranking must be an object/],
+  ];
+  for (const [name, overrides, pattern] of cases) {
+    assert.throws(
+      () => normalizeCandidateInput(candidateInput(overrides), nowIso),
+      pattern,
+      `${name} was not validated`,
+    );
+  }
+  for (const key of RANKING_KEYS) {
+    const ranking = { ...candidateInput().ranking };
+    delete ranking[key];
+    assert.throws(
+      () => normalizeCandidateInput(candidateInput({ ranking }), nowIso),
+      new RegExp(`ranking\\.${key} must be an integer`),
+      `ranking.${key} was not validated`,
+    );
+  }
+  for (const key of ADOPTION_KEYS) {
+    const adoption = {
+      success_metric: "m",
+      baseline: "b",
+      review_on: "2026-09-01",
+      fallback: "f",
+    };
+    delete adoption[key];
+    assert.throws(
+      () => normalizeAdoption(adoption),
+      new RegExp(`adoption\\.${key}`),
+      `adoption.${key} was not validated`,
+    );
+  }
+});
+
+test("a queue document with a bad version or revision is refused", () => {
+  const base = { updated_at: NOW.toISOString(), candidates: [] };
+  assert.throws(
+    () => parseQueueDocument({ ...base, version: 2, revision: 1 }),
+    /queue\.version must be 1/,
+  );
+  assert.throws(
+    () => parseQueueDocument({ ...base, version: 1, revision: -1 }),
+    /queue\.revision must be a non-negative integer/,
+  );
+  assert.throws(
+    () => parseQueueDocument({ ...base, version: 1, revision: 1.5 }),
+    /queue\.revision must be a non-negative integer/,
+  );
+});
+
+// ------------------------------------------------------------ concurrency
+
+test("a concurrent write is detected instead of silently clobbered", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+
+  // 採否を判断している間に、別プロセスが同じ候補を見送ったという状況。
+  const stale = readQueue(environment, NOW.toISOString());
+  invoke(environment, [
+    "resolve",
+    "reduce-ci-log-refetch",
+    "--decision=reject",
+  ]);
+
+  // 古い snapshot を書き戻せてしまうと、終端のはずの候補が active に復活する。
+  assert.throws(
+    () => writeQueue(environment, { ...stale, updated_at: NOW.toISOString() }),
+    /queue was modified concurrently/,
+  );
+  const stored = JSON.parse(readFileSync(queuePath(environment), "utf8"));
+  assert.equal(stored.candidates[0].state, "rejected");
+});
+
+test("the revision advances by one on every write", () => {
+  const environment = makeEnvironment();
+  assert.equal(readQueue(environment, NOW.toISOString()).revision, 0);
+  seed(environment, [candidateInput()]);
+  assert.equal(readQueue(environment, NOW.toISOString()).revision, 1);
+  invoke(environment, ["resolve", "reduce-ci-log-refetch", "--decision=defer"]);
+  assert.equal(readQueue(environment, NOW.toISOString()).revision, 2);
+});
+
+// ------------------------------------------------------------- CLI contracts
+
+test("flags that only make sense for adopt are refused elsewhere", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  // 黙って捨てられると、不正な URL を渡しても成功したように見える。
+  assert.throws(
+    () =>
+      invoke(environment, [
+        "resolve",
+        "reduce-ci-log-refetch",
+        "--decision=defer",
+        "--issue-url=not-a-url",
+      ]),
+    /--issue-url is only valid with --decision=adopt/,
+  );
+  assert.throws(
+    () =>
+      invoke(environment, [
+        "resolve",
+        "reduce-ci-log-refetch",
+        "--decision=reject",
+        "--success-metric=m",
+      ]),
+    /--success-metric is only valid with --decision=adopt/,
+  );
+});
+
+test("extra positional arguments are refused, not ignored", () => {
+  const environment = makeEnvironment();
+  assert.throws(
+    () => invoke(environment, ["status", "typo"]),
+    /status takes 0 positional argument\(s\), got 1/,
+  );
+  // `upsert candidates.json` は stdin を読んでしまうため、成功させると危険。
+  assert.throws(
+    () => invoke(environment, ["upsert", "candidates.json"]),
+    /upsert takes 0 positional argument\(s\), got 1/,
+  );
+  assert.throws(
+    () => invoke(environment, ["resolve", "--decision=defer"]),
+    /resolve takes 1 positional argument\(s\), got 0/,
+  );
+});
+
+test("oversized candidate input is refused before it is parsed", () => {
+  const environment = makeEnvironment();
+  assert.throws(
+    () =>
+      invoke(environment, ["upsert"], {
+        readInput: () => " ".repeat(2 * 1024 * 1024),
+      }),
+    /candidate input must be at most \d+ bytes/,
+  );
+});
+
+// -------------------------------------------------------- health and display
+
+test("a populated health file is surfaced with its status and detail", () => {
+  const environment = makeEnvironment();
+  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  writeFileSync(
+    healthPath(environment),
+    JSON.stringify({
+      status: "failed",
+      last_run_at: "2026-07-31T09:00:00.000Z",
+      detail: "evaluator timed out",
+    }),
+    { mode: 0o600 },
+  );
+
+  const health = readHealth(environment);
+  assert.equal(health.available, true);
+  assert.equal(health.status, "failed");
+  assert.equal(health.lastRunAt, "2026-07-31T09:00:00.000Z");
+  assert.equal(health.detail, "evaluator timed out");
+
+  const { output } = invoke(environment, ["status"]);
+  assert.match(output, /evaluator: failed/);
+  assert.match(output, /evaluator timed out/);
+});
+
+test("an unrecognised health status is shown as unknown rather than hidden", () => {
+  const environment = makeEnvironment();
+  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  writeFileSync(healthPath(environment), JSON.stringify({ status: "weird" }), {
+    mode: 0o600,
+  });
+  // 「読めたが状態を解釈できない」は「読めない」とは別の事実なので分けて出す。
+  assert.equal(readHealth(environment).status, "unknown");
+  assert.match(invoke(environment, ["status"]).output, /evaluator: unknown/);
+});
+
+test("the human-readable views name each section and every candidate state", () => {
+  const environment = makeEnvironment();
+  seed(environment, [
+    candidateInput(),
+    candidateInput({ id: "second-candidate", title: "二件目" }),
+  ]);
+  invoke(environment, ["resolve", "second-candidate", "--decision=defer"]);
+
+  const status = invoke(environment, ["status", "--history"]).output;
+  assert.match(status, /改善候補（1 件）/);
+  assert.match(status, /\[候補\] reduce-ci-log-refetch/);
+  assert.match(status, /採用済み（効果測定中）: なし/);
+  assert.match(status, /\[延期中\] second-candidate — 二件目/);
+  assert.match(status, /延期期限:/);
+
+  assert.match(invoke(environment, ["next"]).output, /reduce-ci-log-refetch/);
+  assert.equal(
+    formatNext(null),
+    "提示すべき候補はありません。",
+  );
+  assert.match(
+    formatStatus({
+      health: { available: false, reason: "not-run" },
+      partitions: { active: [], adopted: [], history: [] },
+      includeHistory: false,
+    }),
+    /evaluator: 未実行/,
+  );
+
+  const upsert = invoke(environment, ["upsert"], {
+    readInput: () => JSON.stringify(candidateInput()),
+  }).output;
+  assert.match(upsert, /reduce-ci-log-refetch: updated/);
+  assert.match(upsert, /保持中の候補: 2 件/);
+});
+
+// ------------------------------------------------------- real process entry
+
+test("the real entry point reads argv, stdin and reports failures on stderr", () => {
+  const environment = makeEnvironment();
+  const cliPath = fileURLToPath(
+    new URL("../home/dot_local/lib/agent-improvement/cli.mjs", import.meta.url),
+  );
+  const base = { ...process.env, ...environment };
+
+  const created = spawnSync(process.execPath, [cliPath, "upsert"], {
+    env: base,
+    input: JSON.stringify(candidateInput()),
+    encoding: "utf8",
+  });
+  assert.equal(created.status, 0, created.stderr);
+  assert.match(created.stdout, /reduce-ci-log-refetch: created/);
+
+  const shown = spawnSync(process.execPath, [cliPath, "status"], {
+    env: base,
+    encoding: "utf8",
+  });
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.match(shown.stdout, /reduce-ci-log-refetch/);
+
+  // 例外は stack ではなく一行のメッセージとして stderr に出し、exit 1 で終わる。
+  const failed = spawnSync(process.execPath, [cliPath, "status", "--histry"], {
+    env: base,
+    encoding: "utf8",
+  });
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /^agent-improvement: unknown flag --histry\n$/);
+
+  const usage = spawnSync(process.execPath, [cliPath, "bogus"], {
+    env: base,
+    encoding: "utf8",
+  });
+  assert.equal(usage.status, 64);
+  assert.match(usage.stdout, /使い方: agent-improvement/);
 });

@@ -69,6 +69,10 @@ export function deriveCandidate(candidate, now) {
   }
 
   // 延期期限が切れた候補は active と同じ判定に落とす（AC-039「次週まで延期」）。
+  //
+  // 境界は「ちょうど EXPIRY_DAYS 経過した時点で失効」（下の `<=`）。AC-036 が
+  // 「新しい根拠がなければ 4 週間で失効する」と定めているため、4 週間ちょうどは
+  // 失効側に含める。
   const expiresAtMs =
     Date.parse(candidate.evidence_updated_at) + EXPIRY_DAYS * DAY_MS;
   return Object.freeze({
@@ -102,19 +106,25 @@ export function partitionQueue(document, now) {
     deriveCandidate(candidate, now),
   );
   return Object.freeze({
-    active: derived
-      .filter((candidate) => candidate.derived_state === "active")
-      .sort(byRank),
-    adopted: derived
-      .filter(
-        (candidate) =>
-          candidate.derived_state === "adopted" ||
-          candidate.derived_state === "review_due",
-      )
-      .sort(byRank),
-    history: derived
-      .filter((candidate) => HISTORY_STATES.includes(candidate.derived_state))
-      .sort(byHistory),
+    active: Object.freeze(
+      derived
+        .filter((candidate) => candidate.derived_state === "active")
+        .sort(byRank),
+    ),
+    adopted: Object.freeze(
+      derived
+        .filter(
+          (candidate) =>
+            candidate.derived_state === "adopted" ||
+            candidate.derived_state === "review_due",
+        )
+        .sort(byRank),
+    ),
+    history: Object.freeze(
+      derived
+        .filter((candidate) => HISTORY_STATES.includes(candidate.derived_state))
+        .sort(byHistory),
+    ),
   });
 }
 

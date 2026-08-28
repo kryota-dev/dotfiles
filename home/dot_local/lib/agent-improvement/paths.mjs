@@ -1,4 +1,15 @@
-import { chmodSync, lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -44,6 +55,13 @@ export function resolveStateDirectory(environment) {
   );
 }
 
+// 読み取り経路用。ディレクトリを作らずに symlink かどうかだけを検査する。
+// 葉のファイルだけを検査すると、state ディレクトリ自体を symlink に差し替えられた
+// ときに `status` / `next` がリンク先の内容を無警告で表示してしまう。
+export function assertStateDirectoryNotSymlink(environment) {
+  assertNotSymlink(resolveStateDirectory(environment), "state directory");
+}
+
 export function queuePath(environment) {
   return path.join(resolveStateDirectory(environment), QUEUE_FILE_NAME);
 }
@@ -66,15 +84,38 @@ export function assertNotSymlink(target, label) {
   }
 }
 
+// symlink を追従しないディレクトリ fd を開く。O_NOFOLLOW は最終要素が symlink の
+// ときに失敗する（macOS は O_DIRECTORY と併せて ENOTDIR、Linux は ELOOP）。
+// `lstat` で検査してから `chmod` する形だと、その 2 つの syscall の間に対象を
+// symlink へ差し替えられ、リンク先の権限を書き換えさせられる（check-then-act）。
+// fd を握ったまま fchmod すれば、検査と適用が同じ inode に対して行われる。
+function openDirectoryNoFollow(directory) {
+  try {
+    return openSync(
+      directory,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+  } catch (error) {
+    if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
+      throw new Error("state directory must not be a symbolic link");
+    }
+    throw error;
+  }
+}
+
 export function ensureStateDirectory(directory) {
+  // 早い段階で分かりやすく失敗させるための事前検査。実際のガードは下の
+  // O_NOFOLLOW 付き open で、そちらが競合窓を持たない本体になる。
   assertNotSymlink(directory, "state directory");
   mkdirSync(directory, { mode: STATE_DIRECTORY_MODE, recursive: true });
-  // mkdirSync({recursive:true}) は既存の symlink ディレクトリでも成功するため、
-  // 作成後にもう一度検査する（`agent-improvement -> ~/.ssh` のような脱出を防ぐ）。
-  assertNotSymlink(directory, "state directory");
-  // mode オプションは umask に削られ、既存ディレクトリには適用されない。
-  // owner-only は AC-035 の要件なので、作成経路に関わらず明示的に固定する。
-  chmodSync(directory, STATE_DIRECTORY_MODE);
+  const descriptor = openDirectoryNoFollow(directory);
+  try {
+    // mode オプションは umask に削られ、既存ディレクトリには適用されない。
+    // owner-only は AC-035 の要件なので、作成経路に関わらず明示的に固定する。
+    fchmodSync(descriptor, STATE_DIRECTORY_MODE);
+  } finally {
+    closeSync(descriptor);
+  }
   return directory;
 }
 
@@ -84,18 +125,22 @@ export function writeJsonAtomic(targetPath, value, label) {
   // 一時ファイル名は予測可能にしない（先置き symlink による任意ファイル上書きを防ぐ）。
   // flag "wx" = O_CREAT|O_EXCL で、既存ファイル・既存 symlink があれば EEXIST で失敗する。
   const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: STATE_FILE_MODE,
-    flag: "wx",
-  });
+  let renamed = false;
   try {
+    // 書き込み自体も try の中に置く。途中で I/O エラーになったとき、外に出していると
+    // 中途半端な 0600 の断片が残る。
+    writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: STATE_FILE_MODE,
+      flag: "wx",
+    });
     chmodSync(temporaryPath, STATE_FILE_MODE);
+    // rename は宛先が symlink でも dentry ごと置き換える（追従しない）ため、
+    // 宛先側 symlink 経由の任意ファイル上書きは構造的に成立しない。
     renameSync(temporaryPath, targetPath);
-  } catch (error) {
-    // rename 前に失敗したら一時ファイルを残さない（0600 の断片を溜めない）。
-    rmSync(temporaryPath, { force: true });
-    throw error;
+    renamed = true;
+  } finally {
+    if (!renamed) rmSync(temporaryPath, { force: true });
   }
   return targetPath;
 }

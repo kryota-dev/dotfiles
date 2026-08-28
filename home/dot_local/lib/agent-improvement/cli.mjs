@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { queuePath } from "./paths.mjs";
@@ -45,6 +45,29 @@ const ADOPTION_FLAG_NAMES = Object.freeze([
   "review-on",
   "fallback",
 ]);
+
+// サブコマンドが受け取る位置引数の数。余分な引数を黙って無視すると、
+// `agent-improvement upsert candidates.json` が指定ファイルではなく stdin を読む
+// といった、成功したように見えて別物が起きる誤用を通してしまう。
+const COMMAND_POSITIONALS = Object.freeze({
+  status: 0,
+  next: 0,
+  resolve: 1,
+  upsert: 0,
+});
+
+// resolve の三択それぞれが受け付ける追加フラグ。ここに無いフラグを渡されたら
+// 黙って捨てずに拒否する（`--decision=defer --issue-url=<不正>` が検証もされずに
+// 成功していた）。
+const DECISION_FLAG_NAMES = Object.freeze({
+  adopt: [...ADOPTION_FLAG_NAMES, "issue-url"],
+  defer: ["until"],
+  reject: [],
+});
+
+// upsert の入力上限。schema 検証は JSON 全体を読み込んでパースした後に効くため、
+// 読み込む前に頭打ちを設ける。
+const MAX_INPUT_BYTES = 1_048_576;
 
 function parseArguments(tokens, allowed) {
   const flags = new Map();
@@ -170,15 +193,22 @@ function applyReject({ existing, nowIso, note }) {
   };
 }
 
-function resolveCommand({ environment, flags, positionals, now, nowIso }) {
-  if (positionals.length !== 1) {
-    throw new TypeError("resolve takes exactly one candidate id");
+function assertDecisionFlags(flags, decision) {
+  const allowedForDecision = DECISION_FLAG_NAMES[decision];
+  for (const name of Object.values(DECISION_FLAG_NAMES).flat()) {
+    if (flags.has(name) && !allowedForDecision.includes(name)) {
+      throw new TypeError(`--${name} is only valid with --decision=adopt`);
+    }
   }
+}
+
+function resolveCommand({ environment, flags, positionals, now, nowIso }) {
   const id = positionals[0];
   const decision = flags.get("decision");
   if (!DECISIONS.includes(decision)) {
     throw new TypeError(`--decision must be one of ${DECISIONS.join(", ")}`);
   }
+  assertDecisionFlags(flags, decision);
 
   const document = readQueue(environment, nowIso);
   const existing = document.candidates.find((candidate) => candidate.id === id);
@@ -217,15 +247,34 @@ function resolveCommand({ environment, flags, positionals, now, nowIso }) {
   };
 }
 
+function assertWithinInputLimit(raw) {
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > MAX_INPUT_BYTES) {
+    throw new TypeError(
+      `candidate input must be at most ${MAX_INPUT_BYTES} bytes (got ${bytes})`,
+    );
+  }
+  return raw;
+}
+
 function readCandidateInput(flags, options) {
   if (flags.has("file")) {
-    return readFileSync(flagText(flags, "file"), "utf8");
+    const filePath = flagText(flags, "file");
+    // ファイルは読む前にサイズで弾ける（stdin と違い事前に大きさが分かる）。
+    const { size } = statSync(filePath);
+    if (size > MAX_INPUT_BYTES) {
+      throw new TypeError(
+        `${filePath} must be at most ${MAX_INPUT_BYTES} bytes (got ${size})`,
+      );
+    }
+    return readFileSync(filePath, "utf8");
   }
-  if (options.readInput) return options.readInput();
+  if (options.readInput) return assertWithinInputLimit(options.readInput());
   if (process.stdin.isTTY) {
     throw new TypeError("候補 JSON を stdin か --file <path> で渡してください");
   }
-  return readFileSync(0, "utf8");
+  // stdin は事前にサイズが分からないため、読み切ってから上限で弾く。
+  return assertWithinInputLimit(readFileSync(0, "utf8"));
 }
 
 function candidateEntries(parsed) {
@@ -323,6 +372,9 @@ function usage() {
     "                     --issue-url を添えると Issue 化済み（promoted）にする",
     "  --decision=defer   --until=YYYY-MM-DD（既定は 7 日後）",
     "  --decision=reject  --note で理由を残せる",
+    "",
+    "採用専用のフラグ（--success-metric / --baseline / --review-on / --fallback /",
+    "--issue-url）を defer / reject に渡すとエラーになります。",
   ].join("\n");
 }
 
@@ -340,6 +392,12 @@ export function runCli(argumentsList, options = {}) {
   }
 
   const { flags, positionals } = parseArguments(tokens, allowed);
+  const expectedPositionals = COMMAND_POSITIONALS[command];
+  if (positionals.length !== expectedPositionals) {
+    throw new TypeError(
+      `${command} takes ${expectedPositionals} positional argument(s), got ${positionals.length}`,
+    );
+  }
   const asJson = flags.get("json") === true;
   const emit = (payload, text) =>
     write(asJson ? JSON.stringify(payload, null, 2) : text);
