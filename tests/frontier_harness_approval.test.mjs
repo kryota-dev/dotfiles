@@ -13,6 +13,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  resolveApprovalsDirectory,
   runApprovalsCommand,
   runApproveCommand,
   startApprovalServerCommand,
@@ -23,6 +24,7 @@ import {
   createApprovalQueue,
 } from "../home/dot_local/lib/frontier-harness/approval-queue.mjs";
 import {
+  APPROVAL_RISKS,
   APPROVAL_RULE_PATTERN_MAX_LENGTH,
   BASELINE_APPROVAL_RULES,
   classifyToolCall,
@@ -30,6 +32,15 @@ import {
   loadApprovalRules,
   normalizeApprovalRulesFile,
 } from "../home/dot_local/lib/frontier-harness/approval-rules.mjs";
+import {
+  AMBIGUOUS_DYNAMIC,
+  AMBIGUOUS_NESTED_SHELL,
+  AMBIGUOUS_UNKNOWN_OPTION,
+  analyzeShellCommand,
+} from "../home/dot_local/lib/frontier-harness/approval-command.mjs";
+import {
+  CONFIG_RISK_VOCABULARY,
+} from "../home/dot_local/lib/frontier-harness/approval-rules-baseline.mjs";
 import {
   DEFAULT_ESCALATION_TIMEOUT_MS,
   DEFAULT_PROGRESS_INTERVAL_MS,
@@ -41,6 +52,12 @@ import {
   runStdioApprovalServer,
 } from "../home/dot_local/lib/frontier-harness/approval-server.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const CLI_PATH = fileURLToPath(
+  new URL("../home/dot_local/lib/frontier-harness/cli.mjs", import.meta.url),
+);
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -231,6 +248,82 @@ test("ordinary development commands stay allowed", () => {
     "make test",
   ]) {
     assert.equal(classifyBash(command).decision, "allow", command);
+  }
+});
+
+// レビュー指摘（fail-open）の回帰。global option を挟んだ形はすべて escalate へ倒す。
+test("escalation survives global options, short clusters, and force refspecs", () => {
+  for (const [command, ruleId] of [
+    ["git -C /repo merge main", "git-merge"],
+    ["git --no-pager merge main", "git-merge"],
+    ["git -c user.name=x push --force", "git-force-push"],
+    ["git push -uf origin main", "git-force-push"],
+    ["git push origin +main", "git-force-push"],
+    ["gh --repo o/r pr merge 1", "gh-pr-merge"],
+    ["gh -R o/r release create v1", "gh-release"],
+    ["npm --prefix pkg publish", "package-publish"],
+    ["yarn --cwd p publish", "package-publish"],
+    ["docker --context c push img", "package-publish"],
+  ]) {
+    const verdict = classifyBash(command);
+    assert.equal(verdict.decision, "escalate", command);
+    assert.equal(verdict.rule.id, ruleId, command);
+  }
+});
+
+// 正規表現を「option を読み飛ばす」形へ広げるだけでは、この 2 例を両立できない
+// （adversarial verify の反例）。option arity を見て初めて両方正しくなる。
+test("option arity decides the subcommand, in both directions", () => {
+  // `merge` は -C の値であり、実際の subcommand は良性の status。
+  assert.equal(classifyBash("git -C merge status").decision, "allow");
+  // -p は値を取らないので、次の merge が本当の subcommand。
+  assert.equal(classifyBash("git -p merge").rule.id, "git-merge");
+});
+
+test("shell obfuscation is normalized away or escalated as opaque", () => {
+  // バックスラッシュ分断と IFS 置換は正規化して本来のルールに当てる。
+  assert.equal(classifyBash("g\\it merge origin/main").rule.id, "git-merge");
+  assert.equal(
+    classifyBash("git${IFS}push${IFS}--force origin main").rule.id,
+    "git-force-push",
+  );
+  // 動的構築・入れ子シェルは解釈できないので opaque として escalate する。
+  for (const command of [
+    "git $(printf x) origin/main",
+    "$(echo git) merge main",
+    "eval \"$(echo abc)\"",
+    "bash -c 'ls'",
+    "sudo apt-get install x",
+  ]) {
+    assert.equal(classifyBash(command).rule.id, "opaque-command", command);
+  }
+  // 引数位置の置換までは咎めない（無人 wave が成立しなくなる）。
+  for (const command of [
+    'echo "$(date)" >> log.txt',
+    'git commit -m "$(cat msg.txt)"',
+  ]) {
+    assert.equal(classifyBash(command).decision, "allow", command);
+  }
+});
+
+test("an unrecognized global option makes the command ambiguous", () => {
+  const analysis = analyzeShellCommand("git --not-a-real-global-option merge x");
+  assert.equal(analysis.ambiguous, AMBIGUOUS_UNKNOWN_OPTION);
+  assert.equal(analyzeShellCommand("sudo ls").ambiguous, AMBIGUOUS_NESTED_SHELL);
+  assert.equal(analyzeShellCommand("$(echo ls)").ambiguous, AMBIGUOUS_DYNAMIC);
+  assert.equal(analyzeShellCommand("git status").ambiguous, null);
+});
+
+test("the risk vocabulary contains every value the shipped config escalates on", () => {
+  const config = JSON.parse(
+    readFileSync("home/dot_config/frontier-harness/config.json", "utf8"),
+  );
+  for (const risk of config.risk.alwaysEscalate) {
+    assert.ok(
+      CONFIG_RISK_VOCABULARY.has(risk),
+      `config risk ${risk} is missing from the approval vocabulary`,
+    );
+    assert.ok(APPROVAL_RISKS.has(risk), risk);
   }
 });
 
@@ -817,7 +910,7 @@ test("closing stdin aborts pending requests instead of leaving them hanging", as
   output.setEncoding("utf8");
   output.on("data", (chunk) => lines.push(chunk));
 
-  const finished = runStdioApprovalServer({
+  const transport = runStdioApprovalServer({
     input,
     output,
     createServer: (send) =>
@@ -836,7 +929,7 @@ test("closing stdin aborts pending requests instead of leaving them hanging", as
     `${JSON.stringify(approveMessage({ toolName: "Bash", input: { command: "git merge main" } }))}\n`,
   );
   input.end();
-  assert.equal(await finished, 0);
+  assert.equal(await transport.finished, 0);
 
   const decision = JSON.parse(
     JSON.parse(lines.join("")).result.content[0].text,
@@ -1015,6 +1108,234 @@ test("approve-server refuses a progress interval that cannot beat the idle timeo
       }),
     /must be a positive integer/,
   );
+});
+
+const MULTI_QUESTION = {
+  question: "Which colours?",
+  header: "Colours",
+  multiSelect: true,
+  options: [
+    { label: "Red", description: "red" },
+    { label: "Blue", description: "blue" },
+  ],
+};
+
+test("a multi-select question requires an array of labels on both sides", (context) => {
+  const { queue } = createQueueFixture(context);
+  const request = createPendingRequest(queue, {
+    toolName: "AskUserQuestion",
+    input: { questions: [MULTI_QUESTION] },
+    escalation: { ruleId: "ask-user-question", risk: "user-question", reason: "user が答える" },
+  });
+  // 書き込み側: scalar は拒否する。
+  assert.throws(
+    () =>
+      runApproveCommand({
+        queue,
+        emit: () => {},
+        flags: ["--request", request.id, "--allow", "--answers", '{"Which colours?":"Red"}'],
+      }),
+    /array of labels/,
+  );
+  // 読み出し側: CLI を迂回して置かれた scalar も拒否する。
+  queue.writeAnswer(
+    request.id,
+    answerRecord(request.id, { answers: { "Which colours?": "Red" } }),
+  );
+  assert.throws(() => queue.readAnswer(request.id, request), /array of labels/);
+});
+
+test("an existing symlink cannot stand in for an answer file", (context) => {
+  const { directory, queue } = createQueueFixture(context);
+  const request = createPendingRequest(queue);
+  const elsewhere = path.join(directory, "decoy.json");
+  writeFileSync(elsewhere, "{}");
+  symlinkSync(elsewhere, path.join(directory, `${request.id}.answer.json`));
+  assert.throws(
+    () => queue.writeAnswer(request.id, answerRecord(request.id)),
+    /answered once/,
+  );
+});
+
+test("two concurrent fh approve processes leave exactly one answer", (context) => {
+  const stateDirectory = temporaryDirectory(context);
+  const directory = approvalsDirectory(stateDirectory);
+  const request = createPendingRequest(createApprovalQueue({ directory }));
+  const run = (behavior) => {
+    try {
+      execFileSync(
+        process.execPath,
+        [CLI_PATH, "approve", "--approvals-dir", directory, "--request", request.id, behavior, "--json"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // 逐次だが別プロセス。link(2) の EEXIST が 2 件目を必ず落とす。
+  const outcomes = [run("--allow"), run("--deny")];
+  assert.equal(outcomes.filter(Boolean).length, 1);
+  const stored = createApprovalQueue({ directory }).readAnswer(
+    request.id,
+    createApprovalQueue({ directory }).readRequest(request.id),
+  );
+  assert.equal(stored.behavior, "allow");
+});
+
+test("fh approvals exposes the questions an AskUserQuestion request asked", (context) => {
+  const stateDirectory = temporaryDirectory(context);
+  const queue = createApprovalQueue({ directory: approvalsDirectory(stateDirectory) });
+  createPendingRequest(queue, {
+    toolName: "AskUserQuestion",
+    input: { questions: [COLOUR_QUESTION, MULTI_QUESTION] },
+    escalation: { ruleId: "ask-user-question", risk: "user-question", reason: "user が答える" },
+  });
+  const listed = runApprovalCli(["approvals", "--json"], stateDirectory);
+  const [entry] = listed.output.approvals;
+  assert.equal(entry.toolName, "AskUserQuestion");
+  assert.deepEqual(
+    entry.input.questions.map((question) => question.question),
+    ["Which colour?", "Which colours?"],
+  );
+  assert.deepEqual(entry.input.questions[1].options.map((o) => o.label), ["Red", "Blue"]);
+  assert.equal(entry.input.questions[1].multiSelect, true);
+});
+
+test("approve-server refuses to start on an unusable rules file or queue", (context) => {
+  const home = temporaryDirectory(context);
+  const io = {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    signals: { on: () => {} },
+  };
+  // 壊れたルールファイルは静かに baseline へ縮退させず、起動を拒否する。
+  const rulesPath = path.join(home, "rules.json");
+  writeFileSync(rulesPath, "{ not json");
+  assert.throws(
+    () =>
+      startApprovalServerCommand({
+        flags: ["--rules", rulesPath],
+        environment: { HOME: home },
+        cwd: "/workspace",
+        directory: path.join(home, "approvals"),
+        ...io,
+      }),
+    /not valid JSON/,
+  );
+  // 相対パスのフラグは作業ディレクトリ由来になるため拒否する。
+  // --rules は rules の解決経路、--approvals-dir は queue の解決経路で弾かれる。
+  assert.throws(
+    () =>
+      startApprovalServerCommand({
+        flags: ["--rules", "rules.json"],
+        environment: { HOME: home },
+        cwd: "/workspace",
+        directory: path.join(home, "approvals"),
+        ...io,
+      }),
+    /must be an absolute path/,
+  );
+  assert.throws(
+    () =>
+      resolveApprovalsDirectory({
+        flags: ["--approvals-dir", "approvals"],
+        stateDirectory: () => home,
+      }),
+    /must be an absolute path/,
+  );
+  // symlink の queue ディレクトリも拒否する。
+  const target = path.join(home, "real");
+  mkdirSync(target);
+  const linked = path.join(home, "linked");
+  symlinkSync(target, linked);
+  assert.throws(
+    () =>
+      startApprovalServerCommand({
+        flags: [],
+        environment: { HOME: home },
+        cwd: "/workspace",
+        directory: linked,
+        ...io,
+      }),
+    /must not be a symbolic link/,
+  );
+});
+
+test("the stdio transport writes JSON-RPC and nothing else to stdout", async (context) => {
+  const directory = path.join(temporaryDirectory(context), "approvals");
+  const queue = createApprovalQueue({ directory });
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const errorOutput = new PassThrough();
+  const stdout = [];
+  const stderr = [];
+  output.setEncoding("utf8");
+  output.on("data", (chunk) => stdout.push(chunk));
+  errorOutput.setEncoding("utf8");
+  errorOutput.on("data", (chunk) => stderr.push(chunk));
+
+  const transport = runStdioApprovalServer({
+    input,
+    output,
+    errorOutput,
+    createServer: (send) =>
+      createApprovalServer({
+        queue,
+        rules: BASELINE_RULES,
+        cwd: "/workspace",
+        timeoutMs: 60000,
+        pollIntervalMs: 5,
+        notify: send,
+        log: (line) => errorOutput.write(`log: ${line}\n`),
+      }),
+  });
+  input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} })}\n`);
+  input.write(`${JSON.stringify(approveMessage({ id: 2, toolName: "Bash", input: { command: "npm test" } }))}\n`);
+  input.end();
+  assert.equal(await transport.finished, 0);
+
+  for (const line of stdout.join("").trim().split("\n")) {
+    const message = JSON.parse(line);
+    assert.equal(message.jsonrpc, "2.0");
+  }
+});
+
+test("a signal aborts pending requests and lets the process finish", async (context) => {
+  const directory = path.join(temporaryDirectory(context), "approvals");
+  const queue = createApprovalQueue({ directory });
+  const handlers = new Map();
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const stderr = new PassThrough();
+  stderr.resume();
+
+  // stdin を閉じずに signal を発火する（実運用の SIGTERM と同じ状況）。
+  const finished = startApprovalServerCommand({
+    flags: ["--approvals-dir", directory, "--timeout-ms", "600000", "--progress-interval-ms", "1000"],
+    environment: { HOME: temporaryDirectory(context) },
+    cwd: "/workspace",
+    directory,
+    stdin: input,
+    stdout: output,
+    stderr,
+    signals: { on: (signal, handler) => handlers.set(signal, handler) },
+  });
+  output.resume();
+  input.write(
+    `${JSON.stringify(approveMessage({ toolName: "Bash", input: { command: "git merge main" } }))}\n`,
+  );
+  // 要求が pending になるまで待つ（実時計だがポーリング間隔は既定 1s 未満で収束する）。
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (queue.listRequests({ status: "pending" }).requests.length === 1) break;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  handlers.get("SIGTERM")("SIGTERM");
+  assert.equal(await finished, 0);
+  const [stored] = queue.listRequests({}).requests;
+  assert.equal(stored.status, "aborted");
+  assert.equal(stored.decision.decidedBy, "shutdown");
 });
 
 test("the approvals directory falls back to the state root layout", (context) => {
