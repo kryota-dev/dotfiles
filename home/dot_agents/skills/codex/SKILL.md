@@ -143,7 +143,7 @@ workspace-write 実行は **linked worktree 内でのみ**行う（main worktree
 
 ### 委任範囲の制約
 
-`codex exec` は **Bash 経由の外部プロセス**であり、Claude 側の `permissions.deny`（`Read(**/.env*)` / `Read(**/id_*)` / `Bash(env:*)` 等）は**一切適用されない**。加えて workspace-write は full-disk read を保持する（下記「残余リスク」）。したがって:
+`codex exec` は **Bash 経由の外部プロセス**であり、Claude 側の `permissions.deny`（`Read(//**/.env*)` / `Read(//**/id_rsa)` / `Bash(env:*)` 等）は**一切適用されない**。deny ルールがファイルシステム絶対アンカー（`//`）で宣言され、セッションの起動位置に依らず効くようになった後も同じで、**アンカーを広げても外部プロセスには届かない**（適用範囲は Claude Code の組み込みファイルツールと、Claude Code が認識できる Bash ファイルコマンドに限られる）。加えて workspace-write は full-disk read を保持する（下記「残余リスク」）。したがって:
 
 - **secret / 認証情報に触れうるタスクは Codex に委譲しない**（親または Sonnet worker で実装する）。
 - 委譲するのは **self-contained なコード変更**に限り、委任プロンプトに対象ファイルを列挙して範囲を明示する。
