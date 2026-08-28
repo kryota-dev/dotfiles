@@ -814,6 +814,47 @@ SHIMEOF
   grep -q '上書きしない\|上書き禁止' "${skills}/planning/SKILL.md"
 }
 
+@test "skills mandated by CLAUDE.md stay model-invocable (#355)" {
+  # This repo carries TWO independent "## Mandatory skill usage" sections, and both
+  # order the MODEL itself to run the listed skills: the deployed global instructions
+  # (home/dot_claude/CLAUDE.md) and the repo's own dogfood CLAUDE.md -> AGENTS.md.
+  # Per the Claude Code docs, disable-model-invocation: true means "Claude can invoke:
+  # no" AND "Description not in context" -- the skill vanishes from the model's skill
+  # list, so the mandate can never be honoured (the harness blocks the call and forbids
+  # reproducing the steps another way). Mandate and frontmatter must agree in both.
+  local entry claudemd search mandated name resolved dir value
+  # "<CLAUDE.md>|<skill dirs, colon-separated, searched in order>". The dogfood file
+  # mandates $code-change-verification (.agents/skills) alongside skills that only
+  # exist as chezmoi sources (home/dot_agents/skills), hence the two-dir search.
+  for entry in \
+    "${HOME_DIR}/dot_claude/CLAUDE.md|${HOME_DIR}/dot_agents/skills" \
+    "${REPO_ROOT}/CLAUDE.md|${REPO_ROOT}/.agents/skills:${HOME_DIR}/dot_agents/skills"; do
+    claudemd="${entry%%|*}"
+    search="${entry#*|}"
+    [ -f "$claudemd" ]
+    # Skill names are written as `$skill-name` inside the section. awk drops both the
+    # opening and the closing heading, so a `$token` in a later heading can't leak in.
+    mandated="$(awk '/^## Mandatory skill usage$/ { f = 1; next } /^## / { f = 0 } f' "$claudemd" |
+      grep -oE '\$[a-z0-9-]+' | tr -d '$' | sort -u)"
+    [ -n "$mandated" ]
+    for name in $mandated; do
+      resolved=""
+      for dir in ${search//:/ }; do
+        if [ -f "${dir}/${name}/SKILL.md" ]; then resolved="${dir}/${name}/SKILL.md"; break; fi
+      done
+      [ -n "$resolved" ] || { echo "mandated skill missing: $name (searched $search)"; return 1; }
+      value="$(sed -n 's/^disable-model-invocation:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$resolved")"
+      # Absent is the documented default and an explicit `false` is equivalent, so both
+      # pass. Anything else fails: YAML also reads True/yes/on as true, and treating
+      # only the literal `true` as hiding would let those slip through.
+      if [ -n "$value" ] && [ "$value" != "false" ]; then
+        echo "mandated skill is hidden from the model: $name (disable-model-invocation: $value)"
+        return 1
+      fi
+    done
+  done
+}
+
 @test "sdd is a single-pass component with no built-in review phase (#347)" {
   local skill="${HOME_DIR}/dot_agents/skills/sdd/SKILL.md"
   [ -f "$skill" ]
