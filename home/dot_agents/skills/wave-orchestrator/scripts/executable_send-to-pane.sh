@@ -378,6 +378,16 @@ irreversible_instruction() {
   printf '%s' "$1" | LC_ALL=C grep -qiE "$IRREVERSIBLE_RE"
 }
 
+# 現在までの UserPromptSubmit の件数。
+#
+# **これは「プロンプトが投入された」件数であって「user が入力した」件数ではない。**
+# harness がセッションへ注入する <task-notification> ブロック (バックグラウンドタスクの
+# 完了通知) も同じイベントを発火させる。実測 68 件中 28 件が task-notification で、
+# **唯一の UserPromptSubmit が task-notification だったセッションが 7 件**あった。
+#
+# よって「増分がある = 自分の本文が届いた」とは厳密には言えない (貼り付け直後に背景通知が
+# 届けば増える)。失敗の向きは「配信済みと報告して再送しない」= 送らない側なので致命的では
+# ないが、**この件数を『user が何かを送った』証拠として使う実装を足さないこと**。
 count_prompt_submits() {
   local f n
   f="${EVENT_DIR}/${SESSION}.jsonl"
