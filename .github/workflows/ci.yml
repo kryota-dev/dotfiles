@@ -53,6 +53,25 @@ jobs:
       - name: Run lint
         run: make lint
 
+      # The mise pin is the only place the Node version is declared; reading it
+      # here keeps CI from becoming a second source of truth that Renovate misses.
+      - name: Resolve the pinned Node.js version
+        id: node-version
+        run: |
+          version=$(sed -n 's/^node = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$version" ] || { echo "node pin not found in mise config" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      # `make test` runs lint-node before test-node; the split CI jobs keep the
+      # syntax check with the other linters.
+      - name: Run Node harness lint
+        run: make lint-node
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -83,6 +102,22 @@ jobs:
         run: |
           sh -c "$(curl -fsLS get.chezmoi.io)" -- -b "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
+      - name: Resolve the pinned Node.js version
+        id: node-version
+        run: |
+          version=$(sed -n 's/^node = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$version" ] || { echo "node pin not found in mise config" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      # Without this step the frontier-harness suite would only ever run locally.
+      - name: Run Node harness tests
+        run: make test-node
 
       - name: Run Bats tests
         run: make test-bats
