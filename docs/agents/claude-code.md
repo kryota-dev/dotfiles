@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-This document covers the Claude Code harness configuration deployed by this dotfiles repo. The harness consists of `~/.claude/settings.json`, a thin ECC launcher, three chezmoi-managed ECC hook forks, a 3-line statusline, the CLV2 continuous-learning observer wiring, and a set of Japanese-language code-review subagents. A second account (`~/.claude-r06`) mirrors the config entirely through symlinks while keeping its runtime state isolated.
+This document covers the Claude Code harness configuration deployed by this dotfiles repo. The harness consists of `~/.claude/settings.json`, a thin ECC launcher, one chezmoi-managed hook script, a 3-line statusline, the CLV2 continuous-learning observer wiring, and a set of Japanese-language code-review subagents. A second account (`~/.claude-r06`) mirrors the config entirely through symlinks while keeping its runtime state isolated.
 
 ---
 
@@ -16,7 +16,6 @@ This document covers the Claude Code harness configuration deployed by this dotf
 - [Hooks graph](#hooks-graph)
   - [SessionStart](#sessionstart)
   - [UserPromptSubmit](#userpromptsubmit)
-  - [PreCompact](#precompact)
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
   - [PostToolUseFailure](#posttoolusefailure)
@@ -24,10 +23,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
   - [Stop](#stop)
   - [StopFailure](#stopfailure)
 - [ECC launcher — ecc-hook.sh](#ecc-launcher--ecc-hooksh)
-- [ECC hook forks (hooks-fork/)](#ecc-hook-forks-hooks-fork)
-  - [governance-capture.js](#governance-capturejs)
-  - [post-bash-command-log.js](#post-bash-command-logjs)
-  - [ecc-state-reader.js](#ecc-state-readerjs)
+- [Hook scripts (hooks-fork/)](#hook-scripts-hooks-fork)
 - [Statusline](#statusline)
 - [CLV2 observer wiring](#clv2-observer-wiring)
 - [Scheduled morning radar](#scheduled-morning-radar)
@@ -44,12 +40,8 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/settings.json` | `~/.claude/settings.json` |
 | `home/dot_claude/executable_ecc-hook.sh` | `~/.claude/ecc-hook.sh` (0755) |
 | `home/dot_claude/executable_statusline.sh` | `~/.claude/statusline.sh` (0755) |
-| `home/dot_claude/executable_clv2-session-notify.sh` | `~/.claude/clv2-session-notify.sh` (0755) |
 | `home/dot_claude/executable_morning-radar.sh` | `~/.claude/morning-radar.sh` (0755) |
 | `home/dot_claude/executable_wave-session-event.sh` | `~/.claude/wave-session-event.sh` (0755) |
-| `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
-| `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
-| `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
 | `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md` (appended by `cldf`/`cldf-r06` via `--append-system-prompt-file`) |
@@ -143,37 +135,22 @@ The `permissions.deny` list blocks:
 
 The hooks are wired in `settings.json` and dispatched through either the ECC launcher or direct `node` invocations. The ECC dispatcher (`run-with-flags.js`) self-gates on `ECC_HOOK_PROFILE` (set to `strict`) and `ECC_DISABLED_HOOKS` (with any per-session `ECC_DISABLED_HOOKS_EXTRA` already merged in by the launcher, #281).
 
+**Reduced in #496** (sub-issue of #473). The surface used to carry 37 entries and layered safety, quality automation, observation, auditing, notification and learning onto the same events. Nineteen entries were removed, leaving 18. What went: the per-edit and per-Stop quality advisories (they duplicate `$code-change-verification` and CI), the observation and auditing that fed no decision loop, the automatic session-summary persistence and SessionStart context injection, and the CLV2 SessionStart notifier. What stayed: the safety boundary (commit-verification bypass block, destructive-command fact-forcing, dev-server launch, `pre:config-protection`), the CLV2 per-tool-call observer, the MCP failure recovery, the ntfy notifications, and every wave-orchestrator session event.
+
 ```mermaid
 flowchart TD
-    SS[SessionStart] --> SS1[ECC session-start-bootstrap]
-    SS --> SS2[clv2-session-notify async]
+    SS[SessionStart] --> SS1[ECC session-start-bootstrap\ncontext injection off\nregisters CLV2 observer lease]
 
     UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nno matcher]
     UPS --> UPS2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
-    PC[PreCompact] --> PC1[ECC pre-compact]
+    PTU[PreToolUse] --> PTU1[config-protection\nWrite Edit MultiEdit]
+    PTU --> PTU2[pre-bash-dispatcher\nBash]
+    PTU --> PTU3[CLV2 observe.sh pre async]
+    PTU --> PTU4[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
-    PTU[PreToolUse] --> PTU1[suggest-compact\nEdit Write]
-    PTU --> PTU2[config-protection\nWrite Edit MultiEdit]
-    PTU --> PTU3[gateguard-fact-force\nEdit Write MultiEdit]
-    PTU --> PTU4[governance-capture fork\nBash Write Edit MultiEdit]
-    PTU --> PTU5[pre-bash-dispatcher\nBash]
-    PTU --> PTU6[mcp-health-check\nmcp__.*]
-    PTU --> PTU7[doc-file-warning\nWrite]
-    PTU --> PTU8[CLV2 observe.sh pre async]
-    PTU --> PTU9[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
-
-    PoTU[PostToolUse] --> PoTU1[ecc-metrics-bridge]
-    PoTU --> PoTU2[ecc-context-monitor]
-    PoTU --> PoTU3[CLV2 observe.sh post async]
-    PoTU --> PoTU4[governance-capture fork\nBash Write Edit MultiEdit]
-    PoTU --> PoTU5[post-bash-dispatcher async\nBash]
-    PoTU --> PoTU6[command-log fork\nBash]
-    PoTU --> PoTU7[post-edit-accumulate\nEdit Write MultiEdit]
-    PoTU --> PoTU8[quality-gate\nEdit Write MultiEdit]
-    PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
-    PoTU --> PoTU10[console-warn\nEdit]
-    PoTU --> PoTU11[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
+    PoTU[PostToolUse] --> PoTU1[CLV2 observe.sh post async]
+    PoTU --> PoTU2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     PTUF[PostToolUseFailure] --> PTUF1[mcp-health-check\nall tools]
     PTUF --> PTUF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
@@ -181,13 +158,10 @@ flowchart TD
     NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
     NTF --> NTF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\npermission_prompt idle_prompt\nagent_needs_input]
 
-    STP[Stop] --> STP1[session-end async]
-    STP --> STP2[cost-tracker async]
-    STP --> STP3[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
-    STP --> STP4[ntfy-notify async]
-    STP --> STP5[format-typecheck async]
-    STP --> STP6[check-console-log sync]
-    STP --> STP7[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
+    STP[Stop] --> STP1[cost-tracker async]
+    STP --> STP2[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
+    STP --> STP3[ntfy-notify async]
+    STP --> STP4[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
     STPF[StopFailure] --> STPF1[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 ```
@@ -196,33 +170,21 @@ flowchart TD
 
 | Hook ID | Command | Notes |
 |---|---|---|
-| `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | Loads previous context; detects package manager |
-| `session:start:clv2-notify` | `clv2-session-notify.sh` (async, timeout 10 s) | Caches review-ready cluster count; fires 7-day-throttled desktop notification |
+| `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | Lifecycle only. `ECC_SESSION_START_CONTEXT=off` suppresses every injected block — previous session summary, active instincts, learned skills, project type (#496, #473 AC-025). The entry stays wired because `session-start.js` registers the CLV2 observer's session lease *before* it evaluates that gate; deleting the entry would silently stop the learning-engine observation this change must preserve |
 
 ### UserPromptSubmit
 
 | Hook ID | Matcher | Command | Notes |
 |---|---|---|---|
-| `user-prompt-submit:prompt-conform-suggest` | none | `node hooks-fork/prompt-conform-suggest.js` (timeout 5 s) | Detects long, task-shaped prompts and injects `additionalContext` suggesting `$prompt-conform` (task #367). Not an ECC fork — a standalone script, documented separately from [ECC hook forks](#ecc-hook-forks-hooks-fork) below. `UserPromptSubmit` does not support `matcher` per the [official Hooks reference](https://code.claude.com/docs/en/hooks) (silently ignored), so the entry omits it. Fail-open: a malformed payload, an invalid env-tuned regex, or any other exception all degrade to no output and exit 0. See [Env vars reference](#env-vars-reference) for the tuning knobs. |
+| `user-prompt-submit:prompt-conform-suggest` | none | `node hooks-fork/prompt-conform-suggest.js` (timeout 5 s) | Detects long, task-shaped prompts and injects `additionalContext` suggesting `$prompt-conform` (task #367). Not an ECC fork — a standalone script, documented separately from [Hook scripts](#hook-scripts-hooks-fork) below. `UserPromptSubmit` does not support `matcher` per the [official Hooks reference](https://code.claude.com/docs/en/hooks) (silently ignored), so the entry omits it. Fail-open: a malformed payload, an invalid env-tuned regex, or any other exception all degrade to no output and exit 0. See [Env vars reference](#env-vars-reference) for the tuning knobs. |
 | `userpromptsubmit:wave-session-event` | none | `wave-session-event.sh` (async, timeout 10 s) | Appends the hook payload to a per-session file so wave-orchestrator's parent session can tell a stopped child apart without scraping the TUI (#437). Wired into every session but **opt-in**: it records nothing unless `WAVE_ORCHESTRATOR_SESSION` is set in the environment (the orchestrator exports it only for the child sessions it launches) — ordinary sessions record nothing. Writes to `${XDG_STATE_HOME:-$HOME/.local/state}/wave-orchestrator/events/<session_id>.jsonl` (dir 700, file 600). Fail-open: no-op without `jq`, a writable state dir, or a `session_id` that parses as a UUID. |
-
-### PreCompact
-
-| Hook ID | Command |
-|---|---|
-| `pre:compact` | `ecc-hook.sh run-with-flags.js pre:compact scripts/hooks/pre-compact.js standard,strict` |
 
 ### PreToolUse
 
 | Hook ID | Matcher | Description |
 |---|---|---|
-| `pre:edit-write:suggest-compact` | `Edit\|Write` | Suggests manual compaction at logical intervals |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | Blocks edits to linter/formatter config files |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | Requires articulating impact before the first edit per file (disabled by default via `ECC_DISABLED_HOOKS`, #280; stays disabled by decision — see [design rationale](../explanation/design-rationale.md#the-fact-forcing-gate-stays-disabled), #282) |
-| `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | Captures governance events to per-account `state.db` (fork, direct `node`) |
-| `pre:bash:dispatcher` | `Bash` | Runs block-no-verify, auto-tmux-dev, tmux/git-push reminders, commit-quality, and the destructive gateguard gate in sequence |
-| `pre:mcp-health-check` | `mcp__.*` | Probes MCP server health; matcher is narrowed to avoid paying cost for non-MCP tools |
-| `pre:write:doc-file-warning` | `Write` | Warns on non-standard scratch doc files outside structured directories |
+| `pre:bash:dispatcher` | `Bash` | Runs `block-no-verify`, `auto-tmux-dev` and the gateguard in sequence. The advisory sub-hooks (`tmux-reminder`, `git-push-reminder`, `commit-quality`) are switched off via `ECC_DISABLED_HOOKS` (#496, #473 AC-010). The gateguard keeps its **destructive-command** fact-forcing; `GATEGUARD_BASH_ROUTINE_DISABLED=1` turns off only the routine gate on the session's first non-read-only Bash (#473 AC-009) |
 | `pre:observe:continuous-learning` | `*` | CLV2 `observe.sh pre` (async); writes `tool_start` to `observations.jsonl` |
 | `pretooluse:wave-session-event` | `AskUserQuestion` | Records the same wave-orchestrator payload as [UserPromptSubmit](#userpromptsubmit) above (async, timeout 10 s; opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Marks a question as opened; paired with the `PostToolUse`/`PostToolUseFailure` rows below via `tool_use_id` to detect whether it was later decided. |
 
@@ -247,16 +209,7 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 
 | Hook ID | Matcher | Async | Description |
 |---|---|---|---|
-| `post:ecc-metrics-bridge` | `*` | No | Running session metrics aggregate for statusline and context monitor |
-| `post:ecc-context-monitor` | `*` | No | Warns on context exhaustion, high cost, scope creep, or tool loops |
 | `post:observe:continuous-learning` | `*` | Yes | CLV2 `observe.sh post`; captures `tool_complete` to `observations.jsonl` |
-| `post:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | No | Captures governance events from tool outputs (fork, direct `node`) |
-| `post:bash:dispatcher` | `Bash` | Yes | PR-created detection; `command-log-audit/cost/build-complete` disabled via `ECC_DISABLED_HOOKS` |
-| `post:bash:command-log-audit` | `Bash` | No | Account-aware bash-command log fork (direct `node`) |
-| `post:edit:accumulate` | `Edit\|Write\|MultiEdit` | No | Collects edited JS/TS paths for Stop-time batched typecheck |
-| `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | Auto-formats `.json/.md/.go/.py` via biome/prettier/gofmt/ruff |
-| `post:edit:design-quality-check` | `Edit\|Write\|MultiEdit` | No | Frontend design-quality checklist warnings |
-| `post:edit:console-warn` | `Edit` | No | Warns (with line numbers) on `console.log` in edited JS/TS files |
 | `posttooluse:wave-session-event` | `AskUserQuestion` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Fires when `AskUserQuestion` is answered. Because `tool_response` carries the answer text, only correlation fields (`session_id`, `prompt_id`, `hook_event_name`, `tool_name`, `tool_use_id`) are projected and recorded — the answer body never lands on disk. |
 
 ### PostToolUseFailure
@@ -277,12 +230,9 @@ This regex is the SSOT shared with the Codex gateguard (see [codex.md](codex.md#
 
 | Hook ID | Async | Description |
 |---|---|---|
-| `stop:session-end` | Yes | Persists session state after each response |
 | `stop:cost-tracker` | Yes | Tracks token and cost metrics per session |
 | `stop:desktop-notify` | Yes | **Disabled** via `env.ECC_DISABLED_HOOKS` — replaced by `stop:ntfy-notify` (#337). Wiring kept for the documented one-step rollback (re-enable here + remove the ntfy entries together) |
 | `stop:ntfy-notify` | Yes | Publishes a session-stop notification (truncated + client-identifier-scrubbed summary) to the self-hosted ntfy server (#337) |
-| `stop:format-typecheck` | Yes | Batch-formats and typechecks (`tsc --noEmit`) JS/TS files edited this session (timeout 300 s) |
-| `stop:check-console-log` | No | Aggregates `console.log` warnings across all git-modified JS/TS files |
 | `stop:wave-session-event` | Yes | Same wave-orchestrator recorder as [UserPromptSubmit](#userpromptsubmit) above (opt-in via `WAVE_ORCHESTRATOR_SESSION`, #437). Marks the turn as idle/complete. |
 
 ### StopFailure
@@ -317,63 +267,21 @@ The `run-with-flags.js` wrapper self-gates: it reads `ECC_HOOK_PROFILE` and `ECC
 
 ---
 
-## ECC hook forks (hooks-fork/)
+## Hook scripts (hooks-fork/)
 
-Three hooks could not be satisfied by ECC's upstream implementations and were forked into `home/dot_claude/hooks-fork/`. All three are invoked directly as `node <file>` rather than through `ecc-hook.sh`, because `run-with-flags.js` rejects scripts outside the plugin root (path-traversal guard). Each fork resolves the ECC runtime via a plugin-root fallback probe and `require()`s ECC modules from the chezmoi external — reuse over reimplementation.
+`home/dot_claude/hooks-fork/` holds hook scripts that are invoked directly as `node <file>` rather than through `ecc-hook.sh`, because `run-with-flags.js` rejects scripts outside the plugin root (path-traversal guard).
 
-`home/dot_claude/hooks-fork/` also holds `prompt-conform-suggest.js` (the [UserPromptSubmit](#userpromptsubmit) hook above), which is **not** an ECC fork — it has no ECC upstream, requires no `require()` of ECC modules, and is stateless (no persistence layer). It is colocated here because it is invoked the same way (`node <file>`, direct) as the three forks below.
+Only `prompt-conform-suggest.js` (the [UserPromptSubmit](#userpromptsubmit) hook above) is left. It is **not** an ECC fork: it has no ECC upstream, `require()`s nothing from the ECC runtime, and is stateless — prompt text never reaches disk or a database. Its tuning knobs are in the [Env vars reference](#env-vars-reference).
 
-### governance-capture.js
+**The three ECC forks that used to live here were removed in #496** (sub-issue of #473):
 
-**What it adds.** ECC's upstream `governance-capture.js` detects governance-relevant events (secrets, approval-required commands, sensitive paths, elevated-privilege commands) but only writes them to stderr; its documented state-store persistence is never wired up. This fork reuses ECC's detection logic verbatim (via `require()`) and adds durable persistence to a per-account `governance_events` table.
+| Removed fork | What it did | Why it went |
+|---|---|---|
+| `governance-capture.js` | Persisted ECC's governance events (secrets, approval-required commands, sensitive paths) to a per-account `state.db` via `node:sqlite` | #473 AC-015: the capture fed no decision loop, and it was the only writer widening raw commands, paths and governance payloads into stored context |
+| `post-bash-command-log.js` | Appended every executed Bash command to a per-account, 0600, secret-redacted `bash-commands.log` | #473 AC-010 / AC-015: a raw command audit nothing read |
+| `ecc-state-reader.js` | Read-only CLI behind the `ecc-status` / `ecc-sessions` / `ecc-work-items` zsh functions | #473 AC-015: the read side of the same `state.db`; removed with its writer and its three shell functions |
 
-**Why node:sqlite instead of ECC's state-store.** ECC's state-store uses `sql.js` (npm) and `ajv` schema validation — neither is present in the chezmoi external, which fetches only ECC's hook/lib source without `node_modules`. Node's built-in `node:sqlite` (`DatabaseSync`) needs no dependencies and writes a standard SQLite3 file. The schema is applied by replaying ECC's own migration SQL (`require()`d from `scripts/lib/state-store/migrations.js`), so the resulting database is schema-compatible with what ECC would have produced.
-
-**Why the migration loop is hand-rolled.** ECC's `applyMigrations()` uses `better-sqlite3`'s `db.transaction()` API. `node:sqlite`'s `DatabaseSync` does not expose `db.transaction()`. The fork replays the `MIGRATIONS` array directly. If ECC changes its migration semantics, this loop must be updated by hand.
-
-**tool_response → tool_output normalization.** Claude Code delivers tool output under the key `tool_response`, but ECC's governance analyzer inspects `tool_output`. Without this normalization the post-side secret detection silently never runs. The fork translates the field name before passing the payload to ECC's detection logic.
-
-**Account isolation.** The database path is derived from `ECC_AGENT_DATA_HOME`:
-
-- `cld` account: `~/.claude/ecc/state.db`
-- `cld-r06` account: `~/.claude-r06/ecc/state.db`
-
-**Fail-open.** Every error path (governance capture disabled, missing ECC runtime, parse error, DB open/write error) degrades to stderr-only emission and a stdin pass-through. The tool pipeline is never blocked.
-
-**Enabling.** Set `ECC_GOVERNANCE_CAPTURE=1` (already set in `settings.json`).
-
-**Node version requirement.** `node:sqlite` requires Node ≥ 22.5. On older Node the fork emits `[governance][persist-failed] node:sqlite unavailable` to stderr and continues without persisting.
-
-WAL mode and `busy_timeout` match ECC's own connection settings, allowing concurrent hook processes (parallel tool calls each fire pre + post) to serialize writes rather than dropping rows on `SQLITE_BUSY`.
-
-### post-bash-command-log.js
-
-**What it fixes.** ECC's upstream `post-bash-command-log.js` appends each executed Bash command to an audit log but hardcodes the destination as `~/.claude/bash-commands.log`, ignoring `ECC_AGENT_DATA_HOME`. The `cld` and `cld-r06` accounts would both write to the same file and their command histories would collide.
-
-**How the fork fixes it.** The log directory is resolved via ECC's own `getClaudeDir()` (= `resolveAgentDataHome`, which honours `ECC_AGENT_DATA_HOME`):
-
-- `cld` account: `~/.claude/bash-commands.log`
-- `cld-r06` account: `~/.claude-r06/bash-commands.log`
-
-The fork layers extra secret-redaction patterns on top of ECC's command sanitizer and writes the log file at mode 0600. It handles audit mode only (`node <file> audit`); ECC's cost mode is handled by the dedicated `stop:cost-tracker` hook.
-
-**Wiring.** The ECC dispatcher's internal `command-log-audit` sub-hook is disabled via `ECC_DISABLED_HOOKS=post:bash:command-log-audit,...` and this fork runs as a standalone `PostToolUse` hook for the `Bash` matcher.
-
-**Fail-open.** If the ECC runtime is absent (sanitizer unavailable), the fork skips logging entirely rather than risk persisting an unredacted command. The process always exits 0.
-
-### ecc-state-reader.js
-
-**What it provides.** A read-only CLI backing three zsh functions:
-
-- `ecc-status` — pending governance events by type, recent events, active sessions
-- `ecc-sessions` — session list with cost/tool counts
-- `ecc-work-items` — pending approval-required items
-
-**Why a fork instead of ECC's own CLI.** ECC's query layer (`scripts/lib/state-store/queries.js`) loads `./schema`, which pulls in `ajv` — absent for the same reason as in `governance-capture.js`. The SELECTs are reimplemented directly on `node:sqlite`, reading the same `state.db` that the governance-capture fork writes.
-
-**Account selection.** `ECC_AGENT_DATA_HOME` determines which `state.db` is read. The `ecc-status`, `ecc-sessions`, and `ecc-work-items` shell functions default to the `~/.claude` account state when it is unset. To inspect the r06 account, prefix the call: `ECC_AGENT_DATA_HOME=$HOME/.claude-r06 ecc-status`. The path computation mirrors `governance-capture.js` exactly.
-
-**Node version requirement.** Same as `governance-capture.js` — requires Node ≥ 22.5. On older Node it prints a human-readable note and exits cleanly.
+`home/.chezmoiremove` reclaims the already-deployed copies — deleting a file from the chezmoi source tree does not delete the copy on disk. The data they wrote (`state.db`, `bash-commands.log`) is deliberately **left in place**: #473 scopes this change to stopping new writes, and deleting the accumulated history is a separate explicit decision.
 
 ---
 
@@ -434,7 +342,7 @@ The baseline is anchored on the exhausted window that resets **last**, since tha
 
 **R06 account badge.** When `CLAUDE_CONFIG_DIR` points to `~/.claude-r06`, the statusline renders a reverse-video `R06` badge to make the active account visually distinct.
 
-**CLV2 🧬N segment.** The `clv2_cluster_count()` function reads the integer cached at `<homunculus>/.review-ready-clusters` by `clv2-session-notify.sh`. It uses identical homunculus-dir precedence:
+**CLV2 🧬N segment.** The `clv2_cluster_count()` function reads the integer cached at `<homunculus>/.review-ready-clusters`. Its writer (`clv2-session-notify.sh`) was removed in #496 (see [CLV2 observer wiring](#clv2-observer-wiring)), so the segment now shows the last value that cache received and never changes; removing the renderer belongs with the statusline. The precedence below is kept verbatim so the two halves cannot drift if a writer is ever restored:
 
 1. `$CLV2_HOMUNCULUS_DIR` if set and absolute
 2. `$XDG_DATA_HOME/ecc-homunculus` if `XDG_DATA_HOME` is absolute
@@ -448,22 +356,13 @@ A non-absolute `XDG_DATA_HOME` is ignored (not used verbatim). Producer and cons
 
 CLV2 (continuous-learning v2) is an ECC skill that observes tool calls, clusters recurring patterns into "instincts", and proposes skills via `/evolve`.
 
-### SessionStart observer
+### SessionStart lifecycle
 
-`clv2-session-notify.sh` runs once per session (async, timeout 10 s) and does two things:
+`clv2-session-notify.sh` used to run once per session to recompute the review-ready instinct-cluster count and fire a 7-day-throttled desktop notification. It was removed in #496 (#473 AC-027): a session-start notification is not an action request, and the Python `evolve` pass ran on every session for a number almost nobody acted on that session.
 
-1. **Compute and cache the review-ready cluster count.** It calls `instinct-cli.py evolve` (the CLV2 engine at `~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py`), parses the line `Potential skill clusters found: N`, and caches `N` to `<homunculus>/.review-ready-clusters`. The statusline reads this cache for the 🧬N segment.
+What remains at `SessionStart` is `session:start`, which registers the observer's session lease. Its context injection is off (`ECC_SESSION_START_CONTEXT=off`, #473 AC-025), but the entry must stay wired — `session-start.js` writes the lease *before* it evaluates the injection gate, so removing the entry would stop the observation the loop depends on.
 
-2. **Fire a throttled desktop notification.** When `N ≥ 1` and the last notification was more than 7 days ago, it emits a macOS `osascript` notification nudging a `/evolve` or `retrospective-codify` pass. The notification epoch is stored in `<homunculus>/.last-instinct-notify` as file content (not mtime) so it survives `rsync`, backups, and `chezmoi re-apply`. The epoch is force-parsed base-10 to avoid octal abort under `set -e` on values like `08`.
-
-If the CLV2 engine is absent, Python is unavailable, or there are fewer than 3 instincts (`evolve` exits 1), the script degrades to a silent no-op. Session start is never blocked.
-
-**Homunculus-dir precedence** (must match the statusline exactly):
-
-```
-CLV2_HOMUNCULUS_DIR (absolute) > XDG_DATA_HOME/ecc-homunculus (absolute XDG only)
-  > HOME/.local/share/ecc-homunculus
-```
+The statusline still renders a 🧬N segment from `<homunculus>/.review-ready-clusters`, and that cache no longer has a writer. Its last value is therefore frozen until the renderer is removed; that removal belongs with the statusline, not here.
 
 ### Per-tool-call observer
 
@@ -555,11 +454,11 @@ Because `claude` resolves to the same wrapper script as `cld` (`~/.local/launche
 
 | Variable | Set in | Effect |
 |---|---|---|
-| `ECC_GOVERNANCE_CAPTURE` | `settings.json env` | `1` = enable governance event capture |
 | `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = run all hooks gated on strict profile. Pinned: settings.json env overrides shell exports, so there is no per-session profile switch (#281) |
-| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip (disables `post:bash:command-log-audit`, `post:bash:command-log-cost`, `post:bash:build-complete`, `pre:edit-write:gateguard-fact-force`) |
+| `ECC_DISABLED_HOOKS` | `settings.json env` | Comma-separated hook IDs to skip. Since #496 it names only sub-hooks that live inside the ECC runtime and therefore cannot be unwired from `settings.json`: `pre:bash:tmux-reminder`, `pre:bash:git-push-reminder`, `pre:bash:commit-quality` (#473 AC-010), plus `stop:desktop-notify` (#337 rollback wiring). Hook IDs that no longer have an entry were dropped — naming one reads like an active safety decision while gating nothing |
 | `ECC_DISABLED_HOOKS_EXTRA` | shell (`claude-config` alias, prefix invocation) | Per-session additive opt-out: `ecc-hook.sh` comma-joins it into `ECC_DISABLED_HOOKS`, since settings.json env overrides the base variable (#281) |
-| `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = quality-gate auto-fixes files instead of blocking |
+| `ECC_SESSION_START_CONTEXT` | `settings.json env` | `off` = inject no SessionStart context (previous session summary, active instincts, learned skills, project type). #473 AC-025; `--continue`/`--resume` and `$session-summary` cover the need on demand |
+| `GATEGUARD_BASH_ROUTINE_DISABLED` | `settings.json env` | `1` = skip the gateguard's routine gate on the session's first non-read-only Bash. The destructive-command fact-forcing is a separate code path and stays on (#473 AC-008 / AC-009) |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | Regex of additional destructive command patterns; SSOT shared with Codex gate |
 | `PROMPT_CONFORM_SUGGEST_MIN_LENGTH` | unset by default (operator-tunable) | Overrides the character-length floor (default 150) that `prompt-conform-suggest.js` requires before it inspects a prompt further. Must be a non-negative integer; other values fall back to the default |
 | `PROMPT_CONFORM_SUGGEST_TASK_REGEX` | unset by default (operator-tunable) | Overrides the imperative task-verb regex `prompt-conform-suggest.js` uses (default covers JP/EN task phrasing). An invalid pattern falls back to the built-in default |

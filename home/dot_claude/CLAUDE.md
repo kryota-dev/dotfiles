@@ -38,7 +38,6 @@
 
 Claude Code では以下が hook で機械的に担保されるため、対応する明示確認・委任は不要:
 
-- **git push**: git-push-reminder hook が push 操作時に stderr で注意喚起するため、push の明示確認は不要（commit の確認は `$commit` で維持する）。
 - **開発サーバー**: auto-tmux-dev hook が dev server を tmux 内で detached 起動するため、ユーザーへの起動委任は不要。
 
 ## Skill provenance

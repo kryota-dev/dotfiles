@@ -37,7 +37,7 @@ These are the user-facing entry points. `claude`/`cld` and `codex`/`cdx` all res
 |---|---|---|---|
 | `claude` / `cld` | Claude Code | Personal (fill-gaps) | Runs the mise-managed `claude` binary with the per-account env set; keeps an already-set `CLAUDE_CONFIG_DIR` (so a hook-spawned child stays on its parent session's account), else defaults to `~/.claude` |
 | `cld-r06` | Claude Code | Work (r06) | Same wrapper; `CLAUDE_CONFIG_DIR` forced to `~/.claude-r06` unconditionally (override) |
-| `claude-config` | Claude Code | Personal | zsh helper: disables ECC config-protection + gateguard-fact-force gates, then calls the `claude` wrapper; for intentional config edits |
+| `claude-config` | Claude Code | Personal | zsh helper: disables the ECC config-protection gate, then calls the `claude` wrapper; for intentional config edits |
 | `cldf` | Claude Code | Personal | zsh helper: calls the `claude` wrapper with `--model claude-fable-5` and the [Fable 5 orchestrator prompt](#fable-5-orchestrator-cldf-family) — main session runs on Fable 5, delegates execution to Sonnet subagents |
 | `cldf-r06` | Claude Code | Work (r06) | `cldf` on the r06 account |
 | `codex` / `cdx` | Codex CLI | Follows `CLAUDE_CONFIG_DIR` (fill-gaps) | Runs the brew-managed `codex` binary with `--profile shared` injected unless argv already carries `--profile`; `CODEX_HOME` follows `CLAUDE_CONFIG_DIR` when set (`~/.codex-r06` for a `.claude-r06` dir, else `~/.codex`), otherwise respects an explicit `CODEX_HOME` or defaults to `~/.codex` |

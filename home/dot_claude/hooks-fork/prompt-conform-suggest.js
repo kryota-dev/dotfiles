@@ -25,9 +25,9 @@
  *   PROMPT_CONFORM_SUGGEST_TASK_REGEX  — RegExp source, default: imperative task verbs (JP/EN)
  *   PROMPT_CONFORM_SUGGEST_KEYWORD_REGEX — RegExp source, default: skill/prompt-authoring terms
  *
- * Unlike home/dot_claude/hooks-fork/governance-capture.js this hook has no
- * persistence layer and does not require() the ECC external runtime — it is a
- * standalone, stateless script (prompt text is never written to disk or a DB).
+ * This hook has no persistence layer and does not require() the ECC external
+ * runtime — it is a standalone, stateless script (prompt text is never written
+ * to disk or a DB). Since #496 it is the only fork left under hooks-fork/.
  *
  * Fail-open: every failure path (malformed stdin JSON, invalid env regex,
  * unexpected exception) degrades to emitting nothing on stdout and exiting 0,
@@ -165,10 +165,9 @@ function run(rawInput) {
   });
 }
 
-// Write stdout and exit only once the buffer is fully flushed — see the same
-// rationale in home/dot_claude/hooks-fork/governance-capture.js (a bare
+// Write stdout and exit only once the buffer is fully flushed: a bare
 // process.exit() after a write can truncate output larger than the OS pipe
-// buffer). Output here is always small, but the safe pattern costs nothing.
+// buffer. Output here is always small, but the safe pattern costs nothing.
 function writeAndExit(output) {
   process.exitCode = 0;
   if (!output) {

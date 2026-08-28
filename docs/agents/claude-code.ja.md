@@ -4,7 +4,7 @@
 
 ← [ドキュメント目次](../README.ja.md)
 
-このドキュメントは、本 dotfiles リポジトリがデプロイする Claude Code ハーネスの設定を説明します。ハーネスは `~/.claude/settings.json`、薄い ECC ランチャー、3 つの chezmoi 管理 ECC フック fork、3 行ステータスライン、CLV2 継続学習オブザーバーの配線、および日本語コードレビュー用サブエージェント群で構成されます。2 つ目のアカウント (`~/.claude-r06`) はシンボリックリンクで設定全体をミラーしつつ、ランタイム状態は分離されます。
+このドキュメントは、本 dotfiles リポジトリがデプロイする Claude Code ハーネスの設定を説明します。ハーネスは `~/.claude/settings.json`、薄い ECC ランチャー、1 つの chezmoi 管理フックスクリプト、3 行ステータスライン、CLV2 継続学習オブザーバーの配線、および日本語コードレビュー用サブエージェント群で構成されます。2 つ目のアカウント (`~/.claude-r06`) はシンボリックリンクで設定全体をミラーしつつ、ランタイム状態は分離されます。
 
 ---
 
@@ -16,7 +16,6 @@
 - [フックグラフ](#フックグラフ)
   - [SessionStart](#sessionstart)
   - [UserPromptSubmit](#userpromptsubmit)
-  - [PreCompact](#precompact)
   - [PreToolUse](#pretooluse)
   - [PostToolUse](#posttooluse)
   - [PostToolUseFailure](#posttoolusefailure)
@@ -24,10 +23,7 @@
   - [Stop](#stop)
   - [StopFailure](#stopfailure)
 - [ECC ランチャー — ecc-hook.sh](#ecc-ランチャー--ecc-hooksh)
-- [ECC フック fork (hooks-fork/)](#ecc-フック-fork-hooks-fork)
-  - [governance-capture.js](#governance-capturejs)
-  - [post-bash-command-log.js](#post-bash-command-logjs)
-  - [ecc-state-reader.js](#ecc-state-readerjs)
+- [フックスクリプト (hooks-fork/)](#フックスクリプト-hooks-fork)
 - [ステータスライン](#ステータスライン)
 - [CLV2 オブザーバー配線](#clv2-オブザーバー配線)
 - [朝次レーダーのスケジュール実行](#朝次レーダーのスケジュール実行)
@@ -44,12 +40,8 @@
 | `home/dot_claude/settings.json` | `~/.claude/settings.json` |
 | `home/dot_claude/executable_ecc-hook.sh` | `~/.claude/ecc-hook.sh` (0755) |
 | `home/dot_claude/executable_statusline.sh` | `~/.claude/statusline.sh` (0755) |
-| `home/dot_claude/executable_clv2-session-notify.sh` | `~/.claude/clv2-session-notify.sh` (0755) |
 | `home/dot_claude/executable_morning-radar.sh` | `~/.claude/morning-radar.sh` (0755) |
 | `home/dot_claude/executable_wave-session-event.sh` | `~/.claude/wave-session-event.sh` (0755) |
-| `home/dot_claude/hooks-fork/governance-capture.js` | `~/.claude/hooks-fork/governance-capture.js` |
-| `home/dot_claude/hooks-fork/post-bash-command-log.js` | `~/.claude/hooks-fork/post-bash-command-log.js` |
-| `home/dot_claude/hooks-fork/ecc-state-reader.js` | `~/.claude/hooks-fork/ecc-state-reader.js` |
 | `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
 | `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md`（`cldf`/`cldf-r06` が `--append-system-prompt-file` で読み込む） |
@@ -141,37 +133,22 @@ Renovate の `github-tags` datasource への接続は別途追跡します。
 
 フックは `settings.json` で配線され、ECC ランチャーまたは直接 `node` 呼び出しでディスパッチされます。ECC ディスパッチャー (`run-with-flags.js`) は `ECC_HOOK_PROFILE`（`strict` に設定）と `ECC_DISABLED_HOOKS`（ランチャーがセッション単位の `ECC_DISABLED_HOOKS_EXTRA` をマージ済みの値、#281）でセルフゲーティングします。
 
+**#496 で縮小しました**（#473 の sub-issue）。従来は 37 エントリが同一イベント面に安全防御・品質自動化・観測・監査・通知・学習を重ねていました。19 エントリを除去し 18 エントリになりました。外したもの: Edit ごと・Stop ごとの品質助言（`$code-change-verification` と CI と重複）、判断に結び付かない観測・監査、セッション要約の自動保存と SessionStart の文脈注入、CLV2 の SessionStart 通知。残したもの: 安全境界（コミット検証の迂回禁止・破壊的コマンドの事実確認・開発サーバーの起動・`pre:config-protection`）、CLV2 のツール呼び出しオブザーバー、MCP 失敗時の recovery、ntfy 通知、そして wave-orchestrator のセッションイベント全件。
+
 ```mermaid
 flowchart TD
-    SS[SessionStart] --> SS1[ECC session-start-bootstrap]
-    SS --> SS2[clv2-session-notify async]
+    SS[SessionStart] --> SS1[ECC session-start-bootstrap\n文脈注入 off\nCLV2 observer lease 登録]
 
     UPS[UserPromptSubmit] --> UPS1[prompt-conform-suggest\nmatcherなし]
     UPS --> UPS2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
-    PC[PreCompact] --> PC1[ECC pre-compact]
+    PTU[PreToolUse] --> PTU1[config-protection\nWrite Edit MultiEdit]
+    PTU --> PTU2[pre-bash-dispatcher\nBash]
+    PTU --> PTU3[CLV2 observe.sh pre async]
+    PTU --> PTU4[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
-    PTU[PreToolUse] --> PTU1[suggest-compact\nEdit Write]
-    PTU --> PTU2[config-protection\nWrite Edit MultiEdit]
-    PTU --> PTU3[gateguard-fact-force\nEdit Write MultiEdit]
-    PTU --> PTU4[governance-capture fork\nBash Write Edit MultiEdit]
-    PTU --> PTU5[pre-bash-dispatcher\nBash]
-    PTU --> PTU6[mcp-health-check\nmcp__.*]
-    PTU --> PTU7[doc-file-warning\nWrite]
-    PTU --> PTU8[CLV2 observe.sh pre async]
-    PTU --> PTU9[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
-
-    PoTU[PostToolUse] --> PoTU1[ecc-metrics-bridge]
-    PoTU --> PoTU2[ecc-context-monitor]
-    PoTU --> PoTU3[CLV2 observe.sh post async]
-    PoTU --> PoTU4[governance-capture fork\nBash Write Edit MultiEdit]
-    PoTU --> PoTU5[post-bash-dispatcher async\nBash]
-    PoTU --> PoTU6[command-log fork\nBash]
-    PoTU --> PoTU7[post-edit-accumulate\nEdit Write MultiEdit]
-    PoTU --> PoTU8[quality-gate\nEdit Write MultiEdit]
-    PoTU --> PoTU9[design-quality-check\nEdit Write MultiEdit]
-    PoTU --> PoTU10[console-warn\nEdit]
-    PoTU --> PoTU11[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
+    PoTU[PostToolUse] --> PoTU1[CLV2 observe.sh post async]
+    PoTU --> PoTU2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
 
     PTUF[PostToolUseFailure] --> PTUF1[mcp-health-check\nall tools]
     PTUF --> PTUF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\nAskUserQuestion]
@@ -179,13 +156,10 @@ flowchart TD
     NTF[Notification] --> NTF1[ntfy-notify async\npermission_prompt idle_prompt\nagent_needs_input agent_completed]
     NTF --> NTF2[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION\npermission_prompt idle_prompt\nagent_needs_input]
 
-    STP[Stop] --> STP1[session-end async]
-    STP --> STP2[cost-tracker async]
-    STP --> STP3[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
-    STP --> STP4[ntfy-notify async]
-    STP --> STP5[format-typecheck async]
-    STP --> STP6[check-console-log sync]
-    STP --> STP7[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
+    STP[Stop] --> STP1[cost-tracker async]
+    STP --> STP2[desktop-notify async\nDISABLED via ECC_DISABLED_HOOKS]
+    STP --> STP3[ntfy-notify async]
+    STP --> STP4[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 
     STPF[StopFailure] --> STPF1[wave-session-event async\nopt-in WAVE_ORCHESTRATOR_SESSION]
 ```
@@ -194,33 +168,21 @@ flowchart TD
 
 | フック ID | コマンド | 備考 |
 |---|---|---|
-| `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | 前回コンテキスト読み込み、パッケージマネージャー検出 |
-| `session:start:clv2-notify` | `clv2-session-notify.sh` (async、タイムアウト 10 秒) | レビュー待ちクラスター数をキャッシュ；7 日スロットルのデスクトップ通知 |
+| `session:start` | `ecc-hook.sh scripts/hooks/session-start-bootstrap.js` | ライフサイクルのみ。`ECC_SESSION_START_CONTEXT=off` が注入ブロック全て（前回セッション要約・active instinct・learned skill・プロジェクト種別）を抑止する（#496、#473 AC-025）。エントリ自体を残すのは、`session-start.js` が CLV2 オブザーバーの session lease を**注入ゲートより前**で登録するため。エントリごと削除すると、本変更が維持すべき学習エンジンの観測が静かに止まる |
 
 ### UserPromptSubmit
 
 | フック ID | Matcher | コマンド | 備考 |
 |---|---|---|---|
-| `user-prompt-submit:prompt-conform-suggest` | なし | `node hooks-fork/prompt-conform-suggest.js`（タイムアウト 5 秒） | 長くタスク性の強いプロンプトを検知し、`$prompt-conform` の実行提案を `additionalContext` として注入する（task #367）。ECC フォークではなく独立スクリプト — 下記の [ECC hook forks](#ecc-フック-fork-hooks-fork) とは別に文書化している。`UserPromptSubmit` は[公式 Hooks reference](https://code.claude.com/docs/en/hooks)上 `matcher` 非サポート（silently ignored）のため、このエントリでは省略している。fail-open: 不正な payload・env でチューニングした不正な正規表現・その他の例外はすべて no-output・exit 0 に縮退する。チューニング項目は [Env vars reference](#env-vars-reference) を参照。 |
+| `user-prompt-submit:prompt-conform-suggest` | なし | `node hooks-fork/prompt-conform-suggest.js`（タイムアウト 5 秒） | 長くタスク性の強いプロンプトを検知し、`$prompt-conform` の実行提案を `additionalContext` として注入する（task #367）。ECC フォークではなく独立スクリプト — 下記の [フックスクリプト](#フックスクリプト-hooks-fork) とは別に文書化している。`UserPromptSubmit` は[公式 Hooks reference](https://code.claude.com/docs/en/hooks)上 `matcher` 非サポート（silently ignored）のため、このエントリでは省略している。fail-open: 不正な payload・env でチューニングした不正な正規表現・その他の例外はすべて no-output・exit 0 に縮退する。チューニング項目は [Env vars reference](#env-vars-reference) を参照。 |
 | `userpromptsubmit:wave-session-event` | なし | `wave-session-event.sh`（async、タイムアウト 10 秒） | hook payload をセッションごとのファイルに追記し、wave-orchestrator の親セッションが TUI を走査せずに子セッションの停止を検知できるようにする（#437）。配線は全セッションに入るが**記録は opt-in**: 環境変数 `WAVE_ORCHESTRATOR_SESSION` が設定されているときのみ記録し（orchestrator が起動する子セッションにのみ export される）、通常セッションは何も記録しない。記録先は `${XDG_STATE_HOME:-$HOME/.local/state}/wave-orchestrator/events/<session_id>.jsonl`（ディレクトリ 700 / ファイル 600）。fail-open: `jq` が無い、記録先に書けない、`session_id` が UUID として解釈できない、のいずれでも no-op。 |
-
-### PreCompact
-
-| フック ID | コマンド |
-|---|---|
-| `pre:compact` | `ecc-hook.sh run-with-flags.js pre:compact scripts/hooks/pre-compact.js standard,strict` |
 
 ### PreToolUse
 
 | フック ID | マッチャー | 説明 |
 |---|---|---|
-| `pre:edit-write:suggest-compact` | `Edit\|Write` | 論理的な区切りで手動コンパクトを提案 |
 | `pre:config-protection` | `Write\|Edit\|MultiEdit` | リンター/フォーマッター設定ファイルへの編集をブロック |
-| `pre:edit-write:gateguard-fact-force` | `Edit\|Write\|MultiEdit` | ファイルごとの初回編集前に影響の明示を要求（`ECC_DISABLED_HOOKS` によりデフォルト無効、#280。判断として無効のまま維持——[design rationale](../explanation/design-rationale.ja.md#fact-forcing-gate-は無効のまま維持)、#282 参照） |
-| `pre:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | ガバナンスイベントをアカウントごとの `state.db` にキャプチャ (fork、直接 `node`) |
-| `pre:bash:dispatcher` | `Bash` | block-no-verify、auto-tmux-dev、tmux/git-push リマインダー、コミット品質、破壊的コマンドのゲートを順番に実行 |
-| `pre:mcp-health-check` | `mcp__.*` | MCP サーバーのヘルスをプローブ；MCP 以外のツールのコストを回避するためマッチャーを絞り込み |
-| `pre:write:doc-file-warning` | `Write` | 構造化ディレクトリ外の非標準スクラッチドキュメントファイルに警告 |
+| `pre:bash:dispatcher` | `Bash` | `block-no-verify`、`auto-tmux-dev`、ゲートガードを順番に実行。助言系のサブフック（`tmux-reminder`、`git-push-reminder`、`commit-quality`）は `ECC_DISABLED_HOOKS` で無効化済み（#496、#473 AC-010）。ゲートガードは**破壊的コマンド**の事実確認を維持し、`GATEGUARD_BASH_ROUTINE_DISABLED=1` はセッション最初の非読み取り Bash に対する routine ゲートだけを止める（#473 AC-009） |
 | `pre:observe:continuous-learning` | `*` | CLV2 `observe.sh pre` (async)；`tool_start` を `observations.jsonl` に書き込み |
 | `pretooluse:wave-session-event` | `AskUserQuestion` | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（async、タイムアウト 10 秒；`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。質問が開いたことを記録する；下記の `PostToolUse`/`PostToolUseFailure` 行と `tool_use_id` でペアリングし、後で決着したかを判定する。 |
 
@@ -245,16 +207,7 @@ flowchart TD
 
 | フック ID | マッチャー | Async | 説明 |
 |---|---|---|---|
-| `post:ecc-metrics-bridge` | `*` | No | ステータスラインとコンテキストモニター用のセッションメトリクス集計 |
-| `post:ecc-context-monitor` | `*` | No | コンテキスト枯渇、高コスト、スコープクリープ、ツールループに警告 |
 | `post:observe:continuous-learning` | `*` | Yes | CLV2 `observe.sh post`；`tool_complete` を `observations.jsonl` にキャプチャ |
-| `post:governance-capture` | `Bash\|Write\|Edit\|MultiEdit` | No | ツール出力からガバナンスイベントをキャプチャ (fork、直接 `node`) |
-| `post:bash:dispatcher` | `Bash` | Yes | PR 作成検出；`command-log-audit/cost/build-complete` は `ECC_DISABLED_HOOKS` で無効 |
-| `post:bash:command-log-audit` | `Bash` | No | アカウント対応 bash コマンドログ fork (直接 `node`) |
-| `post:edit:accumulate` | `Edit\|Write\|MultiEdit` | No | Stop 時の一括型チェック用に編集した JS/TS パスを収集 |
-| `post:quality-gate` | `Edit\|Write\|MultiEdit` | No | `.json/.md/.go/.py` を biome/prettier/gofmt/ruff で自動フォーマット |
-| `post:edit:design-quality-check` | `Edit\|Write\|MultiEdit` | No | フロントエンドデザイン品質チェックリスト警告 |
-| `post:edit:console-warn` | `Edit` | No | 編集した JS/TS ファイルの `console.log` に行番号付きで警告 |
 | `posttooluse:wave-session-event` | `AskUserQuestion` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。`AskUserQuestion` に回答があったときに発火する。`tool_response` に回答本文が含まれるため、相関フィールド（`session_id`、`prompt_id`、`hook_event_name`、`tool_name`、`tool_use_id`）のみに射影して記録する — 回答本文はディスクに残らない。 |
 
 ### PostToolUseFailure
@@ -275,12 +228,9 @@ flowchart TD
 
 | フック ID | Async | 説明 |
 |---|---|---|
-| `stop:session-end` | Yes | 各レスポンス後にセッション状態を永続化 |
 | `stop:cost-tracker` | Yes | セッションごとのトークンとコストメトリクスを追跡 |
 | `stop:desktop-notify` | Yes | **Disabled**（`env.ECC_DISABLED_HOOKS` により）— `stop:ntfy-notify` に置き換え（#337）。ドキュメント化された 1 ステップロールバック（ここで再有効化 + ntfy エントリを一緒に削除）のため配線は維持 |
 | `stop:ntfy-notify` | Yes | セッション停止通知（切り詰め + client-identifier スクラブ済みサマリー）を自己ホスト ntfy サーバーへ publish する（#337） |
-| `stop:format-typecheck` | Yes | 今セッションで編集した JS/TS ファイルを一括フォーマット・型チェック (`tsc --noEmit`、タイムアウト 300 秒) |
-| `stop:check-console-log` | No | git 変更のある全 JS/TS ファイルで `console.log` 警告を集計 |
 | `stop:wave-session-event` | Yes | 上記 [UserPromptSubmit](#userpromptsubmit) と同じ wave-orchestrator 記録スクリプト（`WAVE_ORCHESTRATOR_SESSION` による opt-in、#437）。ターンが idle/完了したことを記録する。 |
 
 ### StopFailure
@@ -315,63 +265,21 @@ $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js <hook-id> <script-path
 
 ---
 
-## ECC フック fork (hooks-fork/)
+## フックスクリプト (hooks-fork/)
 
-3 つのフックは ECC のアップストリーム実装では要件を満たせないため、`home/dot_claude/hooks-fork/` に fork されました。いずれも `ecc-hook.sh` を経由せず `node <file>` として直接呼び出されます（`run-with-flags.js` はプラグインルート外のスクリプトをパストラバーサルガードで拒否するため）。各 fork はプラグインルートフォールバックプローブで ECC ランタイムを解決し、chezmoi external から ECC モジュールを `require()` します — 再実装より再利用を優先。
+`home/dot_claude/hooks-fork/` には、`ecc-hook.sh` を経由せず `node <file>` として直接呼び出されるフックスクリプトを置きます（`run-with-flags.js` はプラグインルート外のスクリプトをパストラバーサルガードで拒否するため）。
 
-`home/dot_claude/hooks-fork/` には [UserPromptSubmit](#userpromptsubmit) フックである `prompt-conform-suggest.js` も置かれていますが、これは ECC フォーク**ではありません** — ECC 側の対応実装がなく、ECC モジュールの `require()` も行わず、永続化層も持たないステートレスなスクリプトです。呼び出し方法（`node <file>` の直接呼び出し）が下記の 3 つの fork と同じであるため、同じディレクトリに配置されています。
+現在残っているのは [UserPromptSubmit](#userpromptsubmit) フックである `prompt-conform-suggest.js` のみです。これは ECC フォーク**ではありません** — ECC 側の対応実装がなく、ECC ランタイムを `require()` せず、ステートレス（プロンプト本文はディスクにも DB にも書かれない）です。チューニング用の環境変数は[環境変数リファレンス](#環境変数リファレンス)を参照してください。
 
-### governance-capture.js
+**ここにあった 3 つの ECC fork は #496（#473 の sub-issue）で削除しました:**
 
-**追加内容。** ECC のアップストリーム `governance-capture.js` はガバナンス関連イベント（シークレット、承認必須コマンド、機密パス、昇格特権コマンド）を検出しますが、stderr への書き込みのみで、ドキュメントに記載されているステートストアへの永続化は実装されていません。この fork は ECC の検出ロジックをそのまま（`require()` 経由で）再利用し、アカウントごとの `governance_events` テーブルへの永続化を追加します。
+| 削除した fork | 役割 | 削除理由 |
+|---|---|---|
+| `governance-capture.js` | ECC のガバナンスイベント（秘匿情報・承認要コマンド・機微パス）を `node:sqlite` でアカウントごとの `state.db` へ永続化 | #473 AC-015: キャプチャが判断のループに繋がっておらず、raw コマンド・パス・governance payload を保存された文脈へ広げる唯一の writer だった |
+| `post-bash-command-log.js` | 実行した Bash コマンドをアカウントごとの 0600・秘匿情報マスク済み `bash-commands.log` へ追記 | #473 AC-010 / AC-015: 誰も読まない raw コマンド監査 |
+| `ecc-state-reader.js` | `ecc-status` / `ecc-sessions` / `ecc-work-items` zsh 関数の背後にある read-only CLI | #473 AC-015: 同じ `state.db` の読み側。writer と 3 つのシェル関数ごと削除 |
 
-**node:sqlite を選んだ理由。** ECC のステートストアは `sql.js`（npm）と `ajv` スキーマ検証を使用しますが、chezmoi external はフック/lib ソースのみをフェッチし `node_modules` は含まれません（`sql.js`/`ajv` は不在）。Node 組み込みの `node:sqlite`（`DatabaseSync`）は依存関係なしで標準 SQLite3 ファイルを書き込みます。スキーマは ECC 自身のマイグレーション SQL（`scripts/lib/state-store/migrations.js` から `require()`）を再適用することで適用され、結果のデータベースは ECC が生成するものとスキーマ互換です。
-
-**マイグレーションループを手動実装した理由。** ECC の `applyMigrations()` は `better-sqlite3` の `db.transaction()` API を使用しますが、`node:sqlite` の `DatabaseSync` はこれを提供しません。fork は `MIGRATIONS` 配列を直接replay します。ECC がマイグレーションのセマンティクスを変更した場合、このループを手動で更新する必要があります。
-
-**tool_response → tool_output の正規化。** Claude Code はツール出力を `tool_response` キーで渡しますが、ECC のガバナンスアナライザーは `tool_output` を検査します。この正規化なしには post 側のシークレット検出がサイレントに動作しません。fork はペイロードを ECC の検出ロジックに渡す前にフィールド名を変換します。
-
-**アカウント分離。** データベースパスは `ECC_AGENT_DATA_HOME` から導出されます：
-
-- `cld` アカウント：`~/.claude/ecc/state.db`
-- `cld-r06` アカウント：`~/.claude-r06/ecc/state.db`
-
-**フェイルオープン。** すべてのエラーパス（ガバナンスキャプチャ無効、ECC ランタイム不在、パースエラー、DB エラー）は stderr のみへの出力と stdin パススルーにフォールバックします。ツールパイプラインはブロックされません。
-
-**有効化。** `ECC_GOVERNANCE_CAPTURE=1` を設定（`settings.json` に設定済み）。
-
-**Node バージョン要件。** `node:sqlite` は Node ≥ 22.5 が必要です。古い Node では `[governance][persist-failed] node:sqlite unavailable` を stderr に出力し、永続化なしで継続します。
-
-WAL モードと `busy_timeout` は ECC 自身の接続設定と一致しており、並行フックプロセス（並列ツール呼び出しは pre + post を発火）が `SQLITE_BUSY` で行を落とさずに書き込みをシリアライズできます。
-
-### post-bash-command-log.js
-
-**修正内容。** ECC のアップストリーム `post-bash-command-log.js` は実行された各 Bash コマンドを監査ログに追記しますが、宛先を `~/.claude/bash-commands.log` にハードコードしており `ECC_AGENT_DATA_HOME` を無視します。`cld` と `cld-r06` アカウントが同じファイルに書き込み、コマンド履歴が衝突します。
-
-**修正方法。** ログディレクトリは ECC 自身の `getClaudeDir()`（= `ECC_AGENT_DATA_HOME` を尊重する `resolveAgentDataHome`）で解決されます：
-
-- `cld` アカウント：`~/.claude/bash-commands.log`
-- `cld-r06` アカウント：`~/.claude-r06/bash-commands.log`
-
-fork は ECC のコマンドサニタイザーの上に追加のシークレット削除パターンを重ね、ログファイルを 0600 で書き込みます。監査モードのみを扱います（`node <file> audit`）；コストモードは専用の `stop:cost-tracker` フックが担当します。
-
-**配線。** ECC ディスパッチャーの内部 `command-log-audit` サブフックは `ECC_DISABLED_HOOKS=post:bash:command-log-audit,...` で無効化され、この fork が `Bash` マッチャーの独立した `PostToolUse` フックとして実行されます。
-
-**フェイルオープン。** ECC ランタイムが不在（サニタイザー不可用）の場合、fork は未削除コマンドを永続化するリスクを避けるためログ書き込みをスキップします。プロセスは常に終了コード 0 を返します。
-
-### ecc-state-reader.js
-
-**提供機能。** 3 つの zsh 関数を支援する読み取り専用 CLI：
-
-- `ecc-status` — タイプ別の未解決ガバナンスイベント、最近のイベント、アクティブセッション
-- `ecc-sessions` — コスト/ツール数を含むセッション一覧
-- `ecc-work-items` — 承認待ち項目
-
-**ECC 自身の CLI でなく fork を使う理由。** ECC のクエリレイヤー（`scripts/lib/state-store/queries.js`）は `./schema` をロードし、`ajv` を引き込みます — `governance-capture.js` と同じ理由で不在です。SELECT は `node:sqlite` 上で直接再実装され、governance-capture fork が書き込むのと同じ `state.db` を読み取ります。
-
-**アカウント選択。** `ECC_AGENT_DATA_HOME` がどの `state.db` を読むかを決定します。`ecc-status`、`ecc-sessions`、`ecc-work-items` シェル関数は、この変数が未設定の場合は `~/.claude` アカウントの状態をデフォルトで参照します。r06 アカウントを参照するには、コマンドにプレフィックスを付けます：`ECC_AGENT_DATA_HOME=$HOME/.claude-r06 ecc-status`。パスの計算は `governance-capture.js` と完全に一致します。
-
-**Node バージョン要件。** `governance-capture.js` と同様に Node ≥ 22.5 が必要です。古い Node では人間が読めるノートを表示してクリーンに終了します。
+配備済みコピーは `home/.chezmoiremove` で回収します（chezmoi source からファイルを消しても、既に配備されたコピーは消えません）。これらが書いたデータ（`state.db`、`bash-commands.log`）は**意図的に残します**: #473 は本変更のスコープを「新規書き込みを止める」に限定しており、蓄積された履歴の削除は別途の明示判断です。
 
 ---
 
@@ -432,7 +340,7 @@ L3  [battery%]  <network-RTT>  <claude-service-status>
 
 **R06 アカウントバッジ。** `CLAUDE_CONFIG_DIR` が `~/.claude-r06` を指す場合、ステータスラインはリバースビデオの `R06` バッジをレンダリングしてアクティブアカウントを視覚的に区別します。
 
-**CLV2 🧬N セグメント。** `clv2_cluster_count()` 関数は `clv2-session-notify.sh` が `<homunculus>/.review-ready-clusters` にキャッシュした整数を読み取ります。homunculus-dir の優先順位は同一でなければなりません：
+**CLV2 🧬N セグメント。** `clv2_cluster_count()` 関数は `<homunculus>/.review-ready-clusters` にキャッシュされた整数を読み取ります。その writer（`clv2-session-notify.sh`）は #496 で削除されたため（[CLV2 オブザーバー配線](#clv2-オブザーバー配線)参照）、このセグメントはキャッシュが最後に受け取った値のまま変化しません。レンダラーの除去はステータスライン側の変更に属します。以下の優先順位は、将来 writer が復活したときに両者が乖離しないようそのまま残しています：
 
 1. `$CLV2_HOMUNCULUS_DIR`（設定されており絶対パスの場合）
 2. `$XDG_DATA_HOME/ecc-homunculus`（`XDG_DATA_HOME` が絶対パスの場合のみ）
@@ -446,22 +354,13 @@ L3  [battery%]  <network-RTT>  <claude-service-status>
 
 CLV2 (continuous-learning v2) はツール呼び出しを観察し、繰り返しパターンを「本能 (instinct)」にクラスタリングし、`/evolve` でスキルを提案する ECC スキルです。
 
-### SessionStart オブザーバー
+### SessionStart のライフサイクル
 
-`clv2-session-notify.sh` はセッションごとに 1 回（async、タイムアウト 10 秒）実行され、2 つのことを行います：
+`clv2-session-notify.sh` はかつてセッションごとに 1 回実行され、レビュー待ち instinct クラスター数を再計算し、7 日スロットルのデスクトップ通知を発火していました。#496（#473 AC-027）で削除しました: セッション開始の通知は行動要求ではなく、そのセッションでほとんど誰も動かない数値のために Python の `evolve` パスが毎セッション走っていたためです。
 
-1. **レビュー待ちクラスター数の計算とキャッシュ。** `instinct-cli.py evolve`（`~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py` の CLV2 エンジン）を呼び出し、`Potential skill clusters found: N` 行を解析し、`N` を `<homunculus>/.review-ready-clusters` にキャッシュします。ステータスラインはこのキャッシュを読んで 🧬N セグメントをレンダリングします。
+`SessionStart` に残るのは `session:start` で、オブザーバーの session lease を登録します。文脈注入は無効（`ECC_SESSION_START_CONTEXT=off`、#473 AC-025）ですが、エントリ自体は残す必要があります — `session-start.js` は lease を**注入ゲートより前**に書き込むため、エントリごと削除するとループが依存する観測まで止まります。
 
-2. **スロットルされたデスクトップ通知の発火。** `N ≥ 1` かつ最後の通知から 7 日以上経過している場合、`/evolve` または `retrospective-codify` パスを促す macOS `osascript` 通知を発火します。通知エポックは `<homunculus>/.last-instinct-notify` にファイル内容（mtime でなく）として保存されるため、`rsync`、バックアップ、`chezmoi re-apply` を生き延びます。エポックは `set -e` 下で `08` のような値が 8 進数として解釈されて abort しないよう強制的に 10 進数でパースされます。
-
-CLV2 エンジンが不在、Python が利用不可、または本能が 3 つ未満（`evolve` が終了コード 1）の場合、スクリプトはサイレント no-op にフォールバックします。セッション開始はブロックされません。
-
-**homunculus-dir の優先順位**（ステータスラインと完全一致が必要）：
-
-```
-CLV2_HOMUNCULUS_DIR (絶対パス) > XDG_DATA_HOME/ecc-homunculus (絶対 XDG のみ)
-  > HOME/.local/share/ecc-homunculus
-```
+ステータスラインは今も `<homunculus>/.review-ready-clusters` から 🧬N セグメントを描画しますが、このキャッシュには writer がいません。したがってセグメントは最後に書かれた値で凍結します。レンダラーの除去はステータスライン側の変更に属するため、ここでは行いません。
 
 ### ツール呼び出しごとのオブザーバー
 
@@ -553,11 +452,11 @@ kryota-dev/dotfiles#257: launchd LaunchAgent が平日朝に `/morning-brief` �
 
 | 変数 | 設定場所 | 効果 |
 |---|---|---|
-| `ECC_GOVERNANCE_CAPTURE` | `settings.json env` | `1` = ガバナンスイベントキャプチャを有効化 |
 | `ECC_HOOK_PROFILE` | `settings.json env` | `strict` = strict プロファイルでゲーティングされるすべてのフックを実行。固定値：settings.json env がシェルの export を上書きするため、セッション単位のプロファイル切替はない（#281） |
-| `ECC_DISABLED_HOOKS` | `settings.json env` | スキップするフック ID のカンマ区切りリスト (`post:bash:command-log-audit`、`post:bash:command-log-cost`、`post:bash:build-complete`、`pre:edit-write:gateguard-fact-force` を無効化) |
+| `ECC_DISABLED_HOOKS` | `settings.json env` | スキップするフック ID のカンマ区切りリスト。#496 以降は、ECC ランタイム内部にあり `settings.json` から配線を外せないサブフックだけを列挙する: `pre:bash:tmux-reminder`、`pre:bash:git-push-reminder`、`pre:bash:commit-quality`（#473 AC-010）と `stop:desktop-notify`（#337 のロールバック配線）。対応するエントリが存在しないフック ID は削除した — 何もゲートしていないのに有効な安全判断のように読めるため |
 | `ECC_DISABLED_HOOKS_EXTRA` | シェル（`claude-config` エイリアス、prefix 起動） | セッション単位の追加 opt-out：settings.json env が基底変数を上書きするため、`ecc-hook.sh` がこれを `ECC_DISABLED_HOOKS` へカンマ結合でマージする（#281） |
-| `ECC_QUALITY_GATE_FIX` | `settings.json env` | `true` = 品質ゲートがブロックする代わりにファイルを自動修正 |
+| `ECC_SESSION_START_CONTEXT` | `settings.json env` | `off` = SessionStart の文脈（前回セッション要約・active instinct・learned skill・プロジェクト種別）を一切注入しない。#473 AC-025。必要時は `--continue`/`--resume` と `$session-summary` で賄う |
+| `GATEGUARD_BASH_ROUTINE_DISABLED` | `settings.json env` | `1` = セッション最初の非読み取り Bash に対するゲートガードの routine ゲートをスキップする。破壊的コマンドの事実確認は別の実行経路であり有効なまま（#473 AC-008 / AC-009） |
 | `GATEGUARD_BASH_EXTRA_DESTRUCTIVE` | `settings.json env` | 追加の破壊的コマンドパターンの正規表現；Codex ゲートと SSOT 共有 |
 | `PROMPT_CONFORM_SUGGEST_MIN_LENGTH` | 既定未設定（運用者がチューニング可能） | `prompt-conform-suggest.js` がプロンプトをさらに検査する前に要求する文字数閾値（既定 150）を上書きする。非負整数のみ有効、それ以外は既定値へフォールバック |
 | `PROMPT_CONFORM_SUGGEST_TASK_REGEX` | 既定未設定（運用者がチューニング可能） | `prompt-conform-suggest.js` が使う命令形タスク動詞の正規表現（既定は JP/EN のタスク文面）を上書きする。不正な正規表現は組み込み既定へフォールバック |

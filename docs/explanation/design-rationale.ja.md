@@ -50,15 +50,15 @@ Renovate の `customManager` 正規表現については [externals-and-pinning.
 
 ## fact-forcing gate は無効のまま維持
 
-**判断:** ECC の `pre:edit-write:gateguard-fact-force` gate（各ファイルの初回編集前に影響ファクトの明示を要求）は、`settings.json` の `env.ECC_DISABLED_HOOKS` によりデフォルト無効のまま維持し（#280）、#282 で整理した長時間セッションでの摩擦は上流へエスカレートしません。#282 は moot としてクローズし、upstream issue は起票しませんでした。
+**判断:** ECC の `pre:edit-write:gateguard-fact-force` gate（各ファイルの初回編集前に影響ファクトの明示を要求）は無効とし、#282 で整理した長時間セッションでの摩擦は上流へエスカレートしません。#282 は moot としてクローズし、upstream issue は起票しませんでした。#280 では `settings.json` の `env.ECC_DISABLED_HOOKS` による無効化でしたが、**#496 で `PreToolUse` エントリ自体を削除しました** —— 誰も動かすつもりのない配線は、有効な安全判断のように読めるだけの死んだ設定だからです（#473 AC-011）。
 
 **なぜ:** 長時間（~2 日）セッションのトランスクリプト分析で、ピン留めされた v2.0.0 ランタイムの gate に 4 つの摩擦が見つかりました: 30 分の無操作 TTL により「セッションごとに 1 回」のアーミングが「バーストごとに 1 回」へ劣化する。要求されるファクトが無意味なターゲット（scratch ファイル、spec ドキュメント、PR ドラフト）にも gate が発火する。Claude Code 自身の read-before-edit 検証との重なりで 1 ファイルあたり最大 3 往復かかる。deny メッセージが実際のメカニズムを隠している——deny 自体がファイルをアーミングし、どんなリトライも通過するため、提示されたファクトは一度も検証されない。
 
-上流は v2.0.0 ピンの後にこの一部を独立に修正しています（2026-07 時点の状況）: セッションごとの予算超過後の denial 圧縮（affaan-m/ECC#2227）と、`GATEGUARD_EXEMPT_GLOBS` によるオプトインのパス除外（affaan-m/ECC#2432）。残る摩擦（TTL、read-before-edit との重なり、deny メッセージの誠実さ）は gate を再有効化した場合にのみ問題になります——`settings.json` の配線は再有効化を意図的に可能なまま残していますが（#280）、現在それを行うものはなく、再有効化には env ではなく `claude --settings` オーバーレイが必要です（#281）。この repo が無効のまま維持する gate のために upstream issue を起票しても、ローカルの利点がない追跡義務が生まれるだけです。
+上流は v2.0.0 ピンの後にこの一部を独立に修正しています（2026-07 時点の状況）: セッションごとの予算超過後の denial 圧縮（affaan-m/ECC#2227）と、`GATEGUARD_EXEMPT_GLOBS` によるオプトインのパス除外（affaan-m/ECC#2432）。残る摩擦（TTL、read-before-edit との重なり、deny メッセージの誠実さ）は gate を再有効化した場合にのみ問題になります。再有効化とは、いまや **`settings.json` へ `PreToolUse` エントリを追加し直すこと**を意味します —— #496 以降は「無効化を解除する」対象のエントリが存在しないため、#281 の `claude --settings` オーバーレイの論点はこの gate には当てはまりません。この repo が無効のまま維持する gate のために upstream issue を起票しても、ローカルの利点がない追跡義務が生まれるだけです。
 
 将来の ECC ピンバンプでこの問いが再浮上した場合は、upstream contribution を検討する前に、2.0.0 以降の上流ノブ（`GATEGUARD_EXEMPT_GLOBS`、`GATEGUARD_FACT_FORCE_FULL_DENIALS`）で再評価してください。
 
-フックグラフと `ECC_DISABLED_HOOKS` / `ECC_DISABLED_HOOKS_EXTRA` チャンネルについては [claude-code.ja.md](../agents/claude-code.ja.md) を参照してください。
+フックグラフ（この gate はもう載っていません）と `ECC_DISABLED_HOOKS` / `ECC_DISABLED_HOOKS_EXTRA` チャンネルについては [claude-code.ja.md](../agents/claude-code.ja.md) を参照してください。この id が hook 面と `ECC_DISABLED_HOOKS` の両方から消えたままであることは `tests/claude_hooks.bats` が検証します。
 
 ---
 

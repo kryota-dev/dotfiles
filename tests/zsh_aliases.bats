@@ -322,5 +322,5 @@ EOF
 @test "claude.zsh: claude-config prefixes the hook opt-out and pins the default account" {
   run zsh -fc "source '${HOME_DIR}/dot_config/zsh/claude.zsh'; alias claude-config"
   [ "$status" -eq 0 ]
-  printf '%s\n' "$output" | grep -qFx "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" claude'"
+  printf '%s\n' "$output" | grep -qFx "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection CLAUDE_CONFIG_DIR=\"\$HOME/.claude\" claude'"
 }

@@ -10,16 +10,16 @@
 # is put on PATH in dot_zshrc.tmpl (static prepend + a precmd hook that keeps it ahead of mise).
 
 # Dedicated session for intentional config edits on the DEFAULT account (~/.claude): disables the
-# ECC config-protection / gateguard-fact-force gates so Claude can edit settings.json / biome.json
-# / eslint.config.* etc. The opt-out goes through ECC_DISABLED_HOOKS_EXTRA: settings.json's env
-# block overrides a shell-exported ECC_DISABLED_HOOKS (#280) but leaves EXTRA untouched, and
-# ecc-hook.sh merges it into ECC_DISABLED_HOOKS for the hook runtime (#281). Setting
-# CLAUDE_CONFIG_DIR explicitly pins the default account; the claude wrapper fill-gaps rule keeps
-# it (it only fills an unset value). The gateguard-fact-force id is redundant with the
-# settings.json default (#280) but kept so the contract survives a future default flip. For the
-# r06 account, prefix the same var to cld-r06:
-#   ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force cld-r06
-alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force CLAUDE_CONFIG_DIR="$HOME/.claude" claude'
+# ECC config-protection gate so Claude can edit settings.json / biome.json / eslint.config.* etc.
+# The opt-out goes through ECC_DISABLED_HOOKS_EXTRA: settings.json's env block overrides a
+# shell-exported ECC_DISABLED_HOOKS (#280) but leaves EXTRA untouched, and ecc-hook.sh merges it
+# into ECC_DISABLED_HOOKS for the hook runtime (#281). Setting CLAUDE_CONFIG_DIR explicitly pins
+# the default account; the claude wrapper fill-gaps rule keeps it (it only fills an unset value).
+# pre:edit-write:gateguard-fact-force was dropped from this list in #496 along with its
+# settings.json wiring — naming a hook id that no longer exists is dead config, not a safety net.
+# For the r06 account, prefix the same var to cld-r06:
+#   ECC_DISABLED_HOOKS_EXTRA=pre:config-protection cld-r06
+alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection CLAUDE_CONFIG_DIR="$HOME/.claude" claude'
 
 # Fable 5 orchestrator: run the main session on Fable 5 and steer task execution into Sonnet
 # subagents via the orchestrator system prompt. The model is pinned to the full ID (not the
@@ -51,16 +51,6 @@ _claude_fable() {
 }
 alias cldf='_claude_fable "$HOME/.claude"'
 alias cldf-r06='_claude_fable "$HOME/.claude-r06"'
-
-# ecc-* CLIs (PR-C, #4/#5): inspect the per-account ECC governance state.db that the
-# governance-capture fork writes. Account is selected by ECC_AGENT_DATA_HOME; the reader
-# defaults to ~/.claude when it is unset, so a plain shell shows the default account. To
-# inspect the r06 account, prefix it: `ECC_AGENT_DATA_HOME=$HOME/.claude-r06 ecc-status`.
-# Functions (not aliases) so flags like --json pass through. The reader lives under the
-# default account dir and is shared by both accounts (same as the governance-capture fork).
-ecc-status() { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" status "$@"; }
-ecc-sessions() { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" sessions "$@"; }
-ecc-work-items() { node "$HOME/.claude/hooks-fork/ecc-state-reader.js" work-items "$@"; }
 
 alias ccdcmds='ccdcommands'
 
