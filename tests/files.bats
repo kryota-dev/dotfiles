@@ -795,6 +795,90 @@ SHIMEOF
   [ ! -d "${HOME_DIR}/dot_agents/skills/santa-method" ]
 }
 
+@test "shared-worktree write guard for Claude subagents has one SSOT (#524)" {
+  # A subagent that rewrites a file in the worktree it shares with its parent rolls the
+  # parent's uncommitted edits back to the spawn-time snapshot. Nothing is deleted, so
+  # tests and CI still pass and the loss is silent until integration.
+  local skills="${HOME_DIR}/dot_agents/skills"
+  local pw="${skills}/pr-workflow/SKILL.md"
+  # The guard lives in pr-workflow: Phase 0.5 is what creates the shared worktree, and
+  # pr-workflow spawns subagents itself besides being where sdd and multi-review run
+  # from (sdd is user-invocable: false, so it only ever runs underneath pr-workflow).
+  # The heading doubles as this test's anchor, so renaming it has to fail here.
+  local anchor='### 共有作業ツリーでの Claude subagent 委譲契約'
+  grep -qF -- "$anchor" "$pw"
+  # Slice out the section body — from the anchor to the next heading of the same or
+  # higher level — and assert the rules against that slice, not the whole file. Checking
+  # the file globally would pass even if the heading were blanked and the rules scattered
+  # into unrelated sections, which is precisely the SSOT property under test. The three
+  # alternated patterns stand in for `^#{1,3} ` because interval expressions are not
+  # portable across the awk implementations on macOS and Ubuntu; `####` sub-headings
+  # inside the section do not match any of them, so they don't terminate the slice.
+  local section
+  section="$(awk -v a="$anchor" '
+    $0 == a { inside = 1; next }
+    inside && (/^# / || /^## / || /^### /) { exit }
+    inside { print }
+  ' "$pw")"
+  [ -n "$section" ] || { echo "SSOT section is empty or the anchor moved"; return 1; }
+  # The six rules every delegation prompt must carry.
+  local rule
+  for rule in \
+    'read-only 扱い' \
+    'git stash' \
+    'git worktree add --detach' \
+    'RED は新規テストの追加で作る' \
+    '<RESULT_FILE>' \
+    'write 境界ではない'; do
+    printf '%s' "$section" | grep -qF -- "$rule" ||
+      { echo "rule missing from the SSOT section: $rule"; return 1; }
+  done
+  # The parent's duties. The exclusivity contract is load-bearing: the snapshot
+  # comparison alone cannot see a rollback of an edit the parent made *after* spawn,
+  # because the tree then matches the pre-spawn snapshot exactly (#524's own repro
+  # steps take that path). status --porcelain covers the untracked files diff misses.
+  local duty
+  for duty in \
+    'subagent 実行中は共有作業ツリーを編集しない' \
+    'pre-spawn' \
+    'status --porcelain' \
+    'ポリシー統制であり技術統制ではない'; do
+    printf '%s' "$section" | grep -qF -- "$duty" ||
+      { echo "parent duty missing from the SSOT section: $duty"; return 1; }
+  done
+  # The scope must stay generalised (not narrowed back to linked worktrees), and the
+  # section must keep disclosing what it does not cover.
+  printf '%s' "$section" | grep -qF -- 'すべての起動'
+  printf '%s' "$section" | grep -qF -- '#### 残余リスク'
+  # Every delegation site must reach the SSOT: sdd owns the standard/large implementation
+  # worker (Phase 4-2), multi-review owns the review legs (Phase 2), issue-fleet reuses one
+  # worktree across a serial lane of implementation subagents (Phase 3-4).
+  local f
+  for f in sdd multi-review issue-fleet; do
+    grep -qF -- '共有作業ツリーでの Claude subagent 委譲契約' "${skills}/${f}/SKILL.md" ||
+      { echo "missing SSOT pointer in: $f"; return 1; }
+  done
+  # The pointers must stay pointers. These rule bodies may appear ONLY in the SSOT --
+  # restating them here is exactly the drift structure #524 set out to avoid, and it is
+  # invisible to every other check because both copies would still read as correct.
+  local marker
+  for f in sdd multi-review issue-fleet; do
+    for marker in 'git stash' 'git worktree add --detach' 'ポリシー統制であり技術統制ではない'; do
+      if grep -qF -- "$marker" "${skills}/${f}/SKILL.md"; then
+        echo "SSOT body duplicated into ${f}: ${marker}"
+        return 1
+      fi
+    done
+  done
+  # The Codex-side guard is a separate SSOT with a different enforcement mechanism (a
+  # fail-closed sandbox check). It stays in codex/SKILL.md: neither relocated into the
+  # new Claude-side section nor copied out of it (explicitly out of scope for #524).
+  grep -q '^## agent profile（workspace-write 実行）$' "${skills}/codex/SKILL.md"
+  grep -q '^### worktree ガード（必須）$' "${skills}/codex/SKILL.md"
+  grep -qF -- 'is not a linked worktree' "${skills}/codex/SKILL.md"
+  ! grep -qF -- 'is not a linked worktree' "$pw"
+}
+
 @test "Plan-PRD pipeline flags are wired into grill-me / planning / sdd (opt-in)" {
   local skills="${HOME_DIR}/dot_agents/skills"
   # grill-me emits the PRD; planning consumes it and emits the Plan; sdd
