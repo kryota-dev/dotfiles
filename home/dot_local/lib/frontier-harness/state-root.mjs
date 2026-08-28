@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { assertNotSymlink } from "./paths.mjs";
@@ -45,7 +45,11 @@ function readTopology(cwd, runGit) {
   try {
     output = runGit(cwd, TOPOLOGY_ARGUMENTS);
   } catch (error) {
-    // bare repository も working tree が無いためここに来る。
+    // git が実際に起動して非 0 終了したときだけ「working tree が無い」とみなす。
+    // 実測: 非 working tree（bare 含む）は status=128、spawn 自体の失敗は
+    // code="ENOENT" / "EACCES" かつ status=null。後者まで握り潰すと、git 不在や
+    // 権限エラーを doctor が「repository の外にいるだけ」と誤診断して隠してしまう。
+    if (typeof error?.status !== "number") throw error;
     throw new GitWorktreeUnavailableError(
       "frontier-harness state root requires a git working tree",
       { cause: error },
@@ -86,6 +90,42 @@ function superprojectCommonDirectory(cwd, runGit) {
   }
 }
 
+// 作業ツリーの `.git` が、git の報告した git dir を実際に指しているかを確認する。
+// これが無いと、GIT_DIR / GIT_COMMON_DIR で別リポジトリの metadata を指したまま
+// 任意のディレクトリを作業ツリーとして通せる（実測で再現した escape）。
+// 見つからない・形が違うときは null を返し、所有と認めない（fail closed）。
+function workingTreeGitLink(topLevel) {
+  const link = path.join(topLevel, ".git");
+  let stats;
+  try {
+    stats = lstatSync(link);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  // symlink の `.git` は escape と同じ形になるため受け付けない。
+  if (stats.isSymbolicLink()) return null;
+  if (stats.isDirectory()) return link;
+  if (!stats.isFile()) return null;
+  const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(link, "utf8"));
+  if (!match) return null;
+  // submodule の `.git` は `gitdir: ../.git/modules/<name>` のように相対で書かれる。
+  return path.resolve(topLevel, match[1].trim());
+}
+
+// linked worktree の admin dir は `gitdir` に「所有する作業ツリーの .git」を書き戻す。
+// 読めない場合は空文字を返し、(b) を成立させない（fail closed）。
+function worktreeBacklink(gitDirectory) {
+  try {
+    return path.resolve(
+      gitDirectory,
+      readFileSync(path.join(gitDirectory, "gitdir"), "utf8").trim(),
+    );
+  } catch {
+    return "";
+  }
+}
+
 // 「common dir が現在の作業ツリー配下にあること」（containment）は要求しない。
 // linked worktree では common dir が作業ツリーの外を指すのが正常であり
 // （実測: /Users/ryota/worktrees/dotfiles/<branch> -> /Users/ryota/dotfiles/.git）、
@@ -93,10 +133,23 @@ function superprojectCommonDirectory(cwd, runGit) {
 // 代わりに「この作業ツリーが所有する common dir か」を検証する。
 function isOwnedByWorkingTree(topology, resolveSuperproject) {
   const { commonDirectory, gitDirectory, topLevel } = topology;
+  // 3 形態に共通の前提: 作業ツリーの `.git` が、この git dir を指していること。
+  // GIT_DIR で他リポジトリの metadata を指すだけでは、この結び付きは作れない。
+  if (workingTreeGitLink(topLevel) !== gitDirectory) return false;
+
   // (a) 通常の repository: <topLevel>/.git がそのまま common dir。
-  if (path.dirname(commonDirectory) === topLevel) return true;
-  // (b) linked worktree: git dir が <commonDir>/worktrees/<name>。
-  if (isInside(path.join(commonDirectory, "worktrees"), gitDirectory)) return true;
+  //     dirname 比較だと `.git` 以外の名前の git dir まで通るため完全一致で見る。
+  if (commonDirectory === path.join(topLevel, ".git")) return true;
+  // (b) linked worktree: git dir が <commonDir>/worktrees/<name> にあり、かつ
+  //     その admin dir の backlink がこの作業ツリーを指していること。
+  //     形（パス配置）だけを見ると、victim の正当な admin dir を GIT_DIR で
+  //     指した任意の cwd が通ってしまう（実測で再現した escape）。
+  if (
+    isInside(path.join(commonDirectory, "worktrees"), gitDirectory) &&
+    worktreeBacklink(gitDirectory) === path.join(topLevel, ".git")
+  ) {
+    return true;
+  }
   // (c) submodule: common dir が superproject の common dir 配下。
   //     (a)(b) で確定したときは git を追加起動しない。
   const superproject = resolveSuperproject();

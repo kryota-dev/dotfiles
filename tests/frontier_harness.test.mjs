@@ -24,7 +24,10 @@ import {
 } from "../home/dot_local/lib/frontier-harness/readiness.mjs";
 import { runWithRolloutGuard } from "../home/dot_local/lib/frontier-harness/rollout.mjs";
 import { chooseRoute } from "../home/dot_local/lib/frontier-harness/router.mjs";
-import { resolveGitCommonDirectory } from "../home/dot_local/lib/frontier-harness/state-root.mjs";
+import {
+  GitWorktreeUnavailableError,
+  resolveGitCommonDirectory,
+} from "../home/dot_local/lib/frontier-harness/state-root.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 import { normalizeTask } from "../home/dot_local/lib/frontier-harness/task.mjs";
 
@@ -1283,8 +1286,161 @@ test("state root resolution reports a missing git working tree distinctly", (con
   assert.throws(
     () =>
       resolveGitCommonDirectory(directory, () => {
-        throw new Error("fatal: this operation must be run in a work tree");
+        // 実 git は working tree が無いとき status 128 で終了する。
+        const error = new Error("fatal: this operation must be run in a work tree");
+        error.status = 128;
+        throw error;
       }),
     /requires a git working tree/,
   );
+});
+
+test("state root resolution propagates a git that could not be executed", (context) => {
+  const directory = temporaryDirectory(context);
+  // spawn 自体の失敗（git 不在・権限）は「working tree が無い」ではないため、
+  // doctor に握り潰させず原因を保ったまま伝播させる。
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(directory, () => {
+        const error = new Error("spawn git ENOENT");
+        error.code = "ENOENT";
+        throw error;
+      }),
+    (error) =>
+      error instanceof GitWorktreeUnavailableError === false &&
+      error.code === "ENOENT",
+  );
+});
+
+test("state root resolution rejects a worktrees path that only shares a prefix", (context) => {
+  const directory = temporaryDirectory(context);
+  const commonDirectory = path.join(directory, "common.git");
+  mkdirSync(commonDirectory);
+  writeFileSync(path.join(commonDirectory, "HEAD"), "ref: refs/heads/main\n");
+  const topLevel = path.join(directory, "tree");
+  mkdirSync(topLevel);
+  const gitDirectory = path.join(commonDirectory, "worktrees-evil", "child");
+  mkdirSync(gitDirectory, { recursive: true });
+  // forward link は成立させ、`worktrees` の prefix 判定だけを切り出して検証する。
+  writeFileSync(path.join(topLevel, ".git"), `gitdir: ${gitDirectory}\n`);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(
+        topLevel,
+        stubGit({ commonDirectory, gitDirectory, topLevel }),
+      ),
+    /not owned by the current working tree/,
+  );
+});
+
+test("fh refuses a state root reached through an injected GIT_DIR", (context) => {
+  const directory = temporaryDirectory(context);
+  const victim = initRepository(path.join(directory, "victim"));
+  const victimWorktree = path.join(directory, "victim-wt");
+  git(victim, ["worktree", "add", "--quiet", victimWorktree, "-b", "victim-branch"]);
+  const untrusted = path.join(directory, "untrusted");
+  mkdirSync(untrusted);
+
+  // victim の「正当な」worktree admin dir を指すため、パスは本当に
+  // <commonDir>/worktrees/ 配下にある。攻撃者が握るのは topLevel だけ。
+  // node --test はファイル内のテストを直列実行するため、process.env の一時変更は安全。
+  const previous = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(victim, ".git", "worktrees", "victim-wt");
+  context.after(() => {
+    if (previous === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previous;
+  });
+
+  assert.throws(
+    () =>
+      runCli(["run", "--task", writeTask(directory), "--json"], {
+        cwd: untrusted,
+        accountScope: "personal",
+        commandPaths: COMMAND_PATHS,
+        config,
+        write: () => {},
+      }),
+    /not owned by the current working tree/,
+  );
+  assert.equal(existsSync(path.join(victim, ".git", "frontier-harness")), false);
+});
+
+test("fh doctor propagates an unowned state root instead of swallowing it", (context) => {
+  const directory = temporaryDirectory(context);
+  const untrusted = initRepository(path.join(directory, "untrusted"));
+  const other = initRepository(path.join(directory, "other"));
+  const nested = path.join(untrusted, "sub");
+  mkdirSync(nested);
+  writeFileSync(path.join(nested, ".git"), `gitdir: ${path.join(other, ".git")}\n`);
+
+  // 要件 5-5: 信頼できない state root の検出は doctor 経路でも握り潰さない。
+  for (const flags of [
+    ["doctor", "--json"],
+    ["doctor", "--probe", "--json"],
+  ]) {
+    assert.throws(
+      () =>
+        runCli(flags, {
+          cwd: nested,
+          accountScope: "personal",
+          commandPaths: COMMAND_PATHS,
+          config,
+          probeProvider: () => ({
+            verified: true,
+            models: [CONFIGURED_FRONTEND_MODEL],
+          }),
+          write: () => {},
+        }),
+      /not owned by the current working tree/,
+    );
+  }
+  assert.equal(existsSync(path.join(other, ".git", "frontier-harness")), false);
+});
+
+test("a run under another account scope does not reuse verified readiness", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--probe", "--json"], {
+      accountScope: "personal",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      probeProvider: () => ({
+        verified: true,
+        models: [CONFIGURED_FRONTEND_MODEL],
+      }),
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  output.pop();
+
+  const taskPath = writeTask(directory);
+  // 同一 scope の run は自分の readiness を再利用する。
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).decision.capability, "frontend.primary");
+
+  // 別 scope の run は personal の readiness を流用しない（要件 2-2 の run 経路）。
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "r06",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).decision.capability, "executor.default");
 });
