@@ -2,8 +2,18 @@ import { accessSync, chmodSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  createApprovalQueue,
+} from "./approval-queue.mjs";
+import {
+  resolveApprovalsDirectory,
+  runApprovalsCommand,
+  runApproveCommand,
+  startApprovalServerCommand,
+} from "./approval-commands.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
+import { flagValue } from "./flags.mjs";
 import { sha256Hex } from "./hash.mjs";
 import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
 import { PROVIDER_COMMANDS } from "./providers.mjs";
@@ -17,6 +27,7 @@ import {
 } from "./state-root.mjs";
 import { createStateStore } from "./state-store.mjs";
 import { normalizeTask } from "./task.mjs";
+import { resolveTrustedPath } from "./trusted-path.mjs";
 import {
   loadVerifiedModels,
   probeAntigravity,
@@ -81,24 +92,15 @@ function loadConfig(configPath) {
 // 設定ファイルの置き場所を作業ディレクトリの内容から解決しない。
 // HOME が無いまま path.join("", ...) すると cwd 相対になり、untrusted repository が
 // 同梱した config が escalation 方針（risk.alwaysEscalate）や rollout を差し替えうる。
+// 同じ不変条件を承認ルールのファイルも要求するため、実装は trusted-path.mjs に集約する。
 function resolveConfigPath(options, environment) {
-  if (options.configPath) return options.configPath;
-  const override = environment.FH_CONFIG_PATH;
-  if (override) {
-    // 明示的な escape hatch として HOME 配下までは要求しない。
-    // ただし相対値は cwd 基準で解決されるため受け付けない。
-    if (!path.isAbsolute(override)) {
-      throw new TypeError("FH_CONFIG_PATH must be an absolute path");
-    }
-    return override;
-  }
-  const home = environment.HOME;
-  if (typeof home !== "string" || !path.isAbsolute(home)) {
-    throw new TypeError(
-      "HOME must be an absolute path to resolve the frontier-harness config",
-    );
-  }
-  return path.join(home, ".config", "frontier-harness", "config.json");
+  return resolveTrustedPath({
+    explicit: options.configPath,
+    environment,
+    envKey: "FH_CONFIG_PATH",
+    homeRelative: [".config", "frontier-harness", "config.json"],
+    label: "frontier-harness config",
+  });
 }
 
 function defaultCommandPaths(environment) {
@@ -111,24 +113,18 @@ function defaultCommandPaths(environment) {
   );
 }
 
-function flagValue(flags, name) {
-  const index = flags.indexOf(name);
-  const value = index === -1 ? undefined : flags[index + 1];
-  // 後続のフラグを値として受け取らない（`--task --json` の誤解釈を防ぐ）。
-  if (!value || value.startsWith("--")) {
-    throw new TypeError(`${name} requires a value`);
-  }
-  return value;
-}
-
-function defaultStatePath(cwd) {
+function defaultStateDirectory(cwd) {
   const stateDirectory = path.join(
     resolveGitCommonDirectory(cwd),
     "frontier-harness",
   );
   ensureDirectory(stateDirectory, "frontier-harness state directory");
   chmodSync(stateDirectory, 0o700);
-  return path.join(stateDirectory, "state.db");
+  return stateDirectory;
+}
+
+function defaultStatePath(cwd) {
+  return path.join(defaultStateDirectory(cwd), "state.db");
 }
 
 // readiness は account scope ごとに分ける。共有すると、あるプロファイルで確定した
@@ -222,6 +218,9 @@ function usage() {
     "Usage: frontier-harness <command> [--json]",
     "",
     "Commands:",
+    "  approvals      List pending approval requests",
+    "  approve        Answer one approval request (--request <id> --allow|--deny)",
+    "  approve-server Run the stdio permission prompt tool for a child session",
     "  doctor  Report adapter and capability readiness",
     "  clean   Prune expired raw evidence and aggregate telemetry",
     "  onboard Approve one repository capability manifest",
@@ -304,6 +303,45 @@ export function runCli(argumentsList, options = {}) {
     writeJsonAtomic(policyPath, policy, "repository policy");
     emit({ approved: true, policyPath, approvalHash: policy.approvalHash });
     return 0;
+  }
+
+  // 承認チャネルは SQLite state を必要としない。承認待ちは既定 8 時間に及ぶため、
+  // その間 DB を開いたままにしないよう createStateStore より前で分岐する。
+  if (
+    command === "approve-server" ||
+    command === "approvals" ||
+    command === "approve"
+  ) {
+    const cwd = options.cwd ?? process.cwd();
+    const directory = resolveApprovalsDirectory({
+      flags,
+      stateDirectory: () => options.stateDirectory ?? defaultStateDirectory(cwd),
+    });
+    if (command === "approve-server") {
+      const finished = startApprovalServerCommand({
+        flags,
+        environment,
+        cwd,
+        directory,
+        ...options.approvalServerIo,
+      });
+      // stdin を読んでいるあいだ event loop は生きている。終了コードは
+      // stdio が閉じた時点で確定させる。
+      finished.then(
+        (code) => {
+          process.exitCode = code;
+        },
+        (error) => {
+          process.stderr.write(`frontier-harness: ${error.message}\n`);
+          process.exitCode = 70;
+        },
+      );
+      return 0;
+    }
+    const queue = createApprovalQueue({ directory });
+    return command === "approvals"
+      ? runApprovalsCommand({ queue, emit, flags })
+      : runApproveCommand({ queue, emit, flags });
   }
 
   const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
