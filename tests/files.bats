@@ -790,6 +790,29 @@ SHIMEOF
   grep -q '上書きしない\|上書き禁止' "${skills}/planning/SKILL.md"
 }
 
+@test "skills mandated by CLAUDE.md stay model-invocable (#355)" {
+  local claudemd="${HOME_DIR}/dot_claude/CLAUDE.md"
+  local skills="${HOME_DIR}/dot_agents/skills"
+  [ -f "$claudemd" ]
+  # "Mandatory skill usage" orders the model to run these skills itself. Per the
+  # Claude Code docs, disable-model-invocation: true means "Claude can invoke: no"
+  # AND "Description not in context" -- the skill vanishes from the model's skill
+  # list, so the mandate can never be honoured (the harness blocks the call and
+  # forbids reproducing the steps another way). Mandate and frontmatter must agree.
+  local mandated
+  mandated="$(sed -n '/^## Mandatory skill usage$/,/^## /p' "$claudemd" |
+    grep -oE '\$[a-z0-9-]+' | tr -d '$' | sort -u)"
+  [ -n "$mandated" ]
+  local name
+  for name in $mandated; do
+    [ -f "${skills}/${name}/SKILL.md" ] || { echo "mandated skill missing: $name"; return 1; }
+    if grep -q '^disable-model-invocation:' "${skills}/${name}/SKILL.md"; then
+      echo "mandated skill is hidden from the model: $name"
+      return 1
+    fi
+  done
+}
+
 @test "sdd is a single-pass component with no built-in review phase (#347)" {
   local skill="${HOME_DIR}/dot_agents/skills/sdd/SKILL.md"
   [ -f "$skill" ]
