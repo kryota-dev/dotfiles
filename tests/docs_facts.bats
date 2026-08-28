@@ -299,3 +299,40 @@ _assert_lifecycle_scripts_documented() {
   done < <(find "${DOCS_DIR}" -name '*.md')
   [ "$missing" -eq 0 ]
 }
+
+@test "docs_facts: every <!-- FACT:fh-*-retention-days --> marker matches the shipped frontier-harness config" {
+  # The two retention windows are load-bearing: `fh clean` deletes on them, and the
+  # numbers live in both the shipped config and the docs. Pin the docs to the config
+  # so a policy change cannot land with the prose left behind.
+  local config="${HOME_DIR}/dot_config/frontier-harness/config.json"
+  [ -f "$config" ] || {
+    echo "missing ${config#"${REPO_ROOT}/"} — the frontier-harness config moved"
+    false
+  }
+
+  local pair marker key actual found f val
+  for pair in "fh-raw-retention-days:rawArtifactsDays" \
+    "fh-telemetry-retention-days:aggregateTelemetryDays"; do
+    marker="${pair%%:*}"
+    key="${pair##*:}"
+    actual="$(grep -oE "\"${key}\"[[:space:]]*:[[:space:]]*[0-9]+" "$config" | grep -oE '[0-9]+$')"
+    [ -n "$actual" ] || {
+      echo "sanity: could not read ${key} from ${config#"${REPO_ROOT}/"} — the extractor likely broke"
+      false
+    }
+    found=0
+    while IFS= read -r f; do
+      while IFS= read -r val; do
+        found=1
+        [ "$val" = "$actual" ] || {
+          echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ${key} is $actual"
+          false
+        }
+      done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+    done < <(grep -rlF "FACT:${marker}" "${DOCS_DIR}")
+    [ "$found" = 1 ] || {
+      echo "no FACT:${marker} markers found under ${DOCS_DIR#"${REPO_ROOT}/"} — the docs refactor regressed"
+      false
+    }
+  done
+}

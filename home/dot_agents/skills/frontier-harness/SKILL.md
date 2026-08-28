@@ -61,8 +61,10 @@ fh clean --dry-run --json
 fh clean --json
 ```
 
-raw evidence は 30 日、aggregate telemetry は 180 日が既定である。`clean` は対象数を報告し、
-`--dry-run` では state を変更しない。
+raw evidence と実行系レコード（adapter run / verification result / review finding）は 30 日、
+内容を含まない aggregate telemetry は 180 日が既定である。`clean` は両方の窓を処理して
+クラスごとの対象数を報告し、`--dry-run` では state を変更しない。承認記録（approvals）は
+監査証跡なのでどちらの窓にも属さず、`clean` では削除されない。
 
 ## Human gate
 

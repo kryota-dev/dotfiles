@@ -74,8 +74,47 @@ face value. The two are resolved differently:
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
 recordings, and accepted decisions. It never uses a model transcript or hidden
-reasoning as its interchange format. Raw evidence has a 30-day retention window;
-aggregate telemetry has a 180-day window.
+reasoning as its interchange format.
+
+### Normalized state schema
+
+The SQLite state is at schema version 2. Every record class is normalized, and
+each one belongs to exactly one retention class:
+
+| Table | Holds | Retention |
+|---|---|---|
+| `tasks` | the normalized task a run was started from | kept |
+| `route_decisions` | the chosen capability, provider, **model, effort**, and reviewer | kept |
+| `evidence` | raw payload references plus a SHA-256 `content_hash` and the task/route it belongs to | raw |
+| `adapter_runs` | one adapter execution: capability, provider, model, effort, status, start/finish, exit code | raw |
+| `verification_results` | one deterministic check: kind, status, command, exit code, evidence reference | raw |
+| `review_findings` | one finding: severity, uncertainty, summary, discriminating experiment, evidence reference | raw |
+| `approvals` | what the user authorized: kind, subject hash, scope, grantor, grant/expiry | **never pruned** |
+| `telemetry_events` | content-free aggregate measurements (category, risk, provider/model/effort, timings, token counts, outcome) | aggregate |
+
+`adapter_runs` deliberately records **no launch-mechanism detail** — no argv,
+sandbox settings, profile path, interactive/non-interactive mode, conversation
+ID, working directory, or environment. Those belong to the adapter, not to the
+schema, so a later change in how adapters are started does not force a second
+migration.
+
+`telemetry_events` has no free-form column at all. Every text column is either a
+closed enum or a short lowercase token, so "aggregate telemetry contains no
+content" is enforced by the schema rather than by convention. That is what makes
+the longer aggregate window safe.
+
+### Retention
+
+Raw evidence and the per-run record classes have a
+<!-- FACT:fh-raw-retention-days -->30<!-- /FACT -->-day window; content-free
+aggregate telemetry has a <!-- FACT:fh-telemetry-retention-days -->180<!-- /FACT -->-day
+window. Both values are configurable in `config.json` and are checked against the
+named defaults in `retention.mjs`. Approvals are an audit trail and belong to
+neither window: `fh clean` never deletes them.
+
+Migrations run as ordered steps inside a single transaction. A failure rolls the
+database back to its previous version *and* column layout, so an interrupted
+upgrade cannot leave a half-migrated state.
 
 ## Repository onboarding
 
@@ -105,7 +144,8 @@ fh clean --dry-run --json
 
 In shadow mode `run`, `verify`, and `review` persist a normalized plan without
 starting a provider or arbitrary shell command. `clean` reports and removes
-expired raw evidence; use `--dry-run` to inspect its impact first.
+expired raw records and expired aggregate telemetry on their own windows, and
+leaves approvals alone; use `--dry-run` to inspect its impact first.
 
 ## Worktrees and rollout
 

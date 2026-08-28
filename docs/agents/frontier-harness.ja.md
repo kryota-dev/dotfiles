@@ -57,8 +57,42 @@ launcher はこれらを global には export しないため、素の shell か
   あるプロファイルで確定した結果を別プロファイルが流用しません。
 
 Evidence Bus には diff、command result、log、trace、screenshot、browser recording、accepted decision
-を入れます。全文 transcript や hidden reasoning は保存・受け渡ししません。raw evidence は 30 日、
-aggregate telemetry は 180 日で保持します。
+を入れます。全文 transcript や hidden reasoning は保存・受け渡ししません。
+
+### 正規化された state schema
+
+SQLite state は schema version 2 です。各レコード種別は正規化され、
+それぞれちょうど 1 つの保持クラスに属します。
+
+| テーブル | 内容 | 保持 |
+|---|---|---|
+| `tasks` | 実行の起点になった正規化済み task | 保持 |
+| `route_decisions` | 選択した capability、provider、**model、effort**、reviewer | 保持 |
+| `evidence` | raw payload への参照、SHA-256 の `content_hash`、所属する task / route | raw |
+| `adapter_runs` | adapter 実行 1 回分: capability、provider、model、effort、状態、開始/終了、exit code | raw |
+| `verification_results` | 決定的チェック 1 件: 種別、状態、command、exit code、evidence 参照 | raw |
+| `review_findings` | 所見 1 件: severity、uncertainty、要約、discriminating experiment、evidence 参照 | raw |
+| `approvals` | user が承認した内容: 種別、subject hash、scope、承認者、承認/失効時刻 | **削除しない** |
+| `telemetry_events` | 内容を含まない集約値（category、risk、provider/model/effort、所要時間、token 数、結果） | 集約 |
+
+`adapter_runs` には **adapter の起動方式に属する情報を意図的に持たせません**。argv、sandbox 設定、
+profile path、対話/非対話モード、conversation ID、作業ディレクトリ、環境変数はいずれも adapter 側の
+関心事であり、schema に焼き込むと起動方式が変わるたびに migration をやり直すことになります。
+
+`telemetry_events` には自由記述の列が 1 つもありません。TEXT 列はすべて閉じた enum か短い小文字
+token であり、「集約テレメトリは内容を含まない」を規約ではなく schema で強制しています。
+集約側の保持期間を長く取れるのはこの性質があるからです。
+
+### 保持期間
+
+raw evidence と実行系レコードは
+<!-- FACT:fh-raw-retention-days -->30<!-- /FACT --> 日、内容を含まない集約テレメトリは
+<!-- FACT:fh-telemetry-retention-days -->180<!-- /FACT --> 日で保持します。どちらも
+`config.json` で変更でき、`retention.mjs` の名前付き既定値と突き合わせて検証しています。
+承認は監査証跡でありどちらの窓にも属しません。`fh clean` は approvals を削除しません。
+
+migration は単一 transaction 内で順序付きステップとして適用します。失敗するとバージョンと
+列構成の両方が移行前へ巻き戻るため、中断した更新が中途半端な state を残すことはありません。
 
 ## onboarding と shadow command
 
@@ -81,7 +115,8 @@ onboarding step で実装予定であり、この shadow foundation には含ま
 external contract、deploy、force push、release、merge は常に明示的な escalation です。
 
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
-記録するだけです。`clean` は期限切れ raw evidence を対象にし、`--dry-run` で影響を確認できます。
+記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
+approvals には手を触れません。`--dry-run` で影響を確認できます。
 
 ## worktree と rollout
 
