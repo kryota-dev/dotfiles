@@ -1,5 +1,11 @@
 function isAvailable(capability, availability, accountScope) {
-  if (!capability || !availability[capability.provider]) {
+  if (!capability) return false;
+  // Object.prototype の継承プロパティ（constructor 等）を可用性として拾わない。
+  if (!Object.hasOwn(availability, capability.provider)) return false;
+  const entry = availability[capability.provider];
+  if (!entry || entry.available !== true) return false;
+  // provider が verified でも、この capability の model が検出されていなければ使えない。
+  if (Array.isArray(entry.models) && !entry.models.includes(capability.model)) {
     return false;
   }
   return !capability.accountScope || capability.accountScope === accountScope;
@@ -59,8 +65,11 @@ export function chooseRoute({ accountScope, availability, config, task }) {
     ? "frontend provider is unavailable for this account scope; using executor.default"
     : "default executor is available";
   const reviewer = config.capabilities["semantic.judge"];
+  // AC-023: oracle の有無が確定していない task は「oracle 無し」= 安全側として扱い、
+  // independent review へ昇格させる（`=== false` の厳密比較では未指定が素通りする）。
+  const hasDeterministicOracle = task.hasDeterministicOracle === true;
   if (
-    task.hasDeterministicOracle === false &&
+    !hasDeterministicOracle &&
     isAvailable(reviewer, availability, accountScope)
   ) {
     return decision({

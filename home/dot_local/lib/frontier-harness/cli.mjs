@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -6,23 +6,26 @@ import { pathToFileURL } from "node:url";
 
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
+import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
+import { PROVIDER_COMMANDS } from "./providers.mjs";
+import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
 import { createStateStore } from "./state-store.mjs";
+import { normalizeTask } from "./task.mjs";
 import {
-  loadVerifiedProviders,
+  loadVerifiedModels,
   probeAntigravity,
   writeReadiness,
 } from "./readiness.mjs";
 
-const PROVIDER_COMMANDS = {
-  antigravity: "agy",
-  claude: "claude",
-  codex: "codex",
-};
 const MANIFEST_KEYS = new Set(["commands", "domains", "capabilities"]);
 
-function findCommand(command, searchPath) {
+export function findCommand(command, searchPath) {
   for (const directory of searchPath.split(path.delimiter)) {
+    // 空要素・相対パスは CWD 基準で解決されるため候補にしない。
+    // POSIX は PATH の zero-length prefix を CWD と定義しており、そのまま join すると
+    // untrusted repository が同梱した実行ファイルを provider として選んでしまう。
+    if (!directory || !path.isAbsolute(directory)) continue;
     const candidate = path.join(directory, command);
     try {
       accessSync(candidate, constants.X_OK);
@@ -68,10 +71,12 @@ function defaultCommandPaths(environment) {
 
 function flagValue(flags, name) {
   const index = flags.indexOf(name);
-  if (index === -1 || !flags[index + 1]) {
+  const value = index === -1 ? undefined : flags[index + 1];
+  // 後続のフラグを値として受け取らない（`--task --json` の誤解釈を防ぐ）。
+  if (!value || value.startsWith("--")) {
     throw new TypeError(`${name} requires a value`);
   }
-  return flags[index + 1];
+  return value;
 }
 
 function defaultStatePath(cwd) {
@@ -82,22 +87,44 @@ function defaultStatePath(cwd) {
   ).trim();
   const absoluteCommonDirectory = path.resolve(cwd, commonDirectory);
   const stateDirectory = path.join(absoluteCommonDirectory, "frontier-harness");
-  mkdirSync(stateDirectory, { mode: 0o700, recursive: true });
-  if (lstatSync(stateDirectory).isSymbolicLink()) {
-    throw new Error("frontier-harness state directory must not be a symbolic link");
-  }
+  ensureDirectory(stateDirectory, "frontier-harness state directory");
   chmodSync(stateDirectory, 0o700);
   return path.join(stateDirectory, "state.db");
 }
 
-function providerAvailability(commandPaths, verifiedProviders = []) {
-  const verified = new Set(verifiedProviders);
+function readinessPathFor(statePath) {
+  return path.join(path.dirname(statePath), "readiness.json");
+}
+
+// doctor も run と同じ state root から readiness path を解決する。
+// これが無いと `doctor --probe` の結果が保存されず、後続の `run` が常に unverified になる。
+function resolveReadinessPath(options) {
+  try {
+    const statePath =
+      options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
+    return readinessPathFor(statePath);
+  } catch {
+    // git repository 外では state root を解決できないため readiness を永続化しない。
+    return null;
+  }
+}
+
+function providerAvailability(commandPaths, verifiedModels = {}) {
   return Object.fromEntries(
-    Object.keys(PROVIDER_COMMANDS).map((provider) => [
-      provider,
-      Boolean(commandPaths[provider]) &&
-        (provider !== "antigravity" || verified.has("antigravity")),
-    ]),
+    Object.keys(PROVIDER_COMMANDS).map((provider) => {
+      const executable = Boolean(commandPaths[provider]);
+      if (provider !== "antigravity") {
+        return [provider, { available: executable, models: null }];
+      }
+      const models = Object.hasOwn(verifiedModels, "antigravity")
+        ? verifiedModels.antigravity
+        : null;
+      const verified = Array.isArray(models) && models.length > 0;
+      return [
+        provider,
+        { available: executable && verified, models: verified ? models : null },
+      ];
+    }),
   );
 }
 
@@ -119,16 +146,6 @@ function approvalHash(manifest) {
   return createHash("sha256")
     .update(JSON.stringify(canonicalize(manifest)))
     .digest("hex");
-}
-
-function writePolicy(policyPath, policy) {
-  mkdirSync(path.dirname(policyPath), { mode: 0o700, recursive: true });
-  const temporaryPath = `${policyPath}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(policy, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  renameSync(temporaryPath, policyPath);
 }
 
 function normalizeManifest(input) {
@@ -197,30 +214,33 @@ export function runCli(argumentsList, options = {}) {
   const config = options.config ?? loadConfig(configPath);
   const commandPaths = options.commandPaths ?? defaultCommandPaths(environment);
   const accountScope = options.accountScope ?? resolveAccountScope(environment);
+  const emit = (value) =>
+    write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
 
   if (command === "doctor") {
-    const readinessPath =
-      options.readinessPath ??
-      (options.statePath
-        ? options.statePath.replace(/state\.db$/, "readiness.json")
-        : null);
-    let verifiedProviders = options.verifiedProviders;
+    let verifiedModels = options.verifiedModels;
+    // state root の解決はディレクトリ作成を伴うため、必要なときだけ行う。
+    const needsReadinessPath = flags.includes("--probe") || !verifiedModels;
+    const readinessPath = needsReadinessPath
+      ? (options.readinessPath ?? resolveReadinessPath(options))
+      : null;
     if (flags.includes("--probe")) {
       const probe = options.probeProvider
         ? options.probeProvider(commandPaths.antigravity)
         : probeAntigravity(commandPaths.antigravity);
-      verifiedProviders = probe.verified ? ["antigravity"] : [];
+      verifiedModels = probe.verified ? { antigravity: probe.models ?? [] } : {};
       if (readinessPath) writeReadiness(readinessPath, probe);
-    } else if (!verifiedProviders && readinessPath) {
-      verifiedProviders = loadVerifiedProviders(readinessPath);
+    } else if (!verifiedModels && readinessPath) {
+      verifiedModels = loadVerifiedModels(readinessPath);
     }
-    const report = createDoctorReport({
-      accountScope,
-      commandPaths,
-      config,
-      verifiedProviders,
-    });
-    write(asJson ? JSON.stringify(report) : JSON.stringify(report, null, 2));
+    emit(
+      createDoctorReport({
+        accountScope,
+        commandPaths,
+        config,
+        verifiedModels: verifiedModels ?? {},
+      }),
+    );
     return 0;
   }
 
@@ -250,47 +270,50 @@ export function runCli(argumentsList, options = {}) {
       approvalHash: approvalHash(manifest),
       manifest,
     };
-    writePolicy(policyPath, policy);
-    write(
-      asJson
-        ? JSON.stringify({ approved: true, policyPath, approvalHash: policy.approvalHash })
-        : JSON.stringify({ approved: true, policyPath, approvalHash: policy.approvalHash }, null, 2),
-    );
+    // `.harness` が symlink の repository で書き込み先が脱出しないよう、
+    // symlink 検査 + O_EXCL + 予測不能な一時名を使う共通ヘルパーを経由する。
+    writeJsonAtomic(policyPath, policy, "repository policy");
+    emit({ approved: true, policyPath, approvalHash: policy.approvalHash });
     return 0;
   }
 
   const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
-  const verifiedProviders =
-    options.verifiedProviders ??
-    loadVerifiedProviders(statePath.replace(/state\.db$/, "readiness.json"));
+  const verifiedModels =
+    options.verifiedModels ?? loadVerifiedModels(readinessPathFor(statePath));
   const store = createStateStore(statePath);
   try {
     if (command === "run") {
       const taskPath = flagValue(flags, "--task");
-      const taskInput = JSON.parse(readFileSync(taskPath, "utf8"));
+      // task JSON は未検証の外部入力として境界で正規化する。
+      const task = normalizeTask(JSON.parse(readFileSync(taskPath, "utf8")));
       const result = store.withTransaction(() => {
-        const task = store.createTask(taskInput);
+        const storedTask = store.createTask(task);
         const route = chooseRoute({
           accountScope,
-          availability: providerAvailability(commandPaths, verifiedProviders),
+          availability: providerAvailability(commandPaths, verifiedModels),
           config,
-          task: taskInput,
-        });
-        store.recordRoute(task.id, route);
-        return {
           task,
+        });
+        store.recordRoute(storedTask.id, route);
+        const execution = runWithRolloutGuard(
+          config,
+          `route ${route.kind}`,
+          options.executor,
+        );
+        return {
+          task: storedTask,
           decision: route,
-          executed: false,
+          executed: execution.executed,
+          executionReason: execution.reason,
           rollout: config.rollout,
         };
       });
-      write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+      emit(result);
       return 0;
     }
 
     if (command === "status") {
-      const result = { routes: store.listRoutes() };
-      write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+      emit({ routes: store.listRoutes() });
       return 0;
     }
 
@@ -305,22 +328,21 @@ export function runCli(argumentsList, options = {}) {
       const cutoff = new Date(
         now.getTime() - config.retention.rawArtifactsDays * 24 * 60 * 60 * 1000,
       ).toISOString();
-      const expired = store
-        .listEvidence()
-        .filter((evidence) => evidence.createdAt < cutoff).length;
-      const prunedEvidence = flags.includes("--dry-run")
-        ? 0
+      const dryRun = flags.includes("--dry-run");
+      const expiredEvidence = store.countEvidenceBefore(cutoff);
+      const pruned = dryRun
+        ? { prunedEvidence: 0, skippedArtifacts: [] }
         : store.pruneEvidenceBefore(
             cutoff,
             path.join(path.dirname(statePath), "evidence"),
           );
-      const result = {
+      emit({
         cutoff,
-        dryRun: flags.includes("--dry-run"),
-        expiredEvidence: expired,
-        prunedEvidence,
-      };
-      write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+        dryRun,
+        expiredEvidence,
+        prunedEvidence: pruned.prunedEvidence,
+        skippedArtifacts: pruned.skippedArtifacts,
+      });
       return 0;
     }
 
@@ -332,8 +354,17 @@ export function runCli(argumentsList, options = {}) {
         command: verificationCommand,
         claimsSupported: ["verification is planned for a shadow route"],
       });
-      const result = { evidence, executed: false, rollout: config.rollout };
-      write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+      const execution = runWithRolloutGuard(
+        config,
+        "verification command",
+        options.executor,
+      );
+      emit({
+        evidence,
+        executed: execution.executed,
+        executionReason: execution.reason,
+        rollout: config.rollout,
+      });
       return 0;
     }
 
@@ -344,13 +375,18 @@ export function runCli(argumentsList, options = {}) {
         producer: "frontier-harness",
         claimsSupported: [`independent review planned for ${taskId}`],
       });
-      const result = {
+      const execution = runWithRolloutGuard(
+        config,
+        "independent review",
+        options.executor,
+      );
+      emit({
         evidence,
-        executed: false,
+        executed: execution.executed,
+        executionReason: execution.reason,
         rollout: config.rollout,
         taskId,
-      };
-      write(asJson ? JSON.stringify(result) : JSON.stringify(result, null, 2));
+      });
       return 0;
     }
   } finally {

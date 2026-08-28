@@ -36,6 +36,7 @@
       "external-contract",
       "force-push",
       "merge",
+      "migration",
       "release"
     ]
   }

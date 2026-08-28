@@ -1,18 +1,11 @@
-function providerCommand(provider) {
-  return {
-    antigravity: "antigravity",
-    claude: "claude",
-    codex: "codex",
-  }[provider];
-}
+import { providerCommand } from "./providers.mjs";
 
 export function createDoctorReport({
   accountScope,
   commandPaths,
   config,
-  verifiedProviders = [],
+  verifiedModels = {},
 }) {
-  const verified = new Set(verifiedProviders);
   const capabilities = Object.fromEntries(
     Object.entries(config.capabilities).map(([name, capability]) => {
       const command = providerCommand(capability.provider);
@@ -38,14 +31,30 @@ export function createDoctorReport({
           },
         ];
       }
-      if (capability.provider === "antigravity" && !verified.has("antigravity")) {
-        return [
-          name,
-          {
-            status: "unverified",
-            reason: "authentication and model availability have not been probed",
-          },
-        ];
+      if (capability.provider === "antigravity") {
+        const models = Object.hasOwn(verifiedModels, "antigravity")
+          ? verifiedModels.antigravity
+          : null;
+        if (!Array.isArray(models) || models.length === 0) {
+          return [
+            name,
+            {
+              status: "unverified",
+              reason: "authentication and model availability have not been probed",
+            },
+          ];
+        }
+        // AC-038: exact model ID の availability を検査する。
+        // provider が verified でも、設定した model が discovery 結果に無ければ使えない。
+        if (!models.includes(capability.model)) {
+          return [
+            name,
+            {
+              status: "unverified",
+              reason: `${command} model discovery did not report ${capability.model}`,
+            },
+          ];
+        }
       }
       return [
         name,

@@ -62,6 +62,15 @@ export function normalizeConfig(input) {
   if (!Array.isArray(input.risk.alwaysEscalate)) {
     throw new TypeError("risk.alwaysEscalate must be an array");
   }
+  // router は完全一致で照合するため、空文字や非文字列が混ざると
+  // escalation が静かに効かなくなる。境界で弾く。
+  if (
+    input.risk.alwaysEscalate.some(
+      (risk) => typeof risk !== "string" || risk.length === 0,
+    )
+  ) {
+    throw new TypeError("risk.alwaysEscalate entries must be non-empty strings");
+  }
 
   return Object.freeze({
     version: input.version,
