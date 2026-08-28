@@ -150,7 +150,8 @@ https で配信済みの URL があるなら、それを叩くのが一番確実
   正常系は検証できない（縮退 UI の検証にはなる）。カメラが要るなら Android で AVD に
   ホストの webcam を割り当てる
 - **仮想端末は実機検証の代替にならない。** 電波、実機カメラ、iOS の 7 日 storage eviction、
-  reCAPTCHA/bot 判定に依存する疎通は、ここでは確認できない
+  reCAPTCHA/bot 判定に依存する疎通は、ここでは確認できない。**iOS 実機のページの中を
+  JS レベルで見る必要が出たら `ios-device-web`**（USB 経由で Web Inspector を CDP として開く）
 - エミュレータ／シミュレータは重い。使い終わったら落とす
 
 ## 片付け
