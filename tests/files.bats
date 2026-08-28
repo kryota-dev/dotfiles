@@ -1996,9 +1996,13 @@ _case_only_collisions() {
 .agents/skills/exact-match
 .agents/skills/no-collision
 FIXTURE
+  # The blank line is load-bearing: the rewrite's subtlest invariant is that `managed` and its
+  # folded copy stay on matching indices because BOTH go through the same "non-empty" filter.
+  # A clash after a blank line only resolves correctly while that stays symmetric.
   local managed
   managed="$(printf '%s\n' \
     '.agents/skills/example/SKILL.md' \
+    '' \
     '.agents/skills/other' \
     '.agents/skills/exact-match' \
     '.agents/skills/unrelated')"
@@ -2868,7 +2872,42 @@ _gate_decision() {
       false
     }
   done
-  # Both jobs install shellcheck from the pinned release; the Lint job also installs shfmt.
+  # Bind the checks to each job rather than to the file as a whole. A file-wide count still
+  # passes if BOTH shellcheck installs land in the lint job while the test job quietly falls
+  # back to the runner image's build -- which is #475 again, in the job that runs
+  # tests/shellcheck.bats. (Confirmed against a hand-broken ci.yml: every file-wide assertion
+  # here passed it.) `steps.*` references are job-scoped in Actions, so finding one inside a
+  # job's block proves the version came from a step in that same job.
+  local job block
+  for job in lint test; do
+    block="$(awk -v j="  ${job}:" '$0 == j { on = 1; next } /^  [a-z]/ { on = 0 } on' "$ci")"
+    [ -n "$block" ] || {
+      echo "could not slice the ${job} job out of ${ci}"
+      false
+    }
+    grep -qF 'home/dot_config/mise/config.toml' <<<"$block" || {
+      echo "the ${job} job reads no pin from the mise config"
+      false
+    }
+    grep -qF 'koalaman/shellcheck/releases/download/v${VERSION}' <<<"$block" || {
+      echo "the ${job} job does not install the pinned shellcheck"
+      false
+    }
+    grep -qF 'VERSION: ${{ steps.' <<<"$block" || {
+      echo "the ${job} job's shellcheck version does not come from a step output"
+      false
+    }
+    grep -qF 'shellcheck --version | grep -qxF "version: ${VERSION}"' <<<"$block" || {
+      echo "the ${job} job does not assert the installed shellcheck matches the pin"
+      false
+    }
+    if [ "$job" = lint ]; then
+      # shfmt is only needed where `make lint` runs.
+      grep -qF 'mvdan/sh/releases/download/v${VERSION}' <<<"$block"
+      grep -qF 'shfmt --version | grep -qxF "v${VERSION}"' <<<"$block"
+    fi
+  done
+  # Exactly one install each -- no stray third copy drifting in.
   [ "$(grep -c 'koalaman/shellcheck/releases/download' "$ci")" -eq 2 ]
   [ "$(grep -c 'mvdan/sh/releases/download' "$ci")" -eq 1 ]
   # shellcheck must not come back through apt in either job: that build is unpinned, and it

@@ -66,7 +66,7 @@ jobs:
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/shellcheck-v${VERSION}/shellcheck" /usr/local/bin/shellcheck
           # Fail here rather than lint the whole tree with an unexpected build.
-          shellcheck --version | grep -qx "version: ${VERSION}"
+          shellcheck --version | grep -qxF "version: ${VERSION}"
 
       - name: Install shfmt
         env:
@@ -74,7 +74,7 @@ jobs:
         run: |
           curl -fsSL "https://github.com/mvdan/sh/releases/download/v${VERSION}/shfmt_v${VERSION}_linux_amd64" -o /usr/local/bin/shfmt
           chmod +x /usr/local/bin/shfmt
-          shfmt --version | grep -qx "v${VERSION}"
+          shfmt --version | grep -qxF "v${VERSION}"
 
       - name: Install zsh
         run: sudo apt-get install -y zsh
@@ -142,7 +142,7 @@ jobs:
           curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/v${VERSION}/shellcheck-v${VERSION}.linux.x86_64.tar.xz" -o "$RUNNER_TEMP/shellcheck.tar.xz"
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
           install -m 0755 "$RUNNER_TEMP/shellcheck-v${VERSION}/shellcheck" /usr/local/bin/shellcheck
-          shellcheck --version | grep -qx "version: ${VERSION}"
+          shellcheck --version | grep -qxF "version: ${VERSION}"
 
       # tests/files.bats renders the chezmoi script templates and executes them, which is the only
       # way to assert the brew-bundle failure policy as behaviour rather than as text — a purely
