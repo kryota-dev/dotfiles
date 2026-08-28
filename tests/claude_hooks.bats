@@ -60,6 +60,13 @@ DISABLED_SUB_HOOK_IDS=(
   "pre:bash:commit-quality"
 )
 
+# Hook entries that stay wired but are switched off. stop:desktop-notify keeps its entry for
+# the documented one-step rollback of #337, so its id legitimately appears in
+# ECC_DISABLED_HOOKS alongside the sub-hook ids above.
+DISABLED_ENTRY_IDS=(
+  "stop:desktop-notify"
+)
+
 # The safety boundary (AC-008) plus the learning-engine observer (AC-028) and the MCP
 # recovery half of AC-014.
 RETAINED_HOOK_IDS=(
@@ -70,12 +77,60 @@ RETAINED_HOOK_IDS=(
   "post:mcp-health-check"
 )
 
+# Of the retained entries, these four have no field-level guard anywhere else in the suite, so
+# an id-only check would accept moving one to another event, narrowing its matcher, or
+# swapping its command for a no-op. The two CLV2 observer entries are deliberately absent:
+# tests/files.bats already pins their event, matcher, command, async and timeout, and
+# duplicating that here would just create two places to update.
+STRUCTURALLY_PINNED_HOOK_IDS=(
+  "session:start"
+  "pre:bash:dispatcher"
+  "pre:config-protection"
+  "post:mcp-health-check"
+)
+
 _require_jq() {
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
 }
 
 _hook_ids() {
   jq -r '.hooks | to_entries[] | .value[] | .id' "$SETTINGS"
+}
+
+# One line per entry: event, id, matcher, command, async, timeout — sorted, tab-separated.
+# Absent optional keys render as "null" (jq's tostring), and that is part of the contract: a
+# hook that gains an async flag or a timeout has changed how it runs.
+_manifest_by_command() {
+  jq -r --arg pattern "$1" '
+    .hooks | to_entries[] | .key as $event | .value[]
+    | select(.hooks[].command | test($pattern))
+    | [ $event, .id, (.matcher | tostring), .hooks[0].command,
+        (.hooks[0].async | tostring), (.hooks[0].timeout | tostring) ]
+    | @tsv
+  ' "$SETTINGS" | sort
+}
+
+# Exact id-set selection (not substring containment, which would let one id match another
+# that merely contains it).
+_manifest_by_ids() {
+  local ids_json
+  ids_json="$(printf '%s\n' "$@" | jq -R . | jq -s .)"
+  jq -r --argjson ids "$ids_json" '
+    .hooks | to_entries[] | .key as $event | .value[]
+    | select(.id as $i | $ids | index($i))
+    | [ $event, .id, (.matcher | tostring), .hooks[0].command,
+        (.hooks[0].async | tostring), (.hooks[0].timeout | tostring) ]
+    | @tsv
+  ' "$SETTINGS" | sort
+}
+
+_assert_manifest() {
+  local label="$1" expected="$2" actual="$3"
+  [ "$actual" = "$expected" ] || {
+    echo "${label} wiring drifted (expected <-> actual):"
+    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+    false
+  }
 }
 
 @test "settings.json is valid JSON" {
@@ -128,37 +183,43 @@ _hook_ids() {
   jq -e '.hooks | has("PreCompact") | not' "$SETTINGS" >/dev/null
 }
 
-@test "#496: ECC_DISABLED_HOOKS switches off the advisory pre-Bash sub-hooks" {
+@test "#496: ECC_DISABLED_HOOKS is exactly the set this change intends to disable" {
   _require_jq
-  local ids id
-  ids="$(jq -r '.env.ECC_DISABLED_HOOKS | split(",")[]' "$SETTINGS")"
+  # Exact set, not "contains". A containment check would accept a dead id sneaking back in —
+  # the three post:bash:* ids that went with the post-Bash dispatcher, or the Edit/Write
+  # fact-forcing id whose entry AC-011 deleted. A dead id here reads like an active safety
+  # decision while gating nothing, which is the exact failure AC-011 cleaned up. Comparing the
+  # whole set also means the "must disable" half (#473 AC-010) and the "no dead id" half are
+  # one invariant instead of two that can drift apart.
+  local expected actual
+  expected="$(printf '%s\n' "${DISABLED_SUB_HOOK_IDS[@]}" "${DISABLED_ENTRY_IDS[@]}" | sort)"
+  actual="$(jq -r '.env.ECC_DISABLED_HOOKS | split(",")[]' "$SETTINGS" | sort)"
+  _assert_manifest "ECC_DISABLED_HOOKS" "$expected" "$actual"
+}
+
+@test "#496: every disabled pre:bash sub-hook id exists in the ECC dispatcher" {
+  # Sub-hook ids never appear as settings.json entries, so nothing else here can tell
+  # `pre:bash:git-push-reminder` from `pre:bash:git-push-remider`. A typo passes every other
+  # guard in this file and silently disables nothing — fail-open. The ECC runtime is an
+  # external, so cross-check it only when it is actually deployed.
+  local dispatcher="${HOME}/.agents/skills/ecc/scripts/hooks/bash-hook-dispatcher.js"
+  [ -f "$dispatcher" ] || skip "ECC external not deployed"
+  local id
   for id in "${DISABLED_SUB_HOOK_IDS[@]}"; do
-    printf '%s\n' "$ids" | grep -qFx "$id" || {
-      echo "ECC_DISABLED_HOOKS must disable '${id}' (#473 AC-010)"
+    grep -qF "'${id}'" "$dispatcher" || {
+      echo "ECC_DISABLED_HOOKS names '${id}' but PRE_BASH_HOOKS has no such id (typo = silent no-op)"
       false
     }
   done
 }
 
-@test "#496: ECC_DISABLED_HOOKS names no hook whose wiring was deleted" {
+@test "#473 AC-008: ECC_HOOK_PROFILE stays strict (the safety sub-hooks are profile-gated)" {
   _require_jq
-  # An id here that no longer has an entry is dead config: it reads like an active safety
-  # decision while gating nothing, which is exactly what AC-011 removed for the Edit/Write
-  # fact-forcing gate. Ids of sub-hooks (pre:bash:*, post:bash:*) never appear as entries, so
-  # only compare the ones that address a settings.json entry.
-  local ids id
-  ids="$(jq -r '.env.ECC_DISABLED_HOOKS | split(",")[]' "$SETTINGS")"
-  local entry_ids
-  entry_ids="$(_hook_ids)"
-  for id in $ids; do
-    case "$id" in
-      pre:bash:* | post:bash:*) continue ;;
-    esac
-    printf '%s\n' "$entry_ids" | grep -qFx "$id" || {
-      echo "ECC_DISABLED_HOOKS names '${id}' but no hook entry has that id"
-      false
-    }
-  done
+  # ECC's isHookEnabled() ANDs ECC_DISABLED_HOOKS with ECC_HOOK_PROFILE. Flipping the profile
+  # to "minimal" disables gateguard-fact-force (destructive-command detection), auto-tmux-dev
+  # and pre:config-protection — all of which declare standard,strict — as surely as naming
+  # them in ECC_DISABLED_HOOKS would, and nothing else in this file would catch it.
+  jq -e '.env.ECC_HOOK_PROFILE == "strict"' "$SETTINGS" >/dev/null
 }
 
 @test "#496: SessionStart injects no context but keeps its entry for the observer lease" {
@@ -202,14 +263,86 @@ _hook_ids() {
   done
 }
 
+@test "#473 AC-008/014/025: the load-bearing retained hooks keep their exact wiring" {
+  _require_jq
+  # "Still present" is not the requirement — "still fires the same way" is. Pin event, matcher,
+  # command, async and timeout so that relocating an entry to another event, narrowing its
+  # matcher, or pointing it at a different script fails here instead of silently weakening the
+  # boundary. Note the CLI angle: `claude plugin install` and the interactive /plugin manager
+  # rewrite settings.json with their own serializer and drop each hook's id and description
+  # (docs/agents/claude-code.md), so an id-only guard is the one that goes blind during that
+  # window — these five fields survive it.
+  local expected actual
+  expected="$(
+    cat <<'MANIFEST'
+PostToolUseFailure	post:mcp-health-check	*	CLAUDE_HOOK_EVENT_NAME=PostToolUseFailure $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js post:mcp-health-check scripts/hooks/mcp-health-check.js standard,strict	null	10
+PreToolUse	pre:bash:dispatcher	Bash	$HOME/.claude/ecc-hook.sh scripts/hooks/pre-bash-dispatcher.js	null	15
+PreToolUse	pre:config-protection	Write|Edit|MultiEdit	$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js pre:config-protection scripts/hooks/config-protection.js standard,strict	null	5
+SessionStart	session:start	*	$HOME/.claude/ecc-hook.sh scripts/hooks/session-start-bootstrap.js	null	null
+MANIFEST
+  )"
+  actual="$(_manifest_by_ids "${STRUCTURALLY_PINNED_HOOK_IDS[@]}")"
+  _assert_manifest "retained hook" "$expected" "$actual"
+}
+
+@test "#496: the hook surface is exactly the 18 entries this change leaves behind" {
+  _require_jq
+  # The removed-id list guards against a hook coming back under its old id. This guards the
+  # other direction: a hook arriving under a new id, or an id being wired twice. Together they
+  # make "the surface shrank to 18" a checked contract rather than a claim in the PR body.
+  # Adding or removing a hook is expected to update this list — that edit is the review signal.
+  local expected actual
+  expected="$(
+    cat <<'MANIFEST'
+Notification	notification:ntfy-notify
+Notification	notification:wave-session-event
+PostToolUse	post:observe:continuous-learning
+PostToolUse	posttooluse:wave-session-event
+PostToolUseFailure	post:mcp-health-check
+PostToolUseFailure	posttoolusefailure:wave-session-event
+PreToolUse	pre:bash:dispatcher
+PreToolUse	pre:config-protection
+PreToolUse	pre:observe:continuous-learning
+PreToolUse	pretooluse:wave-session-event
+SessionStart	session:start
+Stop	stop:cost-tracker
+Stop	stop:desktop-notify
+Stop	stop:ntfy-notify
+Stop	stop:wave-session-event
+StopFailure	stopfailure:wave-session-event
+UserPromptSubmit	user-prompt-submit:prompt-conform-suggest
+UserPromptSubmit	userpromptsubmit:wave-session-event
+MANIFEST
+  )"
+  actual="$(jq -r '.hooks | to_entries[] | .key as $event | .value[] | [$event, .id] | @tsv' "$SETTINGS" | sort)"
+  _assert_manifest "hook surface" "$expected" "$actual"
+
+  # Ids must also be unique across the whole surface: two entries sharing an id would make
+  # every id-keyed guard in this file ambiguous.
+  local total unique
+  total="$(_hook_ids | grep -c .)"
+  unique="$(_hook_ids | sort -u | grep -c .)"
+  [ "$total" = "18" ] || {
+    echo "expected 18 hook entries, found ${total}"
+    false
+  }
+  [ "$total" = "$unique" ] || {
+    echo "hook ids are not unique: ${total} entries but ${unique} distinct ids"
+    false
+  }
+}
+
 @test "#473 AC-008: the pre-Bash dispatcher keeps its safety sub-hooks enabled" {
   _require_jq
   # block-no-verify (commit-verification bypass), auto-tmux-dev (dev server) and the
   # gateguard's destructive fact-forcing must not be switched off alongside the advisories.
+  # Split on commas and match whole ids: a substring match would flag a future
+  # `pre:bash:auto-tmux-dev-debug` as if it disabled `pre:bash:auto-tmux-dev`, and it would
+  # also disagree with the exact-match style the removed-id guard above uses.
   local disabled id
-  disabled="$(jq -r '.env.ECC_DISABLED_HOOKS' "$SETTINGS")"
+  disabled="$(jq -r '.env.ECC_DISABLED_HOOKS | split(",")[]' "$SETTINGS")"
   for id in pre:bash:block-no-verify pre:bash:auto-tmux-dev pre:bash:gateguard-fact-force; do
-    if printf '%s\n' "$disabled" | grep -qF "$id"; then
+    if printf '%s\n' "$disabled" | grep -qFx "$id"; then
       echo "'${id}' is a retained safety hook (#473 AC-008) but ECC_DISABLED_HOOKS disables it"
       false
     fi
@@ -218,24 +351,28 @@ _hook_ids() {
 
 @test "#473 AC-016: the wave-orchestrator session events are untouched" {
   _require_jq
-  # wave-orchestrator watches its children through these entries. They are listed by event
-  # here so that removing one — or narrowing a matcher — fails loudly instead of silently
-  # blinding the parent session.
-  local expected="Notification PostToolUse PostToolUseFailure PreToolUse Stop StopFailure UserPromptSubmit"
-  local actual
-  actual="$(jq -r '[.hooks | to_entries[] | .key as $e | .value[]
-                    | select(.hooks[].command | test("wave-session-event"))
-                    | $e] | sort | unique | join(" ")' "$SETTINGS")"
-  [ "$actual" = "$expected" ] || {
-    echo "wave-session-event.sh events changed: expected [${expected}], got [${actual}]"
-    false
-  }
-  jq -e '[.hooks | to_entries[] | .value[]
-          | select(.hooks[].command | test("wave-session-event"))] | length == 7' "$SETTINGS" >/dev/null
-  # Each one is async with a 10s timeout; a sync wave hook would add latency to every event.
-  jq -e '[.hooks | to_entries[] | .value[]
-          | select(.hooks[].command | test("wave-session-event"))
-          | .hooks[] | select(.async == true and .timeout == 10)] | length == 7' "$SETTINGS" >/dev/null
+  # wave-orchestrator watches its children through these seven entries, so this pins the whole
+  # wiring — event, id, matcher, command, async, timeout — rather than just which events are
+  # present. Narrowing a matcher blinds the parent exactly as deleting an entry would:
+  # dropping idle_prompt from Notification, or widening PreToolUse past AskUserQuestion, keeps
+  # the event set intact while breaking detection. Same structural bar the ntfy and CLV2
+  # observer guards in tests/files.bats already apply. "null" in the matcher column is real:
+  # UserPromptSubmit does not support a matcher (official Hooks reference), so its entry
+  # legitimately omits the key.
+  local expected actual
+  expected="$(
+    cat <<'MANIFEST'
+Notification	notification:wave-session-event	permission_prompt|idle_prompt|agent_needs_input	$HOME/.claude/wave-session-event.sh	true	10
+PostToolUse	posttooluse:wave-session-event	AskUserQuestion	$HOME/.claude/wave-session-event.sh	true	10
+PostToolUseFailure	posttoolusefailure:wave-session-event	AskUserQuestion	$HOME/.claude/wave-session-event.sh	true	10
+PreToolUse	pretooluse:wave-session-event	AskUserQuestion	$HOME/.claude/wave-session-event.sh	true	10
+Stop	stop:wave-session-event	*	$HOME/.claude/wave-session-event.sh	true	10
+StopFailure	stopfailure:wave-session-event	*	$HOME/.claude/wave-session-event.sh	true	10
+UserPromptSubmit	userpromptsubmit:wave-session-event	null	$HOME/.claude/wave-session-event.sh	true	10
+MANIFEST
+  )"
+  actual="$(_manifest_by_command "wave-session-event")"
+  _assert_manifest "wave-session-event" "$expected" "$actual"
 }
 
 @test "#496: the removed hook sources are gone from the chezmoi source tree" {
@@ -273,6 +410,21 @@ _hook_ids() {
     ".claude/clv2-session-notify.sh"; do
     grep -qFx "$p" "$remove_file" || {
       echo "${p} is removed from source but not registered in .chezmoiremove"
+      false
+    }
+  done
+}
+
+@test "#496: the orphaned bash-commands.log stays out of chezmoi's reach" {
+  # #496 removed the writer (hooks-fork/post-bash-command-log.js) but deliberately keeps the
+  # accumulated log. That combination — a large, unredacted-by-best-effort command history that
+  # nothing updates any more — is precisely what a broad `chezmoi add` under ~/.claude could
+  # sweep into this public repo, so both accounts' copies must stay ignored.
+  local ignore_file="${HOME_DIR}/.chezmoiignore"
+  local p
+  for p in ".claude/bash-commands.log" ".claude-r06/bash-commands.log"; do
+    grep -qFx "$p" "$ignore_file" || {
+      echo "${p} is an orphaned command history but .chezmoiignore does not exclude it"
       false
     }
   done
