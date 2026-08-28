@@ -24,10 +24,18 @@
 # outside chezmoi's target tree today, but it is ignored below anyway: observations.jsonl holds
 # tool input/output whose redaction is best-effort, and this is a public repo, so a stray
 # `chezmoi add` under ~/.local/share must not be able to pick it up.
+#
+# bash-commands.log is the same class of data — every Bash command this account ran, redacted
+# on a best-effort basis — and was missing from this list. #496 removed its writer
+# (hooks-fork/post-bash-command-log.js), which makes it an orphan that no longer changes and so
+# no longer draws attention; the accumulated file itself is deliberately kept (#473 scopes that
+# change to stopping new writes, not deleting history), which is exactly why it needs to be
+# unreachable by a broad `chezmoi add`.
 .local/share/ecc-homunculus-*
 .claude/ecc
 .claude/ecc-homunculus
 .claude/.gateguard
+.claude/bash-commands.log
 .claude/mcp-health-cache.json
 .claude/metrics
 
@@ -53,6 +61,7 @@
 .claude-r06/ecc
 .claude-r06/ecc-homunculus
 .claude-r06/.gateguard
+.claude-r06/bash-commands.log
 .claude-r06/mcp-health-cache.json
 .claude-r06/metrics
 
