@@ -221,6 +221,8 @@ function usage() {
     "  approvals      List pending approval requests",
     "  approve        Answer one approval request (--request <id> --allow|--deny)",
     "  approve-server Run the stdio permission prompt tool for a child session",
+    "                 (--session, --approvals-dir, --rules, --timeout-ms,",
+    "                  --progress-interval-ms; path flags must be absolute)",
     "  doctor  Report adapter and capability readiness",
     "  clean   Prune expired raw evidence and aggregate telemetry",
     "  onboard Approve one repository capability manifest",
@@ -236,14 +238,55 @@ export function runCli(argumentsList, options = {}) {
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
   const [command, ...flags] = argumentsList;
   const asJson = flags.includes("--json");
+  const emit = (value) =>
+    write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
+
+  // 承認チャネルは SQLite state も config.json も必要としない。承認待ちは既定 8 時間に
+  // 及ぶため、その間 DB を開いたままにせず、無関係な config.json の生死にも巻き込まない
+  // （escalation ルールを manifest と別ファイルにしたのと同じ独立性の理由）。
+  if (
+    command === "approve-server" ||
+    command === "approvals" ||
+    command === "approve"
+  ) {
+    const cwd = options.cwd ?? process.cwd();
+    const directory = resolveApprovalsDirectory({
+      flags,
+      stateDirectory: () => options.stateDirectory ?? defaultStateDirectory(cwd),
+    });
+    if (command === "approve-server") {
+      const finished = startApprovalServerCommand({
+        flags,
+        environment,
+        cwd,
+        directory,
+        ...options.approvalServerIo,
+      });
+      // stdin を読んでいるあいだ event loop は生きている。終了コードは
+      // stdio が閉じた時点で確定させる。
+      finished.then(
+        (code) => {
+          process.exitCode = code;
+        },
+        (error) => {
+          process.stderr.write(`frontier-harness: ${error.message}\n`);
+          process.exitCode = 70;
+        },
+      );
+      return 0;
+    }
+    const queue = createApprovalQueue({ directory });
+    return command === "approvals"
+      ? runApprovalsCommand({ queue, emit, flags })
+      : runApproveCommand({ queue, emit, flags });
+  }
+
   // 設定パスの解決は遅延させる。設定そのものを注入された呼び出しで、
   // 一度も読まないパスの解決を理由に停止しないため。
   const config =
     options.config ?? loadConfig(resolveConfigPath(options, environment));
   const commandPaths = options.commandPaths ?? defaultCommandPaths(environment);
   const accountScope = options.accountScope ?? resolveAccountScope(environment);
-  const emit = (value) =>
-    write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
 
   if (command === "doctor") {
     let verifiedModels = options.verifiedModels;
@@ -303,45 +346,6 @@ export function runCli(argumentsList, options = {}) {
     writeJsonAtomic(policyPath, policy, "repository policy");
     emit({ approved: true, policyPath, approvalHash: policy.approvalHash });
     return 0;
-  }
-
-  // 承認チャネルは SQLite state を必要としない。承認待ちは既定 8 時間に及ぶため、
-  // その間 DB を開いたままにしないよう createStateStore より前で分岐する。
-  if (
-    command === "approve-server" ||
-    command === "approvals" ||
-    command === "approve"
-  ) {
-    const cwd = options.cwd ?? process.cwd();
-    const directory = resolveApprovalsDirectory({
-      flags,
-      stateDirectory: () => options.stateDirectory ?? defaultStateDirectory(cwd),
-    });
-    if (command === "approve-server") {
-      const finished = startApprovalServerCommand({
-        flags,
-        environment,
-        cwd,
-        directory,
-        ...options.approvalServerIo,
-      });
-      // stdin を読んでいるあいだ event loop は生きている。終了コードは
-      // stdio が閉じた時点で確定させる。
-      finished.then(
-        (code) => {
-          process.exitCode = code;
-        },
-        (error) => {
-          process.stderr.write(`frontier-harness: ${error.message}\n`);
-          process.exitCode = 70;
-        },
-      );
-      return 0;
-    }
-    const queue = createApprovalQueue({ directory });
-    return command === "approvals"
-      ? runApprovalsCommand({ queue, emit, flags })
-      : runApproveCommand({ queue, emit, flags });
   }
 
   const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());

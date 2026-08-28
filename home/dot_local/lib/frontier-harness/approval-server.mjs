@@ -19,6 +19,9 @@ export const DEFAULT_PROGRESS_INTERVAL_MS = 60000;
 export const MCP_STDIO_IDLE_TIMEOUT_MS = 1800000;
 // answer ファイルの確認間隔。承認は人間の応答時間が支配的なので、これで十分細かい。
 export const ANSWER_POLL_INTERVAL_MS = 1000;
+// 改行を含まない入力でバッファが無制限に伸びるのを防ぐ。想定 client は Claude Code 本体
+// だけだが、上限が無いこと自体が堅牢性の欠落なので防御的に置く。
+export const MAX_JSONRPC_LINE_LENGTH = 4194304;
 
 export const SERVER_NAME = "frontier-harness-approver";
 export const SERVER_VERSION = "1.0.0";
@@ -77,12 +80,15 @@ function decisionContent(decision) {
 // permission prompt tool の引数。未知キーは拒否しない —— この payload の形は
 // client（Claude Code）が決めるものであり、将来のフィールド追加で承認チャネルが
 // 落ちると gate ごと失われる。読むのは必要な 3 つだけに留める。
+//
+// ただし欠落は補完しない。`input` を空オブジェクトへ補うと、どのルールにも一致せず
+// allow が返る（fail-open）。tools/list の inputSchema でも required と宣言している。
 export function normalizeApprovalCall(input) {
   requireObject(input, "approval call arguments");
   if (typeof input.tool_name !== "string" || input.tool_name.length === 0) {
     throw new TypeError("approval call tool_name must be a non-empty string");
   }
-  const toolInput = input.input === undefined ? {} : input.input;
+  const toolInput = input.input;
   requireObject(toolInput, "approval call input");
   if (input.tool_use_id !== undefined && typeof input.tool_use_id !== "string") {
     throw new TypeError("approval call tool_use_id must be a string");
@@ -337,66 +343,80 @@ export function runStdioApprovalServer({
   errorOutput = null,
   createServer,
 }) {
-  return new Promise((resolve) => {
-    const send = (message) => {
-      try {
-        output.write(`${JSON.stringify(message)}\n`);
-      } catch {
-        // client が既に切断している。判断そのものは queue のファイルが保持する。
-      }
-    };
-    const server = createServer(send);
-    const inFlight = new Set();
-    let ended = false;
-    let buffer = "";
-
-    const settle = () => {
-      if (ended && inFlight.size === 0) resolve(0);
-    };
-
-    const dispatch = (line) => {
-      let message;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        send(errorResponse(null, PARSE_ERROR, "parse error"));
-        return;
-      }
-      const task = Promise.resolve()
-        .then(() => server.handleMessage(message))
-        .then((response) => {
-          if (response) send(response);
-        })
-        .catch((error) => {
-          errorOutput?.write(`${SERVER_NAME}: ${error.message}\n`);
-          if (Object.hasOwn(message ?? {}, "id") && message.id !== null) {
-            send(errorResponse(message.id, INTERNAL_ERROR, error.message));
-          }
-        })
-        .finally(() => {
-          inFlight.delete(task);
-          settle();
-        });
-      inFlight.add(task);
-    };
-
-    input.setEncoding("utf8");
-    input.on("data", (chunk) => {
-      buffer += chunk;
-      let index = buffer.indexOf("\n");
-      while (index !== -1) {
-        const line = buffer.slice(0, index).trim();
-        buffer = buffer.slice(index + 1);
-        if (line) dispatch(line);
-        index = buffer.indexOf("\n");
-      }
-    });
-    input.on("end", () => {
-      ended = true;
-      // MCP の stdio shutdown は client が stdin を閉じることで始まる。
-      // 待機中の要求は宙に浮かせず aborted として保存する。
-      server.abort("the client closed its side of the connection");
-      settle();
-    });
+  const send = (message) => {
+    try {
+      output.write(`${JSON.stringify(message)}\n`);
+    } catch {
+      // client が既に切断している。判断そのものは queue のファイルが保持する。
+    }
+  };
+  const server = createServer(send);
+  const inFlight = new Set();
+  let ended = false;
+  let buffer = "";
+  let resolveFinished;
+  const finished = new Promise((resolve) => {
+    resolveFinished = resolve;
   });
+
+  const settle = () => {
+    if (ended && inFlight.size === 0) resolveFinished(0);
+  };
+
+  // stdin EOF と signal の共通の終わらせ方。abort だけでは足りない ——
+  // Node は signal listener を登録すると既定の終了動作を外すため、stdin を読み続けて
+  // いる限り event loop が解放されず、要求を aborted にしてもプロセスが残り続ける。
+  const shutdown = (reason) => {
+    if (ended) return;
+    ended = true;
+    input.pause();
+    server.abort(reason);
+    settle();
+  };
+
+  const dispatch = (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      send(errorResponse(null, PARSE_ERROR, "parse error"));
+      return;
+    }
+    const task = Promise.resolve()
+      .then(() => server.handleMessage(message))
+      .then((response) => {
+        if (response) send(response);
+      })
+      .catch((error) => {
+        errorOutput?.write(`${SERVER_NAME}: ${error.message}\n`);
+        if (Object.hasOwn(message ?? {}, "id") && message.id !== null) {
+          send(errorResponse(message.id, INTERNAL_ERROR, error.message));
+        }
+      })
+      .finally(() => {
+        inFlight.delete(task);
+        settle();
+      });
+    inFlight.add(task);
+  };
+
+  input.setEncoding("utf8");
+  input.on("data", (chunk) => {
+    buffer += chunk;
+    let index = buffer.indexOf("\n");
+    while (index !== -1) {
+      const line = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 1);
+      if (line) dispatch(line);
+      index = buffer.indexOf("\n");
+    }
+    if (buffer.length > MAX_JSONRPC_LINE_LENGTH) {
+      buffer = "";
+      send(errorResponse(null, PARSE_ERROR, "message exceeds the maximum line length"));
+    }
+  });
+  // MCP の stdio shutdown は client が stdin を閉じることで始まる。
+  input.on("end", () => shutdown("the client closed its side of the connection"));
+
+  return { finished, shutdown };
 }

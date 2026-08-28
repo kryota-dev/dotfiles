@@ -10,6 +10,11 @@ import { newId, nowIso, rejectUnknownKeys, requireObject } from "./record-valida
 //   <id>.request.json  writer: approve-server（作成と outcome の記録）
 //   <id>.answer.json   writer: responder（orchestrator or user の `fh approve`）
 //
+// なお、ここで言う「承認」は state-store.mjs の `approvals` テーブル（`fh onboard` が
+// 記録する repository manifest の承認、`APPROVAL_KINDS`）とは別の概念である。あちらは
+// 「どの capability を許可したか」という台帳で、こちらは実行時の tool call ごとの
+// escalation。語が同じでも粒度が違うので、意図的に統合していない（#534 へ送る）。
+//
 // 単一の state ファイルに全 pending を詰めると writer が競合して lost update を生む。
 // wave の実運用では 4 セッション並列時に複数が同時停止した実績があり、
 // 1 要求 1 ファイルなら lock 無しで N 並列を扱え、任意の順に解決できる。
@@ -108,6 +113,13 @@ export function normalizeQuestionAnswers(answers, request) {
     if (!multiSelect && Array.isArray(value)) {
       throw new TypeError(
         "approval answer supplies multiple labels for a single-select question",
+      );
+    }
+    // multiSelect は label の配列でなければならない。scalar を黙って配列へ包むと、
+    // single-select 側だけ厳格という非対称な検証になり、仕様（要件 3-10）ともずれる。
+    if (multiSelect && !Array.isArray(value)) {
+      throw new TypeError(
+        "approval answer must supply an array of labels for a multi-select question",
       );
     }
     const chosen = Array.isArray(value) ? value : [value];

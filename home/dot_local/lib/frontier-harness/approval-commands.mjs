@@ -144,13 +144,12 @@ export function startApprovalServerCommand({
   );
   const queue = createApprovalQueue({ directory });
 
-  let server = null;
-  const finished = runStdioApprovalServer({
+  const transport = runStdioApprovalServer({
     input: stdin,
     output: stdout,
     errorOutput: stderr,
-    createServer: (send) => {
-      server = createApprovalServer({
+    createServer: (send) =>
+      createApprovalServer({
         queue,
         rules,
         session,
@@ -159,12 +158,12 @@ export function startApprovalServerCommand({
         progressIntervalMs,
         notify: send,
         log: (line) => stderr.write(`${SERVER_NAME}: ${line}\n`),
-      });
-      return server;
-    },
+      }),
   });
+  // signal を受けたら待機中の要求を aborted として保存したうえで**終了する**。
+  // abort だけでは stdin を読み続けたままになり、プロセスが残る（要件 4-7）。
   for (const signal of ["SIGTERM", "SIGINT"]) {
-    signals.on(signal, () => server?.abort(`received ${signal}`));
+    signals.on(signal, () => transport.shutdown(`received ${signal}`));
   }
-  return finished;
+  return transport.finished;
 }

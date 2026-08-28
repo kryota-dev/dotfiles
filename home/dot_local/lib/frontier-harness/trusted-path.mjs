@@ -13,7 +13,15 @@ export function resolveTrustedPath({
   homeRelative,
   label,
 }) {
-  if (explicit) return explicit;
+  if (explicit) {
+    // 明示指定にも絶対パスを要求する。この経路は CLI フラグ（`--rules`）からも
+    // 到達するため、検証を省くと「作業ディレクトリ由来のパスを使わない」という
+    // 不変条件そのものがフラグ 1 つで迂回できてしまう。
+    if (!path.isAbsolute(explicit)) {
+      throw new TypeError(`${label} must be an absolute path`);
+    }
+    return explicit;
+  }
   const override = environment[envKey];
   if (override) {
     // 明示的な escape hatch として HOME 配下までは要求しない。
