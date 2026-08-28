@@ -136,6 +136,73 @@ shadow mode の `run`、`verify`、`review` は provider や任意 command を�
 記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
 approvals には手を触れません。`--dry-run` で影響を確認できます。
 
+## provider adapter
+
+3 つの CLI は互換ではありません。非対話モードの能力が非対称なので、1 つの汎用ランチャーを
+パラメータで切り替えるのではなく、provider ごとに adapter を持ちます。
+
+| | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| 起動 | `-p` ＋ `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
+| 再開 | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
+| サンドボックス | `--settings` の設定 JSON。`--sandbox` フラグは存在しない | 起動は `--sandbox`、再開は `-c sandbox_mode="…"` | 表現できない（`--sandbox` はファイル書き込みを止めない） |
+| 承認チャネル | 外部への往復が可能 | エージェントによるレビュー | 無し |
+| 成功判定 | `result` イベント / `is_error` / `permission_denials[]` | `turn.completed` と `error` イベント | 終了コードと status だけでは**判定できない** |
+
+adapter は純粋です。invocation を組み立て、プロセス結果を解釈するだけで、Node の子プロセス API を
+import しません（テストがソースを走査して固定しています）。したがって `createAdapterExecutor` は
+runner の注入を必須とし、**既定の runner を持ちません** —— 実プロセスの起動はこの層ではなく
+rollout の昇格作業に属します。挿入点は `runWithRolloutGuard` の `executor` 引数なので、
+`shadow` の間は route が provider に到達しません。
+
+invocation が持つのは provider、実行ファイルの絶対パス、argv 配列、任意の stdin、そして phase だけです。
+環境変数や credential の欄はそもそも存在しません。認証は各 CLI 自身のランチャーと keychain が持ち、
+harness は token もプロファイルパスも扱いません。
+
+### サンドボックスは構築時に封印される
+
+Codex は起動時には `-s/--sandbox` を受け付けますが、再開時には受け付けません。`codex exec resume` が
+受け付けるサンドボックス関連のフラグは、封じ込めを**弱める**ものだけです。この非対称を手で書くと、
+再開したときだけ設定既定へ静かに戻る実行ができあがります。
+
+そのため起動形・再開形のどちらも `sealInvocation` を通して作ります。この関数は、いま生成した argv から
+実効サンドボックスを読み戻し、呼び出し側が要求した policy と一致しなければ throw します。config override を
+書き忘れた再開形は、レビューで気づかれるときではなく**組み立てた時点で**失敗します。`resume` は
+sandbox policy を必須引数として受け取るので、「policy 無しの再開」という形自体が存在しません。
+
+policy の語彙は意図的に小さくしてあります。`read-only` と `workspace-write` の 2 値で、
+「サンドボックス無し」に相当する値は持ちません（持てば再開経路がそこへ落ちうるため）。
+ネットワークの軸も持ちません。許可リストの記法が実測されていないので、3 つの adapter とも
+ネットワークを閉じた形だけを描画します。
+
+### Antigravity は実装するが read-only に留める
+
+Antigravity は、承認できないツール呼び出しをソフト拒否するとき、終了コード 0・status `SUCCESS`・
+空の応答本文を返します。呼び出し側が終了コードと status だけを見ると、何も起きていない実行を
+成功として記録することになります。そのためこの adapter は成功を報告しません。判定**できる**失敗
+（非 0 の終了コード、明示的な失敗 status）だけを失敗として報告し、それ以外は *indeterminate* を返します。
+これは新しい status 値を作らず、理由付きの `failed` な adapter run へ写像されます。応答本文の非空判定と
+標準エラーの走査による本当の成功判定は、別の作業です。
+
+`--sandbox` はファイル書き込みを止めず、シェル実行を壊すだけです。`--dangerously-skip-permissions` は
+唯一持っている境界を外します。adapter はどちらも出さず、書き込みを伴う invocation の組み立てを拒否し、
+書き込み能力を `unenforceable` と宣言します。
+
+### adapter が実行前に検査すること
+
+router は provider 非依存の言葉で可用性を判断します。adapter は実行の直前に、同じ discovery 一覧に対して
+exact model ID を再検査します（route 決定から実行までの間に readiness キャッシュは失効しうるため）。
+そのうえで、router にはできない検査を足します。
+
+- `model` と `effort` は安全なトークンであること。Codex は両方を `-c key=value` の値に埋め込むため、
+  引用符や等号を含む値は別の設定（`sandbox_mode` を含む）を注入しうる。
+- `effort` は harness が既に出荷している語彙に属すること。adapter が 2 つ目の語彙を作らない。
+  provider ごとの受理値は実測されていないので、provider 別の集合も主張しない。
+- 封じ込めを保証できない adapter に対しては、書き込みを伴う実行を拒否する。
+
+拒否は例外ではなく戻り値としての判定です。runner は呼ばれず、結果には provider が起動しなかったことが
+残り、route の選び直しは呼び出し側の判断のままです。この層は capability registry の schema を変更しません。
+
 ## worktree と rollout
 
 primary worktree と PR branch は `pr-workflow` が所有します。将来の writable diversified route だけが
@@ -146,3 +213,5 @@ verified かつ clean apply 可能な candidate は primary へ反映できま�
 promotion は shadow → pilot → default です。`--legacy` による rollback flag はその promotion 作業で
 実装する予定であり、現時点では未実装です。それまで rollout は `shadow` のままで、CLI 側が
 （provider adapter が未実装であることに依存せず）明示的なガードとして shadow を強制します。
+adapter が実装された今、route と provider の間に立っているのはこのガードだけです。adapter は
+既定の runner を持たないので、昇格作業は runner の配線を明示的に行う必要があります。
