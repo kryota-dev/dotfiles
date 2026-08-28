@@ -108,6 +108,16 @@ if is_dump_trigger "$subcommand"; then
       # live at that import path (a real one is github.com/owner/repo/cmd/tool), so nothing
       # installable is lost and every other go entry survives verbatim.
       #
+      # `mas list` has the same "hand-edits don't stick" problem for two reasons, both keyed on the
+      # ADAM ID rather than the display name (mas's local list output is not a stable name source):
+      #   - A retired ADAM ID (RunCat, 1429033973) lingers in `mas list` as long as the app bundle
+      #     stays installed locally, even though the App Store no longer serves it
+      #     (`mas info 1429033973` reports "No apps found"). Drop that line outright.
+      #   - A still-valid ID (RunCat Neo, 6757801838) is dumped under its local bundle name
+      #     ("RunCatNeo", no space) rather than its App Store display name ("RunCat Neo"). Rewrite
+      #     the name in place, keyed on the ID so the rewrite survives whatever name `mas list`
+      #     happens to report.
+      #
       # Staged as a dot-prefixed file in the source dir — chezmoi ignores dot-prefixed source
       # entries, so an interrupted run cannot leave behind something that would get deployed — and
       # swapped in with a same-filesystem rename so the Brewfile is never observed half-written.
@@ -115,17 +125,22 @@ if is_dump_trigger "$subcommand"; then
       # predictable path is worth avoiding even though the source dir is normally user-only.
       # sed rather than `grep -v`: grep reports "selected no lines" as exit 1, which is
       # indistinguishable from a real failure and would skip the rename for a dump consisting
-      # entirely of stdlib entries — leaving exactly the entries this is meant to remove.
+      # entirely of entries these filters remove or rewrite — leaving exactly the entries this is
+      # meant to clean up.
       # Like every other branch here this only warns on failure and still falls through to
       # `exit "$status"`; keeping it inside the `if` condition also stops `set -e` from aborting.
       staged=""
       if staged="$(mktemp "$source_path/.brewfile-sanitize.XXXXXX")" &&
-        sed '/^go "cmd\//d' "$brewfile" >"$staged" &&
+        sed \
+          -e '/^go "cmd\//d' \
+          -e '/^mas "[^"]*", id: 1429033973$/d' \
+          -e 's/^mas "[^"]*", id: 6757801838$/mas "RunCat Neo", id: 6757801838/' \
+          "$brewfile" >"$staged" &&
         mv "$staged" "$brewfile"; then
         :
       else
         if [ -n "$staged" ]; then rm -f "$staged"; fi
-        echo "brew launcher: could not strip stdlib go entries; $brewfile left as dumped." >&2
+        echo "brew launcher: could not sanitize dumped Brewfile entries; $brewfile left as dumped." >&2
       fi
     fi
   fi
