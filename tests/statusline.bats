@@ -35,23 +35,22 @@ MOCK_JSON_RL_SD_ONLY='{"model":{"display_name":"TestModel"},"effort":{"level":"h
 
 # Every test that pipes MOCK_JSON exercises write_harness_cost (the harness-cost
 # contract), which writes a cache file keyed by session_id into the resolved
-# tmpdir. Clean it up so the suite leaves no stray tmpdir artifacts.
-HARNESS_COST_DIR="${TMPDIR:-/tmp}"
-HARNESS_COST_DIR="${HARNESS_COST_DIR%/}"
-HARNESS_COST_FILE="${HARNESS_COST_DIR}/harness-cost-bats-statusline.json"
-
+# tmpdir. Each test gets its own TMPDIR so those files land somewhere private:
+# the suite renders under more than one session id, and a shared-/tmp glob
+# cleanup would reach into a concurrent run's files.
+#
 # write_rate_limits_snapshot writes under $XDG_CACHE_HOME/claude-statusline, so
-# give each test its own throwaway XDG_CACHE_HOME instead of touching the
+# each test likewise gets a throwaway XDG_CACHE_HOME instead of touching the
 # real ~/.cache.
 setup() {
   RL_CACHE_HOME="$(mktemp -d)"
+  HARNESS_COST_DIR="$(mktemp -d)"
+  HARNESS_COST_FILE="${HARNESS_COST_DIR}/harness-cost-bats-statusline.json"
+  export TMPDIR="$HARNESS_COST_DIR"
 }
 
 teardown() {
-  # The billing tests render under a second session id, so sweep the whole
-  # bats-statusline* family rather than the single default file.
-  rm -f "${HARNESS_COST_DIR}"/harness-cost-bats-statusline*.json 2>/dev/null || true
-  rm -rf "$RL_CACHE_HOME" 2>/dev/null || true
+  rm -rf "$RL_CACHE_HOME" "$HARNESS_COST_DIR" 2>/dev/null || true
 }
 
 # --- Billable-delta helpers (#446) -----------------------------------------
@@ -65,16 +64,42 @@ teardown() {
 BILLING_RATE=10
 BILLING_DAILY=10.5
 
+# _seed_billing_cache [daily_total] -- seed the FX rate and today's ccusage
+# total. Tomorrow's file is seeded too: the test and the renderer each evaluate
+# `date` themselves, so a run that straddles local midnight would otherwise have
+# the renderer read an unseeded day, fire the background refresh, and make every
+# amount assertion flaky.
 _seed_billing_cache() {
+  local daily="${1:-$BILLING_DAILY}"
   mkdir -p "${RL_CACHE_HOME}/claude-statusline"
   printf '%s' "$BILLING_RATE" >"${RL_CACHE_HOME}/claude-statusline/usdjpy"
-  printf '%s' "$BILLING_DAILY" >"${RL_CACHE_HOME}/claude-statusline/daily_$(date +%Y%m%d)"
+  printf '%s' "$daily" >"${RL_CACHE_HOME}/claude-statusline/daily_$(date +%Y%m%d)"
+  printf '%s' "$daily" >"${RL_CACHE_HOME}/claude-statusline/daily_$(_tomorrow)"
+}
+
+# Seed only the FX rate, leaving ccusage cold (no daily_* file). Used to drive
+# the lazy daily-anchor path.
+_seed_rate_only() {
+  mkdir -p "${RL_CACHE_HOME}/claude-statusline"
+  printf '%s' "$BILLING_RATE" >"${RL_CACHE_HOME}/claude-statusline/usdjpy"
+}
+
+# Tomorrow's YYYYMMDD on both GNU (-d) and BSD (-v) date.
+_tomorrow() {
+  date -d '+1 day' +%Y%m%d 2>/dev/null || date -v+1d +%Y%m%d
+}
+
+# Strip ANSI SGR sequences so assertions can pin an exact rendered segment.
+_plain() {
+  printf '%s' "$1" | sed 's/\x1b\[[0-9;]*m//g'
 }
 
 # _billing_json <cost> <fh_pct> <fh_reset> <sd_pct> <sd_reset> [session_id]
+# The default uses ${6-...}, not ${6:-...}: an explicitly empty session id is a
+# case under test, and :- would silently swap it for the default one.
 _billing_json() {
   printf '{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":50},"cost":{"total_cost_usd":%s},"rate_limits":{"five_hour":{"used_percentage":%s,"resets_at":%s},"seven_day":{"used_percentage":%s,"resets_at":%s}},"session_id":"%s"}' \
-    "$1" "$2" "$3" "$4" "$5" "${6:-bats-statusline}"
+    "$1" "$2" "$3" "$4" "$5" "${6-bats-statusline}"
 }
 
 # _render <json> -- render with the throwaway cache home and default profile.
@@ -266,7 +291,15 @@ _billing_state() {
 @test "statusline anchors the baseline when a quota window is exhausted" {
   _seed_billing_cache
   _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
-  [[ "$output" == *"(session)"* ]]
+  # The baseline itself is not a charge: the anchoring render must bill zero on
+  # both segments, and must not fall back to showing the raw totals (1.23 and
+  # 10.5 USD, which at the seeded rate of 10 would read as ¥12 and ¥105).
+  local plain
+  plain="$(_plain "$output")"
+  [[ "$plain" == *"¥0 (session)"* ]]
+  [[ "$plain" == *"¥0 (daily)"* ]]
+  [[ "$plain" != *"¥12"* ]]
+  [[ "$plain" != *"¥105"* ]]
   [[ "$output" != *"incl."* ]]
   local state
   state="$(_billing_state)"
@@ -415,4 +448,123 @@ STATE
   [[ "$output" != *"\$1.23"* ]]
   # A failed setlocale must not leak a warning into the rendered status line.
   [[ "$output" != *setlocale* ]]
+}
+
+# --- Coverage for the state-machine edges called out in review ---------------
+
+# The daily half of the feature: the session total is held still so only the
+# ccusage movement can produce the charge.
+@test "statusline bills the daily increment within one day" {
+  _seed_billing_cache
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  # ccusage moves 10.5 -> 17.5, i.e. 7.00 USD at the seeded rate of 10 -> ¥70.
+  _seed_billing_cache 17.5
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  local plain
+  plain="$(_plain "$output")"
+  [[ "$plain" == *"¥70 (daily)"* ]]
+  [[ "$plain" == *"¥0 (session)"* ]]
+  run jq -e '.billing.daily_baseline == 10.5 and .billing.daily_last == 17.5' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+# ccusage refreshes in the background, so the daily total is empty on a cold
+# cache. Anchoring it at 0 there would bill the whole day, so the daily half of
+# the baseline is taken lazily on the first render that has a number.
+@test "statusline defers the daily baseline until ccusage warms up" {
+  _seed_rate_only
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  local plain
+  plain="$(_plain "$output")"
+  [[ "$plain" == *"¥0 (session)"* ]]
+  [[ "$plain" != *"(daily)"* ]]
+  run jq -e '.billing.session_baseline == 1.23 and (.billing | has("daily_date") | not)' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+
+  # Once ccusage lands, the baseline is that value -- not 0, which would have
+  # billed the entire day retroactively.
+  _seed_billing_cache
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  [[ "$(_plain "$output")" == *"¥0 (daily)"* ]]
+  run jq -e '.billing.daily_baseline == 10.5 and .billing.daily_carry == 0' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+# Without a usable session id there is nowhere to keep a baseline, and a delta
+# cannot be invented -- so the raw totals are shown rather than a number with
+# nothing behind it, and no state file is written.
+@test "statusline falls back to raw totals when the session id is unusable" {
+  _seed_billing_cache
+  local escaping
+  escaping="$(_billing_json 1.23 100 1700000000 17.5 1700600000 "../escape")"
+  run bash -c "printf '%s' '${escaping}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  local plain
+  plain="$(_plain "$output")"
+  # Raw totals at the seeded rate of 10: 1.23 -> ¥12, 10.5 -> ¥105.
+  [[ "$plain" == *"¥12 (session)"* ]]
+  [[ "$plain" == *"¥105 (daily)"* ]]
+  [[ "$plain" != *"incl."* ]]
+  run bash -c "ls '${RL_CACHE_HOME}/claude-statusline'/session_* 2>/dev/null"
+  [ -z "$output" ]
+
+  local empty_id
+  empty_id="$(_billing_json 1.23 100 1700000000 17.5 1700600000 "")"
+  run bash -c "printf '%s' '${empty_id}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [[ "$(_plain "$output")" == *"¥12 (session)"* ]]
+  run bash -c "ls '${RL_CACHE_HOME}/claude-statusline'/session_* 2>/dev/null"
+  [ -z "$output" ]
+}
+
+# The sweep must run whatever this session's quota state is: a machine sitting
+# in a long overage would otherwise never collect the baselines left behind by
+# sessions that have ended.
+@test "statusline prunes expired baselines while itself being billed" {
+  _seed_billing_cache
+  local stale="${RL_CACHE_HOME}/claude-statusline/session_gone-long-ago.json"
+  mkdir -p "${RL_CACHE_HOME}/claude-statusline"
+  printf '{"ts":1,"billing":{"window":"five_hour","session_baseline":1}}' >"$stale"
+  touch -t 202001010000 "$stale"
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  # The sweep is backgrounded, so wait for it rather than racing it.
+  local i=0
+  while [ -e "$stale" ] && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  [ ! -e "$stale" ]
+  # This session's own (fresh) baseline must survive the sweep.
+  [ -f "$(_billing_state)" ]
+}
+
+# A truncated or hand-edited state file must not take the statusline down, and
+# must not be trusted: the baseline is simply re-taken at the current spend.
+@test "statusline re-anchors on an unparseable state file" {
+  _seed_billing_cache
+  printf 'not json at all' >"$(_billing_state)"
+  _render "$(_billing_json 4.5 100 1700000000 17.5 1700600000)"
+  [[ "$(_plain "$output")" == *"¥0 (session)"* ]]
+  run jq -e '.billing.session_baseline == 4.5 and .billing.window == "five_hour"' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+# pct_exhausted truncates at the decimal point, so pin the boundary: 99.9 is
+# still inside quota, 100.0 and 100.1 are not.
+@test "statusline places the quota boundary at 100 percent used" {
+  _seed_billing_cache
+  _render "$(_billing_json 1.23 99.9 1700000000 17.5 1700600000)"
+  [[ "$output" == *"incl."* ]]
+  [ ! -f "$(_billing_state)" ]
+
+  _render "$(_billing_json 1.23 100.0 1700000000 17.5 1700600000)"
+  [[ "$output" != *"incl."* ]]
+  [ -f "$(_billing_state)" ]
+
+  _render "$(_billing_json 1.23 99.9 1700000000 17.5 1700600000)"
+  [[ "$output" == *"incl."* ]]
+
+  _render "$(_billing_json 1.23 100.1 1700000000 17.5 1700600000)"
+  [[ "$output" != *"incl."* ]]
+  [ -f "$(_billing_state)" ]
 }
