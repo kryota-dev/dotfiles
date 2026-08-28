@@ -336,3 +336,42 @@ _assert_lifecycle_scripts_documented() {
     }
   done
 }
+
+@test "docs_facts: every <!-- FACT:fh-approval-* --> marker matches the approval channel constants" {
+  # The approval channel blocks a child session while it waits, so these three numbers are
+  # load-bearing: they decide how long a wave child can be held, and the clamp is what keeps
+  # the wait under the MCP tool timeout. Pin the docs to the named constants so a policy
+  # change cannot land with the prose left behind.
+  local source="${HOME_DIR}/dot_local/lib/frontier-harness/approval-server.mjs"
+  [ -f "$source" ] || {
+    echo "missing ${source#"${REPO_ROOT}/"} — the approval server moved"
+    false
+  }
+
+  local pair marker constant actual found f val
+  for pair in "fh-approval-timeout-ms:DEFAULT_ESCALATION_TIMEOUT_MS" \
+    "fh-approval-max-timeout-ms:MAX_ESCALATION_TIMEOUT_MS" \
+    "fh-approval-progress-interval-ms:DEFAULT_PROGRESS_INTERVAL_MS"; do
+    marker="${pair%%:*}"
+    constant="${pair##*:}"
+    actual="$(grep -oE "export const ${constant} = [0-9]+" "$source" | grep -oE '[0-9]+$')"
+    [ -n "$actual" ] || {
+      echo "sanity: could not read ${constant} from ${source#"${REPO_ROOT}/"} — the extractor likely broke"
+      false
+    }
+    found=0
+    while IFS= read -r f; do
+      while IFS= read -r val; do
+        found=1
+        [ "$val" = "$actual" ] || {
+          echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ${constant} is $actual"
+          false
+        }
+      done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+    done < <(grep -rlF "FACT:${marker}" "${DOCS_DIR}")
+    [ "$found" = 1 ] || {
+      echo "no FACT:${marker} markers found under ${DOCS_DIR#"${REPO_ROOT}/"} — the docs refactor regressed"
+      false
+    }
+  done
+}

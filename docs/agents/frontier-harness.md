@@ -135,6 +135,119 @@ Every command that opens the state migrates it, `fh clean --dry-run` included. D
 means "delete nothing", not "open nothing" — a dry run against a v1 database could not
 otherwise count the record classes v2 introduces.
 
+## Approval channel
+
+`claude -p` only exposes `AskUserQuestion` when a `--permission-prompt-tool` is wired in, and
+both permission requests and questions then arrive as **synchronous MCP tool calls**. `fh`
+provides that endpoint so a wave child can reach the user without a terminal: nothing reads a
+screen, nothing sends keystrokes, and nothing has to guess whether a prompt is still
+unanswered — being called *is* the question, and the return value *is* the answer.
+
+Wire it into a child session as its own MCP server, and keep the two hardening flags that make
+the channel a trust boundary rather than a suggestion:
+
+```bash
+MCP='{"mcpServers":{"fh-approve":{"command":"fh","args":["approve-server","--session","<session-id>"]}}}'
+claude -p --mcp-config "$MCP" --strict-mcp-config --setting-sources user \
+  --permission-prompt-tool mcp__fh-approve__approve ...
+```
+
+`--strict-mcp-config` keeps a checked-out repository from injecting another MCP server beside
+the approver, and `--setting-sources user` (or `--bare`) keeps its `.claude/settings.json`
+hooks from running. Launching the child is the wave orchestrator's job and is not part of this
+command.
+
+### Escalation rules
+
+Escalation rules live in **a different file from the repository capability manifest**, because
+the two fail in opposite directions. A gap in the manifest is fail-closed — something does not
+run, and you find out. A gap in the escalation rules is fail-open — something runs without
+anyone being asked, and you do not. Keeping them in one file hides that asymmetry.
+
+The consequence is a deliberately lopsided design:
+
+- The **baseline rules are constants in `approval-rules.mjs`**, not data. They cover merges,
+  force pushes, history rewrites, working-tree rollbacks, releases, outward-facing writes,
+  credential access, deploys, database migrations, and writes aimed at the approval queue
+  itself. No file can remove or weaken one.
+- An optional `$HOME/.config/frontier-harness/approval-rules.json` (or an absolute
+  `FH_APPROVAL_RULES_PATH`) may **only add** rules through `additionalRules`, and may only move
+  the unmatched default in the stricter direction with `defaultDecision: "escalate"`. There is
+  no key that subtracts.
+- The path is never derived from the working directory, for the same reason `config.json`
+  is not: a checked-out repository must not be able to supply its own escalation policy.
+- A malformed rules file **refuses to start** rather than quietly falling back to the baseline.
+  Silently dropping the rules a user deliberately added is the fail-open regression this whole
+  arrangement exists to prevent.
+
+Matching a rule does **not** deny. It escalates — the user is asked, synchronously.
+`AskUserQuestion` escalates regardless of any rule, and the approver never answers one itself:
+it cannot check a claim against a primary source, so it is not given the power to try.
+
+Anything that matches no rule is allowed. That direction is fail-open by construction, and two
+things bound it: read-only calls are auto-approved before they ever reach the prompt tool, so
+the channel never sees them, and the baseline set cannot be shrunk. Regular-expression matching
+over shell command strings is a speed bump, not a boundary — a determined command can be
+spelled around it.
+
+### Reaching the user
+
+An escalation is written to the state root as one file per request, so several children
+stopping at once never contend:
+
+| File | Writer | Holds |
+|---|---|---|
+| `<state root>/frontier-harness/approvals/<id>.request.json` | `approve-server` | the tool call, the rule it matched, and the outcome once decided |
+| `<state root>/frontier-harness/approvals/<id>.answer.json` | the responder | the user's decision |
+
+Each file has exactly one writer, so nothing is ever lost to a concurrent update. The answer is
+published with `O_EXCL` plus `link(2)` rather than a rename, so a request is answered once and a
+second writer loses rather than silently overwriting the first.
+
+Two responders are interchangeable, and the queue does not encode which one is in use:
+
+```bash
+fh approvals --json                                    # what is waiting, and why
+fh approve --request <id> --allow                      # let it through
+fh approve --request <id> --deny --message "..."       # refuse, with a reason for the model
+fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUserQuestion
+```
+
+The wave orchestrator normally relays — it reads the queue, asks the user, and writes the answer
+back — but the user can answer directly with the same commands. That matters: if the
+orchestrator dies, the pending approvals stay decidable. Answers to `AskUserQuestion` are
+validated against the offered options on **both** sides, so a decision the user never expressed
+cannot reach the model through a typo or a hand-edited file.
+
+### Waiting
+
+A permission prompt tool blocks its caller, so the escalation window is bounded on two sides.
+
+| Value | Setting |
+|---|---|
+| <!-- FACT:fh-approval-timeout-ms -->28800000<!-- /FACT --> ms (8 h) | how long an escalation waits before it denies itself (`--timeout-ms`, clamped to <!-- FACT:fh-approval-max-timeout-ms -->86400000<!-- /FACT --> ms, which stays under the `MCP_TOOL_TIMEOUT` default) |
+| <!-- FACT:fh-approval-progress-interval-ms -->60000<!-- /FACT --> ms | how often a `notifications/progress` message is sent while waiting (`--progress-interval-ms`) |
+
+The progress messages exist to reset `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, which is 30 minutes
+for stdio; without them the call is cut off long before a sleeping user could answer. An
+interval at or above that idle timeout is rejected at startup rather than accepted and
+quietly useless.
+
+When the window closes, the request is denied automatically and the record keeps the tool
+input, session, and tool-use id, so the child ends cleanly and the escalation can be replayed
+later. Closing stdin or signalling the server does the same thing under a different status. A
+decision the user already recorded outranks all of them — an answer that lands together with
+the shutdown is honoured, not converted into a denial.
+
+### What this does not defend against
+
+Every process running as the same user can write into the approval queue, including the child
+whose request is waiting there. A child that wants to approve itself can, and no arrangement of
+file permissions changes that; only running the responder under a different uid would. This is
+the same caveat that applies to `approvals.granted_by` in the state schema — the record says
+who granted an approval, it does not prove it. The baseline rule that escalates any command
+referencing the approval directory is defence in depth, not a boundary.
+
 ## Repository onboarding
 
 Approve a repository's command/domain/capability manifest once rather than
