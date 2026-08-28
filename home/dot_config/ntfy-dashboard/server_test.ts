@@ -159,6 +159,11 @@ Deno.test("buildClaudeArgs disables all tools and disables session persistence",
   assertEquals(args[args.length - 1], "prompt text");
 });
 
+Deno.test("buildClaudeArgs disables plugin hooks/MCP via --safe-mode (regression: 3rd-party SessionEnd hooks must not break summarization)", () => {
+  const args = buildClaudeArgs(makeConfig(), "prompt text");
+  assertEquals(args.includes("--safe-mode"), true);
+});
+
 Deno.test("INDEX_HTML renders untrusted notification fields via textContent, never innerHTML", () => {
   assertEquals(INDEX_HTML.includes("innerHTML"), false);
   assertMatch(INDEX_HTML, /title\.textContent = n\.title/);

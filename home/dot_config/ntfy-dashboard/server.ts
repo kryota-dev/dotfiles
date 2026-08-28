@@ -362,6 +362,17 @@ function buildClaudeArgs(config: Config, prompt: string): string[] {
     // to act on embedded instructions.
     "--tools",
     "",
+    // --tools "" only empties the tool allowlist; it does not stop plugin
+    // hooks from running. Every claude invocation on this machine also runs
+    // third-party plugin hooks (e.g. the openai-codex plugin's SessionEnd
+    // hook), which is unrelated to summarization and has been observed to
+    // fail as "Hook cancelled" in this daemon's restricted, non-interactive
+    // environment, turning a successful summary into a non-zero exit.
+    // --safe-mode disables all hooks/plugins/MCP servers for this call while
+    // leaving auth, model selection, and built-in tools unaffected — closing
+    // that failure mode and, as a side effect, further narrowing what a
+    // prompt-injected notification body could trigger.
+    "--safe-mode",
     // Print-mode sessions persist to ~/.claude by default; this call
     // summarizes potentially sensitive notification content and must not
     // leave a durable trace (AC-004).
