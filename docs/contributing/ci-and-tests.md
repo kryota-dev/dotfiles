@@ -67,6 +67,10 @@ Behavioral tests for `dot_claude/executable_statusline.sh`. Pipes mock JSON thro
 - Effort and cost segments render as independent tokens (guards against a field-delimiter regression).
 - The r06 profile badge appears when `CLAUDE_CONFIG_DIR` points at `~/.claude-r06`.
 - The harness-cost cache file is written with the correct session-keyed filename.
+- The rate-limits snapshot is per-profile, per-field validated, 0600 under a lax umask, and never carries `effort` (#449).
+- The [billable-delta contract](../agents/claude-code.md#billable-delta-cost): an `incl.` marker inside quota, raw totals when stdin carries no `rate_limits`, and increments above the baseline once a window is exhausted. The baseline anchors on the later-resetting window, hands over before that window rolls over, is re-taken when its window rolls over, is dropped when the windows have room again, carries the daily remainder across a day change, clamps negative deltas to zero, stays session-scoped, and is written 0600.
+
+The USD→JPY rate and the `ccusage` daily total are seeded into the throwaway `XDG_CACHE_HOME` before the billing assertions run. That pins the rendered amounts *and* keeps the background rate/usage refreshes from firing, so the suite needs no network.
 
 ### `tests/zsh_aliases.bats`
 
