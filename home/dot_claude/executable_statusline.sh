@@ -91,9 +91,22 @@ SESSION_STATE_TTL_DAYS=7
 # ---------------------------------------------------------------------------
 
 # file_mtime <file> -> epoch seconds of last modification (0 if missing).
-# Handles both macOS (stat -f %m) and Linux (stat -c %Y).
+# GNU (stat -c %Y) first, BSD (stat -f %m) second. The order matters: GNU's -f
+# is --file-system, and for the unrecognized %m directive it prints the whole
+# filesystem report on STDOUT before exiting 1 -- so a BSD-first order appended
+# that report to the real mtime, every TTL check died with an arithmetic syntax
+# error, and bash tore down the enclosing function's subshell before it could
+# `cat` its cache. That silently emptied the daily-cost, FX-rate, network and
+# service-status segments on Linux. BSD stat has no -c and fails cleanly on
+# stderr, so this order is correct on both. The digit guard keeps any future
+# platform quirk from reaching $(( )) at all.
 file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+  local m
+  m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null)
+  case "$m" in
+    '' | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$m" ;;
+  esac
 }
 
 # fmt_epoch <epoch> <strftime-fmt> -> formatted local time.
@@ -185,8 +198,12 @@ daily_cost() {
   mtime=$(file_mtime "$cache")
   if [ $((now - mtime)) -gt 300 ]; then
     touch "$cache"
+    # Guard the swap on a non-empty result, like usd_jpy_rate and claude_status
+    # already do: a missing bunx or a failed ccusage run yields an empty file,
+    # and moving that into place would destroy a perfectly good cached total.
     (bunx ccusage@20 daily --since "$(date +%Y%m%d)" --json 2>/dev/null |
-      jq -r '.totals.totalCost // empty' >"$cache.tmp" && mv "$cache.tmp" "$cache") &
+      jq -r '.totals.totalCost // empty' >"$cache.tmp" &&
+      [ -s "$cache.tmp" ] && mv "$cache.tmp" "$cache") &
   fi
   cat "$cache" 2>/dev/null
 }
@@ -232,9 +249,17 @@ usd_jpy_rate() {
 
 # Format a USD amount: JPY (comma-separated integer) when a rate is cached,
 # otherwise fall back to USD.
+#
+# The locale is only requested for %'s thousands grouping, and distros commonly
+# ship without en_US.UTF-8 (Ubuntu generates C.UTF-8 only). bash then warns on
+# stderr for every call, which lands in the rendered statusline, so the warning
+# is dropped: losing the grouping is a cosmetic downgrade, printing a setlocale
+# error into the status line is not. The redirect has to wrap the whole group --
+# bash emits the warning while applying the prefix assignment, before the
+# command's own redirections take effect.
 fmt_cost() {
   if [ -n "$JPY_RATE" ]; then
-    LC_ALL=en_US.UTF-8 printf "¥%'.0f" "$(awk -v u="$1" -v r="$JPY_RATE" 'BEGIN{print u*r}')"
+    { LC_ALL=en_US.UTF-8 printf "¥%'.0f" "$(awk -v u="$1" -v r="$JPY_RATE" 'BEGIN{print u*r}')"; } 2>/dev/null
   else
     printf '$%.2f' "$1"
   fi
