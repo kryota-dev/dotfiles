@@ -79,7 +79,7 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->50<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->51<!-- /FACT --> スキル）
 
 `home/dot_agents/skills/` のキュレーテッドスキルをテーマ別にグループ化しています。
 
