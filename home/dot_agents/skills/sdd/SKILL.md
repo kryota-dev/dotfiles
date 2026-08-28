@@ -284,6 +284,10 @@ requirements.md, design.md, tasks.md を精読し、全体像を把握。
 - **linked worktree 内でのみ委譲する**。0-4 で「現在の場所で作業」を選んだ／`wtp` にフォールバックした結果 **main worktree にいる場合は Codex 委譲を選択肢から外す**（Leader or Sonnet worker に限定）。判定は `codex/SKILL.md` の fail-closed worktree ガードをそのまま前置して機械的に行い、abort したら委譲を諦める（回避しない）。
 - **呼び出し形・`CODEX_HOME` prelude・worktree ガード・実行順序契約・委任範囲の制約は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が唯一の SSOT**。ここに再掲せず必ずそれに従う。特に **`git -C <worktree> diff` の全体レビュー → ホスト側の検証コマンド（lint / test / build）→ commit** の順序を守り、**diff レビュー前にテスト・lint・ビルドを一切実行しない**（Codex が書いたテスト・Makefile・設定は sandbox 外で走るため）。commit は親が行う（`.git` は Codex から read-only）。
 
+**Claude subagent（Sonnet worker / Explore）の前提条件と契約**:
+
+- **共有作業ツリーへの書き込みガードは `pr-workflow`「共有作業ツリーでの Claude subagent 委譲契約」節が唯一の SSOT**。ここに再掲せず必ずそれに従う（委譲プロンプトに規約を含めること、および spawn 前後の親の責務を含む）。4-2 の実装 worker だけでなく、**Phase 1・2 と本節手順 2 で起動する Explore 型の調査サブエージェントも対象**である（`Edit` / `Write` を持たなくても `Bash` 経由で作業ツリーを書き換えられるため）。
+
 tasks.md の各タスクを順番に実装:
 
 1. tasks.md のステータスを `[ ]` → `[-]` に更新（Edit ツール使用）

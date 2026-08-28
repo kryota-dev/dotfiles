@@ -78,6 +78,37 @@ Phase 0 の分類直後、**tier に関わらず必ず `/wtp` でワークツリ
 
 これにより二重作成を防ぐ。→ 承認点インベントリ #2（worktree 戦略選択）は pr-workflow path では発生しない。
 
+### 共有作業ツリーでの Claude subagent 委譲契約
+
+Phase 0.5 で作ったワークツリーは、**親（orchestrator）と、そこから起動される全 Claude subagent が同時に共有する作業ツリー**である。subagent が作業ツリー上のファイルを直接書き換えると、**親の未コミット編集が黙って巻き戻る**。典型は「RED 検証のためファイルを一時的に旧版へ差し替え、検証後に元へ戻す」パターンで、subagent が「元」とみなすのは spawn 時点の snapshot なので、その後に親が書いた編集がそこで失われる。ファイルが消えるのではなく前の状態に戻るだけなので、テストも CI も通り、統合時点まで検出契機が無い（#524。wave 2 の s3 セッションで実際に発生し、レビュー指摘への修正が失われかけた）。
+
+**本節が Claude subagent 側ガードの唯一の SSOT**。委譲元（本 skill の small tier worker と Phase 6 の `adversarial-verifier`、`/sdd` の Sonnet worker（Phase 4-2）と **Explore 型の調査サブエージェント（Phase 1・2・4-2）**、`/multi-review` Phase 2 の Claude leg）は本節を再掲せず参照する。**Codex worker 側は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が SSOT**（そちらは sandbox による linked worktree 判定の fail-closed ガードであり、強制手段が異なるため統合しない）。
+
+適用範囲は linked worktree に限らず、**親と subagent が作業ツリーを共有するすべての起動**とする（`/multi-review` を main worktree で standalone 起動した場合も同じ危険がある）。
+
+#### 委譲プロンプトに必ず含める規約
+
+1. **作業ツリーは read-only 扱い**。書き込んでよいのは委譲プロンプトが**明示列挙した対象ファイル**だけで、列挙外のファイルは一時的にであっても変更しない。
+2. **復元パターン（一時退避 → 復元）を使わない**。`git checkout -- <path>` / `git restore` / `git stash` / `git reset --hard` / `git clean` / `sed -i` / 既存ファイルへの上書きリダイレクト / バックアップからの `cp` 戻しは、共有作業ツリー内で使用禁止。「戻す」対象が spawn 時点の snapshot である限り、親の編集を巻き戻す。
+3. **旧版が要る検証は複製先で行う**。共有作業ツリーを一時的にでも書き換えない。`git show <rev>:<path>` で scratch へ書き出すか、`git worktree add --detach <scratch>/verify <rev>` で使い捨てのワークツリーを立て、そちらで検証する。
+4. **RED は新規テストの追加で作る**。既存ファイルを旧版へ戻して失敗させない（RED はテストを先に書いて失敗させることであって、実装を巻き戻すことではない）。
+5. **結果は親が採番した `<RESULT_FILE>`（scratch 配下）にのみ書く**。それ以外の場所へ書き出さない。
+6. **`tools:` frontmatter は write 境界ではない**。`Read, Glob, Grep, Bash` しか持たないレビュー agent も、`Edit` / `Write` を持たない built-in の `Explore` 型サブエージェントも、**`Bash` を持つ以上リダイレクトや `git` の復元系コマンドで作業ツリーを書き換えられる**（`home/dot_claude/agents/` の 13 本中 12 本が `Bash` を持ち、`Explore` の tool set も `Bash` を含む）。「`Edit` / `Write` が無いから read-only」と判断して本節の適用外にしない。
+
+#### 親（orchestrator）の責務
+
+規約は subagent の遵守に依存するため、**破られたときに検出・復元できる状態**を親が用意する:
+
+1. **spawn 前**: 共有作業ツリーの未コミット編集を commit する。commit できない中間状態なら `git -C <worktree> diff HEAD > <scratch>/pre-spawn-<label>.patch` で退避する（どちらも 1 コマンド）。
+2. **統合前**: `git -C <worktree> diff HEAD` を spawn 前のスナップショット（commit したなら HEAD、退避したなら patch）と突き合わせる。
+3. **巻き戻しを見つけたら復元する**: commit 済みなら HEAD から、退避したなら patch の再適用から戻し、原因の subagent を特定してから再開する（規約 2 の禁止は subagent に課すものであり、親が自分で取ったスナップショットから復元する操作は対象外）。
+
+**これはポリシー統制であり技術統制ではない**（`codex/SKILL.md`「残余リスク」の但し書きと同じ位置づけ）。Claude subagent は親と同じファイルシステム権限で動くため sandbox による強制ができず、上記 1〜2 は規約違反そのものを防がない。**silent な巻き戻しを `git` で見える差分へ変換する**ための最小の保険である。
+
+#### 残余リスク
+
+委譲プロンプト経由の規約は、**親を介さず standalone 起動された subagent には届かない**。`home/dot_claude/agents/` の 13 本へ同じ規約を書けば呼び出し元に依らず効くが、同文 13 か所は drift 構造になり、かつ `general-purpose` / `Explore` は built-in で定義ファイルを持たないため全 worker を覆えない。よって採らず、SSOT 1 か所 + 委譲元からの参照とした（この構造は `tests/files.bats` が機械検証する）。
+
 ## Phase 1-4: tier 別 path
 
 | tier | path |
