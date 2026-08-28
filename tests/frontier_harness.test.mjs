@@ -38,6 +38,7 @@ import {
 } from "../home/dot_local/lib/frontier-harness/records.mjs";
 import {
   ensureDirectory,
+  ensureStateFile,
   ensureStateFileMode,
   writeJsonAtomic,
 } from "../home/dot_local/lib/frontier-harness/paths.mjs";
@@ -2870,4 +2871,72 @@ test("writeJsonAtomic leaves no temporary file behind when the rename fails", (c
     readdirSync(directory).filter((entry) => entry.endsWith(".tmp")),
     [],
   );
+});
+
+test("ensureDirectory names a non-directory collision instead of blaming a symlink", (context) => {
+  const directory = temporaryDirectory(context);
+  const target = path.join(directory, "state");
+  writeFileSync(target, "not a directory");
+
+  assert.throws(
+    () => ensureDirectory(target, "state directory"),
+    /exists and is not a directory/,
+  );
+});
+
+test("ensureDirectory refuses a parent that is not a directory", (context) => {
+  const directory = temporaryDirectory(context);
+  const parent = path.join(directory, "parent");
+  writeFileSync(parent, "not a directory");
+
+  assert.throws(
+    () => ensureDirectory(path.join(parent, "state"), "state directory"),
+    /parent directory .* is not a directory/,
+  );
+});
+
+test("writeJsonAtomic consumes the temporary file on success", (context) => {
+  const directory = temporaryDirectory(context);
+  const targetPath = path.join(directory, "readiness.json");
+
+  writeJsonAtomic(targetPath, { version: 1 }, "readiness cache");
+
+  assert.deepEqual(JSON.parse(readFileSync(targetPath, "utf8")), { version: 1 });
+  assert.equal(statSync(targetPath).mode & 0o777, 0o600);
+  assert.deepEqual(
+    readdirSync(directory).filter((entry) => entry.endsWith(".tmp")),
+    [],
+  );
+});
+
+test("ensureStateFile creates an owner-only file even when umask strips the owner bits", (context) => {
+  const directory = temporaryDirectory(context);
+  const target = path.join(directory, "state.db");
+
+  const previousUmask = process.umask(0o700);
+  try {
+    ensureStateFile(target, "state database");
+  } finally {
+    process.umask(previousUmask);
+  }
+
+  assert.equal(statSync(target).mode & 0o777, 0o600);
+});
+
+test("state store keeps the database owner-only under a umask that strips owner bits", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+
+  // DatabaseSync にファイルを作らせると umask 次第で owner が開けない mode になり、
+  // 以後 fd 経由では権限を直せない（実測: umask 0700 で 0066）。
+  const previousUmask = process.umask(0o700);
+  let store;
+  try {
+    store = createStateStore(statePath);
+  } finally {
+    process.umask(previousUmask);
+  }
+  store.close();
+
+  assert.equal(statSync(statePath).mode & 0o777, 0o600);
 });

@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 import { migrate, schemaVersion } from "./migrations.mjs";
-import { assertNotSymlink, ensureStateFileMode } from "./paths.mjs";
+import { assertNotSymlink, ensureStateFile } from "./paths.mjs";
 import { newId } from "./record-validation.mjs";
 import { evidenceContentHash, normalizeEvidence } from "./records.mjs";
 import { createRecordAccessors } from "./state-records.mjs";
@@ -31,13 +31,13 @@ export function createStateStore(databasePath) {
     // 開く「前」に最終パスと親ディレクトリを検査する。
     assertNotSymlink(path.dirname(databasePath), "state database directory");
     assertNotSymlink(databasePath, "state database");
+    // 権限固定も「開く前」に行う。DatabaseSync に先に作らせると、umask が owner ビットを削った
+    // 場合に owner が開けない mode のファイルができ、後から fd 経由では直せなくなる。
+    ensureStateFile(databasePath, "state database");
   }
   const database = new DatabaseSync(databasePath, {
     enableForeignKeyConstraints: true,
   });
-  if (databasePath !== ":memory:") {
-    ensureStateFileMode(databasePath, "state database");
-  }
   database.exec("PRAGMA busy_timeout = 5000");
   if (databasePath !== ":memory:") {
     database.exec("PRAGMA journal_mode = WAL");

@@ -47,6 +47,11 @@ export function assertNotSymlink(target, label) {
 // 失敗する（fail closed）。現行の呼び出しはいずれも 1 段しか作らず、親は別経路で検証済みである
 // （`<gitCommonDir>` は state-root.mjs が symlink 拒否と作業ツリー所有を検証、`<cwd>` は
 // プロセス自身）。深いパスが要るようになったら、信頼ベースを引数で受け取る形へ広げる。
+//
+// 残余リスク: この検査と後続の `mkdirSync` / `openSync` の間に親を symlink へ差し替えられる
+// 競合窓は閉じられない（`node:fs` に `mkdirat` / `openat` 相当が無く、親を fd で固定して
+// その配下だけを操作する手段が無い）。信頼ベースが通常は他ユーザーの書き込めない場所である
+// ことを前提に許容する。
 function assertTrustedParent(directory, label) {
   const parent = path.dirname(directory);
   const stats = lstatOrNull(parent);
@@ -97,14 +102,21 @@ function applyMode(descriptor, mode) {
 
 export function ensureDirectory(directory, label) {
   assertTrustedParent(directory, label);
-  // 早い段階で分かりやすく失敗させるための事前検査。実際のガードは下の O_NOFOLLOW 付き open で、
-  // そちらが競合窓を持たない本体になる。
+  // 早い段階で分かりやすく失敗させるための事前検査。最終要素に対する実際のガードは下の
+  // O_NOFOLLOW 付き open で、そちらは対象自身については競合窓を持たない（親については
+  // assertTrustedParent の残余リスクを参照）。
   assertNotSymlink(directory, label);
   try {
     // recursive にしない。recursive は検証していない祖先を辿って作れてしまう。
     mkdirSync(directory, { mode: STATE_DIRECTORY_MODE });
   } catch (error) {
     if (error?.code !== "EEXIST") throw error;
+    // 既存物がディレクトリでないことをここで名指しで弾く。下の open の O_DIRECTORY に委ねると
+    // 「symlink である」旨のメッセージになり、単なる同名ファイルの診断を誤誘導する。
+    const existing = lstatOrNull(directory);
+    if (existing && !existing.isSymbolicLink() && !existing.isDirectory()) {
+      throw new Error(`${label} exists and is not a directory`);
+    }
   }
   // mkdir と open の間に生えた symlink も素通りさせない（多層防御）。
   assertNotSymlink(directory, label);
@@ -117,6 +129,13 @@ export function ensureDirectory(directory, label) {
     // umask が owner ビットまで削ると mkdirSync は mode 000 のディレクトリを作り、以後 open も
     // できない。放置すると壊れたディレクトリが残り、次回以降も同じ理由で失敗し続ける
     // （自己回復しない）。symlink でないことを確かめてから path 経由で矯正し、open をやり直す。
+    //
+    // 残余リスク: ここだけは path 指定の chmod になる（開けないディレクトリの fd は握れず、
+    // `node:fs` に `fchmodat` 相当が無い。`lchmodSync` は macOS 限定で Linux には無い）。
+    // lstat と chmod の間に対象を symlink へ差し替えられれば、リンク先の mode を 0700 に
+    // されうる。fail closed にする案は、異常な umask で state ディレクトリが二度と使えなく
+    // なる（現行 cli.mjs:130 の chmod が担っている自己回復の退行）ため採らない。
+    // 同型のイディオムは agent-improvement/paths.mjs にもあり、是正するなら両方揃えて行う。
     assertNotSymlink(directory, label);
     chmodSync(directory, STATE_DIRECTORY_MODE);
     descriptor = openDirectoryNoFollow(directory, label);
@@ -127,13 +146,36 @@ export function ensureDirectory(directory, label) {
   return directory;
 }
 
-// state ファイルの権限を、そのファイル記述子に対して固定する。
-// 自前で fd を持たない経路（SQLite が自分で開くデータベース等）はここを通す。
+// 既存の state ファイルの権限を、そのファイル記述子に対して固定する。
 export function ensureStateFileMode(target, label) {
   applyMode(
     openNoFollow(target, 0, label, "must not be a symbolic link"),
     STATE_FILE_MODE,
   );
+  return target;
+}
+
+// state ファイルを owner-only で「先に」作る。既に在れば mode を固定するだけ。
+//
+// ファイルを自分で作るライブラリ（SQLite の DatabaseSync 等）に先を越されると、その作成 mode は
+// umask に削られる。umask が owner ビットまで削ると owner が開けないファイルができ、以後 fd を
+// 握れないため fchmod で直せなくなる（実測: umask 0700 で mode 0066 —— owner は開けないのに
+// group/other からは読み書きできる最悪の状態が残る）。ディレクトリ側と違い path 指定 chmod への
+// フォールバックを増やしたくないので、先に O_CREAT|O_EXCL|O_NOFOLLOW で作って fd 経由で固定する。
+export function ensureStateFile(target, label) {
+  let descriptor;
+  try {
+    descriptor = openSync(
+      target,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      STATE_FILE_MODE,
+    );
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    // 既存ファイル（symlink を含む）は検査付きの fd 経由に委ねる。
+    return ensureStateFileMode(target, label);
+  }
+  applyMode(descriptor, STATE_FILE_MODE);
   return target;
 }
 
