@@ -120,4 +120,5 @@ apply はツールを入れるだけです。権限付与も端末のペアリ�
 | アカウントごとの環境変数テーブル、ランチャーコマンドマトリクス | [account-isolation.ja.md](account-isolation.ja.md) |
 | Claude Code ハーネス：フック、ECC、CLV2、ステータスライン | [claude-code.ja.md](claude-code.ja.md) |
 | Codex CLI ハーネス：プロファイル設定、フック、アカウント設定 | [codex.ja.md](codex.ja.md) |
+| マルチフロンティア router、evidence、onboarding、rollout | [frontier-harness.ja.md](frontier-harness.ja.md) |
 | スキルタクソノミー、キュレーテッドインベントリ、外部フェッチ、プロベナンス強制 | [skills-provenance.ja.md](skills-provenance.ja.md) |

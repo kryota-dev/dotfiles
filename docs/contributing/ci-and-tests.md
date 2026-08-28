@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-CI is a mirror of the local `make` commands. There is no separate CI lint logic — `make lint` and `make test-bats` are the contract, and CI just calls them.
+CI is a mirror of the local `make` commands. There is no separate CI lint logic — `make lint`, `make lint-node`, `make test-node`, and `make test-bats` are the contract, and CI just calls them. Together they cover everything `make test` runs locally.
 
 ---
 
@@ -14,13 +14,13 @@ The `ci.yml` workflow runs three jobs:
 
 | Job | Command | Runner |
 |---|---|---|
-| `lint` | `make lint` | `ubuntu-latest` |
-| `test` | `make test-bats` | `ubuntu-latest` (needs: lint) |
+| `lint` | `make lint`, then `make lint-node` | `ubuntu-latest` |
+| `test` | `make test-node`, then `make test-bats` | `ubuntu-latest` (needs: lint) |
 | `sync-ghq-completion` | `make sync-ghq-completion` (+ auto-commit if the vendored `_ghq` changed) | `ubuntu-latest`, same-repo PRs only |
 
-Before running `make lint`, the lint job installs shfmt (`v3.13.1`) from the GitHub release and `zsh` via `apt-get`. The test job installs `bats`, `shellcheck`, and `zsh` via `apt-get`. No other CI-specific logic exists; the `Makefile` is the single source of truth.
+Before running `make lint`, the lint job installs shfmt (`v3.13.1`) from the GitHub release and `zsh` via `apt-get`. The test job installs `bats`, `shellcheck`, and `zsh` via `apt-get`. Both jobs then set up Node.js for the `*-node` targets: a `run` step reads the pinned version out of `home/dot_config/mise/config.toml` and feeds it to `actions/setup-node`, so the mise pin stays the only place the version is declared. No other CI-specific logic exists; the `Makefile` is the single source of truth.
 
-Contributors should run `make lint` and `make test-bats` locally before pushing — CI will run the exact same commands.
+Contributors should run `make test` locally before pushing — it chains the same four targets CI runs.
 
 ### Triggers
 

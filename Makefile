@@ -1,4 +1,4 @@
-.PHONY: all help lint fmt test test-bats lint-deno test-deno benchmark sync-ghq-completion
+.PHONY: all help lint fmt test test-bats lint-node test-node lint-deno test-deno benchmark sync-ghq-completion
 
 # Default target — show help (avoid accidental mutation of $HOME via apply)
 all: help
@@ -43,11 +43,21 @@ fmt:
 # ========================================
 
 ## Run all checks (lint + Bats tests)
-test: lint test-bats
+test: lint lint-node test-node test-bats
 
 ## Run Bats tests
 test-bats:
 	@bats tests/*.bats
+
+## Syntax-check Node.js harness modules and tests
+lint-node:
+	@for f in home/dot_local/lib/frontier-harness/*.mjs tests/frontier_harness.test.mjs; do \
+		node --check "$$f" || exit 1; \
+	done
+
+## Run Node.js harness tests without invoking live provider credentials
+test-node:
+	@node --test tests/frontier_harness.test.mjs
 
 ## Type-check, lint, and format-check the ntfy dashboard's Deno code (kryota-dev/dotfiles#371)
 lint-deno:

@@ -38,6 +38,7 @@
 | [アカウント分離: ランチャーコマンド・env](agents/account-isolation.ja.md) | アカウント別 env 変数表、完全なランチャーコマンドマトリクス、`claude`/`codex` ラッパースクリプト |
 | [Claude Code ハーネス設定](agents/claude-code.ja.md) | `settings.json`、ECC フックフォーク、CLV2 オブザーバーの配線、3 行ステータスライン、日本語レビューサブエージェント |
 | [Codex CLI ハーネス設定](agents/codex.ja.md) | デュアル `CODEX_HOME` アカウント、`hooks.json`、`shared.config.toml` SSOT、gateguard |
+| [Frontier Harness](agents/frontier-harness.ja.md) | capability ベース routing、Evidence Bus、Antigravity 境界、shadow rollout |
 | [スキルライブラリと出自分類](agents/skills-provenance.ja.md) | 5 分類（curated/external/system/evolved/unmanaged）とスキル追加手順 |
 
 ### コントリビュート

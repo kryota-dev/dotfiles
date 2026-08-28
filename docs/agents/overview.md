@@ -120,4 +120,5 @@ Details of every env var and launcher command are in [account-isolation.md](acco
 | Per-account env var table, launcher command matrix | [account-isolation.md](account-isolation.md) |
 | Claude Code harness: hooks, ECC, CLV2, statusline | [claude-code.md](claude-code.md) |
 | Codex CLI harness: profile config, hooks, account setup | [codex.md](codex.md) |
+| Multi-frontier router, evidence, onboarding, and rollout | [frontier-harness.md](frontier-harness.md) |
 | Skill taxonomy, curated inventory, external fetching, provenance enforcement | [skills-provenance.md](skills-provenance.md) |
