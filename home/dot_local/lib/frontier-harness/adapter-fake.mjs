@@ -1,4 +1,8 @@
-import { requireInvocationRequest, sealInvocation } from "./adapter-contract.mjs";
+import {
+  requireInvocationRequest,
+  requireSafeArgumentValue,
+  sealInvocation,
+} from "./adapter-contract.mjs";
 
 // 実 credential・実クォータを使わない adapter と runner。
 //
@@ -86,7 +90,12 @@ export function createFakeAdapter({
       if (!request?.resumeKey) {
         throw new TypeError(`${provider} resume requires a resumeKey`);
       }
-      return seal({ request, phase: "resume", resumeKey: request.resumeKey });
+      // 実 adapter と同じ検証水準にしておく（fake だけ緩いと契約テストが素通りする）。
+      return seal({
+        request,
+        phase: "resume",
+        resumeKey: requireSafeArgumentValue(request.resumeKey, `${provider} resumeKey`),
+      });
     },
     readEffectiveSandbox,
     interpret,

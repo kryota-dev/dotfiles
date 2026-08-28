@@ -1,6 +1,7 @@
 import {
   parseJsonLines,
   requireInvocationRequest,
+  requireSafeArgumentValue,
   sealInvocation,
 } from "./adapter-contract.mjs";
 
@@ -85,7 +86,16 @@ function resume(request) {
   if (!request?.resumeKey) {
     throw new TypeError(`${PROVIDER} resume requires a resumeKey`);
   }
-  return seal({ request, phase: "resume", conversationId: request.resumeKey });
+  return seal({
+    request,
+    phase: "resume",
+    // provider の stdout から読み取った conversation id がそのまま argv へ戻るため、
+    // 形を縛って `-` 始まりや argv を壊す値を通さない。
+    conversationId: requireSafeArgumentValue(
+      request.resumeKey,
+      `${PROVIDER} resumeKey`,
+    ),
+  });
 }
 
 // #526 §3.1: envelope は conversation_id / status / response / error / usage を持つ。

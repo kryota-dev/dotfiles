@@ -1,6 +1,7 @@
 import {
   parseJsonLines,
   requireInvocationRequest,
+  requireSafeArgumentValue,
   sealInvocation,
 } from "./adapter-contract.mjs";
 
@@ -15,6 +16,17 @@ const PROVIDER = "codex";
 // `codex exec resume` が受け付けないフラグ。再開形にこれらが混ざった invocation は、
 // 起動しないか、サンドボックスが設定既定へ戻る。どちらも「要求どおり」ではない。
 const FLAGS_REJECTED_ON_RESUME = Object.freeze(["-s", "--sandbox", "-C", "--cd"]);
+
+// この adapter が出してよいフラグの全集合。**denylist ではなく allowlist にする**理由:
+// 危険フラグを列挙する方式は Codex に新しいフラグが増えるたび追随が要り、追随漏れが
+// そのまま素通りになる。位置引数（session id / prompt）は入力検証で `-` 始まりを弾いてあるので、
+// argv 中で `-` から始まる要素は adapter 自身が置いたものだけになり、集合で縛れる。
+const ALLOWED_FLAGS = new Set(["--json", "-c", "--sandbox", "-m"]);
+
+function hasOnlyAllowedFlags(argv) {
+  // `-c` の値（`key=value`）と `-m` の値（model トークン）は `-` で始まらないため対象外。
+  return argv.every((value) => !value.startsWith("-") || ALLOWED_FLAGS.has(value));
+}
 
 // 中立語彙（sandbox.mjs）と Codex の語彙はたまたま同じ綴りだが、対応は明示的に持つ。
 // 綴りが一致しているだけの素通りを、将来どちらかが変わったときに起こさないため。
@@ -65,7 +77,11 @@ function wrapMode(mode) {
 
 function readEffectiveSandbox(invocation) {
   const { argv } = invocation;
-  // 承認とサンドボックスを丸ごと外すフラグ。混ざっていたら、いかなる policy とも一致させない。
+  // 想定外のフラグが 1 つでも混ざっていたら、いかなる policy とも一致させない。
+  // これが「session id や prompt に紛れたフラグ注入」に対する構造的なバックストップになる。
+  if (!hasOnlyAllowedFlags(argv)) return null;
+  // 承認とサンドボックスを丸ごと外すフラグ。allowlist にも含まれないが、
+  // 何を防いでいるかを読み取れるよう明示的にも弾く。
   if (argv.includes("--dangerously-bypass-approvals-and-sandbox")) return null;
 
   const isResume = argv[0] === "exec" && argv[1] === "resume";
@@ -79,15 +95,17 @@ function readEffectiveSandbox(invocation) {
   return wrapMode(fromCodexMode(argv[index + 1]));
 }
 
-// Codex だけ prompt が位置引数なので、`-` で始まる値はフラグとして解釈されうる。
-// 静かに誤解釈させるくらいなら組み立てを拒否する。
-function requirePositionalPrompt(prompt) {
-  if (prompt.startsWith("-")) {
+// Codex は prompt と session id を**位置引数**で受け取る。`-` で始まる値はフラグとして
+// 解釈されうるので、静かに誤解釈させるくらいなら組み立てを拒否する。
+// session id 側にこのガードが無いと、`resume("--full-auto")` のような値がそのまま
+// argv のフラグ位置に載る（実測で再現。sandbox の読み戻しは値の妥当性までは見ない）。
+function requirePositionalArgument(value, label) {
+  if (value.startsWith("-")) {
     throw new TypeError(
-      `${PROVIDER} cannot pass a prompt that begins with "-" as a positional argument`,
+      `${PROVIDER} cannot pass ${label} beginning with "-" as a positional argument`,
     );
   }
-  return prompt;
+  return value;
 }
 
 function launch(request) {
@@ -105,7 +123,7 @@ function launch(request) {
     model,
     "-c",
     `model_reasoning_effort=${effort}`,
-    requirePositionalPrompt(prompt),
+    requirePositionalArgument(prompt, "a prompt"),
   ];
   return sealInvocation({
     provider: PROVIDER,
@@ -121,24 +139,30 @@ function resume(request) {
   if (!request?.resumeKey) {
     throw new TypeError(`${PROVIDER} resume requires a resumeKey`);
   }
-  // model は検証はするが再開形では pin し直さない。再開したスレッドは起動時の model を
-  // 保持しており、`codex exec resume` に対する `-c model=` の形は #526 でも実測されていない。
-  // 「弱まりうる」ものだけを再指定する（サンドボックスと、ターンごとの推論 effort）。
-  const { prompt, effort, sandbox } = requireInvocationRequest(
+  const { prompt, model, effort, sandbox } = requireInvocationRequest(
     request,
     `${PROVIDER} resume request`,
   );
   const argv = [
     "exec",
     "resume",
-    request.resumeKey,
+    // session id は位置引数なので、フラグに化ける値と argv を壊す値の両方を弾く。
+    requirePositionalArgument(
+      requireSafeArgumentValue(request.resumeKey, `${PROVIDER} resumeKey`),
+      "a resume key",
+    ),
     "--json",
     // resume では `-s` が使えないため config override で維持する（#526 §2.3 実測）。
     "-c",
     `sandbox_mode="${toCodexMode(sandbox.mode)}"`,
+    // model も再開形で pin する。`codex exec resume --help`（codex-cli 0.150.1）が
+    // `-m, --model <MODEL>` を受け付けることを実測で確認した。pin しないと、
+    // adapter run に記録した capability の model と実際に走る model が食い違いうる。
+    "-m",
+    model,
     "-c",
     `model_reasoning_effort=${effort}`,
-    requirePositionalPrompt(prompt),
+    requirePositionalArgument(prompt, "a prompt"),
   ];
   return sealInvocation({
     provider: PROVIDER,

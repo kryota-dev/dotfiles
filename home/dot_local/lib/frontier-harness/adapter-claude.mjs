@@ -1,6 +1,7 @@
 import {
   parseJsonLines,
   requireInvocationRequest,
+  requireSafeArgumentValue,
   sealInvocation,
 } from "./adapter-contract.mjs";
 
@@ -94,8 +95,18 @@ function buildArgv({ prompt, model, effort, sandbox, session, permissionPromptTo
   if (session) argv.push(session.flag, session.value);
   // 承認チャネルの受け口そのものは #533 が作る。ここでは呼び出し側が渡したときだけ配線し、
   // 配線の要否を adapter が判断しない（判断は #534 の capability registry 軸の範囲）。
+  //
+  // **未実測の組合せ（#534 への申し送り）**: `read-only` は下で `--permission-mode dontAsk` を
+  // 出すが、#526 §1.2.5［原文］の dontAsk 行は節見出しのとおり「prompt tool を**配線しない**
+  // 場合」の挙動であり、§1.2.1 の 2×2 実測にも dontAsk は含まれない。つまり
+  // 「dontAsk ＋ prompt tool 配線」で AskUserQuestion が通るかは**どちらの一次ソースでも
+  // 確定していない**。ここで拒否も許可も決め打たず、組合せの可否は #533 の受け口の形と
+  // #534 の registry 軸で決める（本 issue のスコープ外）。
   if (permissionPromptTool) {
-    argv.push("--permission-prompt-tool", permissionPromptTool);
+    argv.push(
+      "--permission-prompt-tool",
+      requireSafeArgumentValue(permissionPromptTool, `${PROVIDER} permissionPromptTool`),
+    );
   }
   if (sandbox.mode === "read-only") {
     argv.push("--permission-mode", READ_ONLY_PERMISSION_MODE);
@@ -133,7 +144,12 @@ function launch(request) {
   return seal({
     request,
     phase: "launch",
-    session: sessionId ? { flag: "--session-id", value: sessionId } : null,
+    session: sessionId
+      ? {
+          flag: "--session-id",
+          value: requireSafeArgumentValue(sessionId, `${PROVIDER} sessionId`),
+        }
+      : null,
   });
 }
 
@@ -144,7 +160,12 @@ function resume(request) {
   return seal({
     request,
     phase: "resume",
-    session: { flag: "--resume", value: request.resumeKey },
+    session: {
+      flag: "--resume",
+      // フラグの値として渡るが、値を新しいフラグと再解釈する引数パーサもありうる。
+      // model / effort と同じ水準で形を縛り、`-` 始まりを通さない。
+      value: requireSafeArgumentValue(request.resumeKey, `${PROVIDER} resumeKey`),
+    },
   });
 }
 

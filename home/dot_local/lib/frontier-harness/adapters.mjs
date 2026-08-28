@@ -59,6 +59,7 @@ function refuse(reason) {
 // 実行してよいかを検査する。拒否は例外ではなく理由付きの判定として返す:
 // 「利用不可だったので実行しなかった」は記録すべき事実であって、異常終了ではない。
 export function checkCapabilityExecutable({
+  accountScope,
   adapter,
   availability,
   capability,
@@ -91,6 +92,16 @@ export function checkCapabilityExecutable({
   if (Array.isArray(entry.models) && !entry.models.includes(capability.model)) {
     return refuse(`${command} model discovery did not report ${capability.model}`);
   }
+  // account scope も router の可用性規則の一部である（router.mjs の isAvailable 末尾）。
+  // model だけ再検査して scope を落とすと、多層防御が軸ごとに非対称になる。
+  // 出荷 config の frontend.primary は実際に accountScope を持ち、docs は r06 セッションから
+  // personal credential への fallback を禁じているので、ここは落としてはいけない軸である。
+  // scope を解決できない呼び出し（accountScope 未指定）は、scope 付き capability を拒否する。
+  if (capability.accountScope && capability.accountScope !== accountScope) {
+    return refuse(
+      `account scope ${accountScope ?? "unknown"} does not have a ${capability.accountScope} mapping for ${command}`,
+    );
+  }
 
   try {
     requireCapabilityTokens(capability, `capability ${capability.provider}`);
@@ -119,6 +130,7 @@ export function checkCapabilityExecutable({
 // import すらしない（テストがソースを走査して固定している）。実起動は呼び出し側が注入し、
 // その配線は rollout 昇格（#502）の範囲。それまでは shadow guard が executor を呼ばない。
 export function createAdapterExecutor({
+  accountScope,
   registry = createAdapterRegistry(),
   availability,
   capability,
@@ -134,6 +146,13 @@ export function createAdapterExecutor({
   }
   requireObject(capability, "capability");
   requireObject(request, "adapter execution request");
+  // availability は関数でも渡せる。値で渡すと executor 生成時のスナップショットに固定され、
+  // 生成から実行までの間に readiness が失効しても「実行直前に再検査した」ことにならない。
+  if (typeof availability !== "function") {
+    requireObject(availability, "availability");
+  }
+  const readAvailability = () =>
+    typeof availability === "function" ? availability() : availability;
   const sandbox = normalizeSandboxPolicy(request.sandbox, "execution sandbox");
   const adapter = registry.get(capability.provider);
 
@@ -146,8 +165,9 @@ export function createAdapterExecutor({
 
   return () => {
     const verdict = checkCapabilityExecutable({
+      accountScope,
       adapter,
-      availability,
+      availability: readAvailability(),
       capability,
       executablePath: request.executable,
       sandbox,
@@ -168,9 +188,13 @@ export function createAdapterExecutor({
       model: capability.model,
       effort: capability.effort,
     };
-    const invocation = request.resumeKey
-      ? adapter.resume(invocationRequest)
-      : adapter.launch(invocationRequest);
+    // truthiness で分岐すると、空文字の resume key が黙って新規 launch に化ける
+    // （＝別セッションの二重起動）。null / undefined だけを「再開しない」とみなし、
+    // それ以外は adapter.resume へ渡して adapter 側の検証で loud に落とす。
+    const invocation =
+      request.resumeKey === undefined || request.resumeKey === null
+        ? adapter.launch(invocationRequest)
+        : adapter.resume(invocationRequest);
 
     const startedAt = clock();
     const result = normalizeAdapterResult(

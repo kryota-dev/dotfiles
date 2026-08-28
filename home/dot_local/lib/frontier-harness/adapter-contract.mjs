@@ -94,6 +94,31 @@ export function requireCapabilityTokens({ model, effort }, label) {
   return { model, effort };
 }
 
+// argv へ載る「provider が発行した識別子」や外部から渡る名前の検証。
+//
+// model / effort は requireToken（`/^[a-z][a-z0-9._-]*$/`）で縛れるが、resume 識別子
+// （UUID や thread 名）と MCP ツール名（`mcp__fh__approve` のようにアンダースコアを含む）は
+// それより広い文字種を取る。一方で **argv に載る以上、フラグとして再解釈されうる値**
+// （先頭の `-`）と、`-c key=value` の構造を壊す値（引用符・等号・空白・制御文字）は
+// 許してはならない。位置引数として渡る Codex の session id では、これが直接
+// フラグ注入になる（`resume("--full-auto")` が argv の session id 位置に載る）。
+export const SAFE_ARGUMENT_PATTERN = /^[A-Za-z0-9][\w.-]*$/;
+// UUID は 36 文字。thread 名やツール名も短い。長大な値は argv 経由の詰め込みを疑う。
+export const SAFE_ARGUMENT_MAX_LENGTH = 128;
+
+export function requireSafeArgumentValue(value, label) {
+  requireNonEmptyString(value, label);
+  if (value.length > SAFE_ARGUMENT_MAX_LENGTH) {
+    throw new TypeError(
+      `${label} must be at most ${SAFE_ARGUMENT_MAX_LENGTH} characters`,
+    );
+  }
+  if (!SAFE_ARGUMENT_PATTERN.test(value)) {
+    throw new TypeError(`${label} must match ${SAFE_ARGUMENT_PATTERN}`);
+  }
+  return value;
+}
+
 // 起動形・再開形のどちらの入口でも共通に要る値。adapter 固有の追加値（session id や
 // permission prompt tool）は各 adapter が自分で検証する。
 export function requireInvocationRequest(input, label) {
@@ -182,6 +207,17 @@ export function parseJsonLines(text) {
   return { events, malformed };
 }
 
+// failure_reason は provider 由来の生メッセージを運ぶ。denials からツール入力を落としたのと
+// 同じ配慮を長さにも効かせる（保持期間のある state へ、際限なく provider の出力を流し込まない）。
+// 長い理由で結果ごと失うより切り詰めるほうが有用なので、throw ではなく truncate する。
+export const FAILURE_REASON_MAX_LENGTH = 512;
+
+function boundedFailureReason(value, label) {
+  const reason = optionalNonEmptyString(value, label);
+  if (reason === null || reason.length <= FAILURE_REASON_MAX_LENGTH) return reason;
+  return `${reason.slice(0, FAILURE_REASON_MAX_LENGTH - 1)}\u2026`;
+}
+
 // adapter が返す結果の正規化。adapter ごとに形が揺れると、下流の写像がすべて壊れる。
 export function normalizeAdapterResult(input, label) {
   requireObject(input, `${label} result`);
@@ -190,7 +226,7 @@ export function normalizeAdapterResult(input, label) {
     // provider 非依存の「再開キー」1 本にする（#526 §7.3-1）。
     // session_id / thread id / conversation_id の別は adapter の内側に閉じる。
     resumeKey: optionalNonEmptyString(input.resumeKey, `${label} result resumeKey`),
-    failureReason: optionalNonEmptyString(
+    failureReason: boundedFailureReason(
       input.failureReason,
       `${label} result failureReason`,
     ),
