@@ -52,6 +52,21 @@ _claude_fable() {
 alias cldf='_claude_fable "$HOME/.claude"'
 alias cldf-r06='_claude_fable "$HOME/.claude-r06"'
 
+# improvement-* helpers (#501, sub-issue of #473): the conversational/shell face of the
+# ECC continuous-improvement candidate queue. The CLI itself is
+# ~/.local/bin/agent-improvement (a mise-pinned node launcher over
+# ~/.local/lib/agent-improvement/cli.mjs) and the queue lives at
+# ${XDG_STATE_HOME:-~/.local/state}/agent-improvement/queue.json, owner-only.
+#
+# Functions (not aliases) so flags like --history / --json pass through — the same reason the
+# retired ecc-status / ecc-sessions / ecc-work-items readers were functions (#193, removed in
+# #496). status and next are strictly read-only: they never re-run the weekly evaluator and
+# never create the state dir. improvement-resolve is the ONLY writer here, and it takes the
+# fixed three-way answer (--decision=adopt|defer|reject).
+improvement-status() { agent-improvement status "$@"; }
+improvement-next() { agent-improvement next "$@"; }
+improvement-resolve() { agent-improvement resolve "$@"; }
+
 alias ccdcmds='ccdcommands'
 
 function ccdpaths() {

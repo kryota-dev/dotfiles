@@ -79,7 +79,7 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->49<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->50<!-- /FACT --> スキル）
 
 `home/dot_agents/skills/` のキュレーテッドスキルをテーマ別にグループ化しています。
 
@@ -101,11 +101,11 @@
 
 `planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 
-### セッションとコンテキスト管理（5 スキル）
+### セッションとコンテキスト管理（6 スキル）
 
-会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。
+会話状態の管理、トランスクリプトのコンパクト化、セッション後のキャプチャ。`session-summary` は軽量デフォルトモードと、廃止された `save-session` から取り込んだ `--archive` 深掘りモード（JSONL アーカイブ + サブエージェントサマリー）の両方を持ちます。`knowledge-distill` は ECC 学習ループを週次で診断し、蓄積した学びを昇華先へ routing します（提案のみ）。`improvement-status` は[改善候補キュー](claude-code.ja.md#改善候補キュー)の読み取り専用ビューで、状態を表示するだけで evaluator を再実行しません。
 
-`session-summary`、`prune-session-transcript`、`compact-docs`、`retrospective-codify`、`knowledge-distill`
+`session-summary`、`prune-session-transcript`、`compact-docs`、`retrospective-codify`、`knowledge-distill`、`improvement-status`
 
 ### ワークツリーと dotfiles ツール（4 スキル）
 
