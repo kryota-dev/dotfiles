@@ -18,6 +18,20 @@ import test from "node:test";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import { findCommand, runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { createDoctorReport } from "../home/dot_local/lib/frontier-harness/doctor.mjs";
+import { SCHEMA_VERSION } from "../home/dot_local/lib/frontier-harness/migrations.mjs";
+import {
+  evidenceContentHash,
+  normalizeAdapterRun,
+  normalizeApproval,
+  normalizeReviewFinding,
+  normalizeTelemetryEvent,
+  normalizeVerificationResult,
+} from "../home/dot_local/lib/frontier-harness/records.mjs";
+import {
+  DEFAULT_AGGREGATE_TELEMETRY_RETENTION_DAYS,
+  DEFAULT_RAW_ARTIFACT_RETENTION_DAYS,
+  retentionCutoffs,
+} from "../home/dot_local/lib/frontier-harness/retention.mjs";
 import {
   loadVerifiedModels,
   probeAntigravity,
@@ -92,6 +106,16 @@ const scopeAgnosticConfig = normalizeConfig({
     },
   },
 });
+
+// retention は raw / 集約の 2 クラスを取るようになった。片方だけを対象にしたい
+// テストでは、もう一方に「誰も期限切れにならない」値を渡す。
+const NEVER_EXPIRES_CUTOFF = "1970-01-01T00:00:00.000Z";
+const NO_EXPIRED_RAW_RECORDS = {
+  evidence: 0,
+  adapterRuns: 0,
+  verificationResults: 0,
+  reviewFindings: 0,
+};
 
 const COMMAND_PATHS = {
   antigravity: "/opt/homebrew/bin/agy",
@@ -352,7 +376,7 @@ test("state store stamps a schema version and refuses a newer one", (context) =>
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const store = createStateStore(statePath);
-  assert.equal(store.schemaVersion(), 1);
+  assert.equal(store.schemaVersion(), SCHEMA_VERSION);
   store.close();
 
   const raw = new DatabaseSync(statePath);
@@ -386,9 +410,14 @@ test("state store prunes only evidence older than the raw retention cutoff", () 
     createdAt: "2026-08-27T00:00:00.000Z",
   });
 
-  assert.equal(store.countEvidenceBefore("2026-08-01T00:00:00.000Z"), 1);
-  assert.deepEqual(store.pruneEvidenceBefore("2026-08-01T00:00:00.000Z"), {
-    prunedEvidence: 1,
+  const cutoffs = {
+    rawCutoff: "2026-08-01T00:00:00.000Z",
+    telemetryCutoff: NEVER_EXPIRES_CUTOFF,
+  };
+  assert.equal(store.countExpired(cutoffs).raw.evidence, 1);
+  assert.deepEqual(store.pruneExpired(cutoffs), {
+    raw: { ...NO_EXPIRED_RAW_RECORDS, evidence: 1 },
+    telemetry: 0,
     skippedArtifacts: [],
   });
   assert.equal(store.listEvidence().length, 1);
@@ -412,8 +441,12 @@ test("state store prunes expired artifact files only inside the artifact root", 
   store.close();
 
   const reopened = createStateStore(path.join(directory, "state.db"));
-  const pruned = reopened.pruneEvidenceBefore("2026-08-01T00:00:00.000Z", artifactRoot);
-  assert.equal(pruned.prunedEvidence, 1);
+  const pruned = reopened.pruneExpired({
+    rawCutoff: "2026-08-01T00:00:00.000Z",
+    telemetryCutoff: NEVER_EXPIRES_CUTOFF,
+    artifactRoot,
+  });
+  assert.equal(pruned.raw.evidence, 1);
   assert.deepEqual(pruned.skippedArtifacts, []);
   assert.equal(existsSync(artifactPath), false);
   reopened.close();
@@ -436,14 +469,18 @@ test("artifact pruning refuses to traverse a symlink out of the evidence root", 
     createdAt: "2026-01-01T00:00:00.000Z",
     artifactPath: "link/keep.txt",
   });
-  const pruned = store.pruneEvidenceBefore("2026-08-01T00:00:00.000Z", artifactRoot);
+  const pruned = store.pruneExpired({
+    rawCutoff: "2026-08-01T00:00:00.000Z",
+    telemetryCutoff: NEVER_EXPIRES_CUTOFF,
+    artifactRoot,
+  });
   store.close();
 
   assert.equal(existsSync(protectedFile), true);
   assert.equal(pruned.skippedArtifacts.length, 1);
   assert.match(pruned.skippedArtifacts[0].reason, /symbolic link/);
   // 1 件の不正 path で retention 全体を止めない。
-  assert.equal(pruned.prunedEvidence, 1);
+  assert.equal(pruned.raw.evidence, 1);
 });
 
 test("doctor reports Antigravity as unavailable instead of crossing into r06", () => {
@@ -1443,4 +1480,769 @@ test("a run under another account scope does not reuse verified readiness", (con
     0,
   );
   assert.equal(JSON.parse(output.pop()).decision.capability, "executor.default");
+});
+
+// ---------------------------------------------------------------------------
+// schema v2: migration（kryota-dev/dotfiles#492）
+// ---------------------------------------------------------------------------
+
+// PR #478 時点（schema v1）の DB を、当時の DDL literal で作る。
+// 現行コードの DDL を流用すると「移行前の姿」が実装へ追随してしまい、
+// migration を検証したことにならない。
+const LEGACY_V1_DDL = `
+  CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    goal TEXT NOT NULL,
+    task_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE route_decisions (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    kind TEXT NOT NULL,
+    capability TEXT,
+    provider TEXT,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE evidence (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    producer TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    command TEXT,
+    exit_code INTEGER,
+    artifact_path TEXT,
+    claims_supported TEXT NOT NULL
+  ) STRICT;
+`;
+
+const LEGACY_EVIDENCE_CONTENT = {
+  kind: "test_pass",
+  producer: "codex:gpt-5.6-terra",
+  command: "make test",
+  exitCode: 0,
+  artifactPath: null,
+  claimsSupported: ["the suite passed"],
+};
+
+// v1 の DB を作り、3 テーブルそれぞれに 1 行ずつ入れる。
+function seedLegacyV1Database(statePath) {
+  const raw = new DatabaseSync(statePath);
+  raw.exec(LEGACY_V1_DDL);
+  raw
+    .prepare("INSERT INTO tasks VALUES (?, ?, ?, ?)")
+    .run("task_legacy", "legacy goal", '{"goal":"legacy goal"}', "2026-01-01T00:00:00.000Z");
+  raw
+    .prepare("INSERT INTO route_decisions VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(
+      "route_legacy",
+      "task_legacy",
+      "single-worker",
+      "executor.default",
+      "codex",
+      "default executor is available",
+      "2026-01-01T00:00:00.000Z",
+    );
+  raw
+    .prepare("INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(
+      "ev_legacy",
+      LEGACY_EVIDENCE_CONTENT.kind,
+      LEGACY_EVIDENCE_CONTENT.producer,
+      "2026-01-01T00:00:00.000Z",
+      LEGACY_EVIDENCE_CONTENT.command,
+      LEGACY_EVIDENCE_CONTENT.exitCode,
+      LEGACY_EVIDENCE_CONTENT.artifactPath,
+      JSON.stringify(LEGACY_EVIDENCE_CONTENT.claimsSupported),
+    );
+  raw.exec("PRAGMA user_version = 1");
+  raw.close();
+}
+
+function columnNames(database, table) {
+  return database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .map((column) => column.name);
+}
+
+function tableExists(database, table) {
+  return (
+    Number(
+      database
+        .prepare(
+          "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?",
+        )
+        .get(table).n,
+    ) === 1
+  );
+}
+
+test("a v1 state database migrates to v2 without losing any recorded row", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  seedLegacyV1Database(statePath);
+
+  const store = createStateStore(statePath);
+  assert.equal(store.schemaVersion(), SCHEMA_VERSION);
+
+  // 既存 evidence は値を変えずに残り、新しい列だけが足されている。
+  const evidence = store.listEvidence();
+  assert.equal(evidence.length, 1);
+  assert.deepEqual(
+    {
+      id: evidence[0].id,
+      kind: evidence[0].kind,
+      producer: evidence[0].producer,
+      createdAt: evidence[0].createdAt,
+      command: evidence[0].command,
+      exitCode: evidence[0].exitCode,
+      artifactPath: evidence[0].artifactPath,
+      claimsSupported: evidence[0].claimsSupported,
+    },
+    {
+      id: "ev_legacy",
+      kind: LEGACY_EVIDENCE_CONTENT.kind,
+      producer: LEGACY_EVIDENCE_CONTENT.producer,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      command: LEGACY_EVIDENCE_CONTENT.command,
+      exitCode: LEGACY_EVIDENCE_CONTENT.exitCode,
+      artifactPath: LEGACY_EVIDENCE_CONTENT.artifactPath,
+      claimsSupported: LEGACY_EVIDENCE_CONTENT.claimsSupported,
+    },
+  );
+  // backfill された hash は、新規行と同じ規則で導出されている。
+  assert.equal(
+    evidence[0].contentHash,
+    evidenceContentHash(LEGACY_EVIDENCE_CONTENT),
+  );
+  // 値を捏造せず、参照は NULL のまま。
+  assert.equal(evidence[0].taskId, null);
+  assert.equal(evidence[0].routeId, null);
+
+  const routes = store.listRoutes();
+  assert.equal(routes.length, 1);
+  assert.equal(routes[0].id, "route_legacy");
+  assert.equal(routes[0].reason, "default executor is available");
+  assert.equal(routes[0].model, null);
+  assert.equal(routes[0].effort, null);
+  assert.equal(routes[0].reviewerCapability, null);
+
+  // 新しいテーブルは作られ、空である。
+  assert.deepEqual(store.listAdapterRuns(), []);
+  assert.deepEqual(store.listVerificationResults(), []);
+  assert.deepEqual(store.listReviewFindings(), []);
+  assert.deepEqual(store.listApprovals(), []);
+  assert.deepEqual(store.listTelemetryEvents(), []);
+  store.close();
+
+  const raw = new DatabaseSync(statePath);
+  // node:sqlite の行は null プロトタイプで返るため、素のオブジェクトへ写してから比べる。
+  assert.deepEqual(
+    raw.prepare("SELECT * FROM tasks").all().map((row) => ({ ...row })),
+    [
+      {
+        id: "task_legacy",
+        goal: "legacy goal",
+        task_json: '{"goal":"legacy goal"}',
+        created_at: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+  );
+  raw.close();
+});
+
+test("a failed migration step leaves the v1 database exactly as it was", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  seedLegacyV1Database(statePath);
+
+  // v2 の後半の ALTER と衝突する列を先に作る。route_decisions への 3 列は成功し、
+  // evidence への content_hash 追加で失敗するため、「途中まで進んだ migration が
+  // 巻き戻るか」を検証できる。
+  const seeded = new DatabaseSync(statePath);
+  seeded.exec("ALTER TABLE evidence ADD COLUMN content_hash TEXT");
+  seeded.exec("PRAGMA user_version = 1");
+  seeded.close();
+
+  assert.throws(() => createStateStore(statePath), /duplicate column name/);
+
+  const raw = new DatabaseSync(statePath);
+  assert.equal(Number(raw.prepare("PRAGMA user_version").get().user_version), 1);
+  // 先に成功していた route_decisions への列追加も巻き戻っている。
+  const routeColumns = columnNames(raw, "route_decisions");
+  for (const column of ["model", "effort", "reviewer_capability"]) {
+    assert.ok(
+      !routeColumns.includes(column),
+      `${column} must not survive a rolled back migration`,
+    );
+  }
+  assert.equal(tableExists(raw, "adapter_runs"), false);
+  assert.equal(tableExists(raw, "telemetry_events"), false);
+  // 既存データは失われていない。
+  assert.equal(Number(raw.prepare("SELECT COUNT(*) AS n FROM evidence").get().n), 1);
+  assert.equal(Number(raw.prepare("SELECT COUNT(*) AS n FROM tasks").get().n), 1);
+  raw.close();
+});
+
+test("re-opening a migrated database does not re-run migration steps", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  seedLegacyV1Database(statePath);
+
+  const first = createStateStore(statePath);
+  first.close();
+  // 冪等でなければ ALTER TABLE が duplicate column で落ちる。
+  const second = createStateStore(statePath);
+  assert.equal(second.schemaVersion(), SCHEMA_VERSION);
+  assert.equal(second.listEvidence().length, 1);
+  second.close();
+});
+
+// ---------------------------------------------------------------------------
+// route decision の完全な永続化
+// ---------------------------------------------------------------------------
+
+test("state store records the model and effort a route selected", () => {
+  const store = createStateStore(":memory:");
+  const task = store.createTask({ goal: "record a route" });
+  store.recordRoute(task.id, {
+    kind: "writer-plus-reviewer",
+    capability: "executor.default",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "xhigh",
+    reviewerCapability: "semantic.judge",
+    reason: "no deterministic oracle requires independent review",
+  });
+
+  const [route] = store.listRoutes();
+  assert.equal(route.model, "gpt-5.6-terra");
+  assert.equal(route.effort, "xhigh");
+  assert.equal(route.reviewerCapability, "semantic.judge");
+  store.close();
+});
+
+test("an escalation route stores no model, effort, or reviewer", () => {
+  const store = createStateStore(":memory:");
+  const task = store.createTask({ goal: "escalate" });
+  store.recordRoute(task.id, {
+    kind: "escalation",
+    capability: null,
+    provider: null,
+    reason: "risk migration requires user escalation",
+  });
+
+  const [route] = store.listRoutes();
+  assert.equal(route.model, null);
+  assert.equal(route.effort, null);
+  assert.equal(route.reviewerCapability, null);
+  store.close();
+});
+
+test("fh status reports the model and effort the route selected", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
+
+  const output = [];
+  const options = {
+    config,
+    statePath,
+    commandPaths: COMMAND_PATHS,
+    accountScope: "personal",
+    verifiedModels: {},
+    write: (line) => output.push(line),
+  };
+  assert.equal(runCli(["run", "--task", taskPath, "--json"], options), 0);
+  output.pop();
+  assert.equal(runCli(["status", "--json"], options), 0);
+
+  const [route] = JSON.parse(output.pop()).routes;
+  assert.equal(route.provider, "codex");
+  assert.equal(route.model, "gpt-5.6-terra");
+  assert.equal(route.effort, "xhigh");
+});
+
+// ---------------------------------------------------------------------------
+// evidence の content hash と参照
+// ---------------------------------------------------------------------------
+
+test("evidence content hash is derived by the store, not by the caller", () => {
+  const store = createStateStore(":memory:");
+  const forged = "f".repeat(64);
+  const evidence = store.putEvidence({
+    kind: "test_failure",
+    producer: "codex:gpt-5.6-terra",
+    command: "make test",
+    exitCode: 1,
+    claimsSupported: ["the suite failed"],
+    contentHash: forged,
+  });
+
+  const expected = evidenceContentHash({
+    kind: "test_failure",
+    producer: "codex:gpt-5.6-terra",
+    command: "make test",
+    exitCode: 1,
+    artifactPath: null,
+    claimsSupported: ["the suite failed"],
+  });
+  assert.equal(evidence.contentHash, expected);
+  assert.notEqual(evidence.contentHash, forged);
+  assert.equal(store.listEvidence()[0].contentHash, expected);
+  store.close();
+});
+
+test("evidence links back to the task and route it belongs to", () => {
+  const store = createStateStore(":memory:");
+  const task = store.createTask({ goal: "link evidence" });
+  const route = store.recordRoute(task.id, {
+    kind: "single-worker",
+    capability: "executor.default",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "xhigh",
+    reason: "default executor is available",
+  });
+  store.putEvidence({
+    kind: "verification_plan",
+    producer: "frontier-harness",
+    taskId: task.id,
+    routeId: route.id,
+  });
+
+  const [evidence] = store.listEvidence();
+  assert.equal(evidence.taskId, task.id);
+  assert.equal(evidence.routeId, route.id);
+  store.close();
+});
+
+test("evidence rejects an unknown field instead of silently dropping it", () => {
+  const store = createStateStore(":memory:");
+  assert.throws(
+    () =>
+      store.putEvidence({
+        kind: "test_pass",
+        producer: "fake",
+        transcript: "the writer's hidden reasoning",
+      }),
+    /unsupported key: transcript/,
+  );
+  store.close();
+});
+
+// ---------------------------------------------------------------------------
+// 境界検証（新規 5 エンティティ）
+// ---------------------------------------------------------------------------
+
+const ADAPTER_RUN_INPUT = {
+  taskId: "task_1",
+  routeId: "route_1",
+  capability: "executor.default",
+  provider: "codex",
+  model: "gpt-5.6-terra",
+  effort: "xhigh",
+  status: "succeeded",
+  startedAt: "2026-08-01T00:00:00.000Z",
+  finishedAt: "2026-08-01T00:05:00.000Z",
+  exitCode: 0,
+};
+
+test("adapter run normalization keeps launch-mechanism fields out of the schema", () => {
+  // #526 の結論で起動方式が変わっても migration をやり直さずに済むよう、
+  // argv や sandbox 設定のような起動詳細は schema に入れない。
+  for (const key of ["argv", "sandbox", "conversationId", "cwd", "env"]) {
+    assert.throws(
+      () => normalizeAdapterRun({ ...ADAPTER_RUN_INPUT, [key]: "anything" }),
+      new RegExp(`unsupported key: ${key}`),
+    );
+  }
+});
+
+test("adapter run normalization keeps status and timestamps consistent", () => {
+  assert.throws(
+    () => normalizeAdapterRun({ ...ADAPTER_RUN_INPUT, finishedAt: undefined }),
+    /requires finishedAt/,
+  );
+  assert.throws(
+    () =>
+      normalizeAdapterRun({
+        ...ADAPTER_RUN_INPUT,
+        status: "running",
+        finishedAt: "2026-08-01T00:05:00.000Z",
+      }),
+    /must not carry finishedAt/,
+  );
+  assert.throws(
+    () =>
+      normalizeAdapterRun({
+        ...ADAPTER_RUN_INPUT,
+        finishedAt: "2026-07-31T00:00:00.000Z",
+      }),
+    /must not precede startedAt/,
+  );
+  assert.throws(
+    () => normalizeAdapterRun({ ...ADAPTER_RUN_INPUT, status: "done" }),
+    /must be one of/,
+  );
+});
+
+test("record normalization rewrites timestamps into a comparable canonical form", () => {
+  // retention は created_at の辞書式比較で判定するため、表記ゆれを残すと
+  // 「期限切れなのに消えない」行が生まれる。
+  const run = normalizeAdapterRun({
+    ...ADAPTER_RUN_INPUT,
+    startedAt: "2026-08-01T09:00:00+09:00",
+    finishedAt: "2026-08-01T09:05:00+09:00",
+  });
+  assert.equal(run.startedAt, "2026-08-01T00:00:00.000Z");
+  assert.equal(run.finishedAt, "2026-08-01T00:05:00.000Z");
+  assert.throws(
+    () => normalizeAdapterRun({ ...ADAPTER_RUN_INPUT, startedAt: "yesterday" }),
+    /ISO 8601 timestamp/,
+  );
+});
+
+test("verification and review findings validate their controlled vocabularies", () => {
+  assert.throws(
+    () =>
+      normalizeVerificationResult({
+        taskId: "task_1",
+        checkKind: "vibes",
+        status: "passed",
+      }),
+    /checkKind must be one of/,
+  );
+  assert.throws(
+    () =>
+      normalizeReviewFinding({
+        taskId: "task_1",
+        reviewerCapability: "semantic.judge",
+        severity: "blocker",
+        uncertainty: "low",
+        summary: "something",
+      }),
+    /severity must be one of/,
+  );
+  // finding は evidence 参照・severity・uncertainty・discriminating experiment を保つ。
+  const finding = normalizeReviewFinding({
+    taskId: "task_1",
+    reviewerCapability: "semantic.judge",
+    severity: "must",
+    uncertainty: "high",
+    summary: "the retention window is never applied",
+    discriminatingExperiment: "run fh clean with --now past the cutoff",
+    evidenceId: "ev_1",
+  });
+  assert.equal(finding.uncertainty, "high");
+  assert.equal(finding.evidenceId, "ev_1");
+  assert.match(finding.discriminatingExperiment, /fh clean/);
+});
+
+test("an approval can only be granted by the user", () => {
+  const base = {
+    kind: "repository_manifest",
+    subjectHash: "a".repeat(64),
+    scope: "kryota-dev/dotfiles",
+    grantedBy: "user",
+    grantedAt: "2026-08-01T00:00:00.000Z",
+  };
+  assert.equal(normalizeApproval(base).grantedBy, "user");
+  // model が自分自身を承認者として記録できると、安全境界が state 側から無効化される。
+  assert.throws(
+    () => normalizeApproval({ ...base, grantedBy: "codex" }),
+    /grantedBy must be one of/,
+  );
+  assert.throws(
+    () => normalizeApproval({ ...base, subjectHash: "not-a-digest" }),
+    /SHA-256 hex digest/,
+  );
+  assert.throws(
+    () =>
+      normalizeApproval({ ...base, expiresAt: "2026-07-01T00:00:00.000Z" }),
+    /must not precede grantedAt/,
+  );
+});
+
+const TELEMETRY_INPUT = {
+  category: "implementation",
+  provider: "codex",
+  model: "gpt-5.6-terra",
+  effort: "xhigh",
+};
+
+test("aggregate telemetry cannot carry free-form content", () => {
+  // 集約テレメトリは raw より長く保持されるため、内容を持たないことが前提になる。
+  for (const key of ["summary", "diff", "transcript", "prompt"]) {
+    assert.throws(
+      () => normalizeTelemetryEvent({ ...TELEMETRY_INPUT, [key]: "some prose" }),
+      new RegExp(`unsupported key: ${key}`),
+    );
+  }
+  // enum / token の外にある値も入らない。
+  assert.throws(
+    () =>
+      normalizeTelemetryEvent({
+        ...TELEMETRY_INPUT,
+        category: "Implementation of the auth flow",
+      }),
+    /category must match/,
+  );
+  assert.throws(
+    () => normalizeTelemetryEvent({ ...TELEMETRY_INPUT, outcome: "shipped" }),
+    /outcome must be one of/,
+  );
+  assert.throws(
+    () => normalizeTelemetryEvent({ ...TELEMETRY_INPUT, reviewPrecision: 1.5 }),
+    /between 0 and 1/,
+  );
+});
+
+test("telemetry events round-trip their aggregate measurements", () => {
+  const store = createStateStore(":memory:");
+  store.recordTelemetryEvent({
+    ...TELEMETRY_INPUT,
+    risk: ["migration", "data-migration"],
+    wallClockMs: 1234,
+    inputTokens: 10,
+    outputTokens: 20,
+    toolCalls: 5,
+    toolFailures: 1,
+    verificationResult: "passed",
+    reviewPrecision: 0.75,
+    humanCorrections: 2,
+    rollback: true,
+    outcome: "merged",
+  });
+
+  const [event] = store.listTelemetryEvents();
+  assert.deepEqual(event.risk, ["migration", "data-migration"]);
+  assert.equal(event.reviewPrecision, 0.75);
+  // STRICT には BOOLEAN が無いので 0/1 で持つが、境界では boolean に戻る。
+  assert.equal(event.rollback, true);
+  assert.equal(event.outcome, "merged");
+  store.close();
+});
+
+// ---------------------------------------------------------------------------
+// 保持期間（raw 30 日 / 集約テレメトリ 180 日 / approvals は対象外）
+// ---------------------------------------------------------------------------
+
+// raw / 集約 / 保持対象外 が 1 つずつ期限切れになる state を作る。
+// --now = 2026-08-31 のとき raw cutoff は 2026-08-01、集約 cutoff は 2026-03-04。
+function seedRetentionFixture(statePath) {
+  const store = createStateStore(statePath);
+  const task = store.createTask({ goal: "retention" });
+  const route = store.recordRoute(task.id, {
+    kind: "single-worker",
+    capability: "executor.default",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "xhigh",
+    reason: "default executor is available",
+  });
+
+  // raw cutoff より古い = 消える
+  store.putEvidence({
+    kind: "old_log",
+    producer: "fake",
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordAdapterRun({
+    ...ADAPTER_RUN_INPUT,
+    taskId: task.id,
+    routeId: route.id,
+    startedAt: "2026-07-01T00:00:00.000Z",
+    finishedAt: "2026-07-01T00:05:00.000Z",
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordVerificationResult({
+    taskId: task.id,
+    checkKind: "test",
+    status: "passed",
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  store.recordReviewFinding({
+    taskId: task.id,
+    reviewerCapability: "semantic.judge",
+    severity: "should",
+    uncertainty: "medium",
+    summary: "an old finding",
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+
+  // raw cutoff より新しい = 残る
+  store.putEvidence({
+    kind: "fresh_log",
+    producer: "fake",
+    createdAt: "2026-08-20T00:00:00.000Z",
+  });
+
+  // 集約: raw の窓より古いが 180 日以内 = 残る
+  store.recordTelemetryEvent({
+    ...TELEMETRY_INPUT,
+    createdAt: "2026-07-01T00:00:00.000Z",
+  });
+  // 集約: 180 日より古い = 消える
+  store.recordTelemetryEvent({
+    ...TELEMETRY_INPUT,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+
+  // 承認は raw より古くても消さない（監査証跡）
+  store.recordApproval({
+    kind: "repository_manifest",
+    subjectHash: "b".repeat(64),
+    scope: "kryota-dev/dotfiles",
+    grantedBy: "user",
+    grantedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  store.close();
+}
+
+test("fh clean applies the raw and aggregate telemetry windows separately", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  seedRetentionFixture(statePath);
+
+  const output = [];
+  assert.equal(
+    runCli(["clean", "--now", "2026-08-31T00:00:00.000Z", "--json"], {
+      config,
+      statePath,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const result = JSON.parse(output.pop());
+
+  assert.equal(result.cutoff, "2026-08-01T00:00:00.000Z");
+  assert.equal(result.telemetryCutoff, "2026-03-04T00:00:00.000Z");
+  assert.deepEqual(result.prunedRaw, {
+    evidence: 1,
+    adapterRuns: 1,
+    verificationResults: 1,
+    reviewFindings: 1,
+  });
+  assert.equal(result.prunedTelemetry, 1);
+  // 既存の消費側が読んでいるキーは意味を変えずに残る。
+  assert.equal(result.expiredEvidence, 1);
+  assert.equal(result.prunedEvidence, 1);
+
+  const store = createStateStore(statePath);
+  assert.deepEqual(
+    store.listEvidence().map((evidence) => evidence.kind),
+    ["fresh_log"],
+  );
+  assert.equal(store.listTelemetryEvents().length, 1);
+  // 承認は保持期間のどちらのクラスにも属さないので残る。
+  assert.equal(store.listApprovals().length, 1);
+  store.close();
+});
+
+test("fh clean --dry-run reports every class without deleting anything", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  seedRetentionFixture(statePath);
+
+  const output = [];
+  assert.equal(
+    runCli(
+      ["clean", "--dry-run", "--now", "2026-08-31T00:00:00.000Z", "--json"],
+      { config, statePath, write: (line) => output.push(line) },
+    ),
+    0,
+  );
+  const result = JSON.parse(output.pop());
+
+  assert.deepEqual(result.expiredRaw, {
+    evidence: 1,
+    adapterRuns: 1,
+    verificationResults: 1,
+    reviewFindings: 1,
+  });
+  assert.equal(result.expiredTelemetry, 1);
+  assert.deepEqual(result.prunedRaw, NO_EXPIRED_RAW_RECORDS);
+  assert.equal(result.prunedTelemetry, 0);
+
+  const store = createStateStore(statePath);
+  assert.equal(store.listEvidence().length, 2);
+  assert.equal(store.listAdapterRuns().length, 1);
+  assert.equal(store.listTelemetryEvents().length, 2);
+  assert.equal(store.listApprovals().length, 1);
+  store.close();
+});
+
+test("pruning an expired parent clears the reference instead of failing", () => {
+  const store = createStateStore(":memory:");
+  const task = store.createTask({ goal: "cascade" });
+  const route = store.recordRoute(task.id, {
+    kind: "single-worker",
+    capability: "executor.default",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    effort: "xhigh",
+    reason: "default executor is available",
+  });
+  const evidence = store.putEvidence({
+    kind: "old_log",
+    producer: "fake",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  const run = store.recordAdapterRun({
+    ...ADAPTER_RUN_INPUT,
+    taskId: task.id,
+    routeId: route.id,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    finishedAt: "2026-01-01T00:05:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+  // 期限内の子が、期限切れの親を参照している状態。
+  store.recordVerificationResult({
+    taskId: task.id,
+    adapterRunId: run.id,
+    evidenceId: evidence.id,
+    checkKind: "test",
+    status: "passed",
+    createdAt: "2026-08-20T00:00:00.000Z",
+  });
+
+  const pruned = store.pruneExpired({
+    rawCutoff: "2026-08-01T00:00:00.000Z",
+    telemetryCutoff: NEVER_EXPIRES_CUTOFF,
+  });
+  assert.equal(pruned.raw.evidence, 1);
+  assert.equal(pruned.raw.adapterRuns, 1);
+  assert.equal(pruned.raw.verificationResults, 0);
+
+  const [survivor] = store.listVerificationResults();
+  assert.equal(survivor.adapterRunId, null);
+  assert.equal(survivor.evidenceId, null);
+  assert.equal(survivor.status, "passed");
+  store.close();
+});
+
+test("the shipped retention config matches the named retention defaults", () => {
+  // 30 / 180 が config.json とコード定数の 2 箇所にあるまま静かにずれるのを防ぐ。
+  assert.equal(
+    shippedConfig.retention.rawArtifactsDays,
+    DEFAULT_RAW_ARTIFACT_RETENTION_DAYS,
+  );
+  assert.equal(
+    shippedConfig.retention.aggregateTelemetryDays,
+    DEFAULT_AGGREGATE_TELEMETRY_RETENTION_DAYS,
+  );
+});
+
+test("retention cutoffs refuse an unusable clock", () => {
+  assert.throws(
+    () => retentionCutoffs(shippedConfig.retention, new Date("not a date")),
+    /valid Date/,
+  );
 });
