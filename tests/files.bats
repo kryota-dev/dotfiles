@@ -1095,22 +1095,6 @@ SHIMEOF
   ' "$s" >/dev/null
 }
 
-@test "settings.json ECC_DISABLED_HOOKS is the effective SSOT for disabling gateguard-fact-force (#280)" {
-  local s="${HOME_DIR}/dot_claude/settings.json"
-  [ -f "$s" ]
-  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
-  # Claude Code applies settings.json's env block with precedence over shell-inherited env
-  # vars, so this is the only place that can actually disable the gate; it must carry the
-  # gateguard-fact-force id alongside the three pre-existing post:bash:* ids (none dropped).
-  jq -e '
-    (.env.ECC_DISABLED_HOOKS | split(",")) as $ids
-    | ($ids | index("pre:edit-write:gateguard-fact-force")) != null
-      and ($ids | index("post:bash:command-log-audit")) != null
-      and ($ids | index("post:bash:command-log-cost")) != null
-      and ($ids | index("post:bash:build-complete")) != null
-  ' "$s" >/dev/null
-}
-
 @test "settings.json pins the session effort level" {
   local s="${HOME_DIR}/dot_claude/settings.json"
   [ -f "$s" ]
@@ -1520,176 +1504,24 @@ FAKE_CLAUDE
   rm -rf "$tmp"
 }
 
-@test "ecc governance-capture fork exists and passes node syntax check" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
-  [ -f "$fork" ]
-  node --check "$fork"
-}
-
 # Regression guard: a bare process.exit() after stdout.write() truncates output
 # larger than the OS pipe buffer (~64 KB), which would corrupt PostToolUse
 # pass-through of large tool_response payloads. The fork must pass input through
 # byte-for-byte regardless of size. No ECC runtime needed (a benign tool yields
 # zero events, so the hook only passes stdin through).
-@test "ecc governance-capture fork passes large input through without truncation" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
-  local tmp; tmp=$(mktemp -d)
-  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_name:"Read",tool_input:{file_path:"/x"},tool_response:"A".repeat(200000)}))' > "$tmp/in.json"
-  local in_bytes out_bytes
-  in_bytes=$(wc -c < "$tmp/in.json")
-  out_bytes=$(ECC_GOVERNANCE_CAPTURE=1 ECC_AGENT_DATA_HOME="$tmp" node "$fork" < "$tmp/in.json" 2>/dev/null | wc -c)
-  rm -rf "$tmp"
-  [ "$in_bytes" -gt 65536 ]
-  [ "$in_bytes" -eq "$out_bytes" ]
-}
-
 # Functional smoke: with the ECC runtime present and node:sqlite available, a
 # governance-relevant tool call must persist a row to the per-account state.db.
 # Skips in minimal CI (no ECC external / older Node without node:sqlite).
-@test "ecc governance-capture fork persists an event to state.db" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/governance-capture.js"
-  local ecc="${HOME}/.agents/skills/ecc/scripts/hooks/governance-capture.js"
-  [ -f "$ecc" ] || skip "ECC external runtime not deployed"
-  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
-  local tmp; tmp=$(mktemp -d)
-  printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push origin main --force"},"session_id":"bats-gov"}' \
-    | CLAUDE_PLUGIN_ROOT="${HOME}/.agents/skills/ecc" ECC_GOVERNANCE_CAPTURE=1 ECC_AGENT_DATA_HOME="$tmp" node "$fork" >/dev/null 2>&1
-  local count
-  count=$(node -e 'const{DatabaseSync}=require("node:sqlite");const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});process.stdout.write(String(db.prepare("SELECT count(*) c, session_id s FROM governance_events").get().c));db.close()' "$tmp/ecc/state.db" 2>/dev/null)
-  rm -rf "$tmp"
-  [ "$count" -ge 1 ]
-}
-
-@test "ecc post-bash-command-log fork exists and passes node syntax check" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
-  [ -f "$fork" ]
-  node --check "$fork"
-}
-
-@test "ecc-state-reader aggregates pending governance events from a sandbox state.db" {
-  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
-  [ -f "$reader" ]
-  node --check "$reader"
-  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
-  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
-  local tmp; tmp=$(mktemp -d)
-  mkdir -p "$tmp/ecc"
-  # Seed 2 pending + 1 resolved event; the reader must count only the 2 pending ones.
-  node -e '
-    const {DatabaseSync}=require("node:sqlite");
-    const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});
-    db.exec("CREATE TABLE governance_events(id TEXT PRIMARY KEY, session_id TEXT, event_type TEXT NOT NULL, payload TEXT NOT NULL, resolved_at TEXT, resolution TEXT, created_at TEXT NOT NULL)");
-    const ins=db.prepare("INSERT INTO governance_events(id,session_id,event_type,payload,resolved_at,created_at) VALUES(?,?,?,?,?,?)");
-    ins.run("1","s","approval_requested","{}",null,"2026-01-01T01:00:00Z");
-    ins.run("2","s","secret_detected","{}",null,"2026-01-01T02:00:00Z");
-    ins.run("3","s","approval_requested","{}","2026-01-01T03:00:00Z","2026-01-01T00:30:00Z");
-    db.close();
-  ' "$tmp/ecc/state.db"
-  local out
-  out=$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" status --json)
-  [ "$(echo "$out" | jq -r '.pendingGovernanceEvents')" = "2" ]
-  [ "$(echo "$out" | jq -r '[.governanceByType[].c] | add')" = "2" ]
-  # sessions / work-items tables are absent in this sandbox → graceful empty, never a crash.
-  [ "$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" sessions)" = "No sessions recorded." ]
-  [ "$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" work-items)" = "No work items." ]
-  rm -rf "$tmp"
-}
-
-@test "ecc-state-reader is graceful when state.db is absent and creates nothing" {
-  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
-  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
-  local tmp; tmp=$(mktemp -d)
-  run env "ECC_AGENT_DATA_HOME=$tmp" node "$reader" status
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"No state.db"* ]]
-  # A read-only CLI must never materialize a database on a fresh account.
-  [ ! -e "$tmp/ecc/state.db" ]
-  rm -rf "$tmp"
-}
-
-@test "ecc-state-reader counts only non-closed work items (ECC status domain)" {
-  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
-  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
-  command -v jq >/dev/null 2>&1 || skip "jq unavailable"
-  local tmp; tmp=$(mktemp -d); mkdir -p "$tmp/ecc"
-  # Only "open" is non-closed; resolved/merged/done/cancelled are all closed in ECC's domain.
-  node -e '
-    const {DatabaseSync}=require("node:sqlite");
-    const db=new DatabaseSync(process.argv[1],{enableForeignKeyConstraints:false});
-    db.exec("CREATE TABLE work_items(id TEXT PRIMARY KEY, source TEXT NOT NULL, source_id TEXT, title TEXT NOT NULL, status TEXT NOT NULL, priority TEXT, url TEXT, owner TEXT, repo_root TEXT, session_id TEXT, metadata TEXT, created_at TEXT, updated_at TEXT NOT NULL)");
-    const ins=db.prepare("INSERT INTO work_items(id,source,title,status,updated_at) VALUES(?,?,?,?,?)");
-    for (const [id,st] of [["w1","open"],["w2","resolved"],["w3","merged"],["w4","done"],["w5","cancelled"]]) ins.run(id,"gh",id,st,"2026-01-01");
-    db.close();
-  ' "$tmp/ecc/state.db"
-  local out; out=$(ECC_AGENT_DATA_HOME="$tmp" node "$reader" status --json)
-  [ "$(echo "$out" | jq -r '.openWorkItems')" = "1" ]
-  rm -rf "$tmp"
-}
-
-@test "ecc-state-reader rejects an unknown subcommand with exit 2 even on a fresh account" {
-  local reader="${HOME_DIR}/dot_claude/hooks-fork/ecc-state-reader.js"
-  node -e 'require("node:sqlite")' 2>/dev/null || skip "node:sqlite unavailable"
-  local tmp; tmp=$(mktemp -d)
-  # No state.db: validation must still fire before the graceful "no db" path.
-  run env "ECC_AGENT_DATA_HOME=$tmp" node "$reader" bogus-subcommand
-  [ "$status" -eq 2 ]
-  rm -rf "$tmp"
-}
-
-@test "claude.zsh defines the ecc-* reader functions" {
-  grep -q 'ecc-status()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
-  grep -q 'ecc-sessions()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
-  grep -q 'ecc-work-items()' "${HOME_DIR}/dot_config/zsh/claude.zsh"
-  grep -q 'ecc-state-reader.js' "${HOME_DIR}/dot_config/zsh/claude.zsh"
-}
-
 # Regression guard: a bare process.exit() after stdout.write() truncates output
 # larger than the OS pipe buffer (~64 KB). The fork must pass the PostToolUse Bash
 # payload through byte-for-byte regardless of size. No ECC runtime needed (logging
 # is best-effort; the pass-through is unconditional).
-@test "ecc post-bash-command-log fork passes large input through without truncation" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
-  local tmp; tmp=$(mktemp -d)
-  node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_name:"Bash",tool_input:{command:"echo "+"A".repeat(200000)}}))' > "$tmp/in.json"
-  ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit < "$tmp/in.json" > "$tmp/out.json" 2>/dev/null
-  local in_bytes; in_bytes=$(wc -c < "$tmp/in.json")
-  # Byte-exact pass-through: input exceeds the OS pipe buffer AND output is identical
-  # (cmp catches reordering/corruption that an equal byte count would miss).
-  run cmp "$tmp/in.json" "$tmp/out.json"
-  local cmp_status=$status
-  rm -rf "$tmp"
-  [ "$in_bytes" -gt 65536 ]
-  [ "$cmp_status" -eq 0 ]
-}
-
 # Functional smoke: with the ECC runtime present, the fork appends a sanitized, 0600
 # line to the per-account bash-commands.log resolved via getClaudeDir()
 # (ECC_AGENT_DATA_HOME), proving account isolation (task #11) — not the hardcoded
 # ~/.claude of the ECC original — and that extraRedact() strips a secret ECC's own
 # sanitizer misses. Assertions are split so a failure pinpoints which guarantee broke.
 # Skips in minimal CI (no ECC external deployed).
-@test "ecc post-bash-command-log fork appends a redacted 0600 line to the per-account log" {
-  local fork="${HOME_DIR}/dot_claude/hooks-fork/post-bash-command-log.js"
-  local ecc="${HOME}/.agents/skills/ecc/scripts/hooks/post-bash-command-log.js"
-  [ -f "$ecc" ] || skip "ECC external runtime not deployed"
-  local tmp; tmp=$(mktemp -d)
-  local log="$tmp/bash-commands.log"
-  # AWS_SECRET_ACCESS_KEY=... is a secret shape ECC's sanitizeCommand does not catch;
-  # extraRedact() must strip it before the line is written.
-  printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"AWS_SECRET_ACCESS_KEY=abcdEFGH1234 aws s3 ls"}}' \
-    | CLAUDE_PLUGIN_ROOT="${HOME}/.agents/skills/ecc" ECC_AGENT_DATA_HOME="$tmp" node "$fork" audit >/dev/null 2>&1
-  local file_exists=0 has_cmd=0 secret_leaked=0 perms=""
-  [ -f "$log" ] && file_exists=1
-  grep -q 'aws s3 ls' "$log" 2>/dev/null && has_cmd=1
-  grep -q 'abcdEFGH1234' "$log" 2>/dev/null && secret_leaked=1
-  perms=$(stat -f '%Lp' "$log" 2>/dev/null || stat -c '%a' "$log" 2>/dev/null)
-  rm -rf "$tmp"
-  [ "$file_exists" -eq 1 ]   # account-aware log created under ECC_AGENT_DATA_HOME
-  [ "$has_cmd" -eq 1 ]       # command recorded
-  [ "$secret_leaked" -eq 0 ] # extraRedact stripped the secret env value
-  [ "$perms" = "600" ]       # owner-only permissions
-}
-
 @test "prompt-conform-suggest hook exists and passes node syntax check" {
   local hook="${HOME_DIR}/dot_claude/hooks-fork/prompt-conform-suggest.js"
   [ -f "$hook" ]
@@ -2108,7 +1940,7 @@ SECRETS
   # wins over shell-inherited values); the alias must use the launcher-merged EXTRA channel.
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
   [ -f "$zsh" ]
-  grep -qF "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection,pre:edit-write:gateguard-fact-force " "$zsh"
+  grep -qF "claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection " "$zsh"
   # Catch the dead pattern anywhere on the alias line, not just right after the opening
   # quote (e.g. a FOO=1 ECC_DISABLED_HOOKS=... prefix would regress silently otherwise).
   run grep -E "alias claude-config=.*['[:space:]]ECC_DISABLED_HOOKS=" "$zsh"
@@ -2310,8 +2142,9 @@ _gate_decision() {
   grep -q '@~/AGENTS.md' "$claude"
   grep -q 'Mandatory skill usage' "$claude"
   grep -q 'memory への記録ポリシー' "$claude"
-  # The Claude-only relaxations of the conservative core rules live here.
-  grep -q 'git-push-reminder' "$claude"
+  # The Claude-only relaxations of the conservative core rules live here. The git-push
+  # relaxation was dropped in #496 with the git-push-reminder sub-hook it rested on —
+  # tests/claude_hooks.bats guards that it does not come back while the hook is disabled.
   grep -q 'auto-tmux-dev' "$claude"
   # The personal-account symlink was replaced by this real file.
   [ ! -f "${HOME_DIR}/dot_claude/symlink_CLAUDE.md.tmpl" ]
@@ -2424,101 +2257,13 @@ _gate_decision() {
 }
 
 # ---------------------------------------------------------------------------
-# PR-F: CLV2 instinct→skill flow wiring (SessionStart producer + statusline +
+# PR-F: CLV2 instinct→skill flow wiring (statusline renderer +
 # retrospective-codify input mode).
+#
+# The SessionStart producer (clv2-session-notify.sh) that used to refresh the
+# cache these read was removed in #496 (#473 AC-027) along with its tests; the
+# renderer and the skill's input mode are unchanged and still covered here.
 # ---------------------------------------------------------------------------
-
-@test "clv2-session-notify hook exists, is valid bash, and degrades gracefully" {
-  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
-  [ -f "$hook" ]
-  bash -n "$hook"
-  # Reads the pinned engine and parses its cluster-count line.
-  grep -q 'instinct-cli.py' "$hook"
-  grep -q 'Potential skill clusters found' "$hook"
-  # Caches the count for the statusline and throttles notifications for 7 days.
-  grep -q '.review-ready-clusters' "$hook"
-  grep -q '604800' "$hook"
-  grep -q 'osascript' "$hook"
-  # No-op guards: needs a python interpreter and macOS notifier before acting.
-  grep -q 'command -v python3' "$hook"
-}
-
-# Behavioral: drive the hook with fake python/osascript so it never touches the
-# real engine or fires a real notification, then assert it caches the parsed
-# count and that the 7-day throttle suppresses a second notification.
-@test "clv2-session-notify caches the cluster count and throttles notifications" {
-  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
-  local td hh hb
-  td=$(mktemp -d)
-  hh=$(mktemp -d)
-  hb=$(mktemp -d)
-  # Fake engine file: only needs to be readable; the fake python ignores it.
-  mkdir -p "${hh}/.agents/skills/continuous-learning-v2/scripts"
-  printf 'x\n' >"${hh}/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py"
-  # Fake python3: emit canned evolve output with N=3.
-  printf '%s\n' '#!/usr/bin/env bash' 'echo "Potential skill clusters found: 3"' >"${hb}/python3"
-  chmod +x "${hb}/python3"
-  # Fake osascript: record each notification call.
-  printf '%s\n' '#!/usr/bin/env bash' "echo call >>\"${td}/.osa-calls\"" >"${hb}/osascript"
-  chmod +x "${hb}/osascript"
-
-  # First run: cache == 3, exactly one notification (no throttle stamp yet).
-  # CLV2_PYTHON_CMD is pinned to the fake so an inherited value cannot bypass it.
-  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
-  [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
-  [ -f "${td}/.last-instinct-notify" ]
-  [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
-
-  # Second run immediately after: still caches, but throttle suppresses notify #2.
-  HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
-  [ "$(cat "${td}/.review-ready-clusters")" = "3" ]
-  [ "$(wc -l <"${td}/.osa-calls")" -eq 1 ]
-
-  rm -rf "$td" "$hh" "$hb"
-}
-
-# Regression: a corrupt throttle stamp that looks octal ("09") must not abort the
-# arithmetic (10# base-10 coercion). The hook must still exit 0 and refresh the cache.
-@test "clv2-session-notify tolerates a corrupt octal-looking throttle stamp" {
-  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
-  local td hh hb
-  td=$(mktemp -d)
-  hh=$(mktemp -d)
-  hb=$(mktemp -d)
-  mkdir -p "${hh}/.agents/skills/continuous-learning-v2/scripts"
-  printf 'x\n' >"${hh}/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py"
-  printf '%s\n' '#!/usr/bin/env bash' 'echo "Potential skill clusters found: 2"' >"${hb}/python3"
-  chmod +x "${hb}/python3"
-  printf '%s\n' '#!/usr/bin/env bash' ':' >"${hb}/osascript"
-  chmod +x "${hb}/osascript"
-  printf '09\n' >"${td}/.last-instinct-notify"
-  run env HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" CLV2_PYTHON_CMD="${hb}/python3" PATH="${hb}:$PATH" bash "$hook"
-  [ "$status" -eq 0 ]
-  [ "$(cat "${td}/.review-ready-clusters")" = "2" ]
-  rm -rf "$td" "$hh" "$hb"
-}
-
-# Graceful no-op when the CLV2 engine is not deployed: no cache, clean exit.
-@test "clv2-session-notify is a no-op when the engine is absent" {
-  local hook="${HOME_DIR}/dot_claude/executable_clv2-session-notify.sh"
-  local td hh
-  td=$(mktemp -d)
-  hh=$(mktemp -d)
-  run env HOME="$hh" CLV2_HOMUNCULUS_DIR="$td" bash "$hook"
-  [ "$status" -eq 0 ]
-  [ ! -f "${td}/.review-ready-clusters" ]
-  rm -rf "$td" "$hh"
-}
-
-@test "settings.json wires the clv2 SessionStart notify hook (async)" {
-  command -v jq >/dev/null 2>&1 || skip "jq not installed"
-  local s="${HOME_DIR}/dot_claude/settings.json"
-  run jq -e '.hooks.SessionStart[]
-    | select(.id=="session:start:clv2-notify")
-    | .hooks[0]
-    | select(.command=="$HOME/.claude/clv2-session-notify.sh" and .async==true)' "$s"
-  [ "$status" -eq 0 ]
-}
 
 @test "statusline renders the instinct-cluster segment from the cache" {
   local sl="${HOME_DIR}/dot_claude/executable_statusline.sh"
@@ -2533,7 +2278,6 @@ _gate_decision() {
   grep -q 'instinct-cluster 入力モード' "$sk"
   grep -q -- '--input=instinct-clusters' "$sk"
   grep -q 'instinct-cli.py' "$sk"
-  grep -q 'clv2-session-notify' "$sk"
 }
 
 # --- Self-hosted ntfy notification system (#337) ---

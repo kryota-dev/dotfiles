@@ -517,11 +517,16 @@ stub_count() {
   # 通知系 hook が Notification に残っていること
   run jq -r '[.hooks.Notification[] | .hooks[].command] | map(select(test("ntfy-notify"))) | length' "$SETTINGS"
   [ "$output" -ge 1 ]
-  # 各イベントの既存エントリ数が減っていないこと（wave 追加後の下限）
+  # 各イベントの既存エントリ数が減っていないこと（下限）。
+  # 下限は #496（#473 の sub-issue）で 9/7 から 4/4 へ引き下げた。あの変更は助言・観測系の
+  # 配線を意図的に外すもので、この floor は「wave 追加が既存を落としていないか」を見る
+  # ためのものだから、意図した縮小まで赤くする理由はない。どの id が残る／消えるかという
+  # 本来の契約は tests/claude_hooks.bats が id 単位で検証する。wave 側の配線そのものは
+  # 直前の「wave-session-event が 7 イベントへ配線されている」が担保しており、そちらは不変。
   run jq -r '.hooks.PreToolUse | length' "$SETTINGS"
-  [ "$output" -ge 9 ]
+  [ "$output" -ge 4 ]
   run jq -r '.hooks.Stop | length' "$SETTINGS"
-  [ "$output" -ge 7 ]
+  [ "$output" -ge 4 ]
 }
 
 @test "settings: 旧 pane-state.sh が残っていない" {

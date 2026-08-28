@@ -105,3 +105,23 @@
 # a manual redirect or re-entering plan mode. Removing it from source alone would not
 # delete an already-deployed copy, hence here.
 .agents/skills/cleanup-plan
+
+# ECC hook reduction (#496, sub-issue of #473). Three hooks-fork scripts and the CLV2
+# SessionStart notifier lost their settings.json wiring in the same change, so their source
+# files were removed — but a source deletion alone leaves the deployed copy behind, hence
+# these entries. governance-capture.js (per-account governance state.db) and
+# post-bash-command-log.js (raw Bash audit log) go with AC-015's "stop feeding raw command,
+# path and governance payload into observation"; ecc-state-reader.js was the read side of
+# that same state.db (the ecc-status / ecc-sessions / ecc-work-items zsh functions, also
+# removed); clv2-session-notify.sh recomputed the instinct-cluster count and fired a desktop
+# notification on every SessionStart (AC-027).
+#
+# The DATA these wrote is deliberately NOT listed: #473 scopes this change to stopping new
+# writes, and deleting the accumulated state.db / bash-commands.log / session-data is a
+# separate explicit decision. Note the standing-declaration caveat at the top of this file —
+# these four paths are re-deleted on every apply, so re-enabling any of them means removing
+# the entry here first, not just restoring the source file.
+.claude/hooks-fork/governance-capture.js
+.claude/hooks-fork/post-bash-command-log.js
+.claude/hooks-fork/ecc-state-reader.js
+.claude/clv2-session-notify.sh
