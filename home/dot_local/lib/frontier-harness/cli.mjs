@@ -1,5 +1,4 @@
 import { accessSync, chmodSync, constants, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +9,10 @@ import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
 import { PROVIDER_COMMANDS } from "./providers.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
+import {
+  GitWorktreeUnavailableError,
+  resolveGitCommonDirectory,
+} from "./state-root.mjs";
 import { createStateStore } from "./state-store.mjs";
 import { normalizeTask } from "./task.mjs";
 import {
@@ -19,6 +22,10 @@ import {
 } from "./readiness.mjs";
 
 const MANIFEST_KEYS = new Set(["commands", "domains", "capabilities"]);
+const UNKNOWN_ACCOUNT_SCOPE = "unknown";
+// account scope は readiness キャッシュのファイル名に入るため、
+// パス区切りや相対参照が混ざらないことを保証する。
+const ACCOUNT_SCOPE_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export function findCommand(command, searchPath) {
   for (const directory of searchPath.split(path.delimiter)) {
@@ -47,16 +54,42 @@ function resolveAccountScope(environment) {
     if (!value) continue;
     if (value.endsWith(workSuffix)) scopes.push("r06");
     else if (value.endsWith(personalSuffix)) scopes.push("personal");
-    else scopes.push("unknown");
+    else scopes.push(UNKNOWN_ACCOUNT_SCOPE);
   }
   const uniqueScopes = [...new Set(scopes)];
-  if (uniqueScopes.length === 0) return "personal";
-  if (uniqueScopes.length > 1) return "unknown";
+  // 判定材料が無い（両方未設定）ときと、2 つの変数が食い違うときは、どちらも
+  // 「いずれのプロファイルでもない」に倒す。以前は前者だけ personal を返しており、
+  // 「想定外の値は unknown」という他の分岐と非対称だった（環境変数が未設定なだけで
+  // personal 限定 capability が利用可能と判定されていた）。
+  if (uniqueScopes.length !== 1) return UNKNOWN_ACCOUNT_SCOPE;
   return uniqueScopes[0];
 }
 
 function loadConfig(configPath) {
   return normalizeConfig(JSON.parse(readFileSync(configPath, "utf8")));
+}
+
+// 設定ファイルの置き場所を作業ディレクトリの内容から解決しない。
+// HOME が無いまま path.join("", ...) すると cwd 相対になり、untrusted repository が
+// 同梱した config が escalation 方針（risk.alwaysEscalate）や rollout を差し替えうる。
+function resolveConfigPath(options, environment) {
+  if (options.configPath) return options.configPath;
+  const override = environment.FH_CONFIG_PATH;
+  if (override) {
+    // 明示的な escape hatch として HOME 配下までは要求しない。
+    // ただし相対値は cwd 基準で解決されるため受け付けない。
+    if (!path.isAbsolute(override)) {
+      throw new TypeError("FH_CONFIG_PATH must be an absolute path");
+    }
+    return override;
+  }
+  const home = environment.HOME;
+  if (typeof home !== "string" || !path.isAbsolute(home)) {
+    throw new TypeError(
+      "HOME must be an absolute path to resolve the frontier-harness config",
+    );
+  }
+  return path.join(home, ".config", "frontier-harness", "config.json");
 }
 
 function defaultCommandPaths(environment) {
@@ -80,32 +113,42 @@ function flagValue(flags, name) {
 }
 
 function defaultStatePath(cwd) {
-  const commonDirectory = execFileSync(
-    "git",
-    ["rev-parse", "--git-common-dir"],
-    { cwd, encoding: "utf8" },
-  ).trim();
-  const absoluteCommonDirectory = path.resolve(cwd, commonDirectory);
-  const stateDirectory = path.join(absoluteCommonDirectory, "frontier-harness");
+  const stateDirectory = path.join(
+    resolveGitCommonDirectory(cwd),
+    "frontier-harness",
+  );
   ensureDirectory(stateDirectory, "frontier-harness state directory");
   chmodSync(stateDirectory, 0o700);
   return path.join(stateDirectory, "state.db");
 }
 
-function readinessPathFor(statePath) {
-  return path.join(path.dirname(statePath), "readiness.json");
+// readiness は account scope ごとに分ける。共有すると、あるプロファイルで確定した
+// provider の可用性が、別プロファイルとして解決される実行に流用される。
+function readinessPathFor(statePath, accountScope) {
+  if (
+    typeof accountScope !== "string" ||
+    !ACCOUNT_SCOPE_PATTERN.test(accountScope)
+  ) {
+    throw new TypeError(
+      `account scope ${accountScope} cannot be used as a readiness cache key`,
+    );
+  }
+  return path.join(path.dirname(statePath), `readiness.${accountScope}.json`);
 }
 
 // doctor も run と同じ state root から readiness path を解決する。
 // これが無いと `doctor --probe` の結果が保存されず、後続の `run` が常に unverified になる。
-function resolveReadinessPath(options) {
+function resolveReadinessPath(options, accountScope) {
   try {
     const statePath =
       options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
-    return readinessPathFor(statePath);
-  } catch {
-    // git repository 外では state root を解決できないため readiness を永続化しない。
-    return null;
+    return readinessPathFor(statePath, accountScope);
+  } catch (error) {
+    // git working tree の外では state root を解決できないため readiness を永続化しない。
+    if (error instanceof GitWorktreeUnavailableError) return null;
+    // 信頼できない state root の検出は握り潰さない。
+    // 握り潰すと doctor 経路だけガードが無効化される。
+    throw error;
   }
 }
 
@@ -207,11 +250,10 @@ export function runCli(argumentsList, options = {}) {
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
   const [command, ...flags] = argumentsList;
   const asJson = flags.includes("--json");
-  const configPath =
-    options.configPath ??
-    environment.FH_CONFIG_PATH ??
-    path.join(environment.HOME ?? "", ".config/frontier-harness/config.json");
-  const config = options.config ?? loadConfig(configPath);
+  // 設定パスの解決は遅延させる。設定そのものを注入された呼び出しで、
+  // 一度も読まないパスの解決を理由に停止しないため。
+  const config =
+    options.config ?? loadConfig(resolveConfigPath(options, environment));
   const commandPaths = options.commandPaths ?? defaultCommandPaths(environment);
   const accountScope = options.accountScope ?? resolveAccountScope(environment);
   const emit = (value) =>
@@ -222,7 +264,7 @@ export function runCli(argumentsList, options = {}) {
     // state root の解決はディレクトリ作成を伴うため、必要なときだけ行う。
     const needsReadinessPath = flags.includes("--probe") || !verifiedModels;
     const readinessPath = needsReadinessPath
-      ? (options.readinessPath ?? resolveReadinessPath(options))
+      ? (options.readinessPath ?? resolveReadinessPath(options, accountScope))
       : null;
     if (flags.includes("--probe")) {
       const probe = options.probeProvider
@@ -279,7 +321,8 @@ export function runCli(argumentsList, options = {}) {
 
   const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
   const verifiedModels =
-    options.verifiedModels ?? loadVerifiedModels(readinessPathFor(statePath));
+    options.verifiedModels ??
+    loadVerifiedModels(readinessPathFor(statePath, accountScope));
   const store = createStateStore(statePath);
   try {
     if (command === "run") {
