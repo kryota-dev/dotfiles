@@ -79,9 +79,9 @@ A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (cur
 
 ---
 
-## Curated skill inventory (<!-- FACT:curated-skill-count -->47<!-- /FACT --> skills)
+## Curated skill inventory (<!-- FACT:curated-skill-count -->49<!-- /FACT --> skills)
 
-The 47 curated skills in `home/dot_agents/skills/` are grouped by theme below.
+The curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (14 skills)
 

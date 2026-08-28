@@ -115,6 +115,8 @@ cask "android-commandlinetools"
 cask "android-platform-tools"
 # Tools for building Android applications
 cask "android-studio"
+# Terminal interface for Antigravity agents
+cask "antigravity-cli"
 # Application uninstaller
 cask "appcleaner", args: { appdir: "/Applications" }
 # Display management tool

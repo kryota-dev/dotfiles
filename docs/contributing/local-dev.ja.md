@@ -17,8 +17,10 @@
 | `help`（デフォルト） | `## ` ドキュメントコメント行を `awk` でパースしてターゲット一覧を表示 |
 | `lint` | shellcheck + shfmt diff チェック + `zsh -n` 構文チェック（後述） |
 | `fmt` | `.sh` ファイルを `shfmt -w -i 2 -ci` でインプレース整形；`.sh.tmpl` は差分表示のみ |
-| `test` | `lint` の後に `test-bats` |
+| `test` | `lint`、`lint-node`、`test-node`、`test-bats` の順 |
 | `test-bats` | `bats tests/*.bats` |
+| `lint-node` | frontier-harness module/test に対する `node --check` |
+| `test-node` | live provider credential を使わない `node --test tests/frontier_harness.test.mjs` |
 | `benchmark` | `scripts/benchmark.sh`（コールドスタート + 10 回平均） |
 | `sync-ghq-completion` | mise でピンした ghq バージョンに対応する `_ghq` をアップストリームから取得してベンダリング |
 | `lint-deno` | ntfy dashboard（kryota-dev/dotfiles#371）に対する `deno check` + `deno lint` + `deno fmt --check`。best-effort で `deno` が無ければスキップ。`lint`/CI には含まれない |

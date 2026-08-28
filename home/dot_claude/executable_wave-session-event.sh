@@ -7,10 +7,13 @@
 # file, so the orchestrator can tell "this child stopped and is waiting"
 # without scraping the TUI.
 #
-# PostToolUse / PostToolUseFailure are the exception to "verbatim": their
-# tool_response carries the user's answer text (e.g. AskUserQuestion choices),
-# so only correlation fields are recorded. Everything else is still appended
-# verbatim.
+# Recording is projected per event type: only the fields the reading side
+# actually consumes are kept, so conversation text never lands on disk (#474,
+# #477). The projections deliberately differ -- reusing one allowlist would drop
+# UserPromptSubmit's permission_mode, which the reader needs to classify
+# permission_prompt notifications (#443 / #486). Event types not listed in the
+# case below (PreToolUse, Stop, StopFailure) are still appended verbatim: the
+# reader needs PreToolUse's full tool_input to render the pending question.
 #
 # Why not scrape the pane: matching on screen text broke three different ways in
 # practice (#435 wrong marker, #436 stale scrollback matched as "busy" and the
@@ -67,14 +70,36 @@ main() {
   umask 077
   mkdir -p "$EVENT_DIR" 2>/dev/null || return 0
 
-  if [ "$hook_event_name" = "PostToolUse" ] || [ "$hook_event_name" = "PostToolUseFailure" ]; then
-    # Terminal AskUserQuestion events carry tool_response, which holds the
-    # user's answer text. Project to correlation fields only -- the reader
-    # only needs these to pair against PreToolUse's tool_use_id -- so the
-    # answer body never lands on disk. Projection failure means don't write,
-    # matching the fail-open contract above.
+  local filter=""
+  case "$hook_event_name" in
+    PostToolUse | PostToolUseFailure)
+      # Terminal AskUserQuestion events carry tool_response, which holds the
+      # user's answer text. The reader only needs the correlation fields to
+      # pair these against PreToolUse's tool_use_id.
+      filter='{session_id, prompt_id, hook_event_name, tool_name, tool_use_id}'
+      ;;
+    UserPromptSubmit)
+      # `prompt` is the user's free-form instruction for the turn and is never
+      # read back. `permission_mode` is load-bearing and must stay: it is the
+      # only place the reader can learn the turn's mode, because Notification
+      # payloads do not carry it (measured). Dropping it would break the
+      # permission_prompt classification (#443 / #486).
+      filter='{session_id, prompt_id, hook_event_name, permission_mode}'
+      ;;
+    Notification)
+      # `message` is the rendered notification text; the reader classifies on
+      # notification_type alone and never reads prose (#435). permission_mode is
+      # kept because it is load-bearing whenever present -- today it is absent,
+      # so this projects to null, which the reader's `// empty` already drops.
+      filter='{session_id, prompt_id, hook_event_name, notification_type, permission_mode}'
+      ;;
+  esac
+
+  if [ -n "$filter" ]; then
+    # Projection failure means don't write, matching the fail-open contract
+    # above: a payload we could not project must not be persisted verbatim.
     local projected
-    projected="$(printf '%s' "$input" | jq -c '{session_id, prompt_id, hook_event_name, tool_name, tool_use_id}' 2>/dev/null || true)"
+    projected="$(printf '%s' "$input" | jq -c "$filter" 2>/dev/null || true)"
     [ -n "$projected" ] || return 0
     printf '%s\n' "$projected" >>"${EVENT_DIR}/${session_id}.jsonl" 2>/dev/null || return 0
   else

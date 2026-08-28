@@ -53,16 +53,36 @@ SETTINGS_FILE="${WAVE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
 # 「人が答えるまで止まる」通知。画面に描かれた文言は一切見ない (#435)。
 #
 # permission_prompt と agent_needs_input を分けているのは、auto mode での扱いが
-# 違うから。permission_prompt は auto mode で自動承認され子は止まらない (#443)
-# が、agent_needs_input は自動承認の対象ではないので auto mode でも止まる。
+# 違うから。agent_needs_input は自動承認の対象ではないので auto mode でも必ず
+# 止まる。permission_prompt は auto mode だと**止まる場合と止まらない場合が
+# 両方ある**ため、通知だけでは判別できない (#486。下の AUTO_MODES 参照)。
 NOTIF_NEEDS_INPUT='^agent_needs_input$'
 NOTIF_PERMISSION='^permission_prompt$'
 # 「次の指示を待っている」通知。人が答えるべき問いではないので IDLE に分類する。
 NOTIF_IDLE='^idle_prompt$'
 
-# permission_prompt を自動承認する permission_mode。Notification payload には
+# classifier が承認を代行する permission_mode。Notification payload には
 # permission_mode が入らない (実測) ため、同じターンの他イベントから読む。
-AUTO_APPROVE_MODES='["auto","bypassPermissions"]'
+#
+# **この mode でも permission_prompt が「停止」を意味しうる** (#486)。かつては
+# 「auto なら自動承認されるので子は止まらない」と断定していたが、公式仕様
+# (https://code.claude.com/docs/en/permission-modes 2026-08-28 取得) がこれを
+# 否定する:
+#   - 「Actions no mode auto-approves」— 明示的な ask ルール / 組織が ask に
+#     設定した connector ツール / requiresUserInteraction の MCP ツールと
+#     AskUserQuestion / critical path を対象にした rm・rmdir。**bypassPermissions
+#     を含むどの mode でも**自動承認されない
+#   - 「Writes to protected paths are never auto-approved except in
+#     bypassPermissions mode」
+#   - 「Repeated blocks: if the classifier blocks an action 3 times in a row or
+#     20 times total, auto mode pauses and Claude Code resumes prompting」
+#     (閾値は設定不可)
+#
+# 一方 #443 で実測したとおり、auto mode の permission_prompt が自動承認されて
+# 子が止まらないケースも実在する。**両方とも本当**なので、通知と permission_mode
+# だけでは停止しているかを判別できない。よってこの mode では ASK_PERMISSION とも
+# RUNNING とも断定せず **UNKNOWN** を返す (判定不能を正常と混同しない)。
+AUTO_MODES='["auto","bypassPermissions"]'
 
 UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 
@@ -90,6 +110,33 @@ event_file() {
 # shellcheck disable=SC2016  # jq のプログラム片なので shell 展開させない
 read_events() {
   jq -R -c 'fromjson? // empty' "$1" 2>/dev/null || true
+}
+
+# read_events が黙って落とした行の数を返す (#476)。
+#
+# 行の破損自体は 1 行で監視全体を止めないための意図的な設計だが、**落とした結果
+# として判定が「停止していない」側に倒れると fail-safe 契約が破れる**。落ちたのが
+# 未回答 AskUserQuestion の PreToolUse だったなら、残ったイベントだけで RUNNING と
+# 報告してしまう (#436 と同じ沈黙する故障)。だから落ちた事実を判定へ持ち込む。
+#
+# 空行は破損として数えない。追記の境界や末尾改行で普通に生じる。
+#
+# **数えられなかったときは 1 を返す** (fail-safe)。「数えられない」を「破損なし」と
+# 読むのは、この関数が塞ごうとしている fail-open をここで再演することになる。
+# shellcheck disable=SC2016  # jq のプログラム片なので shell 展開させない
+count_broken_lines() {
+  local flags n
+  flags="$(jq -R -r '
+    if test("^\\s*$") then empty
+    elif (try (fromjson | true) catch false) then empty
+    else "x" end
+  ' "$1" 2>/dev/null)" || {
+    echo 1
+    return 0
+  }
+  n="$(printf '%s' "$flags" | grep -c 'x')" || n=0
+  [ -n "$n" ] || n=0
+  echo "$n"
 }
 
 # 最新ターンのイベントだけを取り出す。prompt_id を持たない行は落とす。
@@ -161,18 +208,51 @@ cmd_state() {
     --arg needs_input "$NOTIF_NEEDS_INPUT" \
     --arg perm "$NOTIF_PERMISSION" \
     --arg idle "$NOTIF_IDLE" \
-    --argjson auto "$AUTO_APPROVE_MODES" \
+    --argjson auto "$AUTO_MODES" \
     "$JQ_DEFS"'
     if length == 0 then "UNKNOWN"
     elif (open_questions | length) > 0 then "ASK_QUESTION"
     elif has_notif($needs_input) then "ASK_PERMISSION"
     elif has_notif($perm) and (auto_uniform($auto) | not) then "ASK_PERMISSION"
+    # auto / bypassPermissions では自動承認されて止まらないことも、承認を求めて
+    # 止まることも両方ある (#486)。どちらか断定できないので UNKNOWN を返す。
+    #
+    # **ただし idle_prompt があれば解除する**。idle_prompt は「次の指示を待って
+    # いる」通知で、承認待ちのモーダルが開いている状態とは両立しない。つまり
+    # *idle である積極的な証拠*であり、これだけを解除の根拠にする。
+    #
+    # 解除が要るのは、permission_prompt が出た全ターンを永久に UNKNOWN にすると
+    # --text (state が RUNNING / IDLE のときしか送らない) が塞がり、新しいターンは
+    # --text でしか始まらないため**自己解除しない詰み**になるから。
+    #
+    # **ただし解除できるのは一部にとどまる**。実イベント (23 セッション / 208 行 /
+    # 52 ターン、2026-08-28 のスナップショット) を prompt_id 単位で集計すると、
+    # permission_prompt を含む 15 ターンのうち idle_prompt も含むのは 6 件だけで、
+    # Stop はあるが idle_prompt が無いターンが 3 件、どちらも無い (実行中) が 6 件。
+    # つまり 6 割は UNKNOWN のままで --text は塞がる。これは意図どおりで、緩めない。
+    # 運用側の手当ては SKILL.md「解除されるのは一部だけ」を参照。
+    #
+    # Stop では解除しない。Stop はターンの終わりを意味しない (#447: サブエージェント
+    # へ委任した親は途中で Stop を出して再開する)。上記の実測でも Stop を持ちながら
+    # idle_prompt を持たないターンが 3 件あり、Stop を根拠にすると承認待ちで止まった
+    # 子を IDLE と報告しうる。
+    elif has_notif($perm) and (has_notif($idle) | not) then "UNKNOWN"
     elif any(.[]; .hook_event_name == "Stop" or .hook_event_name == "StopFailure") then "IDLE"
     elif has_notif($idle) then "IDLE"
     elif any(.[]; .hook_event_name == "UserPromptSubmit") then "RUNNING"
     else "UNKNOWN" end
   ' 2>/dev/null || true)"
   [ -n "$st" ] || st="UNKNOWN"
+  # 壊れた行を落とした結果が「停止していない」判定なら UNKNOWN へ降格する (#476)。
+  # 落ちた行が未回答の質問や停止通知だった可能性を排除できない以上、稼働中とは
+  # 言えない。停止側の判定 (ASK_*) は既に見落とさない向きなので降格しない。
+  case "$st" in
+    RUNNING | IDLE)
+      if [ "$(count_broken_lines "$f")" -gt 0 ]; then
+        st="UNKNOWN"
+      fi
+      ;;
+  esac
   echo "$st"
 }
 
@@ -417,6 +497,29 @@ cmd_self_check() {
     echo "イベント: ${n} セッション分を観測済み"
   else
     echo "イベント: 未観測（まだ子セッションが動いていないだけの可能性あり。検証はできていない）"
+  fi
+
+  # 壊れた行は read_events が黙って落とす (#476)。落ちていること自体をここで
+  # 可視化しないと、--state が UNKNOWN を返す理由が分からないまま監視を続ける
+  # ことになる。検知が劣化している以上、報告するだけでなく非 0 で落とす。
+  # 回復手段は --purge（該当セッションの記録を消す）。
+  local broken_files=0 broken_total=0 nb ev
+  while IFS= read -r ev; do
+    [ -n "$ev" ] || continue
+    nb="$(count_broken_lines "$ev")"
+    if [ "${nb:-0}" -gt 0 ]; then
+      broken_files=$((broken_files + 1))
+      broken_total=$((broken_total + nb))
+      echo "壊れた行: ${nb} 行 ($ev)" >&2
+    fi
+  done <<EOF
+$(find "$EVENT_DIR" -maxdepth 1 -name '*.jsonl' 2>/dev/null)
+EOF
+  if [ "$broken_files" -gt 0 ]; then
+    echo "壊れた行: 合計 ${broken_total} 行 / ${broken_files} セッション — 該当セッションの RUNNING / IDLE は UNKNOWN へ降格される。--purge で記録を消すこと" >&2
+    ok=1
+  else
+    echo "壊れた行: 無し"
   fi
 
   return "$ok"
