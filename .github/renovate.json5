@@ -25,18 +25,6 @@
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/\\.github/workflows/ci\\.yml$/',
-      ],
-      matchStrings: [
-        'SHFMT_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)',
-      ],
-      depNameTemplate: 'mvdan/sh',
-      datasourceTemplate: 'github-releases',
-      extractVersionTemplate: '^v(?<version>.+)$',
-    },
-    {
-      customType: 'regex',
-      managerFilePatterns: [
         '/home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [

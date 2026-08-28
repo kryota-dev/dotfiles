@@ -994,7 +994,7 @@ SHIMEOF
 @test "codex agent profile renders the workspace-write permission posture" {
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   local rendered
-  rendered="$(chezmoi cat "${HOME}/.codex/agent.config.toml" --source "${HOME_DIR}" 2>/dev/null)"
+  rendered="$(_render_target_template "${HOME_DIR}/dot_codex/private_agent.config.toml.tmpl")"
   grep -qx 'sandbox_mode = "workspace-write"' <<<"$rendered"
   grep -qx 'approval_policy = "never"' <<<"$rendered"
   grep -qx 'web_search = "cached"' <<<"$rendered"
@@ -1004,7 +1004,7 @@ SHIMEOF
 @test "codex shared profile does not leak permission keys to interactive sessions" {
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   local rendered
-  rendered="$(chezmoi cat "${HOME}/.codex/shared.config.toml" --source "${HOME_DIR}" 2>/dev/null)"
+  rendered="$(_render_target_template "${HOME_DIR}/dot_codex/private_shared.config.toml.tmpl")"
   grep -qx 'model_reasoning_effort = "xhigh"' <<<"$rendered"
   # The shared profile must stay permission-free (AC-004).
   run grep -Eq '^(sandbox_mode|approval_policy|network_access|web_search)[[:space:]]*=' <<<"$rendered"
@@ -1904,6 +1904,61 @@ FAKE_CLAUDE
   [ "$status" -eq 1 ]
 }
 
+# Print every ".chezmoiremove entry <-> managed path" pair that differs by case only.
+#
+#   $1  path to a .chezmoiremove-style file (blank lines and #-comments ignored)
+#   $2  newline-separated managed paths
+#
+# Split out of the test below so the comparison itself can be exercised against a synthetic
+# fixture. The live check can only ever assert "no collisions", so a comparison broken into
+# always returning nothing would be indistinguishable from a clean tree.
+#
+# Returns 1 without output when $1 yields no entries at all, which lets the caller tell a
+# guard that checked nothing apart from a guard that found nothing.
+#
+# Case-folding runs ONE `tr` per side instead of one command substitution per comparison.
+# The pairwise form spawned ~76k processes (28 entries x 1364 managed paths x 2) and cost
+# 148.9s of a 329.5s `make test` -- 45% of the suite -- for what is pure string equality
+# (#517). `tr` gets the identical character class the old loop used, and both sides are read
+# line-wise so no element can contain a newline, which makes folding them in one batch
+# byte-for-byte equivalent to folding each string alone. `${v,,}` would be shorter but needs
+# bash 4+, which nothing else under tests/ relies on (macOS still ships bash 3.2).
+_case_only_collisions() {
+  local remove_file="$1" managed="$2"
+
+  local entries=() line
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    entries+=("$line")
+  done <"$remove_file"
+  [ "${#entries[@]}" -gt 0 ] || return 1
+
+  local managed_lower entries_lower_raw
+  managed_lower="$(printf '%s\n' "$managed" | tr '[:upper:]' '[:lower:]')"
+  entries_lower_raw="$(printf '%s\n' "${entries[@]}" | tr '[:upper:]' '[:lower:]')"
+
+  # Index alignment: folding to lower case never turns a non-empty line into an empty one, so
+  # putting both managed lists through the same "non-empty" filter keeps them on matching
+  # indices. entries[] is already free of blank and comment lines, so its folded copy has
+  # exactly one line per element.
+  local entries_lower=()
+  while IFS= read -r line; do entries_lower+=("$line"); done <<<"$entries_lower_raw"
+
+  local managed_paths=() managed_paths_lower=() m
+  while IFS= read -r m; do [ -n "$m" ] && managed_paths+=("$m"); done <<<"$managed"
+  while IFS= read -r m; do [ -n "$m" ] && managed_paths_lower+=("$m"); done <<<"$managed_lower"
+
+  local i j
+  for i in "${!entries[@]}"; do
+    for j in "${!managed_paths[@]}"; do
+      [ "${managed_paths[j]}" = "${entries[i]}" ] && continue
+      [ "${managed_paths_lower[j]}" = "${entries_lower[i]}" ] || continue
+      printf '%s <-> %s\n' "${entries[i]}" "${managed_paths[j]}"
+    done
+  done
+  return 0
+}
+
 @test ".chezmoiremove entries never collide with a managed path by case only (#351)" {
   # On macOS's default case-insensitive APFS, a .chezmoiremove entry that
   # differs from a real managed path only by case (e.g. skill.md vs SKILL.md)
@@ -1913,33 +1968,64 @@ FAKE_CLAUDE
   # check every entry against `chezmoi managed` to guard against reintroducing
   # this class of bug.
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi unavailable"
-  local remove_file="${HOME_DIR}/.chezmoiremove"
   local managed
+  # `--exclude=externals` would cut this call roughly in half, and it is still not an option:
+  # it drops managed paths from 1364 to 289, and under .agents/skills/ -- where every one of
+  # the 28 .chezmoiremove entries lives -- from 1196 to 127. #351 was itself an external's
+  # SKILL.md, so excluding externals would drop 89% of what this guard exists to check. The
+  # remaining seconds here are chezmoi's own source-state build; they stay.
   managed="$(chezmoi managed --source "${HOME_DIR}" 2>/dev/null)"
   [ -n "$managed" ]
 
-  local entries=()
-  local line
-  while IFS= read -r line; do
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    entries+=("$line")
-  done <"$remove_file"
-  [ "${#entries[@]}" -gt 0 ]
+  run _case_only_collisions "${HOME_DIR}/.chezmoiremove" "$managed"
+  # status 1 means no entry parsed at all -- a guard silently checking nothing.
+  [ "$status" -eq 0 ]
+  [ -z "$output" ] || { printf '%s\n' "$output" >&2; false; }
+}
 
-  local collisions="" entry lower_entry m lower_m
-  for entry in "${entries[@]}"; do
-    lower_entry="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
-    while IFS= read -r m; do
-      [ -z "$m" ] && continue
-      [ "$m" = "$entry" ] && continue
-      lower_m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]')"
-      if [ "$lower_m" = "$lower_entry" ]; then
-        collisions+="${entry} <-> ${m}"$'\n'
-      fi
-    done <<<"$managed"
-  done
+@test ".chezmoiremove collision detection reports case-only clashes and nothing else" {
+  # The guard above can only ever assert the absence of collisions, so it would look exactly
+  # the same if the comparison stopped working. Pin the detection itself against a fixture
+  # holding one clash of each shape #351 produced.
+  local fixture="${BATS_TEST_TMPDIR}/chezmoiremove"
+  cat >"$fixture" <<'FIXTURE'
+# a comment, ignored
 
-  [ -z "$collisions" ] || { printf '%s' "$collisions" >&2; false; }
+.agents/skills/example/skill.md
+.agents/skills/OTHER
+.agents/skills/exact-match
+.agents/skills/no-collision
+FIXTURE
+  # The blank line is load-bearing: the rewrite's subtlest invariant is that `managed` and its
+  # folded copy stay on matching indices because BOTH go through the same "non-empty" filter.
+  # A clash after a blank line only resolves correctly while that stays symmetric.
+  local managed
+  managed="$(printf '%s\n' \
+    '.agents/skills/example/SKILL.md' \
+    '' \
+    '.agents/skills/other' \
+    '.agents/skills/exact-match' \
+    '.agents/skills/unrelated')"
+
+  run _case_only_collisions "$fixture" "$managed"
+  [ "$status" -eq 0 ]
+  # The file-level clash (#351's own shape) and the directory-level one are both reported...
+  printf '%s\n' "$output" | grep -qxF '.agents/skills/example/skill.md <-> .agents/skills/example/SKILL.md'
+  printf '%s\n' "$output" | grep -qxF '.agents/skills/OTHER <-> .agents/skills/other'
+  # ...while an entry that matches a managed path exactly (what every real entry does) and
+  # one that matches nothing are left alone.
+  ! printf '%s\n' "$output" | grep -q 'exact-match'
+  ! printf '%s\n' "$output" | grep -q 'no-collision'
+  [ "$(printf '%s\n' "$output" | grep -c ' <-> ')" -eq 2 ]
+}
+
+@test ".chezmoiremove collision detection fails loudly when no entry parses" {
+  # Separates "the guard ran and found nothing" from "the guard had nothing to run against",
+  # which the old inline form reported identically.
+  local fixture="${BATS_TEST_TMPDIR}/empty"
+  printf '# only a comment\n\n' >"$fixture"
+  run _case_only_collisions "$fixture" '.a/b'
+  [ "$status" -eq 1 ]
 }
 
 @test "mcp setup registers all servers as user scope for every account config dir" {
@@ -2416,11 +2502,11 @@ _gate_decision() {
   [ "$marker" = yes ]
 }
 
-# Rendered-target checks (codex review): verify the template actually produces
-# the intended files, not just that the source greps right.
+# Rendered-target check (codex review): verify the template actually renders the
+# intended content, not just that the source greps right.
 @test "AGENTS.md renders with the coding-standards inlined" {
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
-  chezmoi cat "${HOME}/AGENTS.md" --source "${REPO_ROOT}/home" 2>/dev/null | grep -q 'Coding standards (house)'
+  _render_target_template "${HOME_DIR}/AGENTS.md.tmpl" | grep -q 'Coding standards (house)'
 }
 
 # ---------------------------------------------------------------------------
@@ -2757,6 +2843,79 @@ _gate_decision() {
   local r="${REPO_ROOT}/.github/renovate.json5"
   grep -qF 'binwiederhier/ntfy' "$r"
   grep -qF "compose\\\\.yaml\\\\.tmpl" "$r"
+}
+
+@test "CI resolves shellcheck and shfmt from the mise pin, not from the runner image (#475)" {
+  local ci="${REPO_ROOT}/.github/workflows/ci.yml"
+  local mise="${HOME_DIR}/dot_config/mise/config.toml"
+  # The Lint job used to install no shellcheck at all and lint with whatever build the
+  # runner image shipped, while `make lint` locally used the mise pin -- so the two could
+  # disagree on SC2015 and a change could only fail after a push. Both CI jobs must derive
+  # the version from the pin; the Test job needs it too, because tests/shellcheck.bats runs
+  # shellcheck itself with the same flags `make lint` uses.
+  local tool version
+  for tool in shellcheck shfmt; do
+    version="$(sed -n "s/^${tool} = \"\(.*\)\"\$/\1/p" "$mise")"
+    [ -n "$version" ] || {
+      echo "no ${tool} pin in ${mise}"
+      false
+    }
+    # The workflow reads the version out of the mise config...
+    grep -qE "${tool}.*home/dot_config/mise/config\.toml" "$ci" || {
+      echo "ci.yml does not resolve the ${tool} version from the mise pin"
+      false
+    }
+    # ...and never repeats the number, which is the drift this guards against.
+    run grep -nF "$version" "$ci"
+    [ "$status" -ne 0 ] || {
+      echo "ci.yml hardcodes the ${tool} version ${version}: ${output}"
+      false
+    }
+  done
+  # Bind the checks to each job rather than to the file as a whole. A file-wide count still
+  # passes if BOTH shellcheck installs land in the lint job while the test job quietly falls
+  # back to the runner image's build -- which is #475 again, in the job that runs
+  # tests/shellcheck.bats. (Confirmed against a hand-broken ci.yml: every file-wide assertion
+  # here passed it.) `steps.*` references are job-scoped in Actions, so finding one inside a
+  # job's block proves the version came from a step in that same job.
+  local job block
+  for job in lint test; do
+    block="$(awk -v j="  ${job}:" '$0 == j { on = 1; next } /^  [a-z]/ { on = 0 } on' "$ci")"
+    [ -n "$block" ] || {
+      echo "could not slice the ${job} job out of ${ci}"
+      false
+    }
+    grep -qF 'home/dot_config/mise/config.toml' <<<"$block" || {
+      echo "the ${job} job reads no pin from the mise config"
+      false
+    }
+    grep -qF 'koalaman/shellcheck/releases/download/v${VERSION}' <<<"$block" || {
+      echo "the ${job} job does not install the pinned shellcheck"
+      false
+    }
+    grep -qF 'VERSION: ${{ steps.' <<<"$block" || {
+      echo "the ${job} job's shellcheck version does not come from a step output"
+      false
+    }
+    grep -qF 'shellcheck --version | grep -qxF "version: ${VERSION}"' <<<"$block" || {
+      echo "the ${job} job does not assert the installed shellcheck matches the pin"
+      false
+    }
+    if [ "$job" = lint ]; then
+      # shfmt is only needed where `make lint` runs.
+      grep -qF 'mvdan/sh/releases/download/v${VERSION}' <<<"$block"
+      grep -qF 'shfmt --version | grep -qxF "v${VERSION}"' <<<"$block"
+    fi
+  done
+  # Exactly one install each -- no stray third copy drifting in.
+  [ "$(grep -c 'koalaman/shellcheck/releases/download' "$ci")" -eq 2 ]
+  [ "$(grep -c 'mvdan/sh/releases/download' "$ci")" -eq 1 ]
+  # shellcheck must not come back through apt in either job: that build is unpinned, and it
+  # is what made the Lint job and a local `make lint` disagree in the first place.
+  ! grep -qE 'apt-get install .*shellcheck' "$ci"
+  # With the literal gone from ci.yml, the regex manager that used to track it there would
+  # match nothing; the mise manager covers both tools instead.
+  ! grep -qF 'SHFMT_VERSION' "${REPO_ROOT}/.github/renovate.json5"
 }
 
 @test "1password ITEMS no longer references the ntfy item" {

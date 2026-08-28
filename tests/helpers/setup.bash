@@ -50,6 +50,28 @@ _render_script_template() {
     "$tmpl" | chezmoi execute-template --source "${HOME_DIR}" >"$out"
 }
 
+# Render a chezmoi *target* template (as opposed to the script templates above) to stdout.
+#
+# `chezmoi cat <target>` renders the same bytes, but it has to build the whole source state
+# first: the 26 external declarations expand to ~1.3k managed paths, so every call costs
+# ~16.4s where this one costs ~0.03s (#517 -- three tests spent 64.5s of a 329.5s `make test`
+# between them). Verified byte-identical for AGENTS.md and both codex profiles before the
+# swap.
+#
+# Use it whenever the assertion is about rendered *content*. It is NOT a drop-in for
+# `chezmoi cat` when the point of the test is chezmoi's own target resolution -- source-path
+# to target-path naming, .chezmoiignore exclusions, or attributes like private_ -- because
+# it is handed the source file directly and never consults the target state.
+#
+# Returns 1 without output when chezmoi is unavailable, matching _render_script_template so
+# callers can `skip`. stderr is deliberately not silenced: a template that fails to render
+# should surface the reason rather than look like an empty file.
+_render_target_template() {
+  local tmpl="$1"
+  command -v chezmoi >/dev/null 2>&1 || return 1
+  chezmoi execute-template --source "${HOME_DIR}" <"$tmpl"
+}
+
 # Octal permission bits of a file or directory (e.g. 700), on both CI platforms.
 #
 # The obvious `stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"` chain is wrong on GNU: there
