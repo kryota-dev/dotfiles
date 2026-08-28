@@ -16,8 +16,10 @@ load helpers/setup
 # would `skip` in CI — no longer holds. The reason that does: a jq assertion skips on a machine
 # without jq, and these guards are the ones you most want green locally before pushing a
 # settings change. What genuinely needs a real JSON parse is already covered — tests/files.bats
-# asserts on this same file with `jq -e` in ~25 places, so a malformed settings.json fails
-# loudly there in CI. These guards stay parser-free rather than duplicate that.
+# has a whole family of tests that parse this same file with jq, so a malformed settings.json
+# fails loudly there in CI. (Deliberately not stating how many: that count drifts with every
+# edit to files.bats, and a number that goes stale is the failure this block just corrected.)
+# These guards stay parser-free rather than duplicate that coverage.
 #
 # See: https://code.claude.com/docs/en/permissions
 
