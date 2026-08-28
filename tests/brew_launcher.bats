@@ -12,8 +12,10 @@ load helpers/setup
 # (CI-safe). The stub brew logs its argv to $BREW_CALLS, writes a small but realistic Brewfile to
 # the --file= target on `bundle dump` (unless $STUB_DUMP_EXIT is non-zero, which simulates a dump
 # failure), and otherwise exits with $STUB_BREW_EXIT. The dump payload deliberately contains both
-# Go standard-library entries and a genuine module so the wrapper's post-dump sanitizing can be
-# exercised. The stub chezmoi fails `source-path` when $STUB_CHEZMOI_SP_FAIL is set.
+# Go standard-library entries and a genuine module, plus a retired-ADAM-ID mas entry and a
+# still-valid mas entry dumped under a mismatched local bundle name, so the wrapper's post-dump
+# sanitizing can be exercised. The stub chezmoi fails `source-path` when $STUB_CHEZMOI_SP_FAIL is
+# set.
 
 WRAPPER="${HOME_DIR}/dot_local/launchers/executable_brew"
 
@@ -54,6 +56,8 @@ go "cmd/go"
 go "cmd/gofmt"
 go "github.com/owner/repo/cmd/tool"
 mas "Xcode", id: 497799835
+mas "RunCat", id: 1429033973
+mas "RunCatNeo", id: 6757801838
 DUMPEOF
       fi
       ;;
@@ -230,6 +234,23 @@ E
   grep -qF 'mas "Xcode", id: 497799835' "$SRC/dot_Brewfile"
 }
 
+@test "brew wrapper: the dump drops a retired-ADAM-ID mas entry and renames the surviving one" {
+  _stubs
+  _run_wrapper install foo
+  [ "$status" -eq 0 ]
+  # RunCat's ADAM ID (1429033973) is retired — `mas info 1429033973` reports "No apps found" — but
+  # it lingers in `mas list` as long as the app bundle stays installed locally, so every dump would
+  # otherwise write it straight back. Anchored on the ID, not the display name, since `mas list`
+  # names are environment-dependent.
+  ! grep -q 'id: 1429033973' "$SRC/dot_Brewfile"
+  # RunCat Neo's ID (6757801838) is still valid, but `mas list` reports the local bundle name
+  # ("RunCatNeo", no space) rather than the App Store display name ("RunCat Neo"). The sanitizer
+  # rewrites the name in place, keyed on the ID.
+  grep -qxF 'mas "RunCat Neo", id: 6757801838' "$SRC/dot_Brewfile"
+  # A third mas entry with neither ID must survive untouched.
+  grep -qxF 'mas "Xcode", id: 497799835' "$SRC/dot_Brewfile"
+}
+
 @test "brew wrapper: sanitizing leaves no staging file in the chezmoi source" {
   _stubs
   _run_wrapper install foo
@@ -247,7 +268,7 @@ E
   [ "$status" -eq 0 ]
   # Nothing was written, so there is nothing to sanitize — and no sanitize warning to emit either.
   [ ! -f "$SRC/dot_Brewfile" ]
-  ! printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+  ! printf '%s\n' "$output" | grep -qF 'could not sanitize dumped Brewfile entries'
 }
 
 @test "brew wrapper: a dump made entirely of stdlib go entries is still sanitized" {
@@ -259,7 +280,7 @@ E
   # Brewfile must come out empty, not untouched.
   [ -f "$SRC/dot_Brewfile" ]
   ! grep -q '^go "cmd/' "$SRC/dot_Brewfile"
-  ! printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+  ! printf '%s\n' "$output" | grep -qF 'could not sanitize dumped Brewfile entries'
 }
 
 @test "brew wrapper: a sanitize failure warns, keeps the dump, and preserves the exit code" {
@@ -275,7 +296,7 @@ MVEOF
   STUB_BREW_EXIT=4 _run_wrapper install foo
   # AC3: the caller sees the real brew's status, never the sanitizer's.
   [ "$status" -eq 4 ]
-  printf '%s\n' "$output" | grep -qF 'could not strip stdlib go entries'
+  printf '%s\n' "$output" | grep -qF 'could not sanitize dumped Brewfile entries'
   # The dumped Brewfile survives untouched rather than being left half-written or removed.
   grep -qF 'brew "coreutils"' "$SRC/dot_Brewfile"
   # ...and the staging file is cleaned up even on the failure path.
