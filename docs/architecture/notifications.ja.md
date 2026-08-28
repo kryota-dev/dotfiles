@@ -13,9 +13,11 @@ tailnet 上のデバイスから subscribe されます（kryota-dev/dotfiles#33
 **スコープの境界**: このページが扱うのは Claude Code の `Notification`/`Stop` フックから
 ntfy への経路に加え、平日朝ブリーフの配信（#361）、週次 knowledge-distill 配信（#368）、
 通知履歴ダッシュボード（#371）です。
-本システムが意図的に手を付けていない独立したローカル限定の通知経路が他に2つあります:
-`clv2-session-notify.sh`（SessionStart、instinct クラスターのレビュー促し）と `notify` zsh
-エイリアス（可聴チャイム。これらの wrapper も失敗時のアラート音として再利用しています）。
+本システムが意図的に手を付けていない独立したローカル限定の通知経路が他に1つあります:
+`notify` zsh エイリアス（可聴チャイム。これらの wrapper も失敗時のアラート音として再利用して
+います）。もう1つあった `clv2-session-notify.sh`（SessionStart、instinct クラスターのレビュー
+促し）は、移行ではなく #496（#473 AC-027）で削除しました: セッション開始の促しは行動要求では
+なく、本ページが定義する通知契約に居場所がないためです。
 `morning-radar.sh`（launchd、平日ブリーフ）は以前はローカル `osascript` で通知していましたが、
 現在はブリーフを tailnet の HTML ページにレンダリングし、それにリンクする ntfy 通知を送ります
 —— 下記[朝ブリーフの配信](#朝ブリーフの配信-361)を参照。`knowledge-distill-radar.sh`

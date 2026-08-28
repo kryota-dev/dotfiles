@@ -44,7 +44,7 @@ ECC 継続学習 v2（Layer 1-3）が観測から蓄積した instinct を、`/e
 **呼び出し契機**:
 
 - **user 手動**: `/retrospective-codify --input=instinct-clusters`
-- **system push**: CLV2 の SessionStart 通知 hook（`clv2-session-notify.sh`）が cluster≥1 を検出してデスクトップ通知（最大 7 日 1 回）。statusline の 🧬N も同じ cluster 数を表示する。通知を見た user が本モードを起動する **pull→push** の経路。
+- **system push**: 廃止。CLV2 の SessionStart 通知 hook（`clv2-session-notify.sh`）が cluster≥1 でデスクトップ通知を出す経路は #496 で削除された（セッション開始の通知は行動要求ではないため）。statusline の 🧬N セグメントは残るが、値を書き込む producer がいないため凍結する。現在の起動経路は上記の user 手動のみ。
 
 **cluster の取得**（engine は改変せず、読み取り専用で利用する）:
 
@@ -125,7 +125,7 @@ See @.claude/conventions/<topic>.md for <description>.
 ## トリガー
 
 - **user 手動**: `/retrospective-codify`（会話からの抽出）/ `/retrospective-codify --input=instinct-clusters`（CLV2 cluster からの抽出）
-- **CLV2 push 連携**: SessionStart 通知 hook（`clv2-session-notify.sh`）が review-ready cluster≥1 を検出すると最大 7 日 1 回デスクトップ通知し、statusline 🧬N にも cluster 数が出る。user はそれを契機に `--input=instinct-clusters` を起動する（auto 実行ではなく user 介入前提）。
+- **CLV2 push 連携**: 廃止（#496）。SessionStart 通知 hook（`clv2-session-notify.sh`）は削除され、review-ready cluster のデスクトップ通知は出ない。statusline 🧬N は残るが producer がいないため値は凍結する。cluster からの抽出は上記の user 手動起動で行う。
 - **将来連携（未実装）**: Theme A SessionEnd hook からの auto trigger（interactive 既定で user 介入前提）。
 
 ## failure mode と対処
