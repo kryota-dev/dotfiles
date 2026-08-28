@@ -24,6 +24,10 @@ import {
 } from "../home/dot_local/lib/frontier-harness/readiness.mjs";
 import { runWithRolloutGuard } from "../home/dot_local/lib/frontier-harness/rollout.mjs";
 import { chooseRoute } from "../home/dot_local/lib/frontier-harness/router.mjs";
+import {
+  GitWorktreeUnavailableError,
+  resolveGitCommonDirectory,
+} from "../home/dot_local/lib/frontier-harness/state-root.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 import { normalizeTask } from "../home/dot_local/lib/frontier-harness/task.mjs";
 
@@ -74,6 +78,21 @@ const shippedConfig = normalizeConfig(
   ),
 );
 
+// frontend.primary の accountScope 制約を外した派生 config。
+// 制約を残すと doctor が scope 不一致で先に unavailable を返し、
+// readiness が scope ごとに分離されているかを分離して観測できない。
+const scopeAgnosticConfig = normalizeConfig({
+  ...baseConfigInput,
+  capabilities: {
+    ...baseConfigInput.capabilities,
+    "frontend.primary": {
+      provider: "antigravity",
+      model: CONFIGURED_FRONTEND_MODEL,
+      effort: "high",
+    },
+  },
+});
+
 const COMMAND_PATHS = {
   antigravity: "/opt/homebrew/bin/agy",
   claude: "/Users/example/.local/launchers/claude",
@@ -102,6 +121,46 @@ function temporaryDirectory(context) {
   const directory = mkdtempSync(path.join(tmpdir(), "frontier-harness-test-"));
   context.after(() => rmSync(directory, { force: true, recursive: true }));
   return directory;
+}
+
+// git fixture 用の共通設定。本リポジトリはコミット署名（1Password SSH）と gitleaks の
+// pre-commit hook を使うため、明示的に無効化しないとテストが実行環境の設定に依存する。
+const GIT_FIXTURE_FLAGS = Object.freeze([
+  "-c",
+  "user.email=frontier-harness@example.com",
+  "-c",
+  "user.name=frontier-harness test",
+  "-c",
+  "commit.gpgsign=false",
+]);
+
+function git(cwd, args) {
+  return execFileSync("git", [...GIT_FIXTURE_FLAGS, ...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+// worktree を追加するには HEAD が要るため、空コミットを 1 つ置く。
+function initRepository(directory) {
+  mkdirSync(directory, { recursive: true });
+  git(directory, ["init", "--quiet", directory]);
+  git(directory, ["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "init"]);
+  return directory;
+}
+
+function writeTask(directory) {
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "Record a shadow route",
+      modality: ["browser"],
+      hasDeterministicOracle: true,
+    }),
+  );
+  return taskPath;
 }
 
 test("normalizeConfig rejects an invalid rollout before an adapter runs", () => {
@@ -567,6 +626,9 @@ test("fh doctor --probe persists readiness without persisting credentials", (con
   const output = [];
   assert.equal(
     runCli(["doctor", "--probe", "--json"], {
+      // accountScope を注入しないと process.env 依存になる。判定材料が無い環境では
+      // "unknown" に倒れ、personal 限定の frontend.primary が unavailable になる。
+      accountScope: "personal",
       config,
       statePath,
       readinessPath,
@@ -593,6 +655,7 @@ test("fh doctor --probe persists readiness through the default state root", (con
   assert.equal(
     runCli(["doctor", "--probe", "--json"], {
       cwd: directory,
+      accountScope: "personal",
       config,
       commandPaths: COMMAND_PATHS,
       probeProvider: () => ({
@@ -604,13 +667,18 @@ test("fh doctor --probe persists readiness through the default state root", (con
     0,
   );
 
+  // readiness は account scope ごとに分かれる（共有ファイルは作らない）。
   const readinessPath = path.join(
     directory,
     ".git",
     "frontier-harness",
-    "readiness.json",
+    "readiness.personal.json",
   );
   assert.equal(existsSync(readinessPath), true);
+  assert.equal(
+    existsSync(path.join(directory, ".git", "frontier-harness", "readiness.json")),
+    false,
+  );
 
   // 続く run が同じ state root の readiness を読み、frontend.primary を選べる。
   const taskPath = path.join(directory, "task.json");
@@ -862,4 +930,517 @@ test("fh verify and review record shadow plans without running a shell command",
     ["review_plan", "verification_plan"],
   );
   store.close();
+});
+
+test("fh resolves the account scope from the launcher suffix convention", () => {
+  const cases = [
+    [{ CLAUDE_CONFIG_DIR: "/Users/example/.claude" }, "personal"],
+    [{ CODEX_HOME: "/Users/example/.codex" }, "personal"],
+    [{ CLAUDE_CONFIG_DIR: "/Users/example/.claude-r06" }, "r06"],
+    [{ CODEX_HOME: "/Users/example/.codex-r06" }, "r06"],
+    // 想定外の値は「不明」に倒す（既存の fail-closed 挙動を固定する）。
+    [{ CLAUDE_CONFIG_DIR: "/Users/example/.claude-experimental" }, "unknown"],
+    // 2 つの変数が食い違うときも「不明」に倒す（既存の fail-closed 挙動を固定する）。
+    [
+      {
+        CLAUDE_CONFIG_DIR: "/Users/example/.claude",
+        CODEX_HOME: "/Users/example/.codex-r06",
+      },
+      "unknown",
+    ],
+    // 判定材料がまったく無いときも「不明」に倒す。
+    // 以前はここだけ personal に倒れており、他の分岐と非対称だった。
+    [{}, "unknown"],
+  ];
+
+  for (const [environment, expected] of cases) {
+    const output = [];
+    assert.equal(
+      runCli(["doctor", "--json"], {
+        environment: { ...environment, PATH: "" },
+        commandPaths: COMMAND_PATHS,
+        config,
+        verifiedModels: VERIFIED_MODELS,
+        write: (line) => output.push(line),
+      }),
+      0,
+    );
+    assert.equal(JSON.parse(output.pop()).accountScope, expected);
+  }
+});
+
+test("fh keeps a personal-only capability unavailable without a resolved account", () => {
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--json"], {
+      environment: { PATH: "" },
+      commandPaths: COMMAND_PATHS,
+      config,
+      verifiedModels: VERIFIED_MODELS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const report = JSON.parse(output.pop());
+  assert.equal(report.accountScope, "unknown");
+  assert.equal(report.capabilities["frontend.primary"].status, "unavailable");
+  // doctor の出力キーは機械可読の契約なので壊さない。
+  assert.deepEqual(Object.keys(report).sort(), [
+    "accountScope",
+    "capabilities",
+    "rollout",
+  ]);
+});
+
+test("readiness verified under one account scope is not reused by another", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const output = [];
+  const doctorOptions = {
+    config: scopeAgnosticConfig,
+    statePath,
+    commandPaths: COMMAND_PATHS,
+    write: (line) => output.push(line),
+  };
+
+  assert.equal(
+    runCli(["doctor", "--probe", "--json"], {
+      ...doctorOptions,
+      accountScope: "personal",
+      probeProvider: () => ({
+        verified: true,
+        models: [CONFIGURED_FRONTEND_MODEL],
+      }),
+    }),
+    0,
+  );
+  assert.equal(
+    JSON.parse(output.pop()).capabilities["frontend.primary"].status,
+    "available",
+  );
+
+  // 同じ scope なら自分の readiness を再利用する。
+  assert.equal(
+    runCli(["doctor", "--json"], { ...doctorOptions, accountScope: "personal" }),
+    0,
+  );
+  assert.equal(
+    JSON.parse(output.pop()).capabilities["frontend.primary"].status,
+    "available",
+  );
+
+  // 別 scope は personal の readiness を流用しない。
+  assert.equal(
+    runCli(["doctor", "--json"], { ...doctorOptions, accountScope: "r06" }),
+    0,
+  );
+  assert.equal(
+    JSON.parse(output.pop()).capabilities["frontend.primary"].status,
+    "unverified",
+  );
+
+  assert.equal(existsSync(path.join(directory, "readiness.personal.json")), true);
+  assert.equal(existsSync(path.join(directory, "readiness.r06.json")), false);
+  // scope の区別を持たない共有キャッシュを残さない。
+  assert.equal(existsSync(path.join(directory, "readiness.json")), false);
+});
+
+test("fh refuses to build a readiness path from an unsafe account scope", (context) => {
+  const directory = temporaryDirectory(context);
+  assert.throws(
+    () =>
+      runCli(["doctor", "--json"], {
+        accountScope: "../../escape",
+        config,
+        statePath: path.join(directory, "state.db"),
+        commandPaths: COMMAND_PATHS,
+        write: () => {},
+      }),
+    /account scope/,
+  );
+});
+
+test("fh refuses to resolve the config path from the working directory", () => {
+  // HOME が無いと path.join("", ...) が cwd 相対になり、untrusted repository 同梱の
+  // config が escalation 方針を差し替えうる。
+  assert.throws(
+    () => runCli(["doctor", "--json"], { environment: { PATH: "" }, write: () => {} }),
+    /HOME/,
+  );
+  assert.throws(
+    () =>
+      runCli(["doctor", "--json"], {
+        environment: { HOME: "relative/home", PATH: "" },
+        write: () => {},
+      }),
+    /HOME/,
+  );
+  assert.throws(
+    () =>
+      runCli(["doctor", "--json"], {
+        environment: {
+          HOME: "/Users/example",
+          FH_CONFIG_PATH: ".harness/config.json",
+          PATH: "",
+        },
+        write: () => {},
+      }),
+    /FH_CONFIG_PATH/,
+  );
+});
+
+test("fh loads the config named by an absolute FH_CONFIG_PATH", (context) => {
+  const directory = temporaryDirectory(context);
+  const configPath = path.join(directory, "config.json");
+  writeFileSync(configPath, JSON.stringify(baseConfigInput));
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--json"], {
+      environment: { HOME: "/Users/example", FH_CONFIG_PATH: configPath, PATH: "" },
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      verifiedModels: VERIFIED_MODELS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(
+    JSON.parse(output.pop()).capabilities["frontend.primary"].status,
+    "available",
+  );
+});
+
+test("fh refuses a git common directory the working tree does not own", (context) => {
+  const directory = temporaryDirectory(context);
+  const untrusted = initRepository(path.join(directory, "untrusted"));
+  const other = initRepository(path.join(directory, "other"));
+  // untrusted repository が同梱した `.git` ファイルで、別リポジトリの metadata を指す。
+  const nested = path.join(untrusted, "sub");
+  mkdirSync(nested);
+  writeFileSync(path.join(nested, ".git"), `gitdir: ${path.join(other, ".git")}\n`);
+
+  assert.throws(
+    () =>
+      runCli(["run", "--task", writeTask(directory), "--json"], {
+        cwd: nested,
+        accountScope: "personal",
+        commandPaths: COMMAND_PATHS,
+        config,
+        write: () => {},
+      }),
+    /not owned by the current working tree/,
+  );
+  // 誘導先に state ディレクトリを作らせない。
+  assert.equal(existsSync(path.join(other, ".git", "frontier-harness")), false);
+});
+
+test("fh resolves the state root through a linked worktree", (context) => {
+  const directory = temporaryDirectory(context);
+  const main = initRepository(path.join(directory, "main"));
+  const linked = path.join(directory, "linked");
+  git(main, ["worktree", "add", "--quiet", linked, "-b", "linked-branch"]);
+
+  const output = [];
+  assert.equal(
+    runCli(["run", "--task", writeTask(directory), "--json"], {
+      cwd: linked,
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  // linked worktree では common dir が作業ツリーの外を指すのが正常。
+  assert.equal(
+    existsSync(path.join(main, ".git", "frontier-harness", "state.db")),
+    true,
+  );
+});
+
+test("fh resolves the state root inside a submodule working tree", (context) => {
+  const directory = temporaryDirectory(context);
+  const parent = initRepository(path.join(directory, "parent"));
+  const child = initRepository(path.join(directory, "child"));
+  // git 2.38 以降はローカル clone に file protocol の明示許可が要る。
+  git(parent, [
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    "--quiet",
+    child,
+    "sub",
+  ]);
+
+  const output = [];
+  assert.equal(
+    runCli(["run", "--task", writeTask(directory), "--json"], {
+      cwd: path.join(parent, "sub"),
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(
+    existsSync(
+      path.join(parent, ".git", "modules", "sub", "frontier-harness", "state.db"),
+    ),
+    true,
+  );
+});
+
+test("fh doctor still reports outside a git working tree", (context) => {
+  const directory = temporaryDirectory(context);
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--json"], {
+      cwd: directory,
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  // state root が無いので readiness は永続化されず unverified に留まる。
+  assert.equal(
+    JSON.parse(output.pop()).capabilities["frontend.primary"].status,
+    "unverified",
+  );
+});
+
+// 実 git は相対パスも symlink も返さない（`--path-format=absolute` を付け、symlink は
+// realpath に解決される）。これらの分岐は runGit を差し替えて直接検証する。
+function stubGit({ commonDirectory, gitDirectory, topLevel, superproject = "" }) {
+  return (cwd, args) => {
+    if (args.includes("--show-superproject-working-tree")) {
+      return `${superproject}\n`;
+    }
+    if (superproject && cwd === superproject) {
+      return `${path.join(superproject, ".git")}\n`;
+    }
+    return `${commonDirectory}\n${gitDirectory}\n${topLevel}\n`;
+  };
+}
+
+test("state root resolution rejects a relative git common directory", (context) => {
+  const directory = temporaryDirectory(context);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(
+        directory,
+        stubGit({
+          commonDirectory: ".git",
+          gitDirectory: ".git",
+          topLevel: directory,
+        }),
+      ),
+    /must be an absolute path/,
+  );
+});
+
+test("state root resolution rejects a symlinked git common directory", (context) => {
+  const directory = temporaryDirectory(context);
+  const real = path.join(directory, "real.git");
+  mkdirSync(real);
+  writeFileSync(path.join(real, "HEAD"), "ref: refs/heads/main\n");
+  const link = path.join(directory, ".git");
+  symlinkSync(real, link);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(
+        directory,
+        stubGit({
+          commonDirectory: link,
+          gitDirectory: link,
+          topLevel: directory,
+        }),
+      ),
+    /must not be a symbolic link/,
+  );
+});
+
+test("state root resolution rejects a directory that is not git metadata", (context) => {
+  const directory = temporaryDirectory(context);
+  const notGit = path.join(directory, ".git");
+  mkdirSync(notGit);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(
+        directory,
+        stubGit({
+          commonDirectory: notGit,
+          gitDirectory: notGit,
+          topLevel: directory,
+        }),
+      ),
+    /not a git metadata directory/,
+  );
+});
+
+test("state root resolution reports a missing git working tree distinctly", (context) => {
+  const directory = temporaryDirectory(context);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(directory, () => {
+        // 実 git は working tree が無いとき status 128 で終了する。
+        const error = new Error("fatal: this operation must be run in a work tree");
+        error.status = 128;
+        throw error;
+      }),
+    /requires a git working tree/,
+  );
+});
+
+test("state root resolution propagates a git that could not be executed", (context) => {
+  const directory = temporaryDirectory(context);
+  // spawn 自体の失敗（git 不在・権限）は「working tree が無い」ではないため、
+  // doctor に握り潰させず原因を保ったまま伝播させる。
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(directory, () => {
+        const error = new Error("spawn git ENOENT");
+        error.code = "ENOENT";
+        throw error;
+      }),
+    (error) =>
+      error instanceof GitWorktreeUnavailableError === false &&
+      error.code === "ENOENT",
+  );
+});
+
+test("state root resolution rejects a worktrees path that only shares a prefix", (context) => {
+  const directory = temporaryDirectory(context);
+  const commonDirectory = path.join(directory, "common.git");
+  mkdirSync(commonDirectory);
+  writeFileSync(path.join(commonDirectory, "HEAD"), "ref: refs/heads/main\n");
+  const topLevel = path.join(directory, "tree");
+  mkdirSync(topLevel);
+  const gitDirectory = path.join(commonDirectory, "worktrees-evil", "child");
+  mkdirSync(gitDirectory, { recursive: true });
+  // forward link は成立させ、`worktrees` の prefix 判定だけを切り出して検証する。
+  writeFileSync(path.join(topLevel, ".git"), `gitdir: ${gitDirectory}\n`);
+  assert.throws(
+    () =>
+      resolveGitCommonDirectory(
+        topLevel,
+        stubGit({ commonDirectory, gitDirectory, topLevel }),
+      ),
+    /not owned by the current working tree/,
+  );
+});
+
+test("fh refuses a state root reached through an injected GIT_DIR", (context) => {
+  const directory = temporaryDirectory(context);
+  const victim = initRepository(path.join(directory, "victim"));
+  const victimWorktree = path.join(directory, "victim-wt");
+  git(victim, ["worktree", "add", "--quiet", victimWorktree, "-b", "victim-branch"]);
+  const untrusted = path.join(directory, "untrusted");
+  mkdirSync(untrusted);
+
+  // victim の「正当な」worktree admin dir を指すため、パスは本当に
+  // <commonDir>/worktrees/ 配下にある。攻撃者が握るのは topLevel だけ。
+  // node --test はファイル内のテストを直列実行するため、process.env の一時変更は安全。
+  const previous = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(victim, ".git", "worktrees", "victim-wt");
+  context.after(() => {
+    if (previous === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previous;
+  });
+
+  assert.throws(
+    () =>
+      runCli(["run", "--task", writeTask(directory), "--json"], {
+        cwd: untrusted,
+        accountScope: "personal",
+        commandPaths: COMMAND_PATHS,
+        config,
+        write: () => {},
+      }),
+    /not owned by the current working tree/,
+  );
+  assert.equal(existsSync(path.join(victim, ".git", "frontier-harness")), false);
+});
+
+test("fh doctor propagates an unowned state root instead of swallowing it", (context) => {
+  const directory = temporaryDirectory(context);
+  const untrusted = initRepository(path.join(directory, "untrusted"));
+  const other = initRepository(path.join(directory, "other"));
+  const nested = path.join(untrusted, "sub");
+  mkdirSync(nested);
+  writeFileSync(path.join(nested, ".git"), `gitdir: ${path.join(other, ".git")}\n`);
+
+  // 要件 5-5: 信頼できない state root の検出は doctor 経路でも握り潰さない。
+  for (const flags of [
+    ["doctor", "--json"],
+    ["doctor", "--probe", "--json"],
+  ]) {
+    assert.throws(
+      () =>
+        runCli(flags, {
+          cwd: nested,
+          accountScope: "personal",
+          commandPaths: COMMAND_PATHS,
+          config,
+          probeProvider: () => ({
+            verified: true,
+            models: [CONFIGURED_FRONTEND_MODEL],
+          }),
+          write: () => {},
+        }),
+      /not owned by the current working tree/,
+    );
+  }
+  assert.equal(existsSync(path.join(other, ".git", "frontier-harness")), false);
+});
+
+test("a run under another account scope does not reuse verified readiness", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const output = [];
+  assert.equal(
+    runCli(["doctor", "--probe", "--json"], {
+      accountScope: "personal",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      probeProvider: () => ({
+        verified: true,
+        models: [CONFIGURED_FRONTEND_MODEL],
+      }),
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  output.pop();
+
+  const taskPath = writeTask(directory);
+  // 同一 scope の run は自分の readiness を再利用する。
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).decision.capability, "frontend.primary");
+
+  // 別 scope の run は personal の readiness を流用しない（要件 2-2 の run 経路）。
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "r06",
+      config: scopeAgnosticConfig,
+      statePath,
+      commandPaths: COMMAND_PATHS,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).decision.capability, "executor.default");
 });

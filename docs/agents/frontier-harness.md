@@ -31,15 +31,46 @@ used in the active account scope. Antigravity is personal-only until a
 vendor-supported work-account mapping is explicitly verified. In an `r06`
 session, no automatic fallback to a personal `agy` credential is allowed.
 
+The account scope is derived from the `CLAUDE_CONFIG_DIR` and `CODEX_HOME`
+suffixes that the `cld` and `codex` launchers set per invocation. When both
+variables are absent, when they disagree, or when one carries an unrecognized
+value, the scope resolves to `unknown` and every capability that declares an
+`accountScope` stays unavailable. The launchers do not export those variables
+globally, so `fh doctor` run from a plain shell reports
+`accountScope: "unknown"`. That is the intended fail-closed default rather than
+a misconfiguration.
+
 ## State and evidence
 
 Configuration, policy, and mutable state have different owners:
 
 | Location | Contents | Git state |
 |---|---|---|
-| `~/.config/frontier-harness/config.json` | capability registry, rollout, retention | chezmoi-managed |
+| `$HOME/.config/frontier-harness/config.json`, or an absolute `FH_CONFIG_PATH` | capability registry, rollout, retention | chezmoi-managed |
 | `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`; enforcement lands with the onboarding step) | repository policy |
-| `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
+| the verified `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
+
+`fh` is meant to run on untrusted checkouts, so neither location is taken at
+face value. The two are resolved differently:
+
+- **Config path — never derived from the working directory.** `HOME` must be an
+  absolute path, and an `FH_CONFIG_PATH` override must be absolute too. A
+  relative value resolves against the working directory, which would let a
+  checked-out repository supply its own escalation policy.
+- **State root — derived from the working directory's git topology, then
+  verified.** The common directory is used only after it is confirmed absolute,
+  not a symbolic link, a real git metadata directory, and **owned by the current
+  working tree**. Ownership requires the working tree's `.git` to point at the
+  reported git directory, plus one of: it is `<toplevel>/.git`; it is the common
+  directory of a linked worktree whose admin directory links back to this
+  working tree; or it is a submodule directory inside the superproject's
+  metadata. Containment inside the working tree is deliberately *not* required,
+  because a linked worktree's common directory legitimately lives outside it.
+  `git init --separate-git-dir` is not supported: its topology cannot be
+  distinguished from a repository redirecting `.git` at somebody else's
+  metadata.
+- **Readiness cache — partitioned per account scope** as `readiness.<scope>.json`,
+  so a result verified under one profile is never reused by another.
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
 recordings, and accepted decisions. It never uses a model transcript or hidden
