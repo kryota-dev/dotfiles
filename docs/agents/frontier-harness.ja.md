@@ -38,19 +38,23 @@ launcher はこれらを global には export しないため、素の shell か
 | 検証済みの `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
 
 `fh` は untrusted な checkout の上で動くことを前提とするため、いずれの置き場所も
-作業ディレクトリの内容から解決しません。
+そのままでは信頼しません。2 つは解決の仕方が異なります。
 
-- `HOME` は絶対パスである必要があり、`FH_CONFIG_PATH` による上書きも絶対パスに限ります。
-  相対値は作業ディレクトリ基準で解決されるため、checkout 済み repository が自前の
-  escalation 方針を差し込めてしまいます。
-- git の common directory は、絶対パスであること、symlink でないこと、真正な git metadata
-  ディレクトリであること、そして **現在の作業ツリーが所有していること** を確認してから使います。
-  所有と認めるのは `<toplevel>/.git`、登録済み linked worktree の common directory、
-  superproject の metadata 配下にある submodule のディレクトリの 3 形態です。
+- **設定パス —— 作業ディレクトリからは決して導出しません。** `HOME` は絶対パスである必要があり、
+  `FH_CONFIG_PATH` による上書きも絶対パスに限ります。相対値は作業ディレクトリ基準で解決されるため、
+  checkout 済み repository が自前の escalation 方針を差し込めてしまいます。
+- **state root —— 作業ディレクトリの git topology から導出し、そのうえで検証します。**
+  common directory は、絶対パスであること、symlink でないこと、真正な git metadata ディレクトリで
+  あること、そして **現在の作業ツリーが所有していること** を確認してから使います。所有と認めるには、
+  作業ツリーの `.git` が報告された git directory を指していることに加えて、次のいずれかが必要です:
+  `<toplevel>/.git` であること、admin directory がこの作業ツリーを指し返す linked worktree の
+  common directory であること、superproject の metadata 配下にある submodule のディレクトリであること。
   作業ツリー配下にあること（containment）は意図的に要求しません。linked worktree の
   common directory は作業ツリーの外にあるのが正常だからです。
-- readiness の probe 結果は `readiness.<scope>.json` として account scope ごとに保存し、
-  あるプロファイルで確定した結果を別プロファイルが流用しないようにします。
+  `git init --separate-git-dir` はサポートしません。その topology は、`.git` を他人の metadata へ
+  向け直した repository と区別できないためです。
+- **readiness キャッシュ —— account scope ごとに分割**し、`readiness.<scope>.json` として保存します。
+  あるプロファイルで確定した結果を別プロファイルが流用しません。
 
 Evidence Bus には diff、command result、log、trace、screenshot、browser recording、accepted decision
 を入れます。全文 transcript や hidden reasoning は保存・受け渡ししません。raw evidence は 30 日、

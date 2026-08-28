@@ -50,20 +50,27 @@ Configuration, policy, and mutable state have different owners:
 | `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`; enforcement lands with the onboarding step) | repository policy |
 | the verified `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
 
-Both locations are resolved without consulting the working directory, because
-`fh` is meant to run on untrusted checkouts:
+`fh` is meant to run on untrusted checkouts, so neither location is taken at
+face value. The two are resolved differently:
 
-- `HOME` must be an absolute path, and an `FH_CONFIG_PATH` override must be
-  absolute too. A relative value resolves against the working directory, which
-  would let a checked-out repository supply its own escalation policy.
-- The git common directory is used only after it is confirmed absolute, not a
-  symbolic link, a real git metadata directory, and **owned by the current
-  working tree**: `<toplevel>/.git`, the common directory of a registered linked
-  worktree, or a submodule directory inside the superproject's metadata.
-  Containment inside the working tree is deliberately *not* required, because a
-  linked worktree's common directory legitimately lives outside it.
-- Readiness probes are cached per account scope as `readiness.<scope>.json`, so
-  a result verified under one profile is never reused by another.
+- **Config path — never derived from the working directory.** `HOME` must be an
+  absolute path, and an `FH_CONFIG_PATH` override must be absolute too. A
+  relative value resolves against the working directory, which would let a
+  checked-out repository supply its own escalation policy.
+- **State root — derived from the working directory's git topology, then
+  verified.** The common directory is used only after it is confirmed absolute,
+  not a symbolic link, a real git metadata directory, and **owned by the current
+  working tree**. Ownership requires the working tree's `.git` to point at the
+  reported git directory, plus one of: it is `<toplevel>/.git`; it is the common
+  directory of a linked worktree whose admin directory links back to this
+  working tree; or it is a submodule directory inside the superproject's
+  metadata. Containment inside the working tree is deliberately *not* required,
+  because a linked worktree's common directory legitimately lives outside it.
+  `git init --separate-git-dir` is not supported: its topology cannot be
+  distinguished from a repository redirecting `.git` at somebody else's
+  metadata.
+- **Readiness cache — partitioned per account scope** as `readiness.<scope>.json`,
+  so a result verified under one profile is never reused by another.
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
 recordings, and accepted decisions. It never uses a model transcript or hidden
