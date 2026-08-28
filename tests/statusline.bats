@@ -275,7 +275,12 @@ _billing_state() {
   [[ "$output" == *"incl."* ]]
   [[ "$output" != *"(session)"* ]]
   [[ "$output" != *"(daily)"* ]]
-  [ ! -f "$(_billing_state)" ]
+  # #499: the state file is no longer proof of a billing baseline -- context is
+  # persisted every render regardless of quota state, so it now exists here
+  # (context_window.remaining_percentage is always 50 in _billing_json). What
+  # must be absent is the `billing` key itself.
+  run jq -e '(has("billing") | not)' "$(_billing_state)"
+  [ "$status" -eq 0 ]
 }
 
 # Pay-as-you-go sessions (API-key auth, or a subscription session before its
@@ -381,7 +386,11 @@ _billing_state() {
   [ -f "$(_billing_state)" ]
   _render "$(_billing_json 3.0 42 1700018000 17.5 1700600000)"
   [[ "$output" == *"incl."* ]]
-  [ ! -f "$(_billing_state)" ]
+  # #499: context is persisted every render regardless of quota state, so the
+  # file itself now survives the reset (context_window.remaining_percentage is
+  # always 50 in _billing_json) -- only the `billing` key must be gone.
+  run jq -e '(has("billing") | not)' "$(_billing_state)"
+  [ "$status" -eq 0 ]
 }
 
 # ccusage resets its daily total at midnight, so the previous day's billable
@@ -555,7 +564,10 @@ STATE
   _seed_billing_cache
   _render "$(_billing_json 1.23 99.9 1700000000 17.5 1700600000)"
   [[ "$output" == *"incl."* ]]
-  [ ! -f "$(_billing_state)" ]
+  # #499: context is persisted every render regardless of quota state, so the
+  # state file itself now exists here too -- only `billing` must be absent.
+  run jq -e '(has("billing") | not)' "$(_billing_state)"
+  [ "$status" -eq 0 ]
 
   _render "$(_billing_json 1.23 100.0 1700000000 17.5 1700600000)"
   [[ "$output" != *"incl."* ]]
@@ -567,4 +579,101 @@ STATE
   _render "$(_billing_json 1.23 100.1 1700000000 17.5 1700600000)"
   [[ "$output" != *"incl."* ]]
   [ -f "$(_billing_state)" ]
+}
+
+# --- Context-window snapshot contract (#499) ---------------------------------
+# billing_state_path's comment notes the `billing` wrapper key leaves room for
+# other session-scoped statusline state to join the same file; this is that
+# state joining. Unlike billing (rare, only during an overage),
+# context_window.remaining_percentage is persisted on every render regardless
+# of quota state, so a reader always sees a live value.
+
+@test "statusline persists context_window.remaining_percentage with no rate_limits on stdin" {
+  run bash -c "printf '%s' '${MOCK_JSON}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  run jq -e '.context.remaining_percentage == 50' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+@test "statusline keeps billing and context as sibling keys during an overage" {
+  _seed_billing_cache
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  run jq -e '.billing.session_baseline == 1.23 and .context.remaining_percentage == 50' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+@test "statusline omits the context key for a missing or non-numeric remaining_percentage" {
+  # No context_window field at all, and no rate_limits: nothing is billable
+  # and nothing is a valid context body, so the state file must not exist.
+  local no_ctx='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"cost":{"total_cost_usd":1.23},"session_id":"bats-statusline"}'
+  run bash -c "printf '%s' '${no_ctx}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [ ! -f "$(_billing_state)" ]
+
+  # remaining_percentage present but non-numeric: same outcome.
+  local bad_ctx='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":"n/a"},"cost":{"total_cost_usd":1.23},"session_id":"bats-statusline"}'
+  run bash -c "printf '%s' '${bad_ctx}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [ ! -f "$(_billing_state)" ]
+}
+
+# Guards session_state_write's umask 077 bracket on the no-rate_limits fallback
+# path specifically -- the billed/reset paths already share the same core and
+# are covered by the pre-existing billing-state 0600 test.
+@test "statusline writes a context-only state file as 0600 even under a lax umask" {
+  run bash -c "umask 000; printf '%s' '${MOCK_JSON}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  [ -f "$(_billing_state)" ]
+  [ "$(_file_mode "$(_billing_state)")" = "600" ]
+}
+
+@test "statusline keeps context snapshots separate per session id" {
+  local json_a json_b
+  json_a='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":30},"session_id":"bats-statusline"}'
+  json_b='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"context_window":{"remaining_percentage":70},"session_id":"bats-statusline-b"}'
+  run bash -c "printf '%s' '${json_a}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  run bash -c "printf '%s' '${json_b}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  run jq -e '.context.remaining_percentage == 30' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+  run jq -e '.context.remaining_percentage == 70' "$(_billing_state bats-statusline-b)"
+  [ "$status" -eq 0 ]
+}
+
+# Non-regression: context is session-scoped state and must never leak into the
+# profile-scoped rate-limits snapshot (#449's failure mode for `effort`, now
+# guarded for `context` too).
+# Every write embeds the *current* context body, so `ts` and `context` always
+# move together and a stale value can never sit behind a fresh timestamp. The
+# remaining hazard is the write being skipped entirely: during an overage the
+# billing half can be unchanged, so without an explicit test on the stored
+# value the last reported percentage would stay on disk after the harness
+# stopped sending `context_window` at all.
+@test "statusline drops a stale context key once the harness stops reporting it" {
+  _seed_billing_cache
+  local without='{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp","project_dir":"/tmp"},"cost":{"total_cost_usd":1.23},"rate_limits":{"five_hour":{"used_percentage":100,"resets_at":1700000000},"seven_day":{"used_percentage":17.5,"resets_at":1700600000}},"session_id":"bats-statusline"}'
+  _render "$(_billing_json 1.23 100 1700000000 17.5 1700600000)"
+  run jq -e '.context.remaining_percentage == 50' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+
+  # Same billing state, no context_window on stdin: the key must go, not linger.
+  _render "$without"
+  run jq -e '(.context | not) and .billing.session_baseline == 1.23' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+
+  # Self-terminating: with nothing left to drop the write is skipped again, so
+  # the file keeps the billing half rather than being churned every render.
+  _render "$without"
+  run jq -e '(.context | not) and .billing.session_baseline == 1.23' "$(_billing_state)"
+  [ "$status" -eq 0 ]
+}
+
+@test "statusline never mixes context into the profile-scoped rate-limits snapshot" {
+  run bash -c "printf '%s' '${MOCK_JSON_RL}' | XDG_CACHE_HOME='${RL_CACHE_HOME}' CLAUDE_CONFIG_DIR='' bash '${SCRIPT}'"
+  [ "$status" -eq 0 ]
+  local snapshot="${RL_CACHE_HOME}/claude-statusline/rate_limits_.claude.json"
+  [ -f "$snapshot" ]
+  run jq -e '(has("context") | not)' "$snapshot"
+  [ "$status" -eq 0 ]
 }

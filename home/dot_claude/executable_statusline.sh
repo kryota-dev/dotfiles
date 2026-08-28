@@ -455,7 +455,8 @@ write_rate_limits_snapshot() {
 # lives in a session-keyed file: concurrent sessions under one profile would
 # otherwise clobber each other's baseline, the failure #449 established for
 # effort. The `billing` wrapper key leaves room for other session-scoped
-# statusline state to join the same file later.
+# statusline state to join the same file, and #499 uses exactly that room for
+# a `context` sibling key below.
 
 # billing_state_path <session_id> -> this session's state file, empty when the
 # id is unusable. Session ids are UUIDs, i.e. already filesystem-safe, so the
@@ -476,12 +477,51 @@ billing_state_path() {
   printf '%s/session_%s.json' "$CACHE_DIR" "$safe"
 }
 
-# Drop this session's baseline: the windows have room again, so the next overage
-# has to start from a fresh one.
+# session_state_write <target> <billing_body> <context_body> -> the shared
+# atomic-write core for this session's state file (#499), producing
+# {"ts":N[,"billing":{...}][,"context":{...}]}. Each body is included only
+# when non-empty, so billing_state_reset can drop `billing` while keeping
+# `context`, and the no-rate_limits fallback further below can write
+# `context` with no `billing` at all. Mirrors write_harness_cost /
+# write_rate_limits_snapshot's umask 077 + mktemp + rename dance, so every
+# session-state file gets the same 0600-under-lax-umask guarantee and the same
+# silent-failure contract: a missing write is simply retried next render.
+session_state_write() {
+  local target="$1" billing_body="$2" context_body="$3"
+  local body=""
+  [ -n "$billing_body" ] && body="${body},\"billing\":{${billing_body}}"
+  [ -n "$context_body" ] && body="${body},\"context\":{${context_body}}"
+
+  local tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "${target%.json}.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
+  if printf '{"ts":%s%s}' "$(date +%s)" "$body" >"$tmpf" 2>/dev/null; then
+    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  else
+    rm -f "$tmpf" 2>/dev/null
+  fi
+}
+
+# Drop this session's baseline: the windows have room again, so the next
+# overage has to start from a fresh one. Context is unrelated to quota state
+# and is persisted every render regardless of it (#499), so this no longer
+# always deletes the file: with a valid context body the file is rewritten
+# carrying only `context` (billing dropped), and it is removed outright only
+# when there is no context to keep either.
 billing_state_reset() {
   local target
   target=$(billing_state_path "$1")
-  [ -n "$target" ] && [ -e "$target" ] && rm -f "$target" 2>/dev/null
+  [ -n "$target" ] || return 0
+  if [ -n "$SESSION_CTX_BODY" ]; then
+    session_state_write "$target" "" "$SESSION_CTX_BODY"
+  else
+    [ -e "$target" ] && rm -f "$target" 2>/dev/null
+  fi
   return 0
 }
 
@@ -520,10 +560,10 @@ billing_state_prune() {
 
 # Persist the baseline, mirroring write_harness_cost / write_rate_limits_snapshot:
 # every numeric field is re-validated as a JSON number, fields that did not
-# validate are omitted rather than written as null, and the file is created
-# under umask 077 via mktemp then renamed into place. Failure is silent -- a
-# missing baseline is simply re-taken on the next render, which beats letting
-# the statusline fail.
+# validate are omitted rather than written as null. The actual write is
+# delegated to session_state_write (#499), which folds in the session's
+# current context body alongside `billing` so a session that is being billed
+# also keeps a live context snapshot in the same file.
 billing_state_write() {
   local target="$1" window="$2" resets_at="$3" sess_base="$4"
   local daily_date="$5" daily_base="$6" daily_carry="$7" daily_last="$8"
@@ -549,19 +589,7 @@ billing_state_write() {
   [ -n "$sess_base" ] && body="${body},\"session_baseline\":${sess_base}"
   [ -n "$daily_date" ] && body="${body},\"daily_date\":\"${daily_date}\",\"daily_baseline\":${daily_base},\"daily_carry\":${daily_carry},\"daily_last\":${daily_last}"
 
-  local tmpf old_umask
-  old_umask=$(umask)
-  umask 077
-  tmpf=$(mktemp "${target%.json}.XXXXXX" 2>/dev/null) || {
-    umask "$old_umask"
-    return 0
-  }
-  umask "$old_umask"
-  if printf '{"ts":%s,"billing":{%s}}' "$(date +%s)" "$body" >"$tmpf" 2>/dev/null; then
-    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
-  else
-    rm -f "$tmpf" 2>/dev/null
-  fi
+  session_state_write "$target" "$body" "$SESSION_CTX_BODY"
 }
 
 # billing_delta <fh_pct> <fh_reset> <sd_pct> <sd_reset> <cost> <daily> <sid>
@@ -618,9 +646,11 @@ billing_delta() {
     anchor_reset="$sd_reset"
   fi
 
-  local st_win="" st_reset="" st_sess="" st_date="" st_base="" st_carry="" st_last=""
+  local st_win="" st_reset="" st_sess="" st_date="" st_base="" st_carry="" st_last="" st_ctx=""
   if [ -f "$state_file" ]; then
-    IFS=$'\x1f' read -r st_win st_reset st_sess st_date st_base st_carry st_last < <(
+    # st_ctx rides along in the same jq pass (no extra fork). It is not part of
+    # the billing state machine below -- only of the write decision.
+    IFS=$'\x1f' read -r st_win st_reset st_sess st_date st_base st_carry st_last st_ctx < <(
       jq -r '[
         (.billing.window // ""),
         (.billing.resets_at // "" | tostring),
@@ -628,7 +658,8 @@ billing_delta() {
         (.billing.daily_date // ""),
         (.billing.daily_baseline // "" | tostring),
         (.billing.daily_carry // "" | tostring),
-        (.billing.daily_last // "" | tostring)
+        (.billing.daily_last // "" | tostring),
+        (.context.remaining_percentage // "" | tostring)
       ] | join("\u001f")' "$state_file" 2>/dev/null
     )
   fi
@@ -729,7 +760,17 @@ billing_delta() {
   # Rendering happens on every turn, but the baseline only moves when ccusage
   # refreshes or the day turns, so skip the write when nothing actually changed.
   local now_state="${st_win}|${st_reset}|${st_sess}|${st_date}|${st_base}|${st_carry}|${st_last}"
-  if [ "$now_state" != "$was" ] || [ ! -f "$state_file" ]; then
+  # Context moves on every render (#499), so a valid context body forces the
+  # write even when the billing half is unchanged -- otherwise a session
+  # sitting in a stable overage would freeze its persisted context at whatever
+  # it was on the render that last moved the baseline.
+  # The stored-context test is the other half of that: every write embeds the
+  # *current* body, so when the harness stops reporting context_window the key
+  # has to be actively dropped -- a skipped write would leave the last reported
+  # value on disk. Self-terminating: once the key is gone both tests are empty
+  # and the write is skipped again.
+  if [ "$now_state" != "$was" ] || [ ! -f "$state_file" ] ||
+    [ -n "$SESSION_CTX_BODY" ] || [ -n "$st_ctx" ]; then
     billing_state_write "$state_file" "$st_win" "$st_reset" "$st_sess" \
       "$st_date" "$st_base" "$st_carry" "$st_last"
   fi
@@ -804,11 +845,31 @@ if [ -n "$sd_pct" ]; then
   [ -n "$sd_reset" ] && line2+=" ${DIM}↻$(fmt_epoch "$sd_reset" '%-m/%-d %H:%M')${RST}"
 fi
 
+# Session context-window snapshot (#499): validated once per render so every
+# writer below (the "billed" and "included" paths inside billing_delta, and
+# the no-rate_limits fallback right after it) can embed it without
+# re-validating or re-deriving it. Unlike billing, which is rare, context
+# moves on every render and is persisted unconditionally -- readers need a
+# live value regardless of quota state. Same JSON-number regex as
+# write_harness_cost / write_rate_limits_snapshot; an invalid or missing value
+# leaves this empty, which omits the `context` key rather than writing null.
+SESSION_CTX_BODY=""
+[[ "$ctx" =~ ^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$ ]] && SESSION_CTX_BODY="\"remaining_percentage\":${ctx}"
+
 # Cost, as money actually owed rather than money spent (#446). daily_cost is
 # read even while nothing is billable, so ccusage stays warm and a baseline can
 # be taken the instant a quota window runs out.
 daily=$(daily_cost)
 billing_delta "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset" "$cost" "$daily" "$session_id"
+# billing_delta leaves BILLING_STATE at "none" without ever touching the state
+# file in two cases: stdin carries no rate_limits at all, or the session id is
+# unusable (billing_state_path resolves empty, so there is nowhere to write --
+# a silent no-op, same guard billing_state_reset uses). Cover the first case
+# here so context still gets persisted even when nothing is billable.
+if [ "$BILLING_STATE" = "none" ] && [ -n "$SESSION_CTX_BODY" ]; then
+  ctx_only_target=$(billing_state_path "$session_id")
+  [ -n "$ctx_only_target" ] && session_state_write "$ctx_only_target" "" "$SESSION_CTX_BODY"
+fi
 # Collect ended sessions' baselines regardless of this session's quota state: a
 # machine sitting in a long overage would otherwise never sweep, and a session
 # that is inside quota is not the only one that can leave a baseline behind.
