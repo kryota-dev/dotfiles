@@ -149,9 +149,15 @@ click URL — just a text summary published to the existing `claude-attention`
 topic (no dedicated topic was added).
 
 - **Precheck**: before invoking claude at all, the wrapper counts accumulated
-  instincts under `$CLV2_HOMUNCULUS_DIR/instincts/personal/` (same fallback as
-  the skill's own Phase 0, `~/.local/share/ecc-homunculus-default`) and
-  compares against the skill's own `--min-instincts` default (10). This dry/
+  instincts under every project's
+  `$CLV2_HOMUNCULUS_DIR/projects/*/instincts/{personal,inherited}/` (same
+  fallback as the skill's own Phase 0, `~/.local/share/ecc-homunculus-default`).
+  CLV2 v2.1 moved instinct storage from the global tier
+  (`instincts/personal/`) to per-project, so counting there instead matters:
+  the global tier is now only a *promotion destination* — `instinct-cli.py`'s
+  `promote` copies instincts into it rather than moving them, so summing both
+  tiers would double-count already-promoted instincts (#491). The count is
+  compared against the skill's own `--min-instincts` default (10). This dry/
   healthy determination is made **independently of claude's own free-text
   response**, so a week with an under-accumulated pipeline is never silently
   reported as a normal week — the notification always says so explicitly

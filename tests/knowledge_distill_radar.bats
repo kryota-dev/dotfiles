@@ -177,10 +177,11 @@ run_fn() {
   [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-healthy"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy" \
-    "${home}/.local/share/ecc-homunculus-default/instincts/personal"
-  # 10 instincts == the MIN_INSTINCTS default: not dry.
+    "${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal"
+  # 10 instincts == the MIN_INSTINCTS default: not dry. Project-scoped (#491):
+  # CLV2 v2.1 moved instinct storage from the global tier to per-project.
   for i in $(seq 1 10); do
-    printf 'instinct %s\n' "$i" >"${home}/.local/share/ecc-homunculus-default/instincts/personal/inst-${i}.md"
+    printf 'instinct %s\n' "$i" >"${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal/inst-${i}.md"
   done
   cat >"${home}/.local/launchers/claude" <<'EOF'
 #!/bin/bash
@@ -214,10 +215,10 @@ EOF
   [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-dry"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy" \
-    "${home}/.local/share/ecc-homunculus-default/instincts/personal"
-  # 3 instincts < the MIN_INSTINCTS default (10): dry pipeline.
+    "${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal"
+  # 3 instincts < the MIN_INSTINCTS default (10): dry pipeline. Project-scoped (#491).
   for i in 1 2 3; do
-    printf 'instinct %s\n' "$i" >"${home}/.local/share/ecc-homunculus-default/instincts/personal/inst-${i}.md"
+    printf 'instinct %s\n' "$i" >"${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal/inst-${i}.md"
   done
   cat >"${home}/.local/launchers/claude" <<'EOF'
 #!/bin/bash
@@ -246,7 +247,7 @@ EOF
 @test "main(): instincts dir does not exist yet (zero accumulated) -> dry, does not abort under pipefail" {
   [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-no-instincts-dir"
-  # Deliberately do NOT create .local/share/ecc-homunculus-default/instincts/personal:
+  # Deliberately do NOT create .local/share/ecc-homunculus-default/projects:
   # this is the exact "zero instincts accumulated" case the precheck's `|| true`
   # guard exists to handle (find on a nonexistent dir exits non-zero under pipefail).
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
@@ -272,6 +273,136 @@ EOF
   message="$(jq -r .message <"${STUB_DIR}/curl_stdin")"
   [[ "$message" == *"縮退"* ]]
   [[ "$message" == *"0/10"* ]]
+}
+
+@test "count_instincts: project-scoped personal+inherited >= 10 -> healthy (not dry)" {
+  local h="${BATS_TEST_TMPDIR}/count-healthy"
+  mkdir -p "${h}/projects/proj1/instincts/personal" "${h}/projects/proj1/instincts/inherited"
+  for i in $(seq 1 7); do
+    printf 'instinct %s\n' "$i" >"${h}/projects/proj1/instincts/personal/inst-${i}.md"
+  done
+  for i in 1 2 3; do
+    printf 'instinct %s\n' "$i" >"${h}/projects/proj1/instincts/inherited/inst-${i}.yaml"
+  done
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 10 ]
+}
+
+@test "count_instincts: sums personal+inherited across multiple projects" {
+  local h="${BATS_TEST_TMPDIR}/count-multi"
+  mkdir -p "${h}/projects/proj1/instincts/personal" "${h}/projects/proj2/instincts/inherited"
+  printf 'a\n' >"${h}/projects/proj1/instincts/personal/inst-1.md"
+  printf 'b\n' >"${h}/projects/proj1/instincts/personal/inst-2.yml"
+  printf 'c\n' >"${h}/projects/proj2/instincts/inherited/inst-3.yaml"
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 3 ]
+}
+
+@test "count_instincts: MEMORY.md and non-instinct extensions are excluded" {
+  local h="${BATS_TEST_TMPDIR}/count-exclusions"
+  mkdir -p "${h}/projects/proj1/instincts/personal"
+  printf 'real\n' >"${h}/projects/proj1/instincts/personal/inst-1.md"
+  # MEMORY.md is a memory index, not an instinct -- no `id:` frontmatter, and
+  # instinct-cli.py's own parser counts it as zero. Must be excluded by name.
+  printf '# memory\n' >"${h}/projects/proj1/instincts/personal/MEMORY.md"
+  # Extensions outside instinct-cli.py's ALLOWED_INSTINCT_EXTENSIONS (.md/.yaml/.yml).
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/notes.py"
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/inst-1.md.tmp"
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
+}
+
+@test "count_instincts: global-tier instincts/personal/ (promotion destination) is not counted" {
+  local h="${BATS_TEST_TMPDIR}/count-global-only"
+  # Files placed directly at $H/instincts/personal (the OLD global-tier path,
+  # not under projects/) must NOT be counted: instinct-cli.py's cmd_promote
+  # COPIES a project instinct into this global dir (write_text on a new path;
+  # the project-side file is left in place), so summing both tiers would
+  # double-count an already-promoted instinct (#491).
+  mkdir -p "${h}/instincts/personal"
+  printf 'promoted\n' >"${h}/instincts/personal/inst-1.md"
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 0 ]
+}
+
+@test "count_instincts: no projects dir yet -> 0, does not fail under pipefail" {
+  local h="${BATS_TEST_TMPDIR}/count-no-projects-dir"
+  run_fn count_instincts "$h"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 0 ]
+}
+
+@test "wrapper and SKILL.md Phase 0 instinct-count expressions agree" {
+  # #491 completion condition: the wrapper's independent precheck and the
+  # skill's own Phase 0 diagnostic must never silently disagree again. Extract
+  # the actual expression from each source (delimited by matching marker
+  # comments) and execute both against the same fixture tree, rather than
+  # trusting a comment to say they match.
+  local skill="${HOME_DIR}/dot_agents/skills/knowledge-distill/SKILL.md"
+  local wrapper_expr skill_expr
+  wrapper_expr="$(sed -n '/# knowledge-distill-instinct-count:begin/,/# knowledge-distill-instinct-count:end/p' "$WRAPPER" | sed '1d;$d')"
+  skill_expr="$(sed -n '/# knowledge-distill-instinct-count:begin/,/# knowledge-distill-instinct-count:end/p' "$skill" | sed '1d;$d')"
+  [ -n "$wrapper_expr" ]
+  [ -n "$skill_expr" ]
+
+  # String-level check too (normalized for indentation and trailing comments):
+  # both sides should be the same logical command, not just agree by
+  # coincidence on the one fixture exercised below.
+  local wrapper_norm skill_norm
+  wrapper_norm="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//' <<<"$wrapper_expr")"
+  skill_norm="$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+#.*$//' <<<"$skill_expr")"
+  [ "$wrapper_norm" = "$skill_norm" ]
+
+  local h="${BATS_TEST_TMPDIR}/agree"
+  mkdir -p "${h}/projects/proj1/instincts/personal" "${h}/projects/proj2/instincts/inherited"
+  for i in $(seq 1 6); do
+    printf 'x\n' >"${h}/projects/proj1/instincts/personal/inst-${i}.md"
+  done
+  for i in 1 2; do
+    printf 'x\n' >"${h}/projects/proj2/instincts/inherited/inst-${i}.yaml"
+  done
+  printf 'x\n' >"${h}/projects/proj1/instincts/personal/MEMORY.md"
+
+  # `wc -l` pads its count on BSD but not on GNU, so compare the trimmed
+  # values -- the point of this test is the count, not wc's field width.
+  local wrapper_result skill_result
+  wrapper_result="$(H="$h" bash -c "$wrapper_expr" | tr -d '[:space:]')"
+  skill_result="$(H="$h" bash -c "$skill_expr" | tr -d '[:space:]')"
+  [ "$wrapper_result" = "8" ]
+  [ "$skill_result" = "8" ]
+  [ "$wrapper_result" = "$skill_result" ]
+}
+
+# The skill's copy of the expression is executed by a headless claude under
+# this wrapper's --allowedTools, so every binary it names has to be one of the
+# granted Bash prefixes -- `printf` is on that list for exactly this reason.
+# An expression that reaches for `tr`, `xargs` or `|| true` parses fine here
+# and is silently denied in production, which is the same class of failure
+# #491 itself was (a phase that never runs). Pin the shared region to the
+# allowlist so that cannot be reintroduced unnoticed.
+@test "the shared instinct-count expression only uses allowlisted binaries" {
+  local skill="${HOME_DIR}/dot_agents/skills/knowledge-distill/SKILL.md"
+  local allowed_tools_line expr word
+  allowed_tools_line="$(grep '^ALLOWED_TOOLS=' "$WRAPPER")"
+
+  for src in "$WRAPPER" "$skill"; do
+    expr="$(sed -n '/# knowledge-distill-instinct-count:begin/,/# knowledge-distill-instinct-count:end/p' "$src" | sed '1d;$d')"
+    [ -n "$expr" ]
+    # Fold the backslash continuations onto one line first, so each `|` stage
+    # becomes exactly one line and its command word is that line's first token.
+    for word in $(printf '%s' "$expr" | tr '\n' ' ' | tr '|' '\n' | sed -E 's/^[[:space:]]*//; s/[[:space:]].*$//' | grep -v '^$'); do
+      [[ "$allowed_tools_line" == *"Bash(${word}:*)"* ]]
+    done
+    # No shell-level chaining: each of these introduces a command the
+    # allowlist does not cover (`true`) or an unparsed compound.
+    [[ "$expr" != *'|| '* ]]
+    [[ "$expr" != *'&& '* ]]
+    [[ "$expr" != *';'* ]]
+  done
 }
 
 @test "main(): a failed run notifies attention priority 5 and leaves no stamp" {

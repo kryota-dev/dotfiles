@@ -137,12 +137,16 @@ LaunchAgent（金曜 18:00 ローカル時刻）が現在これを headless で�
 レンダリングされたページも click URL も無く、既存の `claude-attention` トピックへの
 テキストサマリー publish のみです（専用トピックは追加していません）。
 
-- **Precheck**: claude を起動する前に、wrapper が `$CLV2_HOMUNCULUS_DIR/instincts/personal/`
+- **Precheck**: claude を起動する前に、wrapper が全 project の
+  `$CLV2_HOMUNCULUS_DIR/projects/*/instincts/{personal,inherited}/`
   （skill 自身の Phase 0 と同じ fallback、`~/.local/share/ecc-homunculus-default`）配下の
-  instinct 蓄積数を数え、skill 自身の `--min-instincts` 既定値（10）と比較します。この
-  dry/healthy 判定は**claude 自身の自由記述レスポンスから独立して**行われるため、instinct
-  蓄積が不足した週が静かに通常週として報告されることはありません —— 通知は常にその旨を
-  明示します（`[縮退] instinct N/10 — ...`）。
+  instinct 蓄積数を数えます。CLV2 v2.1 で保存先がグローバル階層（`instincts/personal/`）から
+  project 単位へ移行したため、蓄積量はこちらで数える必要があります —— グローバル階層は現在
+  promote の**書き込み先**にすぎず（`instinct-cli.py` の `promote` は project から COPY するだけで
+  移動ではない）、両方を数えると昇格済み instinct を二重計上してしまいます（#491）。この数を
+  skill 自身の `--min-instincts` 既定値（10）と比較します。この dry/healthy 判定は**claude 自身の
+  自由記述レスポンスから独立して**行われるため、instinct 蓄積が不足した週が静かに通常週として
+  報告されることはありません —— 通知は常にその旨を明示します（`[縮退] instinct N/10 — ...`）。
 - **レポート**: どちらの場合でも skill 自体は実行され（dry の週でも skill 自身の Phase 0/1
   縮退診断レポートが生成されます）、`~/dotfiles/.kryota-dev/knowledge-distill/<YYYY-Www>.md`
   に書き込まれます。wrapper はレポートファイルが空でないことを検証してから週のスタンプを

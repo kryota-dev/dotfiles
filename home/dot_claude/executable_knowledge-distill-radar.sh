@@ -111,6 +111,53 @@ notify_error() {
   ntfy_publish 5 "Knowledge Distill" "$1"
 }
 
+# Count accumulated CLV2 instincts (#491). CLV2 v2.1 moved instinct storage
+# from the global tier ($1/instincts/personal/) to per-project
+# ($1/projects/<id>/instincts/{personal,inherited}/), so this walks every
+# project's personal+inherited dirs -- matching instinct-cli.py's own
+# _project_counts() -- instead of the now-mostly-empty global dir. The global
+# dir is a promotion *destination*, not an accumulation signal: instinct-
+# cli.py's cmd_promote COPIES a project instinct into it (write_text on a new
+# path; the project-side file is left in place), so summing both tiers would
+# double-count an already-promoted instinct. Extensions match instinct-
+# cli.py's ALLOWED_INSTINCT_EXTENSIONS; MEMORY.md is excluded because it's a
+# memory index, not an instinct (no `id:` frontmatter -- instinct-cli.py's own
+# parser counts it as zero).
+#
+# The `H` param name and the find pipeline below are kept byte-identical
+# (modulo indentation) to SKILL.md's Phase 0 diagnostic between the same
+# marker comments, so the wrapper's independent precheck and the skill's own
+# diagnostic can never silently drift apart again --
+# tests/knowledge_distill_radar.bats asserts both the text and the executed
+# result agree.
+count_instincts() {
+  local H="$1"
+  # Only the bare find|wc pipeline sits between the markers, because SKILL.md
+  # runs its copy of it as a headless Bash call under this wrapper's
+  # --allowedTools: every binary in a Phase 0 diagnostic has to be one of the
+  # prefixes granted below (that is why `printf` is on the list at all), and
+  # neither `tr` nor `true` is. Keeping the shared region to allowlisted
+  # binaries lets the two sides stay byte-identical without widening the
+  # read-mostly allowlist -- the shell-only trimming and the pipefail guard
+  # are this wrapper's business and live outside the markers.
+  #
+  # The guard itself: under pipefail, `find` on a not-yet-created projects dir
+  # (the exact "zero instincts accumulated" case this precheck exists to
+  # handle) exits non-zero even with stderr silenced. wc/tr still see (and
+  # correctly count) find's empty output either way; `|| true` only prevents
+  # that non-zero status from tripping the caller's `set -e` and aborting
+  # before ever reaching claude/notify. Kept inside the function so
+  # count_instincts always returns 0 and echoes a count.
+  {
+    # knowledge-distill-instinct-count:begin
+    find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
+      \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
+      \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
+      ! -name 'MEMORY.md' 2>/dev/null | wc -l
+    # knowledge-distill-instinct-count:end
+  } | tr -d ' ' || true
+}
+
 main() {
   # launchd provides a minimal environment; build PATH ourselves so the claude wrapper, the
   # mise-managed binaries (jq/python3), and curl resolve. ~/.local/launchers is first so `claude`
@@ -151,12 +198,9 @@ main() {
   # invoking claude, independently of whatever claude's own free-text response
   # says. This is the signal the ntfy notification uses to explicitly flag a
   # dry week, rather than trusting claude's prose to convey it faithfully.
-  INSTINCT_DIR="$HOMUNCULUS_DIR/instincts/personal"
-  # `|| true` guards the assignment itself: under pipefail, `find` on a not-yet-
-  # created instincts dir (the exact "zero instincts accumulated" case this
-  # precheck exists to handle) exits non-zero even with stderr silenced, which
-  # would otherwise trip `set -e` and abort before ever reaching claude/notify.
-  INSTINCT_COUNT="$(find "$INSTINCT_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')" || true
+  # count_instincts() is pipefail-safe on its own (see its comment), so no
+  # extra guard is needed at this call site.
+  INSTINCT_COUNT="$(count_instincts "$HOMUNCULUS_DIR")"
   DRY=0
   if [ "$INSTINCT_COUNT" -lt "$MIN_INSTINCTS" ]; then
     DRY=1

@@ -42,7 +42,16 @@ user-invocable: true
 ```bash
 H="${CLV2_HOMUNCULUS_DIR:-$HOME/.local/share/ecc-homunculus-default}"    # 未設定なら既定へ fallback（診断表に明記）
 jq '.observer' "$H/config.json"                              # enabled / run_interval / min_observations
-ls "$H/instincts/personal/" 2>/dev/null | wc -l              # instinct 蓄積数
+# instinct 蓄積数。CLV2 v2.1 で保存先がグローバル階層（$H/instincts/personal/）から
+# project 単位（下記）へ移行済み（#491）。グローバル階層は promote の書き込み先
+# （instinct-cli.py の cmd_promote が project から COPY するだけで project 側は残る）
+# であって蓄積量の指標ではないため、両方を数えると昇格済み instinct を二重計上する。
+# knowledge-distill-instinct-count:begin
+find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
+  \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
+  \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
+  ! -name 'MEMORY.md' 2>/dev/null | wc -l
+# knowledge-distill-instinct-count:end
 ls -lt "$H"/projects/*/observations.jsonl 2>/dev/null | head -3   # 観測の鮮度（記録が進んでいるか）
 ls "$H"/projects/*/observations.archive/ 2>/dev/null | tail -3    # 分析の処理痕跡（processed-<時刻> 名はソート=時系列のため tail が直近）
 grep -h 'timed out' "$H"/projects/*/*.log 2>/dev/null | tail -3   # timeout 痕跡（#256 の再発監視）
@@ -92,7 +101,24 @@ instinct 蓄積数 < `--min-instincts` の場合、**縮退レポート**を出�
 
 ## Phase 2: 収集とクラスタ（蓄積が十分な場合）
 
-- `ls "$H/instincts/personal/"` の全 instinct を Read する
+- 対象週内に更新された instinct を Read する（project 単位の蓄積は全 project 合計で数百〜数千件に
+  なり得るため、Phase 0 の総数を全件 Read するのは非現実的。更新日時で絞り、直近更新順で上限を切る）:
+
+```bash
+find "$H/projects" -mindepth 4 -maxdepth 4 -type f \
+  \( -path '*/instincts/personal/*' -o -path '*/instincts/inherited/*' \) \
+  \( -name '*.md' -o -name '*.yaml' -o -name '*.yml' \) \
+  ! -name 'MEMORY.md' -mtime -7 2>/dev/null | head -30
+```
+
+  - `-mtime -7` は「対象週」の粗い近似（日次精度の期間フィルタは行わない）。`--week=last` 実行時も同じ
+    7日窓を使う。`-newermt` は使わない（macOS/Linux 両対応のため）。
+  - `find | head` で完結させる（`xargs`・`ls -t` は使わない）。理由は 2 つ: (1) headless 実行時の
+    `--allowedTools` は `find`/`head` は許可するが `xargs` は許可しない、(2) 件数が多いと `xargs` が
+    引数を分割し、`ls -t` のソートがバッチ内に閉じて `head` の結果が「全体の直近 N 件」にならない。
+    したがって上位 30 件は**更新順ではなく任意の 30 件**であり、`-mtime -7` の窓が実質的な絞り込みになる。
+  - 30 件を超えて対象週内に更新がある場合、超過分は個別 Read せず Phase 0 の instinct 蓄積数（実測値）
+    としてのみ報告する（この週のクラスタ抽出は下記 evolve の cluster 検出に委ねる）。
 - cluster 候補を取得する（instinct 3 件未満は exit 1 になるため、その場合はこの経路を skip）:
 
 ```bash
