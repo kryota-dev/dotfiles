@@ -13,6 +13,11 @@ user-invocable: true
 この gate は current session が特定 model かどうかを判定しない。`fh doctor --json` と task state を
 根拠に、選択済み adapter がその account scope と rollout で実行可能かを確認する。
 
+**`/model-fitness-check` を置き換えるものではない。** 本 gate は「route が実行可能か」を見るのに対し、
+`/model-fitness-check` は「このセッションが §4 contract の model / effort floor を満たすか」を見る。
+両者は直交するため、呼び出し側（`pr-workflow` / `sdd` / `multi-review`）は**両方を起動する**。
+本 gate だけを呼んで floor 判定を省くと、blocking gate を静かに無効化することになる。
+
 ## 手順
 
 1. `fh doctor --json` で required capability の status を読む。

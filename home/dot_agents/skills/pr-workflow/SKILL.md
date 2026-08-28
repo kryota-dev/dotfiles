@@ -20,7 +20,7 @@ user-invocable: true
 
 **委譲は「起動」であって「再実装」ではない（手ロール代替の禁止）**: Phase 5〜7 の各ステップは、指定された skill（`/monitor-ci` / `/multi-review` / `/review-resolve-loop`）を **必ず実際に起動する**。「自分でやった方が速い」「重複が少ない」「指摘は自明」等の最適化判断で**同等処理を手ロール（inline の Bash / Agent）で代替してはならない**。オーバーライドは「skill を起動したうえで付加する」ものであり、起動そのものを省く理由にはならない。委譲先 skill は各々が固有の網羅性（例: `/review-resolve-loop` は review thread / review body / **CI marker Issue comment** の 3 経路を体系的に拾う）を持ち、手ロールはその経路網羅を欠いて指摘を取りこぼす。orchestrator の役割は分類・GATE・統合判断であって、委譲先の仕事の肩代わりではない。
 
-**execution readiness**: 分類・設計・統合判断は Leader が担うが、provider は固定しない。`/execution-readiness-check` が adapter capability、account scope、rollout、permission manifest を確認し、`frontier-harness` が task state から route する。`/model-fitness-check` は 2 release の compatibility shim に限る。shadow rollout では現行の worker/CI/review path を維持し、route/evidence だけを追加記録する。
+**execution readiness**: 分類・設計・統合判断は Leader が担うが、provider は固定しない。`/execution-readiness-check` が adapter capability、account scope、rollout、permission manifest を確認し、`frontier-harness` が task state から route する。**これは「route が実行可能か」を見る gate であり、セッション自身の model/effort floor は判定しない**ため、`/model-fitness-check` の §4 floor 判定と置き換えず**併用する**（両者は直交する。移行期間中に floor 判定を readiness gate で代替すると blocking gate の静かな無効化になる）。shadow rollout では現行の worker/CI/review path を維持し、route/evidence だけを追加記録する。
 
 **マージは user**: 設計決定（task #21 原案の「merge 自動実行」を上書き）として、本 skill は**絶対に自動マージしない**。GATE 3 は merge-ready の handoff であり、merge は user の明示操作。
 
@@ -35,7 +35,12 @@ user-invocable: true
 
 ## Phase 0: Classify（分類）
 
-**Phase 0 冒頭で（遅くとも実装フェーズ前に）`/execution-readiness-check <task context>` を起動する**。current session model の floor ではなく、選択候補の adapter capability、account scope、rollout、repository capability manifest、risk を確認する。adapter unavailable、未承認 capability、security/migration/external contract は fail closed とする。
+**Phase 0 冒頭で（遅くとも実装フェーズ前に）次の 2 つの gate を両方起動する**（順不同・どちらも省略不可）:
+
+- **`/execution-readiness-check <task context>`** —— 選択候補の adapter capability、account scope、rollout、repository capability manifest、risk を確認する。adapter unavailable、未承認 capability、security/migration/external contract は fail closed とする。
+- **`/model-fitness-check <tier>`** —— セッション自身の model / effort が §4 contract の floor を満たすかを判定する（blocking）。tier は分類結果をそのまま渡す（分類より前に起動する場合は `orchestration`）。**行種別も要求される具体的な model / effort 値もここに書かない**（テーブルと行種別判定はいずれも `/model-fitness-check` が唯一の SSOT。値を再掲すると Codex pin と同じ drift を再演する）。
+
+2 つは**直交する gate**であり、片方で他方を代替しない。`execution-readiness-check` は「route が実行可能か」、`model-fitness-check` は「このセッションがその作業を担える model / effort か」を見る。
 
 **size tier の判定軸**（text だけで決めず、次を評価。`--size` で override）:
 

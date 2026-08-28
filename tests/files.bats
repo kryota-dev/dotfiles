@@ -679,13 +679,20 @@ SHIMEOF
   grep -q "^name: execution-readiness-check$" "$readiness"
   grep -q "^name: model-fitness-check$" "$shim"
   grep -q "Frontier Harness への段階移行" "$shim"
-  # New orchestration paths must call the dynamic gate directly.
-  local caller
+  # AC-034: during the migration window the shim itself must invoke the dynamic gate.
+  grep -q 'execution-readiness-check' "$shim"
+  # The dynamic gate must state that it does not replace the model/effort floor.
+  grep -q 'model-fitness-check' "$readiness"
+  # Both gates are orthogonal, so every orchestration path must invoke BOTH.
+  # Dropping the model-fitness-check call would silently disable the blocking floor gate.
+  local caller gate
   for caller in pr-workflow sdd multi-review; do
-    grep -q 'execution-readiness-check' "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
-      echo "${caller}/SKILL.md does not invoke execution-readiness-check"
-      false
-    }
+    for gate in execution-readiness-check model-fitness-check; do
+      grep -q "${gate}" "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+        echo "${caller}/SKILL.md does not invoke ${gate}"
+        false
+      }
+    done
   done
 }
 
