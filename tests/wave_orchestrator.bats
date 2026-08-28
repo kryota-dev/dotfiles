@@ -708,6 +708,19 @@ stub_count() {
   [[ "$output" == *'"notification_type":"permission_prompt"'* ]]
 }
 
+@test "hook: #477 回帰 — 射影後のキー集合を完全一致で固定する" {
+  # 「prompt / message が無い」だけの検証では、filter が {…, cwd} のように
+  # 広がっても検出できない。「読取側が使うフィールドだけを残す」契約を固定する。
+  # jq の keys は**ソート済み**を返す（keys_unsorted は挿入順なので使わない）
+  run_hook '{"session_id":"'"$SID"'","prompt_id":"'"$TURN1"'","hook_event_name":"UserPromptSubmit","permission_mode":"auto","prompt":"SECRET","cwd":"/tmp/wt","transcript_path":"/tmp/t.jsonl"}'
+  run jq -e 'keys == ["hook_event_name","permission_mode","prompt_id","session_id"]' "${EVENT_DIR}/${SID}.jsonl"
+  [ "$status" -eq 0 ]
+
+  run_hook "$(payload_notification "$SID2")"
+  run jq -e 'keys == ["hook_event_name","notification_type","permission_mode","prompt_id","session_id"]' "${EVENT_DIR}/${SID2}.jsonl"
+  [ "$status" -eq 0 ]
+}
+
 @test "hook: #477 回帰 — 射影しても auto mode の判定が退行しない" {
   # 素朴な allowlist の流用は permission_mode を落として #443 / #486 を壊す。
   # 射影を通した実データで判定が成立することを固定する
@@ -1031,6 +1044,38 @@ print(" ".join(bad))
   run_send "%1" --session "$SID" --text "補足指示"
   [ "$status" -eq 11 ]
   [[ "$output" == *"不可逆操作"* ]]
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: --text は capture 失敗を「空」とも「実入力」とも読まない" {
+  # 復旧経路 (送信後の再判定) で capture が失敗したとき、空入力や実入力として
+  # 扱って 2 回目の Enter を送る退行を固定する。--dismiss / --select 側の
+  # capture 失敗テストではこの経路を通らない
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  STUB_CAPTURE_FAIL=1
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
+  [[ "$output" != *"入力欄は空"* ]]
+  [ "$(stub_count 'paste-buffer')" -eq 1 ]
+  [ "$(stub_count 'Enter')" -eq 1 ]
+}
+
+@test "#472 回帰: 除去しきれないエスケープが残る行は判定不能に倒す" {
+  # capture-pane -e が将来 OSC 等を返すようになったとき、残ったバイト列が
+  # 不可逆操作キーワードの途中に挟まって内容ガードを素通りしうる
+  setup_pane_stubs
+  run_hook "$(payload_prompt_submit)"
+  run_hook "$(payload_stop)"
+  STUB_PS_ARGS="claude --resume ${SID}"
+  # OSC 8 (ハイパーリンク) を含む入力欄行。CSI 除去では落ちない
+  printf '\xe2\x9d\xaf \033]8;;https://example.invalid\033\\本文\n' >"$STUB_CAPTURE"
+  run_send "%1" --session "$SID" --text "補足指示"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"UNVERIFIED"* ]]
   [ "$(stub_count 'Enter')" -eq 1 ]
 }
 
@@ -1379,9 +1424,12 @@ print(" ".join(bad))
   [[ "$output" == *"壊れた行: 1 行"* ]]
 }
 
-@test "events: #476 回帰 — --self-check は壊れた行が無ければそう報告する" {
+@test "events: #476 回帰 — --self-check は壊れた行が無ければそう報告し exit 0 で返る" {
+  # 文言だけを見ると、正常な記録でも常に非 0 を返す退行を通してしまう
+  # （監視側が健全な状態を障害扱いする）
   run_hook "$(payload_prompt_submit)"
   run_events --self-check
+  [ "$status" -eq 0 ]
   [[ "$output" == *"壊れた行: 無し"* ]]
 }
 

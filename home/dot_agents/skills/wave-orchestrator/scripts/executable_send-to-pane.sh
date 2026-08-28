@@ -287,7 +287,12 @@ input_box_line() {
     END {
       if (last == "") { print "NONE"; exit 0 }
       sub(esc "\\[2m.*$", "", last)
-      print "LINE" plain(last)
+      p = plain(last)
+      # 除去しきれない ESC が残る = 未知のシーケンス (OSC / DCS / 文字集合切替 等)。
+      # そのまま本文として扱うと、残ったバイト列が不可逆操作キーワードの途中に挟まって
+      # 内容ガードを素通りしうる。判定不能へ倒す。
+      if (index(p, esc) > 0) { print "UNKNOWN"; exit 0 }
+      print "LINE" p
     }
   '
 }
@@ -343,6 +348,8 @@ input_box_has_body() {
     # 入力欄の行そのものが見つからない。空だったのか画面が取れなかったのかを
     # 区別できないので、空とは言わない。
     NONE) return 2 ;;
+    # 除去しきれないエスケープが残った = 画面を正しく読めていない。
+    UNKNOWN) return 2 ;;
     LINE*) ;;
     # 想定外の出力 = 判定器が期待どおり動いていない。
     *) return 2 ;;
@@ -372,7 +379,16 @@ INPUT_BOX_BODY=""
 # dim 判定は必要条件であって十分条件ではない。判定が正しくても、その入力が user の
 # 意図である保証にはならない（入力途中で放置された / 別の話題への入力の可能性）。
 # よってここは env で無効化できるようにしない（安全機構に off スイッチを持たせない）。
-IRREVERSIBLE_RE='(マージ|merge|force[- ]?push|push --force|--force-with-lease|クローズ|close|リリース|release|デプロイ|deploy)'
+#
+# **既知の限界: これは最後の砦であって完全なフィルタではない。** 固定キーワードの
+# ブロックリストなので、載っていない語彙で不可逆操作を指示されればマッチしない
+# (default-allow)。網羅性は保証できないため、**このガードに依存して dim 判定を
+# 緩めてはならない** —— dim 判定が主で、これは二重化にすぎない。
+#
+# 誤検知 (本来送ってよい本文がマッチする) の代償は小さい。このガードが効くのは
+# **確定キーの再送経路だけ**で、初回の送信は常に通るため、誤検知しても
+# PENDING_CONFIRM で止まって user へ上がるだけ。だから網羅性を優先して広めに採る。
+IRREVERSIBLE_RE='(マージ|merge|force[- ]?push|push --force|--force-with-lease|強制プッシュ|強制 ?push|クローズ|close|リリース|release|デプロイ|deploy|revert|取り消し|破棄|公開|publish|削除|delete|drop|grant|revoke|権限)'
 
 irreversible_instruction() {
   printf '%s' "$1" | LC_ALL=C grep -qiE "$IRREVERSIBLE_RE"
@@ -665,7 +681,11 @@ case "$MODE" in
     # 「自分の本文が入力欄を離れたか」だけを画面で見る。セッション状態は見ない。
     # 入力欄の判定には属性つきの画面が要る (#472)。同じ 1 回の取得から、文言
     # マッチ用の素のテキストを派生させる (2 回取ると別時点の画面を混ぜてしまう)。
-    raw="$(capture_raw)"
+    #
+    # **取得失敗を die させない**。ここへ来た時点で本文と確定キーは既に送出済みなので、
+    # exit 1 ("何も送っていない") を返すと契約に反する嘘の報告になる。空文字にして
+    # 判定不能 (UNVERIFIED) へ落とす。
+    raw="$(capture_raw)" || raw=""
     cap="$(printf '%s\n' "$raw" | strip_ansi)"
     if queue_shown "$cap"; then
       echo "QUEUED_UNCONFIRMED キューに入った。ターン開始は未確認。**再送しないこと** (二重キューになる)"
@@ -691,7 +711,7 @@ case "$MODE" in
 
     # 実入力と判定できても、内容が不可逆操作を指示しているなら自動確定しない (#472)。
     if irreversible_instruction "$INPUT_BOX_BODY"; then
-      echo "PENDING_CONFIRM 入力欄の本文が不可逆操作（マージ / 強制 push / クローズ等）を指示している。**Enter を自動で送らない**。誰が書いた本文かを画面と UserPromptSubmit で確かめ、user へ上げること" >&2
+      echo "PENDING_CONFIRM 入力欄の本文が不可逆操作（マージ / 強制 push / クローズ等）を指示している。**Enter を自動で送らない**。誰が書いた本文かはイベントからは判定できない（UserPromptSubmit は harness の背景通知でも発火する）ので、user へ上げて判断を仰ぐこと" >&2
       exit 11
     fi
 
@@ -702,7 +722,7 @@ case "$MODE" in
       echo "DELIVERED 送信を確認した (Enter 再送後)"
       exit 0
     fi
-    raw="$(capture_raw)"
+    raw="$(capture_raw)" || raw=""
     body_rc=0
     input_box_has_body "$raw" || body_rc=$?
     case "$body_rc" in
