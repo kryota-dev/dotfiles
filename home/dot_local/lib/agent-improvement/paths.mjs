@@ -35,24 +35,29 @@ function requireAbsolute(value, label) {
   return value;
 }
 
-export function resolveStateDirectory(environment) {
+// state ディレクトリと、その「信頼ベース」を一緒に返す。ベースは利用者が設定
+// として与える起点（override の親 / XDG_STATE_HOME / HOME）で、ベースより下の
+// 要素だけがこの実装の作るものになる。symlink 検査の範囲をこの境界で決める。
+function resolveStateLayout(environment) {
   const override = environment.AGENT_IMPROVEMENT_STATE_DIR;
   if (override) {
-    return requireAbsolute(override, "AGENT_IMPROVEMENT_STATE_DIR");
+    const directory = requireAbsolute(override, "AGENT_IMPROVEMENT_STATE_DIR");
+    return { directory, base: path.dirname(directory) };
   }
   const stateHome = environment.XDG_STATE_HOME;
   if (stateHome) {
-    return path.join(
-      requireAbsolute(stateHome, "XDG_STATE_HOME"),
-      STATE_DIRECTORY_NAME,
-    );
+    const base = requireAbsolute(stateHome, "XDG_STATE_HOME");
+    return { directory: path.join(base, STATE_DIRECTORY_NAME), base };
   }
-  return path.join(
-    requireAbsolute(environment.HOME, "HOME"),
-    ".local",
-    "state",
-    STATE_DIRECTORY_NAME,
-  );
+  const base = requireAbsolute(environment.HOME, "HOME");
+  return {
+    directory: path.join(base, ".local", "state", STATE_DIRECTORY_NAME),
+    base,
+  };
+}
+
+export function resolveStateDirectory(environment) {
+  return resolveStateLayout(environment).directory;
 }
 
 // 読み取り経路用。ディレクトリを作らずに symlink かどうかだけを検査する。
@@ -103,12 +108,53 @@ function openDirectoryNoFollow(directory) {
   }
 }
 
-export function ensureStateDirectory(directory) {
+// `mkdir -p` が作る中間要素も symlink であってはならない。O_NOFOLLOW が守るのは
+// 最終要素だけなので、`~/.local/link/agent-improvement` の `link` が symlink だと
+// mkdirSync(recursive) はそこへ追従する。
+//
+// 検査対象はベースより下の要素だけに限る。パス全体を realpath で突き合わせると、
+// macOS の `/var -> /private/var` のような OS 由来 symlink で誤検知する
+// （`os.tmpdir()` を使う呼び出しがすべて壊れる）。ベース自身とその上流は利用者の
+// 設定として信頼し、この実装が作りうる範囲だけを見る。
+function assertCreatedComponentsNotSymlink({ directory, base }) {
+  const relative = path.relative(base, directory);
+  // ベース自身が state ディレクトリのとき（override）は作る要素が無い。
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return;
+  }
+  let current = base;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    assertNotSymlink(current, `state path component ${current}`);
+  }
+}
+
+export function ensureStateDirectory(environment) {
+  const layout = resolveStateLayout(environment);
+  const { directory } = layout;
   // 早い段階で分かりやすく失敗させるための事前検査。実際のガードは下の
   // O_NOFOLLOW 付き open で、そちらが競合窓を持たない本体になる。
   assertNotSymlink(directory, "state directory");
+  // mkdir の前後で検査する。前に見るのは symlink 経由で何かを作らせないため
+  // （後だけだと mkdirSync がリンク先に作ってから気づくことになる）。後に見るのは
+  // mkdirSync が新しく作った中間要素も検査対象に入れるため。
+  assertCreatedComponentsNotSymlink(layout);
   mkdirSync(directory, { mode: STATE_DIRECTORY_MODE, recursive: true });
-  const descriptor = openDirectoryNoFollow(directory);
+  assertCreatedComponentsNotSymlink(layout);
+
+  let descriptor;
+  try {
+    descriptor = openDirectoryNoFollow(directory);
+  } catch (error) {
+    if (error?.code !== "EACCES") throw error;
+    // umask が owner ビットまで削ると mkdirSync は mode 000 のディレクトリを作り、
+    // 以後 open もできない。放置すると壊れたディレクトリが残り、次回以降も同じ
+    // 理由で失敗し続ける（自己回復しない）。symlink でないことを確かめてから
+    // path 経由で 0700 に直し、O_NOFOLLOW の open をやり直す。
+    assertNotSymlink(directory, "state directory");
+    chmodSync(directory, STATE_DIRECTORY_MODE);
+    descriptor = openDirectoryNoFollow(directory);
+  }
   try {
     // mode オプションは umask に削られ、既存ディレクトリには適用されない。
     // owner-only は AC-035 の要件なので、作成経路に関わらず明示的に固定する。
@@ -119,8 +165,38 @@ export function ensureStateDirectory(directory) {
   return directory;
 }
 
-export function writeJsonAtomic(targetPath, value, label) {
-  ensureStateDirectory(path.dirname(targetPath));
+// 読み取り経路用。0700/0600 を「矯正」せず「検出」だけする。矯正すると表示が
+// 書き込みになり要件 5.3（表示は state へ書かない）を破る。緩いからといって
+// 停止もしない —— 停止すると AC-037 の「active 候補の全件を表示」が達成できず、
+// 権限も直らないまま一覧だけ失う。
+export function inspectStatePermissions(environment) {
+  const directory = resolveStateDirectory(environment);
+  const warnings = [];
+  const targets = [
+    [directory, STATE_DIRECTORY_MODE, "state directory"],
+    [path.join(directory, QUEUE_FILE_NAME), STATE_FILE_MODE, "queue file"],
+    [path.join(directory, HEALTH_FILE_NAME), STATE_FILE_MODE, "health file"],
+  ];
+  for (const [target, expected, label] of targets) {
+    let stats;
+    try {
+      stats = lstatSync(target);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    const mode = stats.mode & 0o777;
+    if ((mode & 0o077) !== 0) {
+      warnings.push(
+        `${label} is ${mode.toString(8).padStart(3, "0")}, expected ${expected.toString(8)}`,
+      );
+    }
+  }
+  return Object.freeze(warnings);
+}
+
+export function writeJsonAtomic(environment, targetPath, value, label) {
+  ensureStateDirectory(environment);
   assertNotSymlink(targetPath, label);
   // 一時ファイル名は予測可能にしない（先置き symlink による任意ファイル上書きを防ぐ）。
   // flag "wx" = O_CREAT|O_EXCL で、既存ファイル・既存 symlink があれば EEXIST で失敗する。

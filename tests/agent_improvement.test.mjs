@@ -28,6 +28,7 @@ import {
   assertNotSymlink,
   ensureStateDirectory,
   healthPath,
+  inspectStatePermissions,
   queuePath,
   resolveStateDirectory,
   writeJsonAtomic,
@@ -70,6 +71,12 @@ function makeStateRoot() {
 
 function makeEnvironment(overrides = {}) {
   return { AGENT_IMPROVEMENT_STATE_DIR: makeStateRoot(), ...overrides };
+}
+
+// paths.mjs は state ディレクトリを environment から解決する（#344 耐性のため
+// 解決を 1 箇所に閉じている）。任意のディレクトリを対象にしたいテストはこの形で渡す。
+function envFor(directory) {
+  return { AGENT_IMPROVEMENT_STATE_DIR: directory };
 }
 
 process.on("exit", () => {
@@ -160,7 +167,7 @@ test("the state directory is 0700 and the queue file is 0600 regardless of umask
   const target = path.join(directory, "queue.json");
   const previousUmask = process.umask(0o000);
   try {
-    writeJsonAtomic(target, { ok: true }, "queue file");
+    writeJsonAtomic(envFor(directory), target, { ok: true }, "queue file");
   } finally {
     process.umask(previousUmask);
   }
@@ -180,7 +187,7 @@ test("symlinked state paths are refused instead of followed", () => {
     /queue file must not be a symbolic link/,
   );
   assert.throws(
-    () => writeJsonAtomic(linkedFile, { ok: true }, "queue file"),
+    () => writeJsonAtomic(envFor(root), linkedFile, { ok: true }, "queue file"),
     /queue file must not be a symbolic link/,
   );
   assert.equal(readFileSync(victim, "utf8"), "secret");
@@ -188,7 +195,7 @@ test("symlinked state paths are refused instead of followed", () => {
   const linkedDirectory = path.join(root, "state");
   symlinkSync(root, linkedDirectory);
   assert.throws(
-    () => ensureStateDirectory(linkedDirectory),
+    () => ensureStateDirectory(envFor(linkedDirectory)),
     /state directory must not be a symbolic link/,
   );
 });
@@ -197,7 +204,12 @@ test("an atomic write leaves no temporary file behind", async () => {
   const root = makeStateRoot();
   const directory = path.join(root, "agent-improvement");
   await mkdir(directory, { recursive: true });
-  writeJsonAtomic(path.join(directory, "queue.json"), { ok: true }, "queue file");
+  writeJsonAtomic(
+    envFor(directory),
+    path.join(directory, "queue.json"),
+    { ok: true },
+    "queue file",
+  );
   assert.deepEqual(await readdir(directory), ["queue.json"]);
 });
 
@@ -449,7 +461,7 @@ function snapshotStateDirectory(directory) {
 test("status and next leave the whole state directory unchanged", () => {
   const environment = makeEnvironment();
   seed(environment, [candidateInput()]);
-  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  ensureStateDirectory(environment);
   writeFileSync(
     healthPath(environment),
     JSON.stringify({ status: "ok", last_run_at: NOW.toISOString() }),
@@ -481,7 +493,7 @@ test("a missing or malformed health file degrades the display without failing", 
   const environment = makeEnvironment();
   assert.deepEqual(readHealth(environment), { available: false, reason: "not-run" });
 
-  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  ensureStateDirectory(environment);
   writeFileSync(healthPath(environment), "{ broken", { mode: 0o600 });
   const health = readHealth(environment);
   assert.equal(health.available, false);
@@ -494,7 +506,7 @@ test("a missing or malformed health file degrades the display without failing", 
 
 test("a corrupt queue file is surfaced instead of silently reset", () => {
   const environment = makeEnvironment();
-  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  ensureStateDirectory(environment);
   writeFileSync(queuePath(environment), "{ not json", { mode: 0o600 });
   assert.throws(
     () => readQueue(environment, NOW.toISOString()),
@@ -773,7 +785,12 @@ test("status --json mirrors the human view, exposing history only on request", (
   invoke(environment, ["resolve", "reduce-ci-log-refetch", "--decision=defer"]);
 
   const plain = JSON.parse(invoke(environment, ["status", "--json"]).output);
-  assert.deepEqual(Object.keys(plain).sort(), ["active", "adopted", "health"]);
+  assert.deepEqual(Object.keys(plain).sort(), [
+    "active",
+    "adopted",
+    "health",
+    "permission_warnings",
+  ]);
   assert.equal(plain.active.length, 0);
 
   const withHistory = JSON.parse(
@@ -835,9 +852,9 @@ test("existing loose permissions are tightened on use, not just on creation", ()
   writeFileSync(target, "{}\n", { mode: 0o644 });
   chmodSync(target, 0o644);
 
-  writeJsonAtomic(target, { ok: true }, "queue file");
+  writeJsonAtomic(envFor(directory), target, { ok: true }, "queue file");
 
-  // 要件は「作成または利用する」ときの 0700/0600 なので、既存の緩い権限も矯正する。
+  // 要件は「作成または更新する」ときの 0700/0600 なので、既存の緩い権限も矯正する。
   assert.equal(statSync(directory).mode & 0o777, 0o700);
   assert.equal(statSync(target).mode & 0o777, 0o600);
 });
@@ -873,7 +890,7 @@ test("chmod cannot be redirected through a symlinked state directory", () => {
   symlinkSync(victim, linked);
 
   assert.throws(
-    () => ensureStateDirectory(linked),
+    () => ensureStateDirectory(envFor(linked)),
     /state directory must not be a symbolic link/,
   );
   assert.equal(statSync(victim).mode & 0o777, 0o755);
@@ -1049,14 +1066,13 @@ test("a queue document with a bad version or revision is refused", () => {
     () => parseQueueDocument({ ...base, version: 2, revision: 1 }),
     /queue\.version must be 1/,
   );
-  assert.throws(
-    () => parseQueueDocument({ ...base, version: 1, revision: -1 }),
-    /queue\.revision must be a non-negative integer/,
-  );
-  assert.throws(
-    () => parseQueueDocument({ ...base, version: 1, revision: 1.5 }),
-    /queue\.revision must be a non-negative integer/,
-  );
+  for (const revision of [-1, 1.5, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(
+      () => parseQueueDocument({ ...base, version: 1, revision }),
+      /queue\.revision must be an integer between 0 and/,
+      `revision ${revision} was accepted`,
+    );
+  }
 });
 
 // ------------------------------------------------------------ concurrency
@@ -1151,7 +1167,7 @@ test("oversized candidate input is refused before it is parsed", () => {
 
 test("a populated health file is surfaced with its status and detail", () => {
   const environment = makeEnvironment();
-  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  ensureStateDirectory(environment);
   writeFileSync(
     healthPath(environment),
     JSON.stringify({
@@ -1175,7 +1191,7 @@ test("a populated health file is surfaced with its status and detail", () => {
 
 test("an unrecognised health status is shown as unknown rather than hidden", () => {
   const environment = makeEnvironment();
-  ensureStateDirectory(environment.AGENT_IMPROVEMENT_STATE_DIR);
+  ensureStateDirectory(environment);
   writeFileSync(healthPath(environment), JSON.stringify({ status: "weird" }), {
     mode: 0o600,
   });
@@ -1258,4 +1274,327 @@ test("the real entry point reads argv, stdin and reports failures on stderr", ()
   });
   assert.equal(usage.status, 64);
   assert.match(usage.stdout, /使い方: agent-improvement/);
+});
+
+// ============================================================ review round 2
+// large tier（cc-security-review / architecture-reviewer / codex generalist /
+// test-reviewer / performance-reviewer）と adversarial round で挙がった指摘の回帰テスト。
+
+const ESC = String.fromCharCode(27);
+
+// ------------------------------------------------------------- permissions
+
+test("a restrictive umask cannot leave an unusable state directory behind", () => {
+  // umask が owner ビットを削ると mkdirSync は mode 000 のディレクトリを作り、
+  // O_NOFOLLOW の open が EACCES で失敗して 0700 へ矯正できない。残骸が残ると
+  // 次回以降も同じ理由で失敗し続けるため、自己回復することを固定する。
+  const root = makeStateRoot();
+  const parent = path.join(root, "state");
+  mkdirSync(parent, { recursive: true });
+  chmodSync(parent, 0o755);
+  const directory = path.join(parent, "agent-improvement");
+
+  const previousUmask = process.umask(0o700);
+  try {
+    ensureStateDirectory(envFor(directory));
+  } finally {
+    process.umask(previousUmask);
+  }
+  assert.equal(statSync(directory).mode & 0o777, 0o700);
+});
+
+test("a directory left at mode 000 by an earlier failure is healed", () => {
+  const root = makeStateRoot();
+  const directory = path.join(root, "agent-improvement");
+  mkdirSync(directory, { recursive: true });
+  chmodSync(directory, 0o000);
+
+  ensureStateDirectory(envFor(directory));
+  assert.equal(statSync(directory).mode & 0o777, 0o700);
+});
+
+test("a symlinked ancestor below the trusted base is refused before anything is created", () => {
+  // O_NOFOLLOW が守るのは最終要素だけなので、`<base>/.local/state` を symlink に
+  // したときに追従しないことを別に固定する。検査は mkdir の前に走るので、
+  // リンク先には何も作られない。
+  const root = makeStateRoot();
+  const victim = path.join(root, "victim");
+  mkdirSync(victim, { recursive: true });
+  const home = path.join(root, "home");
+  mkdirSync(path.join(home, ".local"), { recursive: true });
+  symlinkSync(victim, path.join(home, ".local", "state"));
+
+  assert.throws(
+    () => ensureStateDirectory({ HOME: home }),
+    /state path component .* must not be a symbolic link/,
+  );
+  assert.equal(existsSync(path.join(victim, "agent-improvement")), false);
+});
+
+test("an OS-level symlink above the trusted base is not mistaken for an attack", () => {
+  // macOS の os.tmpdir() は /var -> /private/var を経由する。信頼ベースより上を
+  // 検査対象にすると、この経路のすべての呼び出しが誤検知で壊れる。
+  const environment = makeEnvironment();
+  assert.doesNotThrow(() => ensureStateDirectory(environment));
+  assert.equal(
+    statSync(environment.AGENT_IMPROVEMENT_STATE_DIR).mode & 0o777,
+    0o700,
+  );
+});
+
+test("loose permissions are surfaced on read without being changed or fatal", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  const directory = environment.AGENT_IMPROVEMENT_STATE_DIR;
+  chmodSync(directory, 0o755);
+  chmodSync(queuePath(environment), 0o644);
+
+  const warnings = inspectStatePermissions(environment);
+  assert.equal(warnings.length, 2);
+
+  // 表示は成功し（AC-037 の全件表示を止めない）、権限も矯正しない（要件 5.3）。
+  const { code, output } = invoke(environment, ["status"]);
+  assert.equal(code, 0);
+  assert.match(output, /警告: state directory is 755/);
+  assert.equal(statSync(directory).mode & 0o777, 0o755);
+
+  // 次の書き込みで矯正される。
+  invoke(environment, ["resolve", "reduce-ci-log-refetch", "--decision=defer"]);
+  assert.equal(statSync(directory).mode & 0o777, 0o700);
+  assert.equal(statSync(queuePath(environment)).mode & 0o777, 0o600);
+});
+
+// ------------------------------------------------------------ content safety
+
+test("control characters are refused in every free-text field", () => {
+  const nowIso = NOW.toISOString();
+  // 値は既定の plain text 出力へそのまま補間され、端末のエスケープとして解釈され
+  // うるうえ、その出力を会話へ整形表示する skill を通じて後続セッションの入力にもなる。
+  for (const overrides of [
+    { title: `a${ESC}[2Jb` },
+    { summary: `line1${String.fromCharCode(10)}line2` },
+    { id: `ok${String.fromCharCode(9)}` },
+  ]) {
+    assert.throws(
+      () => normalizeCandidateInput(candidateInput(overrides), nowIso),
+      /must not contain control characters|must match/,
+      `${Object.keys(overrides)[0]} accepted a control character`,
+    );
+  }
+  assert.throws(
+    () =>
+      normalizeAdoption({
+        success_metric: `m${ESC}`,
+        baseline: "b",
+        review_on: "2026-09-01",
+        fallback: "f",
+      }),
+    /must not contain control characters/,
+  );
+  // 通常の日本語は通る。
+  assert.doesNotThrow(() =>
+    normalizeCandidateInput(
+      candidateInput({ title: "CI ログの再取得を減らす" }),
+      nowIso,
+    ),
+  );
+});
+
+test("a control character in the evaluator's health detail is stripped for display", () => {
+  // health は #506 が書く別プロデューサの出力で、候補と違って schema を通らない。
+  const environment = makeEnvironment();
+  ensureStateDirectory(environment);
+  writeFileSync(
+    healthPath(environment),
+    JSON.stringify({ status: "ok", detail: `x${ESC}[2Jy` }),
+    { mode: 0o600 },
+  );
+  const health = readHealth(environment);
+  assert.equal(health.detail.includes(ESC), false);
+  assert.equal(invoke(environment, ["status"]).output.includes(ESC), false);
+});
+
+// -------------------------------------------------------------- timestamps
+
+test("hour 24 is refused instead of rolling over to the next day", () => {
+  assert.throws(
+    () =>
+      normalizeCandidateInput(
+        candidateInput({ created_at: "2026-02-28T24:00:00Z" }),
+        NOW.toISOString(),
+      ),
+    /must match/,
+  );
+});
+
+// ------------------------------------------------------------- write guards
+
+test("the revision is a safe integer, so the counter cannot silently stall", () => {
+  // 2^53 では revision + 1 === revision となり、増分が止まったことに誰も
+  // 気づけないまま CAS が機能停止する。
+  assert.throws(
+    () =>
+      parseQueueDocument({
+        version: 1,
+        revision: Number.MAX_SAFE_INTEGER,
+        updated_at: NOW.toISOString(),
+        candidates: [],
+      }),
+    /queue\.revision must be an integer between 0 and/,
+  );
+});
+
+test("a write that would roll a terminal candidate back is refused", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  invoke(environment, ["resolve", "reduce-ci-log-refetch", "--decision=reject"]);
+  const stored = readQueue(environment, NOW.toISOString());
+
+  // revision は正しいのに、候補だけを active へ戻そうとする論理バグを模す。
+  assert.throws(
+    () =>
+      writeQueue(environment, {
+        ...stored,
+        updated_at: NOW.toISOString(),
+        candidates: [
+          storedCandidate({ id: "reduce-ci-log-refetch", state: "active" }),
+        ],
+      }),
+    /is rejected on disk and cannot be rolled back to active/,
+  );
+});
+
+// --------------------------------------------------------------------- cli
+
+test("a repeated flag is refused rather than resolved last-wins", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  // 三択に固定した契約が曖昧な入力を素通りさせてはいけない。
+  assert.throws(
+    () =>
+      invoke(environment, [
+        "resolve",
+        "reduce-ci-log-refetch",
+        "--decision=reject",
+        "--decision=adopt",
+      ]),
+    /--decision was given more than once/,
+  );
+});
+
+test("a decision-scoped flag names the decision it actually belongs to", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  assert.throws(
+    () =>
+      invoke(environment, [
+        "resolve",
+        "reduce-ci-log-refetch",
+        "--decision=adopt",
+        "--success-metric=m",
+        "--baseline=b",
+        "--review-on=2026-09-01",
+        "--fallback=f",
+        "--until=2026-09-01",
+      ]),
+    /--until is only valid with --decision=defer/,
+  );
+});
+
+test("unknown envelope keys are refused like unknown candidate keys", () => {
+  const environment = makeEnvironment();
+  assert.throws(
+    () =>
+      invoke(environment, ["upsert"], {
+        readInput: () =>
+          JSON.stringify({ candidates: [candidateInput()], canditates: [] }),
+      }),
+    /candidate input has unknown keys: canditates/,
+  );
+});
+
+test("an upsert that changes nothing leaves the queue untouched", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  invoke(environment, ["resolve", "reduce-ci-log-refetch", "--decision=reject"]);
+  const before = readFileSync(queuePath(environment), "utf8");
+  const beforeStat = statSync(queuePath(environment));
+
+  const { output } = invoke(environment, ["upsert", "--json"], {
+    readInput: () => JSON.stringify(candidateInput()),
+  });
+  assert.match(output, /"changed": false/);
+  assert.equal(readFileSync(queuePath(environment), "utf8"), before);
+  assert.equal(statSync(queuePath(environment)).mtimeMs, beforeStat.mtimeMs);
+});
+
+test("an oversized --file is refused while it is read, not after", () => {
+  const environment = makeEnvironment();
+  const root = makeStateRoot();
+  const big = path.join(root, "big.json");
+  writeFileSync(big, " ".repeat(2 * 1024 * 1024));
+  assert.throws(
+    () => invoke(environment, ["upsert", "--file", big]),
+    /must be at most \d+ bytes/,
+  );
+});
+
+test("history is only built when it will be shown", () => {
+  const document = {
+    candidates: [
+      storedCandidate({
+        state: "rejected",
+        decision: { kind: "reject", at: NOW.toISOString() },
+      }),
+    ],
+  };
+  assert.equal(partitionQueue(document, NOW).history.length, 1);
+  assert.equal(
+    partitionQueue(document, NOW, { includeHistory: false }).history.length,
+    0,
+  );
+});
+
+test("a rejected candidate keeps its rank score in the history view", () => {
+  const environment = makeEnvironment();
+  seed(environment, [candidateInput()]);
+  invoke(environment, [
+    "resolve",
+    "reduce-ci-log-refetch",
+    "--decision=reject",
+    "--note=今回は見送る",
+  ]);
+  const output = invoke(environment, ["status", "--history"]).output;
+  assert.match(output, /\[見送り\] reduce-ci-log-refetch/);
+  assert.doesNotMatch(output, /score=undefined/);
+});
+
+// ---------------------------------------------------------------- launcher
+
+test("the launcher refuses a relative HOME before resolving the module", () => {
+  // HOME が相対だと cwd 基準で解決され、たまたま cd していたリポジトリが同梱する
+  // .local/lib/agent-improvement/cli.mjs を実行してしまう。
+  const launcher = fileURLToPath(
+    new URL(
+      "../home/dot_local/bin/executable_agent-improvement",
+      import.meta.url,
+    ),
+  );
+  const planted = makeStateRoot();
+  mkdirSync(path.join(planted, ".local", "lib", "agent-improvement"), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(planted, ".local", "lib", "agent-improvement", "cli.mjs"),
+    "process.stdout.write('planted\\n');\n",
+  );
+
+  const result = spawnSync("bash", [launcher, "status"], {
+    cwd: planted,
+    env: { ...process.env, HOME: "." },
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 78);
+  assert.match(result.stderr, /HOME を絶対パスで設定してください/);
+  assert.doesNotMatch(result.stdout, /planted/);
 });

@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { queuePath } from "./paths.mjs";
@@ -12,7 +12,12 @@ import {
   requireDate,
   TERMINAL_STATES,
 } from "./schema.mjs";
-import { readHealth, readQueue, writeQueue } from "./store.mjs";
+import {
+  readHealth,
+  readPermissionWarnings,
+  readQueue,
+  writeQueue,
+} from "./store.mjs";
 import { formatNext, formatStatus, partitionQueue, selectNext } from "./view.mjs";
 
 // 改善候補キューの唯一の操作面（#473 AC-037 / 039 / 040 / 041）。
@@ -83,6 +88,12 @@ function parseArguments(tokens, allowed) {
     const name = separator === -1 ? body : body.slice(0, separator);
     if (!allowed.includes(name)) {
       throw new TypeError(`unknown flag --${name}`);
+    }
+    // 同じフラグを 2 回渡されたら last-wins にせず拒否する。
+    // `--decision=reject --decision=adopt` が adopt として通ると、三択に固定した
+    // 契約が曖昧な入力を素通りさせることになる。
+    if (flags.has(name)) {
+      throw new TypeError(`--${name} was given more than once`);
     }
     if (BOOLEAN_FLAGS.has(name)) {
       // `--history=yes` を受け付けると、真偽値として読む側で false になり
@@ -195,9 +206,15 @@ function applyReject({ existing, nowIso, note }) {
 
 function assertDecisionFlags(flags, decision) {
   const allowedForDecision = DECISION_FLAG_NAMES[decision];
-  for (const name of Object.values(DECISION_FLAG_NAMES).flat()) {
-    if (flags.has(name) && !allowedForDecision.includes(name)) {
-      throw new TypeError(`--${name} is only valid with --decision=adopt`);
+  for (const [validDecision, names] of Object.entries(DECISION_FLAG_NAMES)) {
+    for (const name of names) {
+      if (flags.has(name) && !allowedForDecision.includes(name)) {
+        // どの decision で有効かを実際の割り当てから引く。決め打ちにすると
+        // `--until`（defer 専用）にも「adopt でのみ有効」と出てしまう。
+        throw new TypeError(
+          `--${name} is only valid with --decision=${validDecision}`,
+        );
+      }
     }
   }
 }
@@ -257,29 +274,61 @@ function assertWithinInputLimit(raw) {
   return raw;
 }
 
+// 開いた fd から上限まで読み、超えた時点で止める。`statSync` でサイズを見てから
+// 読み直す形だと、その 2 回の間にファイルを差し替えられるうえ、FIFO のように
+// サイズが 0 と報告される入力で上限を素通りされる。
+function readWithinLimit(descriptor, label) {
+  const chunks = [];
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let total = 0;
+  for (;;) {
+    const read = readSync(descriptor, buffer, 0, buffer.length, null);
+    if (read === 0) break;
+    total += read;
+    if (total > MAX_INPUT_BYTES) {
+      throw new TypeError(
+        `${label} must be at most ${MAX_INPUT_BYTES} bytes`,
+      );
+    }
+    chunks.push(Buffer.from(buffer.subarray(0, read)));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function readCandidateInput(flags, options) {
   if (flags.has("file")) {
     const filePath = flagText(flags, "file");
-    // ファイルは読む前にサイズで弾ける（stdin と違い事前に大きさが分かる）。
-    const { size } = statSync(filePath);
-    if (size > MAX_INPUT_BYTES) {
-      throw new TypeError(
-        `${filePath} must be at most ${MAX_INPUT_BYTES} bytes (got ${size})`,
-      );
+    const descriptor = openSync(filePath, "r");
+    try {
+      return readWithinLimit(descriptor, filePath);
+    } finally {
+      closeSync(descriptor);
     }
-    return readFileSync(filePath, "utf8");
   }
   if (options.readInput) return assertWithinInputLimit(options.readInput());
   if (process.stdin.isTTY) {
     throw new TypeError("候補 JSON を stdin か --file <path> で渡してください");
   }
-  // stdin は事前にサイズが分からないため、読み切ってから上限で弾く。
-  return assertWithinInputLimit(readFileSync(0, "utf8"));
+  return readWithinLimit(0, "candidate input");
 }
+
+const ENVELOPE_KEYS = Object.freeze(["candidates"]);
 
 function candidateEntries(parsed) {
   if (Array.isArray(parsed)) return parsed;
-  if (parsed && Array.isArray(parsed.candidates)) return parsed.candidates;
+  if (parsed && Array.isArray(parsed.candidates)) {
+    // 候補本体と同じ fail-fast をここにも効かせる。envelope の綴り違いを黙って
+    // 捨てると、投入したつもりの指定が無視されたことに気づけない。
+    const unknown = Object.keys(parsed).filter(
+      (key) => !ENVELOPE_KEYS.includes(key),
+    );
+    if (unknown.length > 0) {
+      throw new TypeError(
+        `candidate input has unknown keys: ${unknown.join(", ")}`,
+      );
+    }
+    return parsed.candidates;
+  }
   return [parsed];
 }
 
@@ -334,13 +383,19 @@ function upsertCommand({ environment, flags, nowIso, options }) {
     results.push({ id: input.id, outcome: "updated" });
   }
 
-  const saved = writeQueue(environment, {
-    ...document,
-    updated_at: nowIso,
-    candidates: [...byId.values()],
-  });
+  // 全件が skip なら state を触らない。中身が変わらないのに revision と mtime が
+  // 動くのは「更新を skip した」という報告と食い違う。
+  const changed = results.some((result) => result.outcome !== "skipped");
+  const saved = changed
+    ? writeQueue(environment, {
+        ...document,
+        updated_at: nowIso,
+        candidates: [...byId.values()],
+      })
+    : document;
   return {
     results,
+    changed,
     total: saved.candidates.length,
     queue_path: queuePath(environment),
   };
@@ -353,6 +408,7 @@ function formatUpsert(payload) {
       : `- ${result.id}: ${result.outcome}`,
   );
   lines.push(`保持中の候補: ${payload.total} 件`);
+  if (!payload.changed) lines.push("（変更が無いため state は更新していません）");
   return lines.join("\n");
 }
 
@@ -405,17 +461,22 @@ export function runCli(argumentsList, options = {}) {
   if (command === "status") {
     const document = readQueue(environment, nowIso);
     const health = readHealth(environment);
-    const partitions = partitionQueue(document, now);
     const includeHistory = flags.get("history") === true;
+    const partitions = partitionQueue(document, now, { includeHistory });
+    const permissionWarnings = readPermissionWarnings(environment);
     // JSON も人間向け表示と同じ内容にする（--history の有無で 2 つのビューが
     // 食い違うと、片方だけを見て「履歴が無い」と誤解する経路ができる）。
     const payload = {
       health,
+      permission_warnings: permissionWarnings,
       active: partitions.active,
       adopted: partitions.adopted,
       ...(includeHistory ? { history: partitions.history } : {}),
     };
-    emit(payload, formatStatus({ health, partitions, includeHistory }));
+    emit(
+      payload,
+      formatStatus({ health, partitions, includeHistory, permissionWarnings }),
+    );
     return 0;
   }
 

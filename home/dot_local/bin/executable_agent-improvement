@@ -2,6 +2,17 @@
 # Node 本体は mise の pin を使い、PATH 上の別 version を実行しない。
 set -euo pipefail
 
+# HOME を検証してから module path に使う。相対値や空だと cwd 基準で解決され、
+# たまたま cd していたリポジトリが同梱する .local/lib/agent-improvement/cli.mjs を
+# 実行してしまう（CLI 側の相対パス拒否より前に起きる）。
+case "${HOME:-}" in
+  /*) ;;
+  *)
+    echo "agent-improvement: HOME を絶対パスで設定してください。" >&2
+    exit 78
+    ;;
+esac
+
 node_bin="${AGENT_IMPROVEMENT_NODE_BIN:-$(mise which node 2>/dev/null || true)}"
 if [ ! -x "$node_bin" ]; then
   echo "agent-improvement: mise-managed node を解決できません。mise install node を実行してください。" >&2

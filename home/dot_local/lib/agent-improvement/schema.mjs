@@ -6,6 +6,8 @@ export const QUEUE_VERSION = 1;
 
 export const DAY_MS = 86_400_000;
 
+export const MAX_REVISION = Number.MAX_SAFE_INTEGER - 1;
+
 export const CANDIDATE_STATES = Object.freeze([
   "active",
   "deferred",
@@ -72,9 +74,20 @@ const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 // account ラベルは設定由来で増減しうるため、閉じた enum ではなく字種で縛る。
 const ACCOUNT_PATTERN = /^[a-z][a-z0-9-]*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+// C0/C1 制御文字（タブ・改行を含む）を拒否する。これらの値は既定の plain text
+// 出力へそのまま補間されるため、端末のエスケープシーケンスとして解釈されうるうえ、
+// その出力を会話へ整形表示する skill を通じて後続セッションの入力にもなる。
+// 除去（strip）ではなく拒否にするのは、採否理由や基準値を無言で変形させないため
+// （監査性を優先する）。表示側は 1 行の要約として補間しており、複数行を許す契約は
+// 現時点で無い。
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F-\u009F]/;
+
 // 秒までを必須にし、ミリ秒とタイムゾーン指定（Z か ±HH:MM）だけを追加で許す。
+// 時・分・秒は妥当範囲まで絞る。時を 2 桁の数字のままにすると ISO 8601 が終端として
+// 許す 24:00:00 を受理してしまい、日付が翌日へ繰り上がる（2026-02-28T24:00:00Z が
+// 2026-03-01 として保存される）。失効判定がこの値に乗るため、境界で弾く。
 const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const ISSUE_PATH_PATTERN = /^\/[^/]+\/[^/]+\/issues\/[1-9]\d*$/;
 
 const MAX_ID_LENGTH = 100;
@@ -107,6 +120,9 @@ function requireText(value, label, maxLength = MAX_TEXT_LENGTH) {
   }
   if (value.length > maxLength) {
     throw new TypeError(`${label} must be at most ${maxLength} characters`);
+  }
+  if (CONTROL_CHARACTER_PATTERN.test(value)) {
+    throw new TypeError(`${label} must not contain control characters`);
   }
   return value.trim();
 }
@@ -381,6 +397,10 @@ const QUEUE_KEYS = Object.freeze([
 
 // 書き込みのたびに 1 ずつ増える。read-modify-write の競合検出（CAS）に使う。
 // 未作成の queue は revision 0 とし、最初の書き込みが 1 になる。
+//
+// 上限を safe integer の 1 つ手前に置く。2^53 に達すると revision + 1 が revision と
+// 等しくなり、増分が止まったことに誰も気づけないまま CAS が静かに機能停止する
+// （実測で確認済み）。到達しない値だが、静かに壊れるより明示的に失敗させる。
 export function emptyQueueDocument(nowIso) {
   return Object.freeze({
     version: QUEUE_VERSION,
@@ -399,8 +419,14 @@ export function parseQueueDocument(value) {
       `queue.version must be ${QUEUE_VERSION} (found ${JSON.stringify(document.version)})`,
     );
   }
-  if (!Number.isInteger(document.revision) || document.revision < 0) {
-    throw new TypeError("queue.revision must be a non-negative integer");
+  if (
+    !Number.isSafeInteger(document.revision) ||
+    document.revision < 0 ||
+    document.revision > MAX_REVISION
+  ) {
+    throw new TypeError(
+      `queue.revision must be an integer between 0 and ${MAX_REVISION}`,
+    );
   }
   if (!Array.isArray(document.candidates)) {
     throw new TypeError("queue.candidates must be an array");

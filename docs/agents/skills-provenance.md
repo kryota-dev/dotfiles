@@ -89,11 +89,11 @@ Core day-to-day development cycle automation, plus the parallel-dev triad (`repo
 
 `commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `wave-orchestrator`, `delete-merged-branches`
 
-### Code review and multi-agent orchestration (7 skills)
+### Code review and multi-agent orchestration (9 skills)
 
-Review pipelines that spawn subagents or coordinate multiple reviewers, plus the shared model/effort gate they all call before implementation.
+Review pipelines that spawn subagents or coordinate multiple reviewers, plus the two orthogonal gates they all call before implementation (`model-fitness-check` for the session's own model/effort floor, `execution-readiness-check` for adapter capability and rollout) and the routing harness those gates consult.
 
-`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`
+`cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`, `execution-readiness-check`, `frontier-harness`
 
 ### Planning and spec-driven development (5 skills)
 

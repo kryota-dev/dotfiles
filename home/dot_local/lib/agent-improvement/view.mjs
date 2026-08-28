@@ -40,12 +40,25 @@ function utcDate(now) {
 export function deriveCandidate(candidate, now) {
   const nowMs = now.getTime();
 
-  // 終端状態は導出を挟まない。
-  if (candidate.state === "promoted" || candidate.state === "rejected") {
-    return Object.freeze({ ...candidate, derived_state: candidate.state });
+  // promoted は payload を捨てているので ranking を持たない（AC-040）。
+  if (candidate.state === "promoted") {
+    return Object.freeze({ ...candidate, derived_state: "promoted" });
   }
 
   const score = rankScore(candidate.ranking);
+  // rejected も導出は不要だが rank_score は付ける。付けないと履歴の整形が
+  // score=undefined を表示する（整形側は順位を常に出す）。
+  if (candidate.state === "rejected") {
+    return Object.freeze({
+      ...candidate,
+      derived_state: "rejected",
+      rank_score: score,
+    });
+  }
+
+  // comparator が同点判定のたびに Date.parse し直さずに済むよう、導出時に一度だけ
+  // epoch を持たせる。
+  const evidenceMs = Date.parse(candidate.evidence_updated_at);
 
   if (candidate.state === "adopted") {
     // 日付は UTC で比較する（週次運用なので時差の分の前倒しは許容する）。
@@ -54,6 +67,7 @@ export function deriveCandidate(candidate, now) {
       ...candidate,
       derived_state: due ? "review_due" : "adopted",
       rank_score: score,
+      evidence_ms: evidenceMs,
     });
   }
 
@@ -65,6 +79,7 @@ export function deriveCandidate(candidate, now) {
       ...candidate,
       derived_state: "deferred",
       rank_score: score,
+      evidence_ms: evidenceMs,
     });
   }
 
@@ -73,12 +88,12 @@ export function deriveCandidate(candidate, now) {
   // 境界は「ちょうど EXPIRY_DAYS 経過した時点で失効」（下の `<=`）。AC-036 が
   // 「新しい根拠がなければ 4 週間で失効する」と定めているため、4 週間ちょうどは
   // 失効側に含める。
-  const expiresAtMs =
-    Date.parse(candidate.evidence_updated_at) + EXPIRY_DAYS * DAY_MS;
+  const expiresAtMs = evidenceMs + EXPIRY_DAYS * DAY_MS;
   return Object.freeze({
     ...candidate,
     derived_state: expiresAtMs <= nowMs ? "expired" : "active",
     rank_score: score,
+    evidence_ms: evidenceMs,
     expires_at: new Date(expiresAtMs).toISOString(),
   });
 }
@@ -86,8 +101,7 @@ export function deriveCandidate(candidate, now) {
 // 同点は根拠の新しい順 → id 昇順で解決し、実行のたびに並びが変わらないようにする。
 function byRank(a, b) {
   if (b.rank_score !== a.rank_score) return b.rank_score - a.rank_score;
-  const evidenceDelta =
-    Date.parse(b.evidence_updated_at) - Date.parse(a.evidence_updated_at);
+  const evidenceDelta = b.evidence_ms - a.evidence_ms;
   if (evidenceDelta !== 0) return evidenceDelta;
   return a.id < b.id ? -1 : 1;
 }
@@ -101,7 +115,9 @@ function byHistory(a, b) {
   return a.id < b.id ? -1 : 1;
 }
 
-export function partitionQueue(document, now) {
+// `includeHistory` を渡さない呼び出し（`next` や `status` の既定）では履歴の
+// filter / sort を組み立てない。表示しないものを毎回並べ替える理由がない。
+export function partitionQueue(document, now, { includeHistory = true } = {}) {
   const derived = document.candidates.map((candidate) =>
     deriveCandidate(candidate, now),
   );
@@ -120,17 +136,23 @@ export function partitionQueue(document, now) {
         )
         .sort(byRank),
     ),
-    history: Object.freeze(
-      derived
-        .filter((candidate) => HISTORY_STATES.includes(candidate.derived_state))
-        .sort(byHistory),
-    ),
+    history: includeHistory
+      ? Object.freeze(
+          derived
+            .filter((candidate) =>
+              HISTORY_STATES.includes(candidate.derived_state),
+            )
+            .sort(byHistory),
+        )
+      : Object.freeze([]),
   });
 }
 
 // AC-038 が読む「最優先の 1 件」。既に約束した再評価を、新規候補より先に出す。
 export function selectNext(document, now) {
-  const { active, adopted } = partitionQueue(document, now);
+  const { active, adopted } = partitionQueue(document, now, {
+    includeHistory: false,
+  });
   const reviewDue = adopted.filter(
     (candidate) => candidate.derived_state === "review_due",
   );
@@ -190,8 +212,19 @@ function formatSection(title, candidates, emptyText) {
   ];
 }
 
-export function formatStatus({ health, partitions, includeHistory }) {
-  const lines = [formatHealth(health), ""];
+export function formatStatus({
+  health,
+  partitions,
+  includeHistory,
+  permissionWarnings = [],
+}) {
+  const lines = [formatHealth(health)];
+  // 権限のドリフトは表示で知らせるだけ（矯正も停止もしない）。次の書き込みで
+  // 自動的に 0700/0600 へ戻る。
+  for (const warning of permissionWarnings) {
+    lines.push(`警告: ${warning}（次の書き込みで矯正されます）`);
+  }
+  lines.push("");
   lines.push(...formatSection("改善候補", partitions.active, "なし"));
   lines.push(
     ...formatSection("採用済み（効果測定中）", partitions.adopted, "なし"),
