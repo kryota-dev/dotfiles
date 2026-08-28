@@ -392,12 +392,12 @@ The fork layers extra secret-redaction patterns on top of ECC's command sanitize
 
 ```
 L1  <host>  <dir>  <branch> [*dirty] [⇡N⇣N]  [worktree]
-L2  <model>  [effort]  [🧬N]  <ctx○>  [5h%]  [7d%]  [session-cost]  [daily-cost]
+L2  <model>  [effort]  [🧬N]  <ctx○>  [5h%]  [7d%]  <billable-cost>
 L3  [battery%]  <network-RTT>  <claude-service-status>
 ```
 
 - **L1**: host icon, project-relative directory, git branch with dirty/ahead/behind indicators, worktree name when in a worktree
-- **L2**: model display name, effort level, CLV2 instinct-cluster count (🧬N), context remaining circle (●◕◑◔○), 5-hour and 7-day rate-limit percentages with reset times, session cost and daily cost both in JPY (falls back to USD when no exchange rate is cached)
+- **L2**: model display name, effort level, CLV2 instinct-cluster count (🧬N), context remaining circle (●◕◑◔○), 5-hour and 7-day rate-limit percentages with reset times, and the billable cost — either a dim `incl.` marker or session/daily amounts in JPY (falls back to USD when no exchange rate is cached). See [Billable-delta cost](#billable-delta-cost) for what the amounts mean
 - **L3**: battery level (macOS laptop only, via `pmset`), network RTT tier (ping to 1.1.1.1), Claude service status (from Claude status API)
 
 ### Implementation constraints
@@ -407,6 +407,26 @@ L3  [battery%]  <network-RTT>  <claude-service-status>
 **Non-blocking I/O.** All external and network operations (ping, curl, `ccusage`, `pmset`) run in background subshells and write to a cache directory (`$XDG_CACHE_HOME/claude-statusline`, mode 700). The renderer reads from cache; cache entries refresh in the background at their respective TTLs (network: 15 s, battery: 60 s, daily cost: 5 min, exchange rate: 24 h). Rendering is always instant.
 
 **JPY cost conversion.** Exchange rates are fetched from `api.frankfurter.dev` (ECB daily rates) with a 24-hour cache. When a rate is available, costs are displayed as `¥N,NNN`; otherwise as `$N.NN`.
+
+### Billable-delta cost
+
+Under a subscription, spend inside the 5h/7d quota is already paid for; only spend past an exhausted window is invoiced against usage credits. Showing the raw session/daily totals therefore parked money that will never be billed next to money that will, behind the same glyph. Line 2 shows what is actually owed instead:
+
+| stdin state | Rendered | Why |
+| --- | --- | --- |
+| No `rate_limits` at all | `¥N (session)` `¥N (daily)` — the raw totals | API-key (pay-as-you-go) auth, or a subscription session before its first API response. There is no quota being consumed, so the totals *are* the bill |
+| `rate_limits` present, both windows under 100% | `incl.` (dim) | Nothing is billable. The marker keeps the slot occupied so a missing segment reads as "this costs nothing", not "the cost lookup broke" |
+| Either window at 100% | `¥N (session)` `¥N (daily)` — increments since the window ran out | Only the spend above the baseline is invoiced |
+
+**Baseline lifecycle.** The spend at the moment a window is exhausted becomes the baseline, kept in `$XDG_CACHE_HOME/claude-statusline/session_<session_id>.json` (0600) under a `billing` key. It is *session*-scoped rather than profile-scoped: concurrent sessions under one profile would otherwise clobber each other's baseline, the failure #449 established for `effort` in the profile-keyed rate-limits snapshot.
+
+The baseline is anchored on the exhausted window that resets **last**, since that is the one keeping the overage alive. It stays valid only while that window is the same instance (`resets_at` unchanged) and still exhausted — `used_percentage` is monotonic within one instance, so that pair proves the overage never lapsed, with no wall-clock comparison and so no sensitivity to clock skew. While both windows are exhausted the anchor hands over to the longer-lived one, so the baseline survives the shorter window rolling over mid-overage. When neither window is exhausted the baseline is deleted and the display returns to `incl.`.
+
+**Daily carry.** `ccusage` resets its total at midnight, so the previous day's billable remainder is banked into a carry before re-basing on the new day; the daily amount is `carry + (today's total − today's baseline)`. Both deltas are clamped at 0, so a `ccusage` correction or a resumed session never renders a negative charge. The daily half of the baseline is taken lazily: `ccusage` refreshes in the background, and anchoring it at 0 on a cold cache would bill the whole day.
+
+**Cost of the common path.** The statusline re-renders on every turn, so the window checks, the session-id resolution, and the "is there any baseline on disk" probe are shell builtins — a machine that never exceeds its quota pays no extra fork. Baselines are written only when a value actually moves. Files left behind by ended sessions are swept once a day by a backgrounded `find`; the sweep runs whatever this session's quota state is, since a machine sitting in a long overage would otherwise never collect them. (`find -mtime +N` compares whole 24-hour periods with a strict `>`, so effective retention is up to N+1 days.)
+
+**Known limit: sessions that start mid-overage.** When the baseline is first taken there is no way to tell "this session was already running when the window ran out" from "this session started after it ran out". The baseline is the spend at that render, which is right for the first case and loses the first turn's charge in the second. The alternative — anchoring at 0 — would bill a whole session's pre-overage spend in the common case, so the under-report is the deliberate trade.
 
 **R06 account badge.** When `CLAUDE_CONFIG_DIR` points to `~/.claude-r06`, the statusline renders a reverse-video `R06` badge to make the active account visually distinct.
 

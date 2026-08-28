@@ -3,7 +3,7 @@
 #
 # Layout (3 lines):
 #   L1  host  dir(project-relative)  branch *dirty ⇡ahead⇣behind  worktree
-#   L2  model  effort  context  5h  7d  session-cost  daily-cost   (cost in JPY)
+#   L2  model  effort  context  5h  7d  billable-session  billable-daily  (JPY)
 #   L3  battery(macOS laptop only)  network-quality  claude-service-status
 #
 # Design notes:
@@ -77,20 +77,82 @@ I_PLUG=$'\xf3\xb0\x9a\xa5'     # nf-md-power_plug     U+F06A5
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
 mkdir -p "$CACHE_DIR" 2>/dev/null && chmod 700 "$CACHE_DIR" 2>/dev/null
 
+# A quota window counts as consumed at 100% used: below that the spend is
+# covered by the subscription, at or above it every further dollar is invoiced
+# against usage credits. Named so this billing threshold is never mistaken for
+# the 50/80 warning bands pct_color paints with.
+QUOTA_EXHAUSTED_PCT=100
+# Sessions never signal "done", so the per-session billing state (below) is aged
+# out by mtime instead of being deleted on exit.
+SESSION_STATE_TTL_DAYS=7
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 # file_mtime <file> -> epoch seconds of last modification (0 if missing).
-# Handles both macOS (stat -f %m) and Linux (stat -c %Y).
+# GNU (stat -c %Y) first, BSD (stat -f %m) second. The order matters: GNU's -f
+# is --file-system, and for the unrecognized %m directive it prints the whole
+# filesystem report on STDOUT before exiting 1 -- so a BSD-first order appended
+# that report to the real mtime, every TTL check died with an arithmetic syntax
+# error, and bash tore down the enclosing function's subshell before it could
+# `cat` its cache. That silently emptied the daily-cost, FX-rate, network and
+# service-status segments on Linux. BSD stat has no -c and fails cleanly on
+# stderr, so this order is correct on both. The digit guard keeps any future
+# platform quirk from reaching $(( )) at all.
+# $OSTYPE is a bash builtin, so picking the platform's own form costs nothing
+# and keeps this to a single stat per call. A blind `-c || -f` chain would spawn
+# two processes on macOS, and this runs five-plus times per render.
 file_mtime() {
-  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0
+  local m
+  case "$OSTYPE" in
+    darwin*) m=$(stat -f %m "$1" 2>/dev/null) ;;
+    *) m=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null) ;;
+  esac
+  case "$m" in
+    '' | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$m" ;;
+  esac
 }
 
 # fmt_epoch <epoch> <strftime-fmt> -> formatted local time.
 # Handles both macOS (date -r) and Linux (date -d @epoch).
 fmt_epoch() {
   date -r "$1" "+$2" 2>/dev/null || date -d "@$1" "+$2" 2>/dev/null
+}
+
+# sanitize_session_id <session_id> -> filesystem-safe id, empty when unusable.
+# Matches ECC's sanitizeSessionId: reject traversal outright, map any character
+# outside [A-Za-z0-9_-] to '_', cap at 64 chars. Shared by every session-keyed
+# cache file so the harness-cost contract (cost-tracker.js resolves the same
+# filename) and the billing state can never disagree on a session's identity.
+sanitize_session_id() {
+  local sid="$1"
+  [ -n "$sid" ] || return 0
+  case "$sid" in *..* | */* | *\\*) return 0 ;; esac
+  printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-64
+}
+
+# pct_exhausted <used_percentage> -> 0 when that quota window is fully consumed.
+# Truncating at the decimal point is exact enough for a ">= 100" test and keeps
+# this fork-free, which matters because it runs on every render including the
+# common case where nothing is billable. A missing or non-numeric percentage is
+# never exhausted.
+pct_exhausted() {
+  local p=${1%%.*}
+  case "$p" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ "$p" -ge "$QUOTA_EXHAUSTED_PCT" ]
+}
+
+# epoch_after <a> <b> -> 0 when epoch a is strictly later than epoch b.
+# An unknown b loses to a known a, so a window that reports resets_at always
+# outranks one whose resets_at the harness omitted.
+epoch_after() {
+  case "$1" in '' | *[!0-9]*) return 1 ;; esac
+  case "$2" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$1" -gt "$2" ]
 }
 
 # Context fill indicator (non-battery; circle fill by remaining percentage).
@@ -142,8 +204,12 @@ daily_cost() {
   mtime=$(file_mtime "$cache")
   if [ $((now - mtime)) -gt 300 ]; then
     touch "$cache"
+    # Guard the swap on a non-empty result, like usd_jpy_rate and claude_status
+    # already do: a missing bunx or a failed ccusage run yields an empty file,
+    # and moving that into place would destroy a perfectly good cached total.
     (bunx ccusage@20 daily --since "$(date +%Y%m%d)" --json 2>/dev/null |
-      jq -r '.totals.totalCost // empty' >"$cache.tmp" && mv "$cache.tmp" "$cache") &
+      jq -r '.totals.totalCost // empty' >"$cache.tmp" &&
+      [ -s "$cache.tmp" ] && mv "$cache.tmp" "$cache") &
   fi
   cat "$cache" 2>/dev/null
 }
@@ -189,9 +255,17 @@ usd_jpy_rate() {
 
 # Format a USD amount: JPY (comma-separated integer) when a rate is cached,
 # otherwise fall back to USD.
+#
+# The locale is only requested for %'s thousands grouping, and distros commonly
+# ship without en_US.UTF-8 (Ubuntu generates C.UTF-8 only). bash then warns on
+# stderr for every call, which lands in the rendered statusline, so the warning
+# is dropped: losing the grouping is a cosmetic downgrade, printing a setlocale
+# error into the status line is not. The redirect has to wrap the whole group --
+# bash emits the warning while applying the prefix assignment, before the
+# command's own redirections take effect.
 fmt_cost() {
   if [ -n "$JPY_RATE" ]; then
-    LC_ALL=en_US.UTF-8 printf "¥%'.0f" "$(awk -v u="$1" -v r="$JPY_RATE" 'BEGIN{print u*r}')"
+    { LC_ALL=en_US.UTF-8 printf "¥%'.0f" "$(awk -v u="$1" -v r="$JPY_RATE" 'BEGIN{print u*r}')"; } 2>/dev/null
   else
     printf '$%.2f' "$1"
   fi
@@ -272,10 +346,7 @@ write_harness_cost() {
   # filename. A naive [0-9.]-only filter both let "1.2.3" through and silently
   # dropped jq's 1E-7, which cost-tracker.js accepts via Number().
   [[ "$cost" =~ ^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$ ]] || return 0
-  # Match ECC sanitizeSessionId: reject traversal, map any char outside
-  # [A-Za-z0-9_-] to '_', cap at 64 chars.
-  case "$sid" in *..* | */* | *\\*) return 0 ;; esac
-  sid=$(printf '%s' "$sid" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-64)
+  sid=$(sanitize_session_id "$sid")
   [ -n "$sid" ] || return 0
   local tmp="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
   tmp="${tmp%/}"
@@ -372,6 +443,298 @@ write_rate_limits_snapshot() {
     rm -f "$tmpf" 2>/dev/null
   fi
 }
+
+# Billable-delta contract (#446): under a subscription, spend inside the 5h/7d
+# quota is already paid for and only spend past an exhausted window is invoiced
+# against usage credits. A raw session/daily total therefore parks money that
+# will never be billed next to money that will, behind the same glyph. The
+# helpers below pin the spend at the moment a window ran out and report only the
+# increment above that baseline.
+#
+# The baseline is session-scoped, so unlike the rate-limits snapshot above it
+# lives in a session-keyed file: concurrent sessions under one profile would
+# otherwise clobber each other's baseline, the failure #449 established for
+# effort. The `billing` wrapper key leaves room for other session-scoped
+# statusline state to join the same file later.
+
+# billing_state_path <session_id> -> this session's state file, empty when the
+# id is unusable. Session ids are UUIDs, i.e. already filesystem-safe, so the
+# common case is resolved with parameter expansion alone -- important because
+# this sits on the render path. Only an unusual id pays the shared sanitizer's
+# subshell, and for a [A-Za-z0-9_-] id the two agree by construction: `tr -c`
+# has nothing to map and `cut -c1-64` is `${sid:0:64}`.
+billing_state_path() {
+  local sid="$1" safe
+  case "$sid" in
+    '') return 0 ;;
+    *[!A-Za-z0-9_-]*)
+      safe=$(sanitize_session_id "$sid")
+      [ -n "$safe" ] || return 0
+      ;;
+    *) safe=${sid:0:64} ;;
+  esac
+  printf '%s/session_%s.json' "$CACHE_DIR" "$safe"
+}
+
+# Drop this session's baseline: the windows have room again, so the next overage
+# has to start from a fresh one.
+billing_state_reset() {
+  local target
+  target=$(billing_state_path "$1")
+  [ -n "$target" ] && [ -e "$target" ] && rm -f "$target" 2>/dev/null
+  return 0
+}
+
+# Age out the baselines left behind by sessions that have ended. Sessions never
+# signal "done", so they are pruned by mtime. Called on every render regardless
+# of quota state -- a baseline written during an overage must still be collected
+# once that session is gone, and the overage may outlive it.
+#
+# The leading glob is a shell builtin, so a machine with no baseline on disk --
+# every machine that never exceeds its quota -- pays no fork at all here. Once
+# some baseline does exist the daily stamp check costs a `date` and a `stat`,
+# which is the price of collecting it.
+#
+# Note `find -mtime +N` compares whole 24h periods with a strict `>`, so the
+# effective retention is up to N+1 days. That slack is fine for a sweep.
+billing_state_prune() {
+  local f found=0
+  for f in "$CACHE_DIR"/session_*.json; do
+    if [ -e "$f" ]; then
+      found=1
+      break
+    fi
+  done
+  [ "$found" = 1 ] || return 0
+
+  # Once a day, the same stamp-file TTL idiom the caches above use.
+  # Backgrounded so the render never waits on the directory walk.
+  local stamp="$CACHE_DIR/.session-gc" now mtime
+  now=$(date +%s)
+  mtime=$(file_mtime "$stamp")
+  if [ $((now - mtime)) -gt 86400 ]; then
+    touch "$stamp"
+    (find "$CACHE_DIR" -maxdepth 1 -type f -name 'session_*.json' -mtime "+${SESSION_STATE_TTL_DAYS}" -delete 2>/dev/null) &
+  fi
+}
+
+# Persist the baseline, mirroring write_harness_cost / write_rate_limits_snapshot:
+# every numeric field is re-validated as a JSON number, fields that did not
+# validate are omitted rather than written as null, and the file is created
+# under umask 077 via mktemp then renamed into place. Failure is silent -- a
+# missing baseline is simply re-taken on the next render, which beats letting
+# the statusline fail.
+billing_state_write() {
+  local target="$1" window="$2" resets_at="$3" sess_base="$4"
+  local daily_date="$5" daily_base="$6" daily_carry="$7" daily_last="$8"
+
+  case "$window" in
+    five_hour | seven_day) ;;
+    *) return 0 ;;
+  esac
+  local num_re='^(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$'
+  [[ "$resets_at" =~ $num_re ]] || resets_at=""
+  [[ "$sess_base" =~ $num_re ]] || sess_base=""
+  # The daily trio is all-or-nothing: a carry without the baseline it was
+  # measured against would silently overstate the next day's charge.
+  case "$daily_date" in
+    '' | *[!0-9]*) daily_date="" ;;
+  esac
+  if ! [[ "$daily_base" =~ $num_re ]] || ! [[ "$daily_carry" =~ $num_re ]] || ! [[ "$daily_last" =~ $num_re ]]; then
+    daily_date=""
+  fi
+
+  local body="\"window\":\"${window}\""
+  [ -n "$resets_at" ] && body="${body},\"resets_at\":${resets_at}"
+  [ -n "$sess_base" ] && body="${body},\"session_baseline\":${sess_base}"
+  [ -n "$daily_date" ] && body="${body},\"daily_date\":\"${daily_date}\",\"daily_baseline\":${daily_base},\"daily_carry\":${daily_carry},\"daily_last\":${daily_last}"
+
+  local tmpf old_umask
+  old_umask=$(umask)
+  umask 077
+  tmpf=$(mktemp "${target%.json}.XXXXXX" 2>/dev/null) || {
+    umask "$old_umask"
+    return 0
+  }
+  umask "$old_umask"
+  if printf '{"ts":%s,"billing":{%s}}' "$(date +%s)" "$body" >"$tmpf" 2>/dev/null; then
+    mv -f "$tmpf" "$target" 2>/dev/null || rm -f "$tmpf" 2>/dev/null
+  else
+    rm -f "$tmpf" 2>/dev/null
+  fi
+}
+
+# billing_delta <fh_pct> <fh_reset> <sd_pct> <sd_reset> <cost> <daily> <sid>
+#
+# Results come back in three globals (the file's existing convention for cheap
+# cross-function results, cf. JPY_RATE) instead of on stdout, so the common path
+# costs no subshell:
+#   BILLING_STATE   none     no rate_limits on stdin -> raw totals are billed
+#                   included inside quota -> nothing is billable
+#                   billed   a window is exhausted -> BILLED_* hold the deltas
+#   BILLED_SESSION  billable session spend, empty when it cannot be computed
+#   BILLED_DAILY    billable spend today, carried across midnight
+billing_delta() {
+  local fh_pct="$1" fh_reset="$2" sd_pct="$3" sd_reset="$4"
+  local cost="$5" daily="$6" sid="$7"
+
+  BILLING_STATE="none"
+  BILLED_SESSION=""
+  BILLED_DAILY=""
+
+  # No rate_limits at all: an API-key (pay-as-you-go) session, or a
+  # subscription session before its first API response. There is no quota being
+  # consumed, so every dollar really is billed -- report the raw totals.
+  [ -n "$fh_pct" ] || [ -n "$sd_pct" ] || return 0
+
+  local fh_out=0 sd_out=0
+  pct_exhausted "$fh_pct" && fh_out=1
+  pct_exhausted "$sd_pct" && sd_out=1
+
+  if [ "$fh_out" = 0 ] && [ "$sd_out" = 0 ]; then
+    # Inside quota: nothing is billable, and a baseline left from an earlier
+    # overage is now stale -- the next overage has to start from a fresh one.
+    BILLING_STATE="included"
+    billing_state_reset "$sid"
+    return 0
+  fi
+
+  local state_file
+  state_file=$(billing_state_path "$sid")
+  # With no usable session id there is nowhere to keep a baseline, and a delta
+  # cannot be invented. Fall back to the raw totals rather than show a number
+  # with nothing behind it.
+  [ -n "$state_file" ] || return 0
+
+  # Anchor on the exhausted window that resets last: it is the one keeping the
+  # overage alive, so the baseline outlives the shorter window rolling over.
+  local anchor_win="" anchor_reset=""
+  if [ "$fh_out" = 1 ]; then
+    anchor_win="five_hour"
+    anchor_reset="$fh_reset"
+  fi
+  if [ "$sd_out" = 1 ] && { [ -z "$anchor_win" ] || epoch_after "$sd_reset" "$anchor_reset"; }; then
+    anchor_win="seven_day"
+    anchor_reset="$sd_reset"
+  fi
+
+  local st_win="" st_reset="" st_sess="" st_date="" st_base="" st_carry="" st_last=""
+  if [ -f "$state_file" ]; then
+    IFS=$'\x1f' read -r st_win st_reset st_sess st_date st_base st_carry st_last < <(
+      jq -r '[
+        (.billing.window // ""),
+        (.billing.resets_at // "" | tostring),
+        (.billing.session_baseline // "" | tostring),
+        (.billing.daily_date // ""),
+        (.billing.daily_baseline // "" | tostring),
+        (.billing.daily_carry // "" | tostring),
+        (.billing.daily_last // "" | tostring)
+      ] | join("\u001f")' "$state_file" 2>/dev/null
+    )
+  fi
+  local was="${st_win}|${st_reset}|${st_sess}|${st_date}|${st_base}|${st_carry}|${st_last}"
+
+  # The stored anchor holds only while its window is the same instance and is
+  # still exhausted. used_percentage is monotonic within one instance, so that
+  # pair proves the overage never lapsed since the baseline was taken -- which
+  # is why no wall-clock comparison is needed, and clock skew cannot lose a
+  # baseline or resurrect a stale one.
+  local win_out=0 live_reset=""
+  case "$st_win" in
+    five_hour)
+      win_out=$fh_out
+      live_reset="$fh_reset"
+      ;;
+    seven_day)
+      win_out=$sd_out
+      live_reset="$sd_reset"
+      ;;
+  esac
+  if [ "$win_out" = 1 ] && [ "$live_reset" = "$st_reset" ]; then
+    # Hand the anchor over to a longer-lived window while both are exhausted:
+    # continuity transfers at that instant, so the baseline survives the
+    # current window's reset instead of being discarded mid-overage.
+    if [ "$anchor_win" != "$st_win" ] && epoch_after "$anchor_reset" "$st_reset"; then
+      st_win="$anchor_win"
+      st_reset="$anchor_reset"
+    fi
+  else
+    # Fresh anchor. A session that was already running when the window ran out
+    # is the common case, so the baseline is this render's spend: anchoring at 0
+    # would bill everything it spent while still inside quota. The cost is that
+    # a session which *starts* mid-overage loses its first turn from the total,
+    # since there is no way to tell the two apart without state we do not have.
+    # Under-reporting by one turn beats over-reporting a whole session.
+    st_win="$anchor_win"
+    st_reset="$anchor_reset"
+    st_sess=""
+    st_date=""
+    st_base=""
+    st_carry=""
+    st_last=""
+  fi
+
+  # The two halves of the baseline are taken independently and lazily: ccusage
+  # refreshes in the background, so `daily` is empty on a cold cache and
+  # anchoring it at 0 there would bill the whole day.
+  [ -n "$st_sess" ] || st_sess="$cost"
+
+  local today=""
+  if [ -n "$daily" ] || [ -n "$st_date" ]; then
+    today=$(date +%Y%m%d)
+  fi
+  if [ -z "$st_date" ] && [ -n "$daily" ]; then
+    st_date="$today"
+    st_base="$daily"
+    st_carry=0
+    st_last="$daily"
+  elif [ -n "$st_date" ] && [ "$st_date" != "$today" ]; then
+    # ccusage totals reset at midnight, so bank the previous day's billable
+    # remainder into the carry before re-basing on the new day. Everything spent
+    # today is billable, hence the 0 baseline.
+    st_carry=$(awk -v c="$st_carry" -v l="$st_last" -v b="$st_base" \
+      'BEGIN { d = l - b; if (d < 0) d = 0; printf "%.10f", c + d }')
+    st_date="$today"
+    st_base=0
+    st_last="${daily:-0}"
+  fi
+  if [ -n "$st_date" ] && [ -n "$daily" ]; then
+    st_last="$daily"
+  fi
+
+  # One awk pass for all the money: bash 3.2 has no float arithmetic. Every
+  # delta is clamped at 0 -- including after the carry is added, since the carry
+  # comes back out of the state file and a corrupted one must not be able to
+  # render a negative charge for even a single frame.
+  IFS=$'\x1f' read -r BILLED_SESSION BILLED_DAILY < <(
+    awk -v cost="$cost" -v sb="$st_sess" -v dn="$daily" -v db="$st_base" -v dc="$st_carry" '
+      BEGIN {
+        s = ""
+        d = ""
+        if (cost != "" && sb != "") {
+          s = cost - sb
+          if (s < 0) s = 0
+        }
+        if (dn != "" && db != "") {
+          d = dn - db
+          if (d < 0) d = 0
+          d = d + dc
+          if (d < 0) d = 0
+        }
+        printf "%s\037%s\n", s, d
+      }'
+  )
+
+  BILLING_STATE="billed"
+  # Rendering happens on every turn, but the baseline only moves when ccusage
+  # refreshes or the day turns, so skip the write when nothing actually changed.
+  local now_state="${st_win}|${st_reset}|${st_sess}|${st_date}|${st_base}|${st_carry}|${st_last}"
+  if [ "$now_state" != "$was" ] || [ ! -f "$state_file" ]; then
+    billing_state_write "$state_file" "$st_win" "$st_reset" "$st_sess" \
+      "$st_date" "$st_base" "$st_carry" "$st_last"
+  fi
+}
+
 write_harness_cost "$cost" "$session_id"
 write_rate_limits_snapshot "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset"
 
@@ -441,9 +804,32 @@ if [ -n "$sd_pct" ]; then
   [ -n "$sd_reset" ] && line2+=" ${DIM}↻$(fmt_epoch "$sd_reset" '%-m/%-d %H:%M')${RST}"
 fi
 
-[ -n "$cost" ] && line2+="${SEP}${I_COST} $(fmt_cost "$cost") ${DIM}(session)${RST}"
+# Cost, as money actually owed rather than money spent (#446). daily_cost is
+# read even while nothing is billable, so ccusage stays warm and a baseline can
+# be taken the instant a quota window runs out.
 daily=$(daily_cost)
-[ -n "$daily" ] && line2+="${SEP}${I_COST} $(fmt_cost "$daily") ${DIM}(daily)${RST}"
+billing_delta "$fh_pct" "$fh_reset" "$sd_pct" "$sd_reset" "$cost" "$daily" "$session_id"
+# Collect ended sessions' baselines regardless of this session's quota state: a
+# machine sitting in a long overage would otherwise never sweep, and a session
+# that is inside quota is not the only one that can leave a baseline behind.
+billing_state_prune
+case "$BILLING_STATE" in
+  billed)
+    [ -n "$BILLED_SESSION" ] && line2+="${SEP}${I_COST} $(fmt_cost "$BILLED_SESSION") ${DIM}(session)${RST}"
+    [ -n "$BILLED_DAILY" ] && line2+="${SEP}${I_COST} $(fmt_cost "$BILLED_DAILY") ${DIM}(daily)${RST}"
+    ;;
+  included)
+    # Inside quota the spend is covered, so there is no amount to show. The
+    # marker still occupies the slot: a silently missing segment would read as
+    # "the cost lookup broke" rather than "this costs nothing".
+    line2+="${SEP}${I_COST} ${DIM}incl.${RST}"
+    ;;
+  *)
+    # Pay-as-you-go (no rate_limits): the raw totals already are the bill.
+    [ -n "$cost" ] && line2+="${SEP}${I_COST} $(fmt_cost "$cost") ${DIM}(session)${RST}"
+    [ -n "$daily" ] && line2+="${SEP}${I_COST} $(fmt_cost "$daily") ${DIM}(daily)${RST}"
+    ;;
+esac
 printf '%s\n' "$line2"
 
 # ---------------------------------------------------------------------------
