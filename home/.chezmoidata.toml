@@ -20,11 +20,11 @@ ghq_user = "kryota-dev"
 
 [ecc]
   # Everything Claude Code — https://github.com/affaan-m/ECC
-  # Pinned to an immutable commit (the v2.1.0 release commit) so the executable hook runtime
+  # Pinned to an immutable commit (the v2.2.0 release commit) so the executable hook runtime
   # cannot change under a moved tag. Renovate (github-tags) tracks release tags and bumps both
   # version and commit together; ECC is never auto-merged (see packageRules in renovate.json5).
-  version = "2.1.0"
-  commit = "4da6deac1888690e7fb8572d097ee23db630f7a0"
+  version = "2.2.0"
+  commit = "5eddf1a3ffd311423be2d4ba7d26f7209c91b033"
   # Adopted ECC skills (Phase 3 analysis: 133 selected of 271 skills at analysis time).
   # Reconciled against the pinned commit's current 261-skill tree (F-0): 127 exist, 6
   # vanished upstream between analysis and the pinned commit and are dropped
