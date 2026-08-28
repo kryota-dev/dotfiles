@@ -79,7 +79,7 @@
 
 ---
 
-## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->49<!-- /FACT --> スキル）
+## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->50<!-- /FACT --> スキル）
 
 `home/dot_agents/skills/` のキュレーテッドスキルをテーマ別にグループ化しています。
 
@@ -113,11 +113,11 @@
 
 `wtp`、`wtp-cleanup`、`chezmoi`、`git-filter-path`
 
-### ドメイン、データベース、メディア、生産性ユーティリティ（12 スキル）
+### ドメイン、データベース、メディア、生産性ユーティリティ（13 スキル）
 
-データベース、メディア変換、日々の生産性にまたがる各種機能スキルに加え、2026-07-07 のラウンドで追加された朝ルーチン・レポーティング/発信系スキル（`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`）。`virtual-device` は iOS Simulator / Android Emulator の実ブラウザを駆動するところまでを担い、探索テストのワークフロー自体は `agent-browser skills get dogfood` へ委譲します。
+データベース、メディア変換、日々の生産性にまたがる各種機能スキルに加え、2026-07-07 のラウンドで追加された朝ルーチン・レポーティング/発信系スキル（`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`）。`virtual-device` は iOS Simulator / Android Emulator の実ブラウザを駆動するところまでを担い、探索テストのワークフロー自体は `agent-browser skills get dogfood` へ委譲します。`ios-device-web` は `virtual-device` が止まる先を引き継ぎます。USB 接続した**実機**の iPhone / iPad の Web Inspector を CDP エンドポイントとして開き、実 Safari タブやインストール済み PWA の中で JS を評価します。シミュレータ（電波が無く `persist()` の実付与も起きない）でも `phone-harness`（動画ストリームで DOM に触れない）でも届かない層です。
 
-`fix-migration-leftover`、`webp-convert`、`agent-browser`、`virtual-device`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`、`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`
+`fix-migration-leftover`、`webp-convert`、`agent-browser`、`virtual-device`、`ios-device-web`、`daily-planning`、`sync-daily-planning-calendar`、`empirical-prompt-tuning`、`redact-patterns`、`gmail-triage`、`morning-brief`、`worklog`、`zenn-draft`
 
 ---
 
