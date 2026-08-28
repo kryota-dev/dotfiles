@@ -38,7 +38,7 @@ Configuration, policy, and mutable state have different owners:
 | Location | Contents | Git state |
 |---|---|---|
 | `~/.config/frontier-harness/config.json` | capability registry, rollout, retention | chezmoi-managed |
-| `<repo>/.harness/policy.json` | approved repository capability manifest | repository policy |
+| `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`; enforcement lands with the onboarding step) | repository policy |
 | `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
@@ -56,8 +56,10 @@ fh onboard --manifest candidate.json
 fh onboard --manifest candidate.json --approve --json
 ```
 
-Unknown commands and domains are not executed. They enter a queue that a wave
-can approve in one batch. Credentials, migrations, external contract changes,
+Unknown commands and domains are not executed. Queueing them for a single
+wave-level batch approval is planned for the onboarding step and is not part of
+this shadow foundation: today `fh onboard` records an approved manifest and no
+command consumes it yet. Credentials, migrations, external contract changes,
 deploys, force pushes, releases, and merges remain explicit escalations.
 
 ## Shadow commands
@@ -82,6 +84,7 @@ child worktrees through `wtp`; read-only investigation does not create one.
 A verified, cleanly applicable candidate may move into the primary worktree,
 but merge and other irreversible external actions always remain with the user.
 
-The promotion path is shadow → pilot → default. `--legacy` remains the rollback
-path until telemetry and representative skill evaluations demonstrate that the
-new route is reliable.
+The promotion path is shadow → pilot → default. A `--legacy` rollback flag is
+planned for that promotion work and is not implemented yet. Until then the
+rollout stays on `shadow`, which the CLI enforces as an explicit guard rather
+than relying on the provider adapter being absent.

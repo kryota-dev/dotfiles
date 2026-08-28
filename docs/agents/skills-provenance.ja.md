@@ -81,7 +81,7 @@
 
 ## キュレーテッドスキルインベントリ（<!-- FACT:curated-skill-count -->49<!-- /FACT --> スキル）
 
-`home/dot_agents/skills/` の 47 スキルをテーマ別にグループ化しています。
+`home/dot_agents/skills/` のキュレーテッドスキルをテーマ別にグループ化しています。
 
 ### Git、PR、GitHub ワークフロー（14 スキル）
 

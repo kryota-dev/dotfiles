@@ -26,6 +26,7 @@ test に限定する。
 - 2026-08-27: Step 1 の Homebrew cask 導入と Antigravity settings の target apply を完了。`agy` の interactive keychain login と authenticated model discovery は user action 待ち。
 - 2026-08-27: Step 2 の shadow-mode foundation を実装。`fh doctor/onboard/run/status/verify/review/clean`、SQLite route/evidence state、raw-evidence retention、Node/Bats regression test を追加。
 - 2026-08-27: `execution-readiness-check` と `frontier-harness` skill の draft、`model-fitness-check` compatibility shim、canonical/mirror documentation を追加。既存 orchestrator の全面移行、provider write adapter、wave batch authorization は未完了。
+- 2026-08-28: PR #478 のレビュー指摘に対応。(1) AC-034 の shim 契約を実装し直した —— `pr-workflow` / `sdd` / `multi-review` は `execution-readiness-check` と `model-fitness-check` の**両方**を呼ぶ（floor 判定を readiness gate で置き換えていたため、§4 の blocking floor gate が新経路から到達不能になっていた）。`model-fitness-check` 側にも shim 契約と削除条件を明記。(2) `findCommand` が PATH の空要素を候補にしないよう修正（untrusted repository の `agy` が `doctor --probe` で起動しうる経路）。(3) policy / readiness の書き込みを symlink 検査 + `O_EXCL` + 予測不能な一時名の共通ヘルパーに集約。(4) `doctor --probe` の readiness を既定 state root へ永続化。(5) `config.rollout` を出力値ではなく実行ガードとして消費。(6) 未指定の `hasDeterministicOracle` を安全側（oracle 無し）に倒す task 正規化を追加。(7) SQLite に schema version と migration を追加。(8) CI に `lint-node` / `test-node` を追加（Node テストが CI で一度も実行されていなかった）。Node テストは 20 → 41 件。
 
 ## File change plan
 

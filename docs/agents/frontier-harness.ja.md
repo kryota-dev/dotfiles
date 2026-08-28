@@ -28,7 +28,7 @@ Antigravity は vendor-supported な業務 account mapping を実測するまで
 | 場所 | 内容 | 管理 |
 |---|---|---|
 | `~/.config/frontier-harness/config.json` | capability registry、rollout、retention | chezmoi |
-| `<repo>/.harness/policy.json` | 承認済み repository capability manifest | repository policy |
+| `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込む。参照して強制するのは onboarding step から） | repository policy |
 | `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
 
 Evidence Bus には diff、command result、log、trace、screenshot、browser recording、accepted decision
@@ -50,7 +50,9 @@ fh status --json
 fh clean --dry-run --json
 ```
 
-未知の command/domain は実行せず queue に残し、wave boundary で一括承認します。credential、migration、
+未知の command/domain は実行しません。wave boundary での一括承認のために queue へ残す仕組みは
+onboarding step で実装予定であり、この shadow foundation には含まれません（現時点の `fh onboard` は
+承認済み manifest を記録するだけで、それを参照する command はまだありません）。credential、migration、
 external contract、deploy、force push、release、merge は常に明示的な escalation です。
 
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
@@ -63,5 +65,6 @@ primary worktree と PR branch は `pr-workflow` が所有します。将来の 
 verified かつ clean apply 可能な candidate は primary へ反映できますが、merge と不可逆な外部操作は
 常に user が行います。
 
-promotion は shadow → pilot → default です。telemetry と skill evaluation が十分になるまで、
-`--legacy` を rollback path として維持します。
+promotion は shadow → pilot → default です。`--legacy` による rollback flag はその promotion 作業で
+実装する予定であり、現時点では未実装です。それまで rollout は `shadow` のままで、CLI 側が
+（provider adapter が未実装であることに依存せず）明示的なガードとして shadow を強制します。
