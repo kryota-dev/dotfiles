@@ -121,17 +121,39 @@ is reported as `ban-unused-ignore`.
 
 File-level opt-out is not merely discouraged, it is rejected. deno honours
 `// deno-lint-ignore-file no-console` (and a bare `// deno-lint-ignore-file`, which disables
-every rule), either of which would silently exempt an entire file, so the target scans for
-those two forms and fails before it lints:
+every rule), either of which would silently exempt an entire file, and deno offers no flag to
+turn ignore directives off — so the target inspects sources itself and fails before it lints:
 
 ```
 lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
-home/dot_local/lib/example/cli.mjs:1:// deno-lint-ignore-file no-console
+home/dot_local/lib/example/cli.mjs:1
 ```
 
-A file-level directive naming only other rules (`// deno-lint-ignore-file no-explicit-any`)
-is left alone — it does not weaken this guard, and the console call underneath it is still
-reported.
+The check is **fail-closed**. It finds `deno-lint-ignore-file` anywhere in a line and then
+allows it only when the remainder provably names other rules: ASCII rule names, at least one
+of them, none of them `no-console`. A directive naming only other rules
+(`// deno-lint-ignore-file no-explicit-any`) is therefore left alone — it does not weaken this
+guard, and the console call underneath it is still reported. Anything the check cannot prove
+safe is rejected.
+
+It is written that way because checks shaped like deno's lexer kept leaking. Each of these
+passed a check anchored on `^[[:space:]]*//` while deno honoured the directive and exempted
+the whole file:
+
+| input | why the anchored check missed it |
+|---|---|
+| a BOM (U+FEFF) before the `//` | not POSIX `[[:space:]]`, but ECMAScript whitespace |
+| U+00A0 / U+3000 (any Unicode `Zs`) before the `//` or between rule names | same |
+| U+2028 / U+2029 after the directive | ends a line comment for ECMAScript, but not a record for `awk` |
+
+That set is ECMAScript's, not POSIX's, so matching it in `awk` is a list that is never
+finished, and every gap is a silent hole. Inverting the test ends the chase.
+
+The cost is false positives: the literal text is rejected wherever it appears in a scanned
+file, including inside a template literal, a block comment, or prose, where deno would ignore
+it. That is the side to err on. Both the matched text and control characters in the path are
+kept out of the diagnostic, so neither a file's contents nor its name can carry terminal
+escapes into a console or a CI log.
 
 Most of the tree needs no exemption at all — the CLI modules under `home/dot_local/lib/`
 already write through `process.stdout.write` / `process.stderr.write`. At the time the guard

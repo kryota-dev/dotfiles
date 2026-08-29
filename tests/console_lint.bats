@@ -144,12 +144,52 @@ EOF
   [[ "$output" == *"file-level opt-out is not allowed"* ]]
 }
 
+@test "lint-console: unicode that hides a whole-file opt-out from a lexer-shaped check is rejected" {
+  # Each of these passed a check anchored on `^[[:space:]]*//` while deno honoured the
+  # directive and exempted the file. They are ECMAScript whitespace / line terminators that
+  # POSIX [[:space:]] does not cover, which is why the check no longer tries to model them.
+  local label bytes
+  # shellcheck disable=SC1003
+  for label in \
+    'bom:\357\273\277// deno-lint-ignore-file' \
+    'nbsp-before:\302\240// deno-lint-ignore-file' \
+    'ideographic-space-before:\343\200\200// deno-lint-ignore-file' \
+    'nbsp-separator:// deno-lint-ignore-file\302\240no-console' \
+    'u2028-terminator:// deno-lint-ignore-file\342\200\250x' \
+    'u2029-terminator:// deno-lint-ignore-file\342\200\251x'; do
+    bytes="${label#*:}"
+    rm -f "${FIXTURE}"/probe.mjs
+    printf "${bytes}\nconsole.log(\"hidden\");\n" >"${FIXTURE}/probe.mjs"
+    lint_console
+    [ "$status" -ne 0 ] && [[ "$output" == *"file-level opt-out is not allowed"* ]] || {
+      echo "${label%%:*} slipped past the file-level opt-out check: ${output}"
+      false
+    }
+  done
+}
+
+@test "lint-console: a control character in a path cannot reach the diagnostic" {
+  # The path is as attacker-controlled as the file's contents, so it is sanitised too.
+  local esc
+  esc="$(printf 'ev\033[2Jil')"
+  cat >"${FIXTURE}/${esc}.mjs" <<'EOF'
+// deno-lint-ignore-file
+console.log("x");
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file-level opt-out is not allowed"* ]]
+  [[ "$output" != *"$(printf '\033')"* ]]
+  # ...and the path is still reported, with the control byte replaced -- so this cannot pass
+  # merely because the diagnostic went missing.
+  [[ "$output" == *"ev?"* ]]
+}
+
 @test "lint-console: the opt-out check errs toward false positives, never a silent hole" {
-  # deno keeps a file-level directive live through blank lines, `//` and `/* */` comments and
-  # a shebang, and only the first statement ends that region -- so scanning just the region
-  # risks missing a real bypass. Scanning whole files instead costs this: the directive's
-  # exact text at the start of a line inside a template literal is rejected even though deno
-  # reads it as a string. Pinned as the deliberate trade it is, not left as an accident.
+  # The check allows a directive only when it provably names other rules, so text it cannot
+  # prove safe is rejected wherever it appears -- here inside a template literal, which deno
+  # reads as a string. That is the deliberate cost of not modelling deno's lexer, and it is
+  # pinned so nobody trades it back for a quieter check that leaks.
   cat >"${FIXTURE}/a.mjs" <<'EOF'
 export const SAMPLE = `
 // deno-lint-ignore-file

@@ -122,17 +122,38 @@ console.log(banner);
 
 ファイル単位の除外は「非推奨」ではなく**拒否**します。deno は
 `// deno-lint-ignore-file no-console`（および全ルールを無効化する裸の
-`// deno-lint-ignore-file`）を honor するため、どちらもファイル全体を黙って除外できてしまいます。
-そこでターゲットは lint の前にこの 2 形式を走査して失敗させます。
+`// deno-lint-ignore-file`）を honor するため、どちらもファイル全体を黙って除外できてしまい、
+しかも deno には ignore ディレクティブを無効化するフラグがありません。そこでターゲットが
+ソースを自ら検査し、lint の前に失敗させます。
 
 ```
 lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
-home/dot_local/lib/example/cli.mjs:1:// deno-lint-ignore-file no-console
+home/dot_local/lib/example/cli.mjs:1
 ```
 
-他のルールだけを指定したファイル単位ディレクティブ（`// deno-lint-ignore-file no-explicit-any`）は
-そのまま通します — このガードを弱めることはなく、その下にある console 呼び出しは依然として
-報告されるためです。
+この検査は **fail-closed** です。行中のどこかにある `deno-lint-ignore-file` を見つけ、残りが
+「ASCII のルール名の羅列であり、少なくとも 1 つ存在し、`no-console` を含まない」と**証明できた
+ときだけ**通します。したがって他のルールだけを指定したディレクティブ
+（`// deno-lint-ignore-file no-explicit-any`）はそのまま通り — このガードを弱めることはなく、
+その下にある console 呼び出しは依然として報告されます。安全と証明できない入力はすべて拒否します。
+
+こうしているのは、deno の字句解析を模した検査が漏れ続けたためです。次のいずれも
+`^[[:space:]]*//` にアンカーした検査を通過する一方、deno はディレクティブを honor して
+ファイル全体を除外していました。
+
+| 入力 | アンカー付き検査が見逃した理由 |
+|---|---|
+| `//` の前に BOM (U+FEFF) | POSIX の `[[:space:]]` ではないが ECMAScript の空白 |
+| `//` の前やルール名の区切りに U+00A0 / U+3000（Unicode `Zs` 全般） | 同上 |
+| ディレクティブ直後に U+2028 / U+2029 | ECMAScript では行コメントを終端するが、awk のレコードは終端しない |
+
+この集合は POSIX ではなく ECMAScript のものなので、awk で列挙し続ける限りリストは終わらず、
+隙間はすべてサイレントな穴になります。判定を反転させることでこの追いかけっこを終わらせています。
+
+代償は誤検出です。走査対象ファイル内であれば、テンプレートリテラル・ブロックコメント・散文の
+中にある同一文字列も拒否されます（deno はそれらを無視するにもかかわらず）。誤る方向としては
+こちらを選びます。一致した行の内容も、パスに含まれる制御文字も診断には出さないため、
+ファイルの内容もファイル名も端末や CI ログへ制御シーケンスを持ち込めません。
 
 ツリーの大半はそもそも除外を必要としません。`home/dot_local/lib/` 配下の CLI モジュールは
 既に `process.stdout.write` / `process.stderr.write` 経由で出力しています。ガードを有効化した
