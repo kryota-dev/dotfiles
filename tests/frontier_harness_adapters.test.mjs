@@ -1583,3 +1583,74 @@ test("the init health check refuses a prompt tool whose shape it cannot read", (
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// runner の同期／非同期（#537: 起動時検査を stream 上で行うために非同期 runner が要る）
+// ---------------------------------------------------------------------------
+
+test("a synchronous runner still yields a synchronous execution result", () => {
+  const { executor } = fakeExecutor({
+    availability: { fake: { available: true, models: ["gpt-5.6-terra"] } },
+    results: [
+      { exitCode: 0, stdout: JSON.stringify({ outcome: "succeeded" }), stderr: "" },
+    ],
+  });
+  const execution = executor();
+  // Promise になっていたら、既存の同期呼び出し側は `execution.outcome` を undefined として
+  // 読み、失敗を成功として扱いうる。同期契約はここで固定する。
+  assert.equal(typeof execution.then, "undefined");
+  assert.equal(execution.outcome, "succeeded");
+});
+
+test("an asynchronous runner yields a promise that resolves to the same shape", async () => {
+  const adapter = createFakeAdapter();
+  const executor = createAdapterExecutor({
+    registry: createAdapterRegistry({ adapters: [adapter] }),
+    availability: { fake: { available: true, models: ["gpt-5.6-terra"] } },
+    capability: FAKE_CAPABILITY,
+    capabilityName: "executor.default",
+    request: {
+      prompt: "run the suite",
+      executable: "/usr/local/bin/fake",
+      sandbox: { mode: "read-only" },
+    },
+    runner: () =>
+      Promise.resolve({
+        exitCode: 0,
+        stdout: JSON.stringify({ outcome: "succeeded", resumeKey: "fake-async" }),
+        stderr: "",
+      }),
+  });
+
+  const pending = executor();
+  assert.equal(typeof pending.then, "function");
+  const execution = await pending;
+  assert.equal(execution.ranProvider, true);
+  assert.equal(execution.outcome, "succeeded");
+  assert.equal(execution.resumeKey, "fake-async");
+  // 開始時刻は runner を呼ぶ前、終了時刻は解決後。await を挟んでも逆転しない。
+  assert.ok(execution.finishedAt >= execution.startedAt);
+});
+
+test("a refused capability short-circuits before the runner, async or not", () => {
+  let runnerCalls = 0;
+  const executor = createAdapterExecutor({
+    registry: createAdapterRegistry({ adapters: [createFakeAdapter()] }),
+    availability: { fake: { available: false, models: null } },
+    capability: FAKE_CAPABILITY,
+    capabilityName: "executor.default",
+    request: {
+      prompt: "run the suite",
+      executable: "/usr/local/bin/fake",
+      sandbox: { mode: "read-only" },
+    },
+    runner: () => {
+      runnerCalls += 1;
+      return Promise.resolve({ exitCode: 0, stdout: "{}", stderr: "" });
+    },
+  });
+  const execution = executor();
+  assert.equal(execution.ranProvider, false);
+  assert.equal(execution.outcome, "refused");
+  assert.equal(runnerCalls, 0);
+});

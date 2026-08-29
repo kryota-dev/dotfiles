@@ -1611,3 +1611,68 @@ print(" ".join(bad))
   [ "$(stub_count 'send-keys')" -eq 0 ]
   [ "$(stub_count 'paste-buffer')" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# #537 回帰: 子起動を fh 経由の非対話実行へ切り替える
+# ---------------------------------------------------------------------------
+
+@test "#537 回帰: SKILL.md が子起動を fh session に寄せている" {
+  # 起動フラグを skill 側で組み立てると、事前遮断（--setting-sources / --strict-mcp-config）と
+  # 承認チャネルの配線を sealInvocation が強制する保証の外に出る。
+  grep -q 'fh session launch' "$SKILL_MD"
+  grep -q -- '--prompt-file' "$SKILL_MD"
+  grep -q '起動フラグを自分で組み立てない' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md が承認チャネル経由の代理応答を書いている" {
+  # 画面参照とキー送出を伴わずに承認と回答が成立することが、この移行の完了条件そのもの。
+  grep -q 'fh approvals' "$SKILL_MD"
+  grep -q 'fh approve --request' "$SKILL_MD"
+  grep -q '呼ばれた時点が未回答であり、返り値が回答である' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md が承認経路の起動前確認を必須として書いている" {
+  # 承認経路が配線されていないと AskUserQuestion 自体が消え、blocking gate が静かに無効化される
+  # （#529 PRD R1）。前提チェックが skill から落ちると、その沈黙する故障に戻る。
+  grep -q 'AskUserQuestion' "$SKILL_MD"
+  grep -q 'fh doctor' "$SKILL_MD"
+  grep -q 'fh onboard' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md が tmux を撤去せず #539 へ送っている" {
+  # 目視で介入できる窓としての価値は残る（#529 PRD §6 ガード 21）。
+  # 撤去条件を決めるのは #539 なので、本 skill は legacy として残すことを明示する。
+  grep -q '#539' "$SKILL_MD"
+  grep -q 'legacy' "$SKILL_MD"
+  grep -q 'claude --resume' "$SKILL_MD"
+  # legacy 経路のスクリプトは実体として残っていること。
+  [ -f "${HOME_DIR}/dot_agents/skills/wave-orchestrator/scripts/executable_wave-events.sh" ]
+  [ -f "${HOME_DIR}/dot_agents/skills/wave-orchestrator/scripts/executable_send-to-pane.sh" ]
+}
+
+@test "#537 回帰: SKILL.md が「マージは代理しない」を筆頭のまま残している" {
+  # 経路が変わっても無条件エスカレート集合の筆頭であり続ける。承認チャネルは要求を user へ
+  # 運ぶ経路であって、Leader が代理で許可してよいという意味ではない。
+  grep -q 'マージは代理しない' "$SKILL_MD"
+  grep -q 'fh approve --allow` を打ってはならない' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md が後始末で承認要求の会話内容を消している" {
+  # 質問文と選択肢は要求 payload に残る。wave が終わったら残さない運用に揃える。
+  grep -q 'fh approvals --purge' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md が account の取り違えと stderr の永続化を明示的に禁じている" {
+  # 子は必ず親と同じ account で走る（launcher が継承した CLAUDE_CONFIG_DIR を保持するため）。
+  # 「業務を別区分のアカウントで走らせる」事故は黙って起きるので、推測で進めないことを書く。
+  grep -q 'この経路では運べない' "$SKILL_MD"
+  grep -q 'accountScope' "$SKILL_MD"
+  # fh 自身はイベント型名しか書かないが、子の生 stderr は継承される（人が覗く窓）。
+  # そこをファイルへ落とすと「記録に会話内容を残さない」が外側から破れる。
+  grep -q '子の stderr をファイルへ残さない' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md がワークツリーを承認境界として説明している" {
+  # 承認済みリポジトリから別リポジトリの worktree を指すだけで gate を迂回できてはならない。
+  grep -q '承認境界そのもの' "$SKILL_MD"
+}

@@ -9,9 +9,12 @@ evolving `pr-workflow`. It routes a normalized task to a provider capability,
 records evidence in repository-local runtime state, and makes deterministic
 verification higher priority than any model's self-assessment.
 
-The initial rollout is **shadow**. It records route, verification, and review
-plans but does not start provider write runs. This keeps the existing
-`pr-workflow` execution path intact while the router collects evidence.
+The rollout is **pilot**, and its blast radius is deliberately narrow. `run`,
+`verify`, and `review` still only record route, verification, and review plans:
+they inject no runner, so they reach no provider whatever the rollout says. The
+one command that starts a real process is `fh session`, which launches the child
+sessions the wave orchestrator drives. Setting the rollout back to `shadow` stops
+that path, which makes the config value an emergency brake rather than a label.
 
 ## Installation and readiness
 
@@ -227,9 +230,11 @@ Two responders are interchangeable, and the queue does not encode which one is i
 
 ```bash
 fh approvals --json                                    # what is waiting, and why
+fh approvals --all --json                              # decided requests too
 fh approve --request <id> --allow                      # let it through
 fh approve --request <id> --deny --message "..."       # refuse, with a reason for the model
 fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUserQuestion
+fh approvals --purge --json                            # drop decided requests once a wave ends
 ```
 
 The wave orchestrator normally relays — it reads the queue, asks the user, and writes the answer
@@ -237,6 +242,12 @@ back — but the user can answer directly with the same commands. That matters: 
 orchestrator dies, the pending approvals stay decidable. Answers to `AskUserQuestion` are
 validated against the offered options on **both** sides, so a decision the user never expressed
 cannot reach the model through a typo or a hand-edited file.
+
+A request holds the question and its options, because answering it needs them. Nothing else
+retains that text, so `fh approvals --purge` is how a finished wave stops keeping it: it deletes
+requests that already reached a terminal status along with their answers. Pending requests survive,
+and so does anything the queue could not read — deleting a record whose status you could not
+confirm would silently discard a child that is still waiting.
 
 ### Waiting
 
@@ -387,10 +398,75 @@ mid-run, `requiresWrite` when the run modifies files. Both default to false, and
 matched against what the chosen provider declares — see *The route is gated on approval
 channel and write access* below.
 
-In shadow mode `run`, `verify`, and `review` persist a normalized plan without
-starting a provider or arbitrary shell command. `clean` reports and removes
-expired raw records and expired aggregate telemetry on their own windows, and
-leaves approvals alone; use `--dry-run` to inspect its impact first.
+`run`, `verify`, and `review` persist a normalized plan without starting a provider or an
+arbitrary shell command. They do so at every rollout, not only under `shadow`, because they
+pass no runner to `runWithRolloutGuard`. `clean` reports and removes expired raw records and
+expired aggregate telemetry on their own windows, and leaves approvals alone; use `--dry-run`
+to inspect its impact first.
+
+## Child sessions
+
+`fh session` is the one command that starts a provider process. It exists for the wave
+orchestrator, whose children are full `pr-workflow` sessions that must be able to ask the user.
+
+```bash
+fh session launch --worktree <abs> --prompt-file <abs> --label feat-537-child
+fh session resume --worktree <abs> --prompt-file <abs> --resume-key <session id>
+```
+
+It does **not** go through the router. `chooseRoute` picks `executor.default`, whose provider
+declares no external approval channel, so every task that needs a human decision would become an
+escalation and no child would ever start. Adding a Claude fallback there would change routing
+semantics; a child's model and effort come from the `model-fitness-check` contract instead, so
+the capability is named explicitly (`--capability`, default `session.child`). Everything else
+still applies: the capability registry supplies provider, model, and effort; the repository
+capability manifest must approve that capability or the command queues a gap and exits 2;
+`checkCapabilityExecutable` re-checks account scope, model discovery, and write containment; and
+the rollout guard decides whether anything runs at all.
+
+The approval channel is verified in three layers, each of which refuses rather than warns:
+
+1. **Structural.** `sealInvocation` will not assemble an argv that lacks
+   `--permission-prompt-tool` and exactly one inline `--mcp-config` server. A missing wiring
+   therefore starts no process at all.
+2. **Before launch.** The declared approval server is started once and handed an MCP handshake
+   (`initialize`, then `tools/list`). If it does not publish the `approve` tool — because it is
+   missing, unreadable, slow, or the wrong program — no child is started.
+3. **On the first init event.** The child's structured output is read as a stream, and
+   `readInitHealth` is applied to its `system/init` event. If `AskUserQuestion` is absent, the
+   approval server did not connect, or the child reports MCP or plugin errors, the child is
+   terminated immediately and the run is recorded as failed. Reading the stream rather than the
+   finished output is what keeps this a startup check: a child whose gate silently disappeared
+   is stopped in the first second, not diagnosed after it has done a task's worth of work.
+
+A run whose init event never arrives is treated the same way. Not being able to read the check
+is not evidence that it passed.
+
+What the run leaves behind carries no conversation. `adapter_runs` has no column for a prompt or
+an argv by design, and the evidence row's claims are a fixed vocabulary plus the resume key, the
+health verdict, and the **names** of denied tools. The prompt is read from a file rather than an
+argument so it never reaches `fh`'s own `ps` entry, the child's stdout is interpreted in memory
+and never written to disk, and the only thing **`fh` itself** writes to stderr is the type name of
+each event, as a liveness heartbeat.
+
+The child's own stderr is a different stream, and it is inherited rather than filtered. That is
+deliberate: a pane running `fh session` is the window a person looks through, which is the one
+guard the move away from tmux was never willing to give up. `fh` does not control what goes into
+it, and what a `claude -p` writes there has not been measured, so treat it as capable of carrying
+conversation: watch it, do not persist it. Redirecting a child's stderr into a log file is how
+this design's one non-negotiable — no conversation in the record — gets broken from the outside.
+
+`fh session` also does not carry an account selection. The child resolves `claude` from PATH,
+and that launcher keeps an inherited `CLAUDE_CONFIG_DIR`, so a child always runs on the account
+of the session that launched it. Pinning a child to a specific account is done the existing way —
+by declaring `accountScope` on its capability, which `checkCapabilityExecutable` enforces — not
+by passing a launcher name through this command.
+
+A repository's approval is bound to the worktree the child will run in, not to the directory the
+command was invoked from. The manifest, the approval scope, the state root, and the child's
+working directory all resolve from `--worktree`. Resolving them from the caller's cwd would let
+an approved repository launch a child into an unapproved one, which is the capability gate
+answering a question nobody asked.
 
 ## Provider adapters
 
@@ -408,9 +484,13 @@ provider gets its own adapter rather than one parameterised launcher:
 
 Adapters are pure: they build an invocation and interpret a process result. They never import
 Node's child-process API, which a test pins by reading their sources. `createAdapterExecutor`
-therefore requires an injected runner and ships **no default** — starting real processes belongs to
-the rollout promotion, not to this layer. The insertion point is the `executor` argument of
-`runWithRolloutGuard`, so a `shadow` rollout still never reaches a provider.
+therefore requires an injected runner and ships **no default** — starting real processes belongs
+outside this layer. The only injection site is `fh session`, whose runner lives in
+`child-runner.mjs`; the insertion point is the `executor` argument of `runWithRolloutGuard`, so a
+`shadow` rollout still never reaches a provider. That runner is asynchronous, because reading the
+child's first `system/init` event is the only way to stop a session whose approval channel
+vanished before it does any work. `createAdapterExecutor` returns a promise only when the runner
+does, so the synchronous contract every other caller relies on is unchanged.
 
 An invocation carries a provider, an absolute executable path, an argv array, optional stdin, and
 its phase. It has no environment or credential field at all: authentication stays with each CLI's
@@ -581,9 +661,12 @@ child worktrees through `wtp`; read-only investigation does not create one.
 A verified, cleanly applicable candidate may move into the primary worktree,
 but merge and other irreversible external actions always remain with the user.
 
-The promotion path is shadow → pilot → default. A `--legacy` rollback flag is
-planned for that promotion work and is not implemented yet. Until then the
-rollout stays on `shadow`, which the CLI enforces as an explicit guard rather
-than relying on the provider adapter being absent. That guard is now the only thing standing
-between a route and a provider, since the adapters exist; they ship no default runner, so promotion
-has to wire one deliberately.
+The promotion path is shadow → pilot → default. The rollout is now `pilot`, which the CLI
+enforces as an explicit guard rather than relying on the provider adapter being absent. That
+guard is the only thing standing between a route and a provider, and `pilot` opens exactly one
+path: `fh session`, the child-session launcher. Every other command still passes no runner, so
+promotion widened the surface by one deliberate command rather than by a config value.
+
+Rolling back is editing `rollout` to `shadow`: the guard then returns `executed: false` before
+any process starts. Promoting to `default`, adding a `--legacy` rollback flag, and defining the
+telemetry that justifies the next promotion are still open work.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "rollout": "shadow",
+  "rollout": "pilot",
   "retention": {
     "rawArtifactsDays": 30,
     "aggregateTelemetryDays": 180
@@ -26,6 +26,11 @@
       "model": "gemini-3.7-flash-high",
       "effort": "high",
       "accountScope": "personal"
+    },
+    "session.child": {
+      "provider": "claude",
+      "model": "claude-opus-5",
+      "effort": "xhigh"
     }
   },
   "risk": {

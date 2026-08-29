@@ -1,4 +1,4 @@
-import { accessSync, constants, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,18 +11,20 @@ import {
   runApproveCommand,
   startApprovalServerCommand,
 } from "./approval-commands.mjs";
+import { defaultCommandPaths, providerAvailability } from "./command-paths.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
+import { BLOCKED_PENDING_APPROVAL, INTERNAL_ERROR, USAGE } from "./exit-codes.mjs";
 import { flagValue } from "./flags.mjs";
 import {
   findManifestGaps,
   loadVerifiedManifest,
 } from "./manifest-policy.mjs";
 import { runOnboardCommand } from "./onboard-commands.mjs";
-import { PROVIDER_COMMANDS } from "./providers.mjs";
 import { retentionCutoffs } from "./retention.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
+import { runSessionCommand } from "./session-command.mjs";
 import {
   approvedManifestStoreFor,
   defaultStateDirectory,
@@ -42,10 +44,6 @@ import {
   writeReadiness,
 } from "./readiness.mjs";
 
-// 承認待ちで実行を止めたときの終了コード。`onboard` が「まだ承認していない」に使っていた
-// ものを、承認境界が実行を止めた全経路（run / verify）へ広げる。0 と区別できないと、
-// 呼び出し側スクリプトが「承認が要る」を「成功」と読んでしまう。
-const BLOCKED_PENDING_APPROVAL = 2;
 // --dry-run は state を変更しないので、削除件数はすべて 0 で返す。
 const EMPTY_RAW_PRUNE_COUNTS = Object.freeze({
   evidence: 0,
@@ -57,23 +55,6 @@ const UNKNOWN_ACCOUNT_SCOPE = "unknown";
 // account scope は readiness キャッシュのファイル名に入るため、
 // パス区切りや相対参照が混ざらないことを保証する。
 const ACCOUNT_SCOPE_PATTERN = /^[a-z][a-z0-9-]*$/;
-
-export function findCommand(command, searchPath) {
-  for (const directory of searchPath.split(path.delimiter)) {
-    // 空要素・相対パスは CWD 基準で解決されるため候補にしない。
-    // POSIX は PATH の zero-length prefix を CWD と定義しており、そのまま join すると
-    // untrusted repository が同梱した実行ファイルを provider として選んでしまう。
-    if (!directory || !path.isAbsolute(directory)) continue;
-    const candidate = path.join(directory, command);
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // PATH の次候補を確認する。
-    }
-  }
-  return null;
-}
 
 function resolveAccountScope(environment) {
   const scopes = [];
@@ -114,41 +95,12 @@ function resolveConfigPath(options, environment) {
   });
 }
 
-function defaultCommandPaths(environment) {
-  const searchPath = environment.PATH ?? "";
-  return Object.fromEntries(
-    Object.entries(PROVIDER_COMMANDS).map(([provider, command]) => [
-      provider,
-      findCommand(command, searchPath),
-    ]),
-  );
-}
-
-function providerAvailability(commandPaths, verifiedModels = {}) {
-  return Object.fromEntries(
-    Object.keys(PROVIDER_COMMANDS).map((provider) => {
-      const executable = Boolean(commandPaths[provider]);
-      if (provider !== "antigravity") {
-        return [provider, { available: executable, models: null }];
-      }
-      const models = Object.hasOwn(verifiedModels, "antigravity")
-        ? verifiedModels.antigravity
-        : null;
-      const verified = Array.isArray(models) && models.length > 0;
-      return [
-        provider,
-        { available: executable && verified, models: verified ? models : null },
-      ];
-    }),
-  );
-}
-
 function usage() {
   return [
     "Usage: frontier-harness <command> [--json]",
     "",
     "Commands:",
-    "  approvals      List pending approval requests",
+    "  approvals      List pending approval requests (--all, or --purge to drop decided ones)",
     "  approve        Answer one approval request (--request <id> --allow|--deny)",
     "  approve-server Run the stdio permission prompt tool for a child session",
     "                 (--session, --approvals-dir, --rules, --timeout-ms,",
@@ -162,17 +114,23 @@ function usage() {
     "          --from-gaps builds the candidate from the approved manifest plus",
     "          everything queued by `fh gaps`",
     "  run     Record a shadow route for a task JSON file",
+    "  session Launch or resume a child session through the approval channel:",
+    "            fh session launch --worktree <abs> --prompt-file <abs>",
+    "            fh session resume --worktree <abs> --prompt-file <abs> --resume-key <id>",
+    "          Optional: --capability (default session.child), --session-id, --label,",
+    "          --sandbox, --approvals-dir, --approval-server-command, --timeout-ms,",
+    "          --progress-interval-ms. Path flags must be absolute.",
     "  status  Show recorded route decisions",
     "  verify  Record a deterministic verification plan",
     "  review  Record an independent review plan",
   ].join("\n");
 }
 
-// 戻り値は command で型が分かれる: `onboard` は domain のアドレス解決を伴うため
-// **Promise<number>** を返し、それ以外は同期に number を返す。プログラムから呼ぶ場合は
-// `Promise.resolve(runCli(...))` で受けるか、ファイル末尾の entrypoint と同じく
-// `instanceof Promise` で分岐すること（`process.exitCode = runCli(...)` と素朴に書くと、
-// onboard 経路で Promise オブジェクトが exitCode に入り静かに壊れる）。
+// 戻り値は command で型が分かれる: `onboard`（domain のアドレス解決を伴う）と `session`
+// （子プロセスの stream を読む）は **Promise<number>** を返し、それ以外は同期に number を
+// 返す。プログラムから呼ぶ場合は `Promise.resolve(runCli(...))` で受けるか、ファイル末尾の
+// entrypoint と同じく `instanceof Promise` で分岐すること（`process.exitCode = runCli(...)` と
+// 素朴に書くと、これらの経路で Promise オブジェクトが exitCode に入り静かに壊れる）。
 export function runCli(argumentsList, options = {}) {
   const environment = options.environment ?? process.env;
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
@@ -210,7 +168,7 @@ export function runCli(argumentsList, options = {}) {
         },
         (error) => {
           process.stderr.write(`frontier-harness: ${error.message}\n`);
-          process.exitCode = 70;
+          process.exitCode = INTERNAL_ERROR;
         },
       );
       return 0;
@@ -263,11 +221,31 @@ export function runCli(argumentsList, options = {}) {
     return 0;
   }
 
-  // onboard だけは domain のアドレス解決を伴うため Promise を返す。呼び出し側
-  // （下の entrypoint とテスト）はこの 1 コマンドだけ await すればよく、他のコマンドの
+  // onboard は domain のアドレス解決を伴うため Promise を返す。呼び出し側
+  // （下の entrypoint とテスト）はこのコマンドを await すればよく、他のコマンドの
   // 同期な戻り値の契約は変えない。
   if (command === "onboard") {
     return runOnboardCommand({ flags, options, emit });
+  }
+
+  // session も同じく Promise を返す。子の構造化出力を stream で読み、最初の `system/init` で
+  // 起動時検査を行う（事後検査にすると、gate を失った子が丸ごと 1 タスク走ったあとになる）。
+  // state store はコマンド側が自分で開閉する —— 子は数時間走りうるので、下の try/finally の
+  // ように「コマンド実行の間ずっと開いたまま」にしない。
+  //
+  // **cwd を渡さない。** 承認境界・state・承認 queue は子が走るワークツリーから解決する
+  // （呼び出し元の cwd から解決すると `--worktree` で別リポジトリを指すだけで gate を迂回できる）。
+  if (command === "session") {
+    return runSessionCommand({
+      flags,
+      options,
+      environment,
+      emit,
+      config,
+      commandPaths,
+      accountScope,
+      ...(options.sessionIo ?? {}),
+    });
   }
 
   const statePath = options.statePath ?? defaultStatePath(cwd);
@@ -497,7 +475,7 @@ export function runCli(argumentsList, options = {}) {
   }
 
   write(usage());
-  return 64;
+  return USAGE;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -506,9 +484,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // （同期経路の挙動をマイクロタスク 1 つ分でも変えない）。
   const result = runCli(process.argv.slice(2));
   if (result instanceof Promise) {
-    result.then((code) => {
-      process.exitCode = code;
-    });
+    // **rejection を握る。** `.then` だけで受けると未処理の rejection になり、Node は
+    // スタックトレースを出して落ちる —— `emit()` の JSON も、設計した終了コード契約
+    // （2 = 承認待ち / 1 = 実行失敗）も一切経由しない。子が既に走ったあとで記録の書き込みが
+    // 失敗した場合、それは「何が起きたか」を再構成する手段が丸ごと消えることを意味する。
+    result.then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (error) => {
+        // 引数の検証はすべて TypeError で落ちる。使い方の誤りを内部エラーと同じコードで
+        // 返すと、呼び出し側スクリプトが「直せる誤り」と「直せない不整合」を区別できない。
+        const usageError = error instanceof TypeError;
+        process.stderr.write(
+          `frontier-harness: ${usageError ? error.message : (error?.stack ?? error)}\n`,
+        );
+        process.exitCode = usageError ? USAGE : INTERNAL_ERROR;
+      },
+    );
   } else {
     process.exitCode = result;
   }
