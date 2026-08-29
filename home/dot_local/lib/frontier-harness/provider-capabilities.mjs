@@ -102,20 +102,24 @@ export function unmetRequirements(capabilities, { requiresApproval, requiresWrit
     approvalChannelStrength(capabilities.approvalChannel) <
       APPROVAL_CHANNEL_STRENGTH[HUMAN_APPROVAL_CHANNEL]
   ) {
-    unmet.push({
-      axis: "approvalChannel",
-      required: HUMAN_APPROVAL_CHANNEL,
-      actual: capabilities.approvalChannel,
-    });
+    unmet.push(
+      Object.freeze({
+        axis: "approvalChannel",
+        required: HUMAN_APPROVAL_CHANNEL,
+        actual: capabilities.approvalChannel,
+      }),
+    );
   }
   if (requiresWrite === true && capabilities.writeAccess !== ENFORCEABLE_WRITE_ACCESS) {
-    unmet.push({
-      axis: "writeAccess",
-      required: ENFORCEABLE_WRITE_ACCESS,
-      actual: capabilities.writeAccess,
-    });
+    unmet.push(
+      Object.freeze({
+        axis: "writeAccess",
+        required: ENFORCEABLE_WRITE_ACCESS,
+        actual: capabilities.writeAccess,
+      }),
+    );
   }
-  return unmet;
+  return Object.freeze(unmet);
 }
 
 // reason 文字列用の要約。route を塞いだ事実は evidence に構造化して残すが、

@@ -402,6 +402,13 @@ afterwards why a given provider ran.
 The reviewer is not gated either. `semantic.judge` neither writes nor holds the human gate, so
 refusing it on these axes would turn "add a reviewer" into "escalate" without buying any safety.
 
+An escalated route also withholds the provider outright, whatever the rollout says. Without that,
+"blocked routes are recorded, not run" would hold only because the rollout happens to be `shadow`,
+and promoting it while wiring a real runner would let a blocked route reach a provider after all —
+the gate passing at the routing stage and leaking at the execution one. The same guard covers the
+risk-based escalation that predates these axes, and under `shadow` nothing changes, since the
+rollout guard was already refusing to call the executor.
+
 Every block is recorded. A decision carries the capability, provider, axis, required value and
 declared value for each one, and `fh run` writes them as a `route_block` evidence row tied to the
 task and route, inside the same transaction that records the route. The routes table has no

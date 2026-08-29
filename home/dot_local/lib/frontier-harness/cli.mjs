@@ -385,11 +385,19 @@ export function runCli(argumentsList, options = {}) {
                 ),
               })
             : null;
-        const execution = runWithRolloutGuard(
-          config,
-          `route ${route.kind}`,
-          options.executor,
-        );
+        // escalation は「人の判断へ戻す」ための route なので、rollout に関わらず provider を
+        // 起動しない。#534 が選んだ扱い（塞いだ route は実行せず記録する）はここで初めて
+        // 構造になる —— これが無いと不変条件は「rollout が shadow である」ことに依存し、
+        // #502 で昇格して executor を配線した瞬間に gate が実行段ですり抜ける。
+        // shadow の間は runWithRolloutGuard も executor を呼ばないため、挙動は変わらない。
+        const execution =
+          route.kind === "escalation"
+            ? {
+                executed: false,
+                reason:
+                  "escalation route requires user judgement; recorded without provider execution",
+              }
+            : runWithRolloutGuard(config, `route ${route.kind}`, options.executor);
         return {
           task: storedTask,
           decision: route,

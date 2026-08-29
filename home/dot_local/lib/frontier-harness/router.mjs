@@ -26,11 +26,15 @@ function capabilityBlockers({ capability, capabilityName, providerCapabilities, 
     providerCapabilities,
     capability.provider,
   );
-  return unmetRequirements(declared, task).map((unmet) => ({
-    capability: capabilityName,
-    provider: capability.provider,
-    ...unmet,
-  }));
+  // 配列だけを freeze しても要素は可変のままなので、エントリ自体も freeze する
+  // （設計の immutability 既定。decision は呼び出し側から書き換えられない）。
+  return unmetRequirements(declared, task).map((unmet) =>
+    Object.freeze({
+      capability: capabilityName,
+      provider: capability.provider,
+      ...unmet,
+    }),
+  );
 }
 
 // 遮断が無かった route に空配列を生やさない（reviewerCapability と同じ spread 規約）。

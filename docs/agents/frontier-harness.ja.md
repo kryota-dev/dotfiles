@@ -353,6 +353,13 @@ oracle の欠落を「oracle 無し」と読むのは reviewer を**足す**方�
 reviewer も軸では塞ぎません。`semantic.judge` は書き込みも人の gate も担わないため、ここで拒否すると
 「reviewer を足す」が「escalation」に化けるだけで、安全性は何も買えません。
 
+escalation になった route は、rollout が何であれ provider を起動しません。これが無いと
+「塞いだ route は実行せず記録する」は「たまたま rollout が `shadow` だから」成り立っているだけで、
+昇格して実起動を配線した瞬間に、塞いだはずの route が provider へ届いてしまいます —— gate は
+route 段階では通っているのに実行段で漏れる、という形です。同じガードは、この軸より前から存在する
+risk による escalation にも効きます。`shadow` の間は rollout guard が既に executor を呼んで
+いないため、挙動は変わりません。
+
 塞いだ route はすべて記録されます。decision は遮断 1 件ごとに capability・provider・軸・要求値・宣言値を
 持ち、`fh run` はそれを task と route に紐付いた `route_block` evidence として、route を記録するのと同じ
 トランザクションの中で書きます。routes テーブルにはこの 5 つ組を入れる列が無く、足すのは migration に

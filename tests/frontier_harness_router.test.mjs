@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
@@ -148,6 +149,22 @@ test("provider capability facts are memoised and frozen", () => {
   assert.equal(Object.isFrozen(providerCapabilityFacts().codex), true);
 });
 
+test("every value the provider capability API returns is frozen", () => {
+  // 配列だけを freeze しても要素は可変のままなので、両方を固定する。
+  assert.equal(
+    Object.isFrozen(resolveProviderCapabilities(defaultProviderCapabilityFacts(), "codex")),
+    true,
+  );
+  assert.equal(Object.isFrozen(resolveProviderCapabilities({}, "nope")), true);
+
+  const unmet = unmetRequirements(
+    { approvalChannel: "none", writeAccess: "unenforceable" },
+    { requiresApproval: true, requiresWrite: true },
+  );
+  assert.equal(Object.isFrozen(unmet), true);
+  assert.equal(unmet.every((entry) => Object.isFrozen(entry)), true);
+});
+
 test("an unknown provider resolves to the weakest capabilities (fail closed)", () => {
   assert.deepEqual(
     resolveProviderCapabilities(defaultProviderCapabilityFacts(), "nope"),
@@ -226,18 +243,23 @@ test("normalizeTask defaults both requirement flags to false", () => {
 });
 
 test("normalizeTask rejects a non-boolean requirement flag", () => {
+  // 正規表現だけを渡すと message しか照合されず、同文言の Error でも通ってしまう。
+  // 型まで固定して「境界検証は TypeError で落とす」という設計を回帰から守る。
+  const isTypeError = (pattern) => (error) =>
+    error instanceof TypeError && pattern.test(error.message);
+
   assert.throws(
     () => normalizeTask({ goal: "g", requiresApproval: "true" }),
-    /task\.requiresApproval must be a boolean/,
+    isTypeError(/task\.requiresApproval must be a boolean/),
   );
   assert.throws(
     () => normalizeTask({ goal: "g", requiresWrite: 1 }),
-    /task\.requiresWrite must be a boolean/,
+    isTypeError(/task\.requiresWrite must be a boolean/),
   );
-  // 既存フィールドのエラーメッセージが helper 化で変わっていないこと。
+  // 既存フィールドのエラーメッセージと型が helper 化で変わっていないこと。
   assert.throws(
     () => normalizeTask({ goal: "g", hasDeterministicOracle: "false" }),
-    /task\.hasDeterministicOracle must be a boolean/,
+    isTypeError(/task\.hasDeterministicOracle must be a boolean/),
   );
 });
 
@@ -284,6 +306,9 @@ test("the blocked route carries the capability, provider, axis and both values",
       actual: "agent-review",
     },
   ]);
+  // decision は呼び出し側から書き換えられない（配列と要素の両方）。
+  assert.equal(Object.isFrozen(decision.blocked), true);
+  assert.equal(Object.isFrozen(decision.blocked[0]), true);
 });
 
 test("a task needing human judgement is routed to an executor that can ask", () => {
@@ -627,4 +652,219 @@ test("fh run keeps a browser fallback routed while recording why it moved", (con
   assert.deepEqual(run.blockEvidence.claimsSupported, [
     "frontend.primary (antigravity) was not routed: writeAccess requires supported but the provider declares unenforceable",
   ]);
+});
+
+test("fh run persists every blocked axis, not just the first", (context) => {
+  // router 単体では 3 件の遮断を確認しているが、CLI 層で 1 件しか写さない回帰
+  // （blocked の先頭要素だけを保存する等）は 1 件ずつのテストでは通り抜ける。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = writeTask(directory, {
+    goal: "apply a reviewed patch from the browser session",
+    modality: ["browser"],
+    requiresApproval: true,
+    requiresWrite: true,
+    hasDeterministicOracle: true,
+  });
+
+  const output = [];
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config,
+      verifiedModels: VERIFIED_MODELS,
+      statePath,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+
+  const run = JSON.parse(output.pop());
+  assert.equal(run.decision.kind, "escalation");
+  assert.deepEqual(
+    run.blocked.map((entry) => [entry.capability, entry.axis]),
+    [
+      ["frontend.primary", "approvalChannel"],
+      ["frontend.primary", "writeAccess"],
+      ["executor.default", "approvalChannel"],
+    ],
+  );
+
+  const expectedClaims = [
+    "frontend.primary (antigravity) was not routed: approvalChannel requires external but the provider declares none",
+    "frontend.primary (antigravity) was not routed: writeAccess requires supported but the provider declares unenforceable",
+    "executor.default (codex) was not routed: approvalChannel requires external but the provider declares agent-review",
+  ];
+  assert.deepEqual(run.blockEvidence.claimsSupported, expectedClaims);
+
+  // 永続化後も 3 件すべてが残っていること（出力だけ正しく DB が欠けるのを防ぐ）。
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const evidence = store.listEvidence();
+  assert.equal(evidence.length, 1);
+  assert.deepEqual(evidence[0].claimsSupported, expectedClaims);
+});
+
+test("fh run rolls the route back when the block evidence cannot be written", (context) => {
+  // design.md のエラーシナリオ 4:「route は残ったが理由は残らない」中間状態を作らない。
+  // evidence の INSERT だけを失敗させ、同一トランザクションの task / route も
+  // 巻き戻ることを固定する（監査証跡の原子性は AC「後から理由を追える」の前提）。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = writeTask(directory, {
+    goal: "rewrite published history",
+    requiresApproval: true,
+    hasDeterministicOracle: true,
+  });
+
+  const options = {
+    accountScope: "personal",
+    commandPaths: COMMAND_PATHS,
+    config,
+    verifiedModels: VERIFIED_MODELS,
+    statePath,
+    write: () => {},
+  };
+
+  // 1 度目の run でスキーマを作らせてから、evidence の INSERT を落とす trigger を仕込む。
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      ...options,
+      write: () => {},
+    }),
+    0,
+  );
+  const setup = new DatabaseSync(statePath);
+  setup.exec(
+    "CREATE TRIGGER block_evidence_insert BEFORE INSERT ON evidence " +
+      "BEGIN SELECT RAISE(ABORT, 'evidence write failed'); END",
+  );
+  setup.close();
+
+  const before = (() => {
+    const store = createStateStore(statePath);
+    try {
+      return { routes: store.listRoutes().length, evidence: store.listEvidence().length };
+    } finally {
+      store.close();
+    }
+  })();
+
+  assert.throws(
+    () => runCli(["run", "--task", taskPath, "--json"], options),
+    /evidence write failed/,
+  );
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  // 2 度目の run は task / route / evidence のいずれも増やしていないこと。
+  assert.equal(store.listRoutes().length, before.routes);
+  assert.equal(store.listEvidence().length, before.evidence);
+});
+
+test("fh run never starts a provider for an escalation route", (context) => {
+  // 「塞いだ route は実行せず記録する」という #534 の決定を、rollout に依存せず固定する。
+  // rollout=default でも executor は呼ばれない（gate が実行段ですり抜けない）。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = writeTask(directory, {
+    goal: "rewrite published history",
+    requiresApproval: true,
+    hasDeterministicOracle: true,
+  });
+
+  const output = [];
+  let executorCalls = 0;
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config: normalizeConfig({ ...baseConfigInput, rollout: "default" }),
+      verifiedModels: VERIFIED_MODELS,
+      statePath,
+      executor: () => {
+        executorCalls += 1;
+        return "executed";
+      },
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+
+  const run = JSON.parse(output.pop());
+  assert.equal(run.decision.kind, "escalation");
+  assert.equal(executorCalls, 0);
+  assert.equal(run.executed, false);
+  assert.match(run.executionReason, /escalation route requires user judgement/);
+});
+
+test("a risk escalation also withholds provider execution", (context) => {
+  // 本 PR 以前から存在する risk escalation にも同じ不変条件が効くこと。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = writeTask(directory, {
+    goal: "merge the branch",
+    risk: ["merge"],
+    hasDeterministicOracle: true,
+  });
+
+  const output = [];
+  let executorCalls = 0;
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config: normalizeConfig({ ...baseConfigInput, rollout: "default" }),
+      verifiedModels: VERIFIED_MODELS,
+      statePath,
+      executor: () => {
+        executorCalls += 1;
+        return "executed";
+      },
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+
+  const run = JSON.parse(output.pop());
+  assert.equal(run.decision.kind, "escalation");
+  assert.equal(executorCalls, 0);
+  // risk escalation には blocked を付けない（扱いを分けている）。
+  assert.deepEqual(run.blocked, []);
+  assert.equal(run.blockEvidence, null);
+});
+
+test("a routed run still reaches the executor under a non-shadow rollout", (context) => {
+  // escalation ガードが「塞がなかった route」まで止めていないこと（過剰遮断の回帰防止）。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const taskPath = writeTask(directory, {
+    goal: "browser work",
+    modality: ["browser"],
+    hasDeterministicOracle: true,
+  });
+
+  const output = [];
+  let executorCalls = 0;
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config: normalizeConfig({ ...baseConfigInput, rollout: "default" }),
+      verifiedModels: VERIFIED_MODELS,
+      statePath,
+      executor: () => {
+        executorCalls += 1;
+        return "executed";
+      },
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+
+  const run = JSON.parse(output.pop());
+  assert.equal(run.decision.capability, "frontend.primary");
+  assert.equal(executorCalls, 1);
+  assert.equal(run.executed, true);
 });
