@@ -144,10 +144,15 @@ async function prepared(context, { capabilities = [CANDIDATE_CAPABILITY] } = {})
   return { directory, repository, statePath, policyPath, task, baseline };
 }
 
-async function candidate(argumentsList, fixture, { candidateConfig = config } = {}) {
+async function candidate(
+  argumentsList,
+  fixture,
+  { candidateConfig = config, runGit } = {},
+) {
   const output = [];
   const code = await runCli([...argumentsList, "--json"], {
     config: candidateConfig,
+    runGit,
     statePath: fixture.statePath,
     cwd: fixture.repository,
     policyPath: fixture.policyPath,
@@ -664,16 +669,26 @@ test("the shadow rollout removes no worktree on discard", async (context) => {
   const record = await createCandidate(fixture);
   writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
 
+  // ツリーが残ることだけでは「git を呼んでいない」を証明できない（副作用のない git 呼び出しでも
+  // 通ってしまう）。runGit を例外化した spy で、到達そのものが 0 回であることを見る。
+  let gitCalls = 0;
   const { code, report } = await candidate(
     ["candidate", "discard", "--candidate", record.id],
     fixture,
-    { candidateConfig: shadowConfig },
+    {
+      candidateConfig: shadowConfig,
+      runGit: () => {
+        gitCalls += 1;
+        throw new Error("the shadow rollout must not reach git");
+      },
+    },
   );
 
   // 撤去も git の実プロセスを起こす。`shadow` でツリーが消えると「戻せば何も起きない」が壊れる。
   assert.equal(code, 0);
   assert.equal(report.executed, false);
   assert.match(report.executionReason, /shadow rollout/);
+  assert.equal(gitCalls, 0);
   assert.equal(existsSync(record.worktree), true);
   assert.equal(createCandidateStore({
     directory: candidatesDirectory(path.dirname(fixture.statePath)),
@@ -766,14 +781,93 @@ test("list reports every candidate the registry knows about", async (context) =>
   const second = await createCandidate(fixture);
   await candidate(["candidate", "discard", "--candidate", first.id], fixture);
 
+  // 並び順は `created_at` の後 id（乱数）で決まるため、同一ミリ秒に作られると順序が揺れる。
+  // 集合として比較し、順序に依存しない。
   const { report } = await candidate(["candidate", "list"], fixture);
   assert.deepEqual(
-    report.candidates.map((entry) => [entry.id, entry.status]),
+    report.candidates.map((entry) => [entry.id, entry.status]).sort(),
     [
       [first.id, "discarded"],
       [second.id, "open"],
-    ],
+    ].sort(),
   );
+});
+
+test("adopting under the shadow rollout reaches no git process", async (context) => {
+  const fixture = await prepared(context);
+  const record = await createCandidate(fixture);
+  writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
+  recordCheck(fixture, record);
+
+  // 取り込み判定は「今のツリーの hash」を要り、それ自体が git を起こす。判定を guard の外に
+  // 置くと shadow でも git が動く。
+  let gitCalls = 0;
+  const { code, report } = await candidate(
+    ["candidate", "adopt", "--candidate", record.id],
+    fixture,
+    {
+      candidateConfig: shadowConfig,
+      runGit: () => {
+        gitCalls += 1;
+        throw new Error("the shadow rollout must not reach git");
+      },
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(report.executed, false);
+  assert.match(report.executionReason, /shadow rollout/);
+  assert.equal(gitCalls, 0);
+});
+
+test("editing a candidate after it passed blocks adoption until it is re-verified", async (context) => {
+  // 単体の `adoptionVerdict` は手製レコードで判定を確かめるだけで、`adopt` が実際に現在の
+  // ツリー hash を採り直すこと、`recordCheck` 相当の来歴が実経路で効くことは証明しない。
+  const fixture = await prepared(context);
+  const record = await createCandidate(fixture);
+  const file = path.join(record.worktree, "tracked.txt");
+
+  writeFileSync(file, "one\nCANDIDATE\nthree\n");
+  recordCheck(fixture, record);
+
+  // 合格後に書き換える。
+  writeFileSync(file, "one\nSNEAKY\nthree\n");
+  const blocked = await candidate(["candidate", "adopt", "--candidate", record.id], fixture);
+  assert.equal(blocked.code, 2);
+  assert.match(blocked.report.executionReason, /changed after it was verified/);
+  assert.equal(
+    readFileSync(path.join(fixture.repository, "tracked.txt"), "utf8"),
+    "one\ntwo\nthree\n",
+    "拒否したのに一部でも適用してはならない",
+  );
+
+  // 書き換えた内容で検証し直せば取り込める。
+  recordCheck(fixture, record);
+  const adopted = await candidate(["candidate", "adopt", "--candidate", record.id], fixture);
+  assert.equal(adopted.code, 0);
+  assert.equal(adopted.report.adopted, true);
+  assert.equal(
+    readFileSync(path.join(fixture.repository, "tracked.txt"), "utf8"),
+    "one\nSNEAKY\nthree\n",
+  );
+});
+
+test("discard recovers a worktree orphaned by a partial removal", async (context) => {
+  const fixture = await prepared(context);
+  const record = await createCandidate(fixture);
+  // 登記簿は discarded なのにツリーが残っている状態（撤去の途中で失敗した後）を作る。
+  createCandidateStore({
+    directory: candidatesDirectory(path.dirname(fixture.statePath)),
+  }).setStatus(record.id, "discarded");
+  assert.equal(existsSync(record.worktree), true);
+
+  // 状態だけを見て早期 return すると、この孤児を CLI から片付ける手段が無くなる。
+  const { code } = await candidate(
+    ["candidate", "discard", "--candidate", record.id],
+    fixture,
+  );
+  assert.equal(code, 0);
+  assert.equal(existsSync(record.worktree), false);
 });
 
 test("the registry refuses to hold more live candidates than its limit", async (context) => {

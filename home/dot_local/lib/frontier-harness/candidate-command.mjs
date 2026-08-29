@@ -1,4 +1,4 @@
-import path from "node:path";
+import { existsSync } from "node:fs";
 
 import {
   CANDIDATE_MAX_LIVE_ENTRIES,
@@ -8,15 +8,14 @@ import {
 import { BLOCKED_PENDING_APPROVAL, CANDIDATE_NOT_ADOPTED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue } from "./flags.mjs";
 import {
-  MAX_GIT_OUTPUT_BYTES,
+  MAX_ADOPTABLE_DIFF_BYTES,
   applyPatch,
   createDetachedWorktree,
   createGitRunner,
   createPatchWriter,
   patchApplies,
   removeWorktree,
-  worktreeDiff,
-  worktreeTreeHash,
+  worktreeSnapshot,
 } from "./git-worktree.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
 import { requireAbsolutePath } from "./paths.mjs";
@@ -181,19 +180,57 @@ function candidateAdopt({
     );
   }
 
-  // 取り込みの前提は検証であって、モデルの申告ではない。ここが #495 の中心にある gate なので、
-  // git を 1 回も呼ぶ前に判定する。
-  const verdict = adoptionVerdict({
-    candidate,
-    results: store.listVerificationResultsForTask(candidate.taskId),
-    // 「今から取り込む中身」の hash。検証時に記録した hash と突き合わせる。
-    treeHash: worktreeTreeHash({
+  // **取り込み判定も rollout guard の内側で行う。** 判定には「今のツリーの hash」が要り、
+  // それ自体が git の実プロセスを起こす。guard の外へ出すと `shadow` でも git が動き、
+  // 「戻せば何も起きない」が 1 経路だけ破れる（`review packet` / `discard` と同じ穴）。
+  const guarded = runWithRolloutGuard(config, "candidate adoption", () => {
+    // 取り込みの前提は検証であって、モデルの申告ではない。ここが #495 の中心にある gate。
+    // **hash と patch を同じ stage から取る。** 別々に取ると、その間にツリーが書き換わったとき
+    // 「hash は検証済みのツリー T、patch は未検証の T'」という組み合わせが成立してしまい、
+    // hash 照合が patch について何も保証しなくなる。
+    const diff = worktreeSnapshot({
       worktree: candidate.worktree,
       base: candidate.base,
       runGit,
-    }),
+      maxBytes: MAX_ADOPTABLE_DIFF_BYTES,
+    });
+    const verdict = adoptionVerdict({
+      candidate,
+      results: store.listVerificationResultsForTask(candidate.taskId),
+      // 「今から取り込む中身」の hash。検証時に記録した hash と突き合わせる。
+      treeHash: diff.treeHash,
+    });
+    if (!verdict.verified) return { verdict, applied: false, unverified: true };
+
+    if (diff.truncated || diff.patch.trim().length === 0) {
+      return {
+        verdict,
+        applied: false,
+        empty: diff.patch.trim().length === 0,
+        truncated: diff.truncated,
+      };
+    }
+    if (!patchApplies({ worktree, patch: diff.patch, runGit, writePatch })) {
+      return { verdict, applied: false, empty: false, truncated: false, conflicted: true };
+    }
+    applyPatch({ worktree, patch: diff.patch, runGit, writePatch });
+    return { verdict, applied: true };
   });
-  if (!verdict.verified) {
+  if (!guarded.executed) {
+    emit({
+      action: "adopt",
+      candidate,
+      adopted: false,
+      executed: false,
+      executionReason: guarded.reason,
+    });
+    return 0;
+  }
+  const outcome = guarded.result;
+  const verdict = outcome.verdict;
+
+  // 検証を通っていない candidate は、ツリーに一切触れずに断る。
+  if (outcome.unverified) {
     emit({
       action: "adopt",
       candidate,
@@ -204,37 +241,6 @@ function candidateAdopt({
     });
     return CANDIDATE_NOT_ADOPTED;
   }
-
-  const guarded = runWithRolloutGuard(config, "candidate adoption", () => {
-    // 取り込む patch は切り詰めない。切り詰めた patch は適用できないうえ、当たったとしても
-    // 「一部だけ取り込まれた」状態を作る。
-    const diff = worktreeDiff({
-      worktree: candidate.worktree,
-      base: candidate.base,
-      runGit,
-      maxBytes: MAX_GIT_OUTPUT_BYTES,
-    });
-    if (diff.truncated || diff.patch.trim().length === 0) {
-      return { applied: false, empty: diff.patch.trim().length === 0, truncated: diff.truncated };
-    }
-    if (!patchApplies({ worktree, patch: diff.patch, runGit, writePatch })) {
-      return { applied: false, empty: false, truncated: false, conflicted: true };
-    }
-    applyPatch({ worktree, patch: diff.patch, runGit, writePatch });
-    return { applied: true };
-  });
-  if (!guarded.executed) {
-    emit({
-      action: "adopt",
-      candidate,
-      adopted: false,
-      executed: false,
-      executionReason: guarded.reason,
-      verifiedChecks: verdict.relevant.length,
-    });
-    return 0;
-  }
-  const outcome = guarded.result;
 
   if (!outcome.applied) {
     // **衝突しても candidate を捨てない。** ツリーを残したまま状態だけを移し、
@@ -303,24 +309,36 @@ function candidateDiscard({ flags, emit, config, worktree, candidates, runGit })
   if (!candidate) {
     throw new TypeError(`candidate ${candidateId} does not exist`);
   }
-  if (!LIVE_CANDIDATE_STATUSES.has(candidate.status)) {
-    emit({ action: "discard", candidate, executed: false, executionReason: "already discarded" });
+  // **登記簿の状態ではなく、ツリーの実在で判断する。** 撤去の途中で失敗すると「登記簿は
+  // discarded なのにツリーが残る」状態になりうる。状態だけを見て早期 return すると、その
+  // 孤児を CLI から片付ける手段が無くなる。`discard` を冪等にして回復経路を残す。
+  if (!existsSync(candidate.worktree)) {
+    const settled = LIVE_CANDIDATE_STATUSES.has(candidate.status)
+      ? candidates.setStatus(candidate.id, "discarded")
+      : candidate;
+    emit({
+      action: "discard",
+      candidate: settled,
+      executed: false,
+      executionReason: "the candidate worktree is already gone",
+    });
     return 0;
   }
   // 撤去も git の実プロセスを起こすので rollout guard を通す。`shadow` でツリーが消えると、
   // 「shadow へ戻せば何も起きない」という非常停止レバーの意味が壊れる。
-  const guarded = runWithRolloutGuard(config, "candidate worktree removal", () =>
-    removeWorktree({ repository: worktree, target: candidate.worktree, runGit }),
-  );
+  const guarded = runWithRolloutGuard(config, "candidate worktree removal", () => {
+    // **登記簿を先に進めてからツリーを撤去する**（`candidateAdopt` と同じ順序）。逆順だと、
+    // 撤去は成功したのに登記簿の書き込みが失敗した場合に「live なのに実体が無い」状態で
+    // 固着し、`adopt` も `discard` も通らなくなる。
+    const discarded = candidates.setStatus(candidate.id, "discarded");
+    removeWorktree({ repository: worktree, target: candidate.worktree, runGit });
+    return discarded;
+  });
   if (!guarded.executed) {
     emit({ action: "discard", candidate, executed: false, executionReason: guarded.reason });
     return 0;
   }
-  emit({
-    action: "discard",
-    candidate: candidates.setStatus(candidate.id, "discarded"),
-    executed: true,
-  });
+  emit({ action: "discard", candidate: guarded.result, executed: true });
   return 0;
 }
 

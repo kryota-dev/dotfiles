@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { LIVE_CANDIDATE_STATUSES } from "./candidate-store.mjs";
 import {
   DEFAULT_CHECK_TIMEOUT_MS,
@@ -46,6 +44,10 @@ import { createStateStore } from "./state-store.mjs";
 // 呼び出し側が渡した path を信用するわけではないので、`--worktree` の gate は弱まらない。
 
 export const DEFAULT_CHECK_KIND = "test";
+// チェックに与える時間の上限。`approval-server.mjs` が escalation の待機に上限を課しているのと
+// 同じ理由で、ここにも要る —— チェックの実行中はツリーの書き換えを検知できない窓（下記参照）
+// なので、`--timeout-ms` を無制限にできると、その窓を任意に広げられる。
+export const MAX_CHECK_TIMEOUT_MS = 3_600_000;
 export const VERIFICATION_EVIDENCE_KIND = "verification_run";
 
 const PRODUCER = "frontier-harness";
@@ -84,8 +86,10 @@ export async function runVerifyCommand({
     "--worktree",
   );
   const candidateId = optionalFlagValue(flags, "--candidate");
-  const timeoutMs =
-    positiveIntegerFlag(flags, "--timeout-ms") ?? DEFAULT_CHECK_TIMEOUT_MS;
+  const timeoutMs = Math.min(
+    positiveIntegerFlag(flags, "--timeout-ms") ?? DEFAULT_CHECK_TIMEOUT_MS,
+    MAX_CHECK_TIMEOUT_MS,
+  );
 
   const statePath = options.statePath ?? defaultStatePath(worktree);
   const store = createStateStore(statePath);
@@ -135,6 +139,9 @@ export async function runVerifyCommand({
       checkKind,
       command,
       candidateId: candidateId ?? null,
+      // 実際に効いた上限を出す。クランプされたことを呼び出し側（と運用者）が見られないと、
+      // 「指定したつもりの値」と「効いている値」が静かにずれる。
+      timeoutMs,
       rollout: config.rollout,
       policyIntegrity: approved.integrity,
     };
@@ -155,6 +162,19 @@ export async function runVerifyCommand({
       });
       return BLOCKED_PENDING_APPROVAL;
     }
+
+    // **チェックが見たツリーを、走らせる前に確定させる。** 実行後にだけ hash を採ると、
+    // それは「チェックが見たもの」ではなく「チェックが終わった時点のもの」になる。
+    // チェックは既定 15 分走りうるので、その間に candidate のツリーへ書き込めば、
+    // 検証していない内容が「検証済み」として記録される（取り込み判定はこの hash を信じる）。
+    const runGit = options.runGit ?? createGitRunner();
+    const treeHashBefore = verifiedCandidate
+      ? worktreeTreeHash({
+          worktree: verifiedCandidate.worktree,
+          base: verifiedCandidate.base,
+          runGit,
+        })
+      : null;
 
     // rollout guard は新しい実行経路にも必ず効かせる。`shadow` へ戻せば、承認済みの
     // コマンドであってもプロセスは 1 つも起きない。
@@ -187,15 +207,23 @@ export async function runVerifyCommand({
     // ここから先はトランザクションの外。await している間、書き込みロックは握っていない。
     const outcome = await guarded.result;
 
-    // 検証した「中身」を固定する。取り込み直前に再計算して突き合わせることで、合格した
-    // あとに candidate のツリーを書き換えて取り込む経路を塞ぐ（`adoptionVerdict` 参照）。
-    const treeHash = verifiedCandidate
+    // 実行後にもう一度採り、走らせる前と一致することを要求する。一致しなければ、チェックが
+    // 実行中に書き換えられたツリーを見たことになり、その合否は**どのツリーについての判定でも
+    // ない**。結果は監査のために残すが、`errored` にし hash を付けない —— hash の無い結果は
+    // `adoptionVerdict` が取り込み根拠にしないので、fail-closed に倒れる。
+    const treeHashAfter = verifiedCandidate
       ? worktreeTreeHash({
           worktree: verifiedCandidate.worktree,
           base: verifiedCandidate.base,
-          runGit: options.runGit ?? createGitRunner(),
+          runGit,
         })
       : null;
+    const treeMoved = treeHashBefore !== treeHashAfter;
+    const treeHash = treeMoved ? null : treeHashBefore;
+    const status = treeMoved ? "errored" : outcome.status;
+    const failureReason = treeMoved
+      ? "the candidate worktree changed while the check was running; the result does not describe any single tree"
+      : outcome.failureReason;
 
     const stored = store.withTransaction(() => {
       const evidence = store.putEvidence({
@@ -207,7 +235,7 @@ export async function runVerifyCommand({
         exitCode: outcome.exitCode,
         claimsSupported: verificationClaims({
           checkKind,
-          status: outcome.status,
+          status,
           timedOut: outcome.timedOut,
         }),
       });
@@ -218,7 +246,7 @@ export async function runVerifyCommand({
         candidateId: verifiedCandidate ? verifiedCandidate.id : null,
         treeHash,
         checkKind,
-        status: outcome.status,
+        status,
         command,
         exitCode: outcome.exitCode,
         evidenceId: evidence.id,
@@ -231,13 +259,13 @@ export async function runVerifyCommand({
       result: stored.result,
       evidence: stored.evidence,
       executed: true,
-      status: outcome.status,
+      status,
       exitCode: outcome.exitCode,
       timedOut: outcome.timedOut,
-      failureReason: outcome.failureReason,
+      failureReason,
       gaps: [],
     });
-    return outcome.status === "passed" ? 0 : VERIFICATION_FAILED;
+    return status === "passed" ? 0 : VERIFICATION_FAILED;
   } finally {
     store.close();
   }

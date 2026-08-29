@@ -567,25 +567,51 @@ test("the shadow rollout builds no packet and starts no git process", async (con
   assert.equal(existsSync(out), false);
 });
 
-test("a diff past the cap is truncated, flagged, and cut on a character boundary", async (context) => {
+test("a diff past the cap is truncated on a character boundary, deterministically", async (context) => {
   const fixture = await prepared(context);
-  // 1 MiB を超える追跡済み変更を作る。マルチバイト文字を含めることで、切り詰めが
-  // バイト境界で行われていれば末尾に U+FFFD が現れる。
-  writeFileSync(
-    path.join(fixture.repository, "tracked.txt"),
-    `${"あ".repeat(MAX_DIFF_BYTES)}\n`,
-  );
+  // **境界が必ず多バイト文字の途中に来るようにする。** 実 diff の偶発的な長さに頼ると、
+  // バイト境界で切る不正実装でも、たまたま文字境界に一致すれば U+FFFD が出ずに通ってしまう
+  // （"あ" は 3 バイトなので、ヘッダ長次第で 1/3 の確率で見逃す）。runGit を fake にして
+  // 上限のちょうど 1 バイト内側で文字が割れる patch を返し、決定的に検証する。
+  const head = "diff --git a/x b/x\n";
+  // "あ" は 3 バイト。上限位置が文字の 2 バイト目に来るよう、ASCII の詰め物で位相を合わせる
+  // （合わせないと境界にちょうど乗ってしまい、バイト切りの実装でも通ってしまう）。
+  const phase = (MAX_DIFF_BYTES - head.length) % 3;
+  const padding = "a".repeat((phase - 1 + 3) % 3);
+  const filler = "あ".repeat(Math.ceil(MAX_DIFF_BYTES / 3) + 8);
+  const patch = `${head}${padding}${filler}`;
+  const bytes = Buffer.from(patch, "utf8");
+  assert.equal(bytes.byteLength > MAX_DIFF_BYTES, true);
+  // 上限位置が文字の途中であることを、テスト側で先に確かめておく（前提が崩れたら気づけるように）。
+  const cutIsMidCharacter = (bytes[MAX_DIFF_BYTES] & 0b1100_0000) === 0b1000_0000;
+  assert.equal(cutIsMidCharacter, true, "この題材では上限が文字の途中に来る必要がある");
+
+  const fakeGit = (cwd, args) => {
+    const joined = args.join(" ");
+    if (joined.startsWith("rev-parse --absolute-git-dir")) {
+      return { status: 0, stdout: `${fixture.directory}\n`, stderr: "" };
+    }
+    if (joined.startsWith("rev-parse --verify")) {
+      return { status: 0, stdout: `${"0".repeat(40)}\n`, stderr: "" };
+    }
+    if (joined.startsWith("diff --binary --cached")) {
+      return { status: 0, stdout: patch, stderr: "" };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
   const out = path.join(fixture.directory, "packet.json");
   const { report } = await review(
     ["review", "packet", "--task", fixture.task.id, "--out", out],
     fixture,
+    { runGit: fakeGit },
   );
 
   assert.equal(report.diffTruncated, true);
   const packet = JSON.parse(readFileSync(out, "utf8"));
   assert.equal(packet.diff.truncated, true);
   assert.equal(Buffer.byteLength(packet.diff.patch, "utf8") <= MAX_DIFF_BYTES, true);
-  // 文字境界で切っていれば置換文字は生まれない。
+  // 文字境界で切っていれば置換文字は生まれない。バイト境界で切ればここで必ず落ちる。
   assert.equal(packet.diff.patch.includes("\uFFFD"), false);
 });
 

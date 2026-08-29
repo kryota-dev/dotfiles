@@ -439,9 +439,13 @@ Four properties make the result worth more than that claim:
   terminal, not piped. The only thing the harness learns is the exit code, so "no free text
   reaches the state database" is a property of what was captured rather than a rule about
   what gets written.
-- **The exit code is the verdict.** 0 records `passed`, anything else records `failed`, and
+- **The exit code is the verdict.** 0 records `passed`, anything else records `failed`. A check
+  that could not be started at all — the binary is not on `PATH`, or `spawn` failed — is recorded
+  as `errored` rather than raised, so "we tried to verify and could not" still leaves a trace. And
   a check that outlives
-  <!-- FACT:fh-check-timeout-ms -->900000<!-- /FACT --> ms (overridable with `--timeout-ms`)
+  <!-- FACT:fh-check-timeout-ms -->900000<!-- /FACT --> ms (overridable with `--timeout-ms`, itself
+  capped at <!-- FACT:fh-check-max-timeout-ms -->3600000<!-- /FACT --> ms, because the check window
+  is the one interval in which a candidate can change without being noticed)
   is terminated — SIGTERM, then SIGKILL after a grace period — and recorded as `errored` with
   exit code 124. `fh verify` itself exits 0 only when the check passed.
 
@@ -805,12 +809,24 @@ Three things have to line up, and each closes a way of faking the first:
 - **The check must post-date the candidate.** A green run from before it existed says nothing
   about what is in it.
 - **The tree must not have moved since.** Results also carry `tree_hash`, the git tree the check
-  actually saw. Adoption re-derives it and refuses on a mismatch, so writing to the candidate
-  after it passed does not smuggle unverified changes in under the old verdict. A result with no
-  `tree_hash` is not an adoption basis — treating a missing hash as "fine" would be the easiest
-  way to switch this gate off.
+  actually saw. It is derived **both before and after** the check and the two must agree: hashing
+  only afterwards would record whatever the tree became, not what was measured, and a check may
+  run for many minutes. If the tree moves mid-check the result is recorded as `errored` with no
+  hash, because it then describes no single tree. Adoption re-derives the hash and refuses on a
+  mismatch, so writing to the candidate after it passed does not smuggle unverified changes in
+  under the old verdict. A result with no `tree_hash` is not an adoption basis — treating a
+  missing hash as "fine" would be the easiest way to switch this gate off.
 
-An unverified, red, or stale candidate is refused with exit 2 and its tree is left alone.
+Adoption reads the hash and builds the patch from **one** staging pass, so the thing that was
+checked and the thing that gets applied cannot drift apart between two separate reads.
+
+An unverified, red, or stale candidate is refused with exit 2 and its tree is left alone. The whole
+judgement — hashing, verdict, diff, apply — sits inside the rollout guard, so `shadow` reaches no
+git process here either.
+
+`discard` keys off whether the tree still exists rather than the recorded status, which makes it
+idempotent: a removal that failed halfway leaves an orphaned tree, and a status-only check would
+leave no way to clean it up.
 
 **A conflict retains the work.** If the patch does not apply cleanly to the target worktree,
 the candidate moves to `conflicted`, **the tree is kept**, and the command exits 2 — the same

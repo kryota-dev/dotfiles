@@ -20,7 +20,10 @@ import {
   manifestGapsDirectory,
 } from "../home/dot_local/lib/frontier-harness/manifest-gaps.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
-import { verificationClaims } from "../home/dot_local/lib/frontier-harness/verify-command.mjs";
+import {
+  MAX_CHECK_TIMEOUT_MS,
+  verificationClaims,
+} from "../home/dot_local/lib/frontier-harness/verify-command.mjs";
 
 // `fh verify`（#495）専用のスイート。
 //
@@ -204,17 +207,18 @@ test("a command that a shell would reinterpret is refused at execution time", ()
   }
 });
 
-test("the check runner refuses a binary that is not on PATH as an absolute entry", async () => {
-  await assert.rejects(
-    () =>
-      runDeterministicCheck({
-        command: APPROVED_COMMAND,
-        cwd: "/",
-        // 相対要素は候補にしない（POSIX の zero-length prefix は CWD を指す）。
-        environment: { PATH: "relative/bin::" },
-      }),
-    /not on PATH/,
-  );
+test("a binary that is not on PATH is a recorded outcome, not an exception", async () => {
+  // 相対要素は候補にしない（POSIX の zero-length prefix は CWD を指す）。
+  const outcome = await runDeterministicCheck({
+    command: APPROVED_COMMAND,
+    cwd: "/",
+    environment: { PATH: "relative/bin::" },
+  });
+  // spawn の EACCES と同じ「チェックを開始できなかった」であり、例外ではなく結果として残す
+  // —— 例外にすると、npm 未導入の環境では検証を試みた事実そのものが記録に残らない。
+  assert.equal(outcome.status, "errored");
+  assert.equal(outcome.exitCode, null);
+  assert.match(outcome.failureReason, /could not be started/);
 });
 
 // ---------------------------------------------------------------------------
@@ -438,7 +442,7 @@ test("a check that outlives its limit is escalated to SIGKILL and recorded as er
   store.close();
 });
 
-test("a check that cannot be started is recorded, not thrown", async (context) => {
+test("a check that cannot be started is persisted, not merely reported", async (context) => {
   const fixture = await prepared(context);
   const spawnFake = createFakeSpawn({ emitError: new Error("EACCES") });
   const { code, report } = await verify({ ...fixture, spawnFake });
@@ -446,6 +450,76 @@ test("a check that cannot be started is recorded, not thrown", async (context) =
   assert.equal(code, 1);
   assert.equal(report.status, "errored");
   assert.match(report.failureReason, /could not be started/);
+
+  // report だけを見ると「返したが記録していない」退行を見逃す。state に残ることまで見る。
+  const store = createStateStore(fixture.statePath);
+  const [result] = store.listVerificationResults();
+  assert.equal(result.status, "errored");
+  assert.equal(result.taskId, fixture.task.id);
+  const [evidence] = store.listEvidence();
+  assert.equal(result.evidenceId, evidence.id);
+  store.close();
+});
+
+test("a missing binary is persisted as an errored result, not raised", async (context) => {
+  const fixture = await prepared(context);
+  // PATH に npm が無い環境。`fh` 自体は動くが、チェックは開始できない。
+  const { code, report } = await verify({
+    ...fixture,
+    environment: { PATH: path.join(fixture.directory, "empty-bin") },
+  });
+
+  assert.equal(code, 1);
+  assert.equal(report.status, "errored");
+  assert.match(report.failureReason, /could not be started/);
+
+  // spawn 失敗と同じく、試みた事実が state に残ること（例外にすると痕跡ごと消える）。
+  const store = createStateStore(fixture.statePath);
+  const [result] = store.listVerificationResults();
+  assert.equal(result.status, "errored");
+  assert.equal(result.taskId, fixture.task.id);
+  store.close();
+});
+
+test("the approved whitespace variant runs end to end through the CLI", async (context) => {
+  // 単体で `matchCommand` と `checkCommandArgv` を突き合わせるだけでは、CLI が承認済み
+  // コマンドを runner へ渡す結線までは確かめられない —— 壊れていたのはまさにその経路だった。
+  const fixture = await prepared(context);
+  const spawnFake = createFakeSpawn();
+  const { code, report } = await verify({
+    ...fixture,
+    command: "npm  run   test",
+    spawnFake,
+  });
+
+  assert.equal(code, 0);
+  assert.equal(report.status, "passed");
+  assert.deepEqual(spawnFake.calls[0].argv, ["run", "test"]);
+
+  const store = createStateStore(fixture.statePath);
+  assert.equal(store.listVerificationResults()[0].status, "passed");
+  store.close();
+});
+
+test("a check longer than the ceiling is clamped rather than honoured", async (context) => {
+  const fixture = await prepared(context);
+  const spawnFake = createFakeSpawn();
+  // 上限を超える指定は切り詰める。無制限にできると、チェック実行中という
+  // 「ツリーの書き換えを検知できない窓」を任意に広げられる。
+  const clamped = await verify({
+    ...fixture,
+    spawnFake,
+    extraFlags: ["--timeout-ms", String(MAX_CHECK_TIMEOUT_MS * 10)],
+  });
+  assert.equal(clamped.report.timeoutMs, MAX_CHECK_TIMEOUT_MS);
+
+  // 上限内の指定はそのまま通す（一律に潰していないこと）。
+  const honoured = await verify({
+    ...fixture,
+    spawnFake: createFakeSpawn(),
+    extraFlags: ["--timeout-ms", "1234"],
+  });
+  assert.equal(honoured.report.timeoutMs, 1234);
 });
 
 // ---------------------------------------------------------------------------

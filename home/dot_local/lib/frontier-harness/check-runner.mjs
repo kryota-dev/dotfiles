@@ -73,8 +73,22 @@ export async function runDeterministicCheck({
   timeoutMs = DEFAULT_CHECK_TIMEOUT_MS,
   terminationGraceMs = CHECK_TERMINATION_GRACE_MS,
 }) {
+  // 承認可能な形でないコマンドは**使い方の誤り**なので throw する（呼び出し側の引数が違う）。
   const argv = checkCommandArgv(command);
-  const executable = resolveCheckExecutable(argv[0], environment);
+  // 一方、実行ファイルが PATH に無いのは**環境の問題**であって、spawn が EACCES で落ちるのと
+  // 同じ種類の「チェックを開始できなかった」である。片方だけ例外にすると、npm 未導入の環境では
+  // 検証を試みた事実そのものが記録に残らない。結果として記録する側へ揃える。
+  let executable;
+  try {
+    executable = resolveCheckExecutable(argv[0], environment);
+  } catch (error) {
+    return {
+      status: "errored",
+      exitCode: null,
+      timedOut: false,
+      failureReason: `the verification command could not be started: ${error.message}`,
+    };
+  }
 
   return new Promise((resolve) => {
     let child;

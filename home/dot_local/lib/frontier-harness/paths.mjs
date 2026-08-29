@@ -200,7 +200,13 @@ export function ensureStateFile(target, label) {
 // symlink ガードと atomic rename は同じままにする。
 export function writeJsonToChosenPath(targetPath, value, label) {
   const directory = path.dirname(targetPath);
-  if (!lstatOrNull(directory)) {
+  if (lstatOrNull(directory)) {
+    // **既存でも symlink 検査は落とさない。** 権限の強制だけを省きたいのであって、
+    // 安全境界を省きたいわけではない。`ensureDirectory` を丸ごと飛ばすと、この検査まで
+    // 一緒に消え、`writeJsonAtomic` は拒否する symlink 化した親を素通りさせてしまう
+    // （2 つの書き手で安全性が非対称になる）。
+    assertNotSymlink(directory, `${label} directory`);
+  } else {
     // 存在しないときだけ作る。作る場合は state と同じ 0700 を課す。
     ensureDirectory(directory, `${label} directory`);
   }

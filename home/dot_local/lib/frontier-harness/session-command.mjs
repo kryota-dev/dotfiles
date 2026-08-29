@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import path from "node:path";
 
 import { requireSafeArgumentValue } from "./adapter-contract.mjs";
 import { createAdapterExecutor } from "./adapters.mjs";

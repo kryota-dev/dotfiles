@@ -20,7 +20,11 @@ import { requireAbsolutePath } from "./paths.mjs";
 
 // diff の上限。reviewer packet は JSON へ埋め込まれるため、際限なく大きくしない。
 export const MAX_DIFF_BYTES = 1_048_576;
-// git の stdout 上限。diff の上限より広く取り、切り詰めは呼び出し側で明示的に行う。
+// 取り込みを試みる patch の上限。**runner の stdout 上限より小さくすること。** 同じ値にすると、
+// 上限に達した時点で `spawnSync` が maxBuffer 超過で error を投げ、`truncated: true` を返す経路に
+// 到達できない（＝「大きすぎる patch は取り込まない」分岐が死ぬ）。
+export const MAX_ADOPTABLE_DIFF_BYTES = 32 * 1_048_576;
+// git の stdout 上限。上の判定上限より広く取り、切り詰めの判断は呼び出し側が行う。
 export const MAX_GIT_OUTPUT_BYTES = 64 * 1_048_576;
 
 // 先頭は英数字に限る（`-` 始まりをフラグとして解釈させない）。`~` `^` は `HEAD~1` 等で使う。
@@ -96,37 +100,57 @@ function withStagedIndex(worktree, base, runGit, action) {
   }
 }
 
-// 追跡済みの変更と未追跡の新規ファイルの両方を含む patch を作る。
-//
-// 使い捨ての index を使うため、対象ワークツリーの index は一切変わらない。`.gitignore` は
-// `add -A` が尊重するので、無視対象のビルド成果物は patch に入らない。
+// ツリーの「内容そのもの」を 1 回の stage から取り出す。追跡済みの変更と未追跡の新規ファイルの
+// 両方を含み、`.gitignore` は `add -A` が尊重するので無視対象のビルド成果物は入らない。
+// 使い捨ての index を使うため、対象ワークツリーの index は一切変わらない。
 //
 // **scratch index の置き場所を呼び出し側に選ばせない。** ワークツリーの内側に置くと
 // `git add -A` がその index ファイル自身を patch へ取り込む。git ディレクトリ配下は
 // git が決して走査しないので、そこから導出すれば呼び出し側が何を渡しても壊れない。
-export function worktreeDiff({ worktree, base, runGit, maxBytes = MAX_DIFF_BYTES }) {
+//
+// **hash と patch を同じ index から
+// 作ることが要点。** 別々に stage すると、その 2 回の間にツリーが書き換わったとき、hash は
+// ツリー T を、patch は T' を指すことになり、「hash が一致したから取り込んでよい」という
+// 判断の根拠が patch と結び付かなくなる（取り込み判定が守っているつもりの不変条件が破れる）。
+export function worktreeSnapshot({ worktree, base, runGit, maxBytes = MAX_DIFF_BYTES }) {
   return withStagedIndex(worktree, base, runGit, ({ baseCommit, withIndex }) => {
+    const treeHash = requireGit(
+      runGit(worktree, ["write-tree"], withIndex),
+      "hashing the worktree",
+    ).trim();
     const patch = requireGit(
       runGit(worktree, ["diff", "--binary", "--cached", baseCommit], withIndex),
       "diffing the worktree",
     );
     const bytes = Buffer.from(patch, "utf8");
-    if (bytes.byteLength <= maxBytes) return { base: baseCommit, patch, truncated: false };
+    if (bytes.byteLength <= maxBytes) {
+      return { base: baseCommit, treeHash, patch, truncated: false };
+    }
     // **文字境界で切る。** バイト境界で切ると多バイト文字を割り、末尾に U+FFFD が生まれる。
     // patch はここで既に適用不能（truncated）だが、壊れた文字を reviewer へ見せる意味は無い。
     const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
     const head = decoder.decode(bytes.subarray(0, maxBytes), { stream: true });
-    return { base: baseCommit, patch: head, truncated: true };
+    return { base: baseCommit, treeHash, patch: head, truncated: true };
   });
 }
 
+export function worktreeDiff({ worktree, base, runGit, maxBytes = MAX_DIFF_BYTES }) {
+  const { base: baseCommit, patch, truncated } = worktreeSnapshot({
+    worktree,
+    base,
+    runGit,
+    maxBytes,
+  });
+  return { base: baseCommit, patch, truncated };
+}
+
 // 「検証した時点でツリーに何が入っていたか」を一意に表す git tree object の hash。
-// `verification_results.tree_hash` に記録し、取り込み直前に再計算して突き合わせる
-// ことで、「合格したあとにツリーを書き換えて取り込む」経路を塞ぐ。
+// `verification_results.tree_hash` に記録し、取り込み直前に再計算して突き合わせることで、
+// 「合格したあとにツリーを書き換えて取り込む」経路を塞ぐ。
 export function worktreeTreeHash({ worktree, base, runGit }) {
-  return withStagedIndex(worktree, base, runGit, ({ withIndex }) =>
-    requireGit(runGit(worktree, ["write-tree"], withIndex), "hashing the worktree").trim(),
-  );
+  // patch は使わないので、切り詰め判定に載せない（0 を渡すと必ず truncated になるだけ）。
+  return worktreeSnapshot({ worktree, base, runGit, maxBytes: Number.POSITIVE_INFINITY })
+    .treeHash;
 }
 
 export function createDetachedWorktree({ repository, target, base, runGit }) {

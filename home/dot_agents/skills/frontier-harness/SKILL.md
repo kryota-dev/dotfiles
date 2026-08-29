@@ -113,7 +113,9 @@ fh candidate discard --candidate <id> --json
   チェックは `fh verify --candidate <id>` で走らせる（`--worktree` でツリーを直接指すと、
   policy.json が未コミットのとき承認境界が正しく止める）。
 - 合格した**後に** candidate のツリーへ書き込むと、取り込みは断られる（tree hash が食い違うため）。
-  書き換えたら `fh verify` をやり直す。
+  書き換えたら `fh verify` をやり直す。**チェックの実行中**に書き換えた場合も、結果は `errored`
+  になる（どのツリーについての判定でもないため）。
+- `fh candidate discard` は冪等。撤去が途中で失敗してツリーだけ残った場合も、もう一度叩けば片付く。
 - 承認済みコマンドの実行はサンドボックスされない。`npm run test` を承認することは、その時点の
   `package.json` が書いてある内容を自分の環境で実行してよい、という意味になる。未検証の差分を
   抱えた candidate を検証するときは、この点を踏まえること。

@@ -385,7 +385,8 @@ _assert_lifecycle_scripts_documented() {
   for triple in "fh-check-timeout-ms:DEFAULT_CHECK_TIMEOUT_MS:check-runner.mjs" \
     "fh-candidate-max-live:CANDIDATE_MAX_LIVE_ENTRIES:candidate-store.mjs" \
     "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs" \
-    "fh-review-diff-max-bytes:MAX_DIFF_BYTES:git-worktree.mjs"; do
+    "fh-review-diff-max-bytes:MAX_DIFF_BYTES:git-worktree.mjs" \
+    "fh-check-max-timeout-ms:MAX_CHECK_TIMEOUT_MS:verify-command.mjs"; do
     marker="${triple%%:*}"
     constant="$(echo "$triple" | cut -d: -f2)"
     source="${HOME_DIR}/dot_local/lib/frontier-harness/$(echo "$triple" | cut -d: -f3)"

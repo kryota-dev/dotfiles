@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import path from "node:path";
 
 import { VERIFICATION_FAILED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue } from "./flags.mjs";
