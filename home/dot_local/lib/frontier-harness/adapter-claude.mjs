@@ -26,6 +26,49 @@ const STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config";
 const MCP_CONFIG_FLAG = "--mcp-config";
 const PERMISSION_PROMPT_TOOL_FLAG = "--permission-prompt-tool";
 const SETTINGS_FLAG = "--settings";
+// ［実測 claude 2.1.251］`-p` と `--output-format stream-json` の組合せは `--verbose` を
+// 要求する（"When using --print, --output-format=stream-json requires --verbose"）。
+// 無いと CLI は NDJSON を 1 行も出さずに exit 1 するので、起動時検査からは
+// 「init イベントが無かった」としか見えない。ストリーム形式と対で出す。
+const VERBOSE_FLAG = "--verbose";
+
+// 子が届く必要のあるホスト。公式 docs［原文］: "Claude Code pre-allows no domains by default"
+// —— つまり `strictAllowlist: true` を allowedDomains 無しで立てると、sandboxed な shell は
+// **どのホストへも到達できない**。子は pr-workflow を走らせるので push と gh が要る。
+//
+// **署名 socket は開けない。** `network.allowUnixSockets` を与えれば 1Password の agent socket
+// 経由で commit 署名が通るが、それは自律的に走る子へ「vault の鍵で署名する能力」を渡すことに
+// なる。docs も Unix socket の許可を privilege escalation の経路として名指ししている。
+// 代わりに子へは「署名を切ってコミットする」ことを session-command.mjs が明示的に伝える
+// —— 中間コミットが未署名でも、main へ入る squash コミットは GitHub が署名する。
+// 載せるのは**開発ループが実際に踏むホスト**だけで、各行に根拠となる実ファイルがある。
+// 「あると便利」では足さない —— docs が言うとおり、許可した先はそのまま持ち出しの経路になる。
+//
+// **これは固定値である。** リポジトリごと・capability ごとに変えられないので、別の言語や
+// レジストリを使うリポジトリで子を走らせると、ここに無いホストで塞がれる。塞がれた子には
+// 迂回させず、必要だったホストを報告させる（session-command.mjs の briefing がそう指示する）。
+export const SANDBOX_ALLOWED_DOMAINS = Object.freeze([
+  // git / gh / GitHub Actions の解決。chezmoi external も 29 件がここを踏む。
+  "github.com",
+  "*.github.com",
+  // raw 取得（chezmoi external 3 件）と、Release アセットのリダイレクト先
+  // （`releases/download` は objects.githubusercontent.com へ 302 する）。
+  "*.githubusercontent.com",
+  // Node: package.json の packageManager が pnpm を指し、.npmrc にレジストリ上書きが無い
+  // ＝ 既定レジストリ。scoped registry を使うリポジトリのために GitHub Packages も。
+  "registry.npmjs.org",
+  "npm.pkg.github.com",
+  // ツールチェーン本体のブートストラップ（run_onchange_after_12-setup-mise.sh.tmpl）。
+  "mise.run",
+  // Ruby: Gemfile / Gemfile.lock の source。
+  "rubygems.org",
+  // Python: requirements.txt に index-url 指定が無い ＝ 既定 PyPI（配布物は別ホスト）。
+  "pypi.org",
+  "files.pythonhosted.org",
+  // Go: go.mod 群に GOPROXY 上書きが無い ＝ 既定の module proxy と checksum db。
+  "proxy.golang.org",
+  "sum.golang.org",
+]);
 // #526 §1.6［原文］: `--bare` を付けない `-p` は、信頼していないフォルダでも repository の
 // `.mcp.json` の server に接続する。
 const PROJECT_MCP_FILE = ".mcp.json";
@@ -48,6 +91,7 @@ const CLAUDE_FLAGS = Object.freeze({
   [SETTINGS_FLAG]: true,
   [MCP_CONFIG_FLAG]: true,
   [PERMISSION_PROMPT_TOOL_FLAG]: true,
+  [VERBOSE_FLAG]: false,
 });
 
 // docs/en/settings の scope 表［原文］に対応する。managed settings は --setting-sources の語彙に
@@ -75,7 +119,19 @@ function sandboxSettings() {
       failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
-      network: { strictAllowlist: true },
+      // ［実測］Seatbelt の下では Go の crypto/x509 が Security.framework → XPC → trustd へ
+      // 委譲する経路を塞がれ、`gh` が `x509: OSStatus -26276` で落ちる。公式 docs の
+      // troubleshooting は `excludedCommands` を第一に挙げるが、anthropics/claude-code#39240 は
+      // 「sandbox が https_proxy を注入するため除外しても効かない」として closed になっている。
+      //
+      // 緩むのは **macOS の trust 評価に到達できるかどうか**だけである。実測では、この設定を
+      // 入れても許可外ホストは接続不可のままだった（allowlist の遮断は維持される）。
+      // `strictAllowlist` と `allowUnsandboxedCommands: false` は据え置く。
+      enableWeakerNetworkIsolation: true,
+      network: {
+        strictAllowlist: true,
+        allowedDomains: [...SANDBOX_ALLOWED_DOMAINS],
+      },
     },
   };
 }
@@ -264,6 +320,17 @@ function readEffectiveSandbox(invocation) {
   ) {
     return null;
   }
+  // strictAllowlist が立っていることだけを見ると、広げた allowlist を忍ばせた argv が
+  // 「サンドボックスされている」として封印を通る。宣言した許可リストと同一であることまで
+  // 読み戻す（他のフラグと同じく、読み取れない形・食い違う形は一致とみなさない）。
+  const domains = sandbox.network?.allowedDomains;
+  if (
+    !Array.isArray(domains) ||
+    domains.length !== SANDBOX_ALLOWED_DOMAINS.length ||
+    !SANDBOX_ALLOWED_DOMAINS.every((domain, index) => domains[index] === domain)
+  ) {
+    return null;
+  }
 
   const readOnly = flagValue(argv, "--permission-mode") === READ_ONLY_PERMISSION_MODE;
   return { mode: readOnly ? "read-only" : "workspace-write" };
@@ -357,6 +424,7 @@ function buildArgv({
     // #526 §1.4: system/init・assistant・最終 result が NDJSON で流れる。
     "--output-format",
     "stream-json",
+    VERBOSE_FLAG,
     "--model",
     model,
     "--effort",

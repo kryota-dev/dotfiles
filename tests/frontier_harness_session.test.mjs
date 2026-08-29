@@ -514,6 +514,58 @@ test("the launched argv carries every pre-emptive isolation flag", async (contex
   assert.equal(call.argv[call.argv.indexOf("--session-id") + 1], SESSION_ID);
 });
 
+test("the child is told what the sandbox denies before it hits the wall", async (context) => {
+  // 実運用で 2 セッションとも、作業を終えてから commit で初めて「署名 socket が塞がれている」
+  // ことを知り、そこで止まった。制約を各 prompt に書かせる運用ルールにすると必ず書き漏れるので、
+  // sandbox を課している側（fh）が prompt の先頭で構造的に伝える。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 0);
+  const [call] = spawnFake.calls;
+  const prompt = call.argv[call.argv.indexOf("-p") + 1];
+  // 塞がれている点が、失敗する前に読める形で入っていること。
+  //
+  // **許可ドメインの一覧そのものは検査しない。** 一覧は adapter が持つので、文面に埋め込むと
+  // 二重管理になり drift する（実際、一覧を広げたときに文面だけが古くなった）。ここで確かめる
+  // のは「制約の存在が伝わるか」であって、許可の中身ではない。
+  assert.match(prompt, /許可リスト/);
+  assert.match(prompt, /commit\.gpgsign=false/);
+  assert.match(prompt, /dangerouslyDisableSandbox/);
+  assert.match(prompt, /secure-transport/);
+  // 呼び出し側の prompt は落とさない。
+  assert.ok(prompt.includes(PROMPT_BODY));
+});
+
+test("the child git uses a TLS backend that works inside the sandbox", async (context) => {
+  // ［実測］sandbox はプロキシ経由の egress を課すため、git は OpenSSL 系バックエンドに落ちて
+  // CA バンドルを読もうとし、その読み取りが sandbox に塞がれて失敗する。secure-transport
+  // バックエンドは CA ファイルを読まず macOS の trust 評価を使うので通る（実測で ls-remote 成功）。
+  //
+  // 各コマンドに `-c` を付ける運用ルールにすると付け忘れるので、環境変数で全 git 呼び出しへ
+  // 効かせる。利用者側の設定には一切触れない。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 0);
+  const [call] = spawnFake.calls;
+  const env = call.options.env;
+  const count = Number(env.GIT_CONFIG_COUNT);
+  assert.ok(count >= 1, "GIT_CONFIG_COUNT must cover the injected entry");
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    entries.push([env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`]]);
+  }
+  assert.ok(
+    entries.some(([key, value]) => key === "http.sslBackend" && value === "secure-transport"),
+    "the child must inherit an http.sslBackend override",
+  );
+});
+
 test("a child without AskUserQuestion is terminated instead of left running", async (context) => {
   const { directory, statePath, policyPath } = await preparedDirectory(context);
   const spawnFake = createFakeSpawn({

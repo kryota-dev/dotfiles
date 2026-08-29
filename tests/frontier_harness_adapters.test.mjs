@@ -20,6 +20,7 @@ import {
   INIT_PROBLEM_MCP_SERVER_ERRORS,
   INIT_PROBLEM_NOT_AN_INIT_EVENT,
   INIT_PROBLEM_PLUGIN_ERRORS,
+  SANDBOX_ALLOWED_DOMAINS,
   claudeAdapter,
   configSourcesFor,
   readInitHealth,
@@ -354,7 +355,13 @@ test("claude carries the identical sandbox settings into a resumed run", () => {
     failIfUnavailable: true,
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
-    network: { strictAllowlist: true },
+    enableWeakerNetworkIsolation: true,
+    network: {
+      strictAllowlist: true,
+      // 一覧は増減するので値を二重管理しない。ここで固定するのは
+      // 「設定へ出るのは宣言した定数そのものである」という対応関係。
+      allowedDomains: [...SANDBOX_ALLOWED_DOMAINS],
+    },
   });
   // model / effort が argv に反映されていること（flag と値の対で確認する）。
   const pairOf = (argv, flag) => argv.slice(argv.indexOf(flag), argv.indexOf(flag) + 2);
@@ -369,6 +376,90 @@ test("claude carries the identical sandbox settings into a resumed run", () => {
   assert.ok(!launch.argv.includes("--resume"));
   assert.ok(resume.argv.includes("--resume"));
   assert.ok(!resume.argv.includes("--session-id"));
+});
+
+test("claude pairs stream-json with --verbose in both phases", () => {
+  // 実測（claude 2.1.251）: `-p` と `--output-format stream-json` の組合せは `--verbose` を
+  // 要求し、無いと "When using --print, --output-format=stream-json requires --verbose" で
+  // 即座に exit 1 する。init イベントが 1 件も出ないため、起動時検査は「init ではなかった」と
+  // 報告するだけで、原因（フラグ不足）は argv からしか分からない。
+  const launch = claudeAdapter.launch(
+    requestFor(claudeAdapter, "workspace-write", { sessionId: "session-1" }),
+  );
+  const resume = claudeAdapter.resume(
+    requestFor(claudeAdapter, "workspace-write", { resumeKey: "session-1" }),
+  );
+  for (const invocation of [launch, resume]) {
+    assert.ok(invocation.argv.includes("--output-format"));
+    assert.ok(invocation.argv.includes("--verbose"));
+  }
+});
+
+test("claude pre-allows domains without opening a hole", () => {
+  // 公式 docs［原文］: "Claude Code pre-allows no domains by default"。`strictAllowlist: true`
+  // だけを立てると sandboxed Bash はどのホストへも到達できず、子は push も gh も打てない。
+  //
+  // 一覧そのものは開発対象が変われば増減するので、ここで固定するのは**値ではなく性質**である
+  // —— 許可の形が境界を壊していないこと、そして署名 socket を渡していないこと。
+  const launch = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
+  const settings = JSON.parse(launch.argv[launch.argv.indexOf("--settings") + 1]);
+  const domains = settings.sandbox.network.allowedDomains;
+
+  assert.ok(Array.isArray(domains) && domains.length > 0);
+  assert.equal(settings.sandbox.network.strictAllowlist, true);
+  for (const domain of domains) {
+    // 裸の `*` は allowlist を無効化する（docs はこれを有効な形として認めている）。
+    assert.notEqual(domain, "*", "a bare wildcard would allow every host");
+    // ワイルドカードは先頭ラベルにだけ許す。`example.*` のような形は sandboxed command には
+    // 効かないと docs が明記しており、効いているつもりの設定になる。
+    const wildcards = domain.split("*").length - 1;
+    if (wildcards > 0) {
+      assert.equal(wildcards, 1, `${domain} must not carry more than one wildcard`);
+      assert.ok(domain.startsWith("*."), `${domain} must put its wildcard in the leading label`);
+    }
+    // TLD だけ（`*.com` 等）は事実上どこへでも到達できる。
+    assert.ok(
+      domain.replace(/^\*\./, "").split(".").length >= 2,
+      `${domain} is too broad to be an allowlist entry`,
+    );
+  }
+
+  // 署名 socket は渡さない —— 自律的に走る子に 1Password の鍵で署名する能力を与えないため。
+  assert.ok(!Object.hasOwn(settings.sandbox.network, "allowUnixSockets"));
+  assert.ok(!Object.hasOwn(settings.sandbox.network, "allowAllUnixSockets"));
+});
+
+test("claude reads back no sandbox when the domain allowlist is widened", () => {
+  // strictAllowlist が立っていることだけを見ると、広げた allowlist を忍ばせた argv が
+  // 封印を通る（fail-open）。宣言どおりの許可リストであることまで読み戻す。
+  const widened = JSON.stringify({
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      network: { strictAllowlist: true, allowedDomains: ["*"] },
+    },
+  });
+  assert.equal(
+    claudeAdapter.readEffectiveSandbox({ argv: ["-p", "go", "--settings", widened] }),
+    null,
+  );
+});
+
+test("claude lets Go-based tools verify TLS inside the sandbox", () => {
+  // ［実測］Seatbelt の下では Go の crypto/x509 が Security.framework → XPC → trustd に
+  // 委譲する経路を塞がれ、`gh` が `x509: OSStatus -26276` で落ちる。公式 docs の
+  // troubleshooting は `excludedCommands` を第一に挙げるが、anthropics/claude-code#39240 は
+  // 「sandbox が https_proxy を注入するため除外しても効かない」として closed になっている。
+  // 実測では enableWeakerNetworkIsolation で `gh` が通り、**allowlist の遮断は維持された**
+  // （許可外ホストは接続不可のまま）。
+  const launch = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
+  const settings = JSON.parse(launch.argv[launch.argv.indexOf("--settings") + 1]);
+  assert.equal(settings.sandbox.enableWeakerNetworkIsolation, true);
+  // 緩めるのはここだけ。allowlist と escape hatch の封じは維持する。
+  assert.equal(settings.sandbox.network.strictAllowlist, true);
+  assert.equal(settings.sandbox.allowUnsandboxedCommands, false);
 });
 
 test("claude never emits a sandbox flag that does not exist", () => {

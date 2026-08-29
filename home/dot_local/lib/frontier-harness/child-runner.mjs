@@ -24,6 +24,30 @@ export const TERMINATION_GRACE_MS = 5000;
 // シグナルで終わると exitCode が null になるため、成功と読めない値をここで確定させる。
 export const TERMINATED_EXIT_CODE = 143;
 
+// 子の git が sandbox 内で TLS 検証を通せるようにする。
+//
+// ［実測］sandbox はプロキシ経由の egress を課すため、git は OpenSSL 系バックエンドに落ちて
+// CA バンドルを読もうとし、その読み取りが sandbox に塞がれて
+// `error setting certificate verify locations` で失敗する。secure-transport バックエンドは
+// CA ファイルを読まず macOS の trust 評価を使うので通る（`git ls-remote` の成功を実測）。
+//
+// **各コマンドに `-c` を付ける運用ルールにしない。** 子は git を何度も呼ぶので必ず付け忘れる。
+// 環境変数で全呼び出しへ効かせ、利用者側の設定には一切触れない。
+const GIT_SSL_BACKEND_KEY = "http.sslBackend";
+const GIT_SSL_BACKEND_VALUE = "secure-transport";
+
+// 既存の GIT_CONFIG_* を壊さずに 1 件足す。呼び出し元が既に使っていた場合、上書きすると
+// その指定が黙って消える（`GIT_CONFIG_COUNT` は「先頭から何件読むか」なので、末尾へ足す）。
+export function withGitTlsBackend(source) {
+  const env = { ...source };
+  const declared = Number.parseInt(env.GIT_CONFIG_COUNT ?? "0", 10);
+  const count = Number.isInteger(declared) && declared >= 0 ? declared : 0;
+  env[`GIT_CONFIG_KEY_${count}`] = GIT_SSL_BACKEND_KEY;
+  env[`GIT_CONFIG_VALUE_${count}`] = GIT_SSL_BACKEND_VALUE;
+  env.GIT_CONFIG_COUNT = String(count + 1);
+  return env;
+}
+
 const HEARTBEAT_PREFIX = "frontier-harness: child event";
 // stderr へ書いてよいのは**イベントの型名だけ**。会話内容を運ばないことに加え、
 // provider の出力をそのまま端末へ流さない（制御文字・ANSI を書かない）。
@@ -67,6 +91,7 @@ function createTailBuffer(limitBytes) {
 export function createChildRunner({
   cwd,
   permissionPromptTool,
+  environment = process.env,
   spawn = nodeSpawn,
   stderr = process.stderr,
   terminationGraceMs = TERMINATION_GRACE_MS,
@@ -82,6 +107,7 @@ export function createChildRunner({
       try {
         child = spawn(invocation.executable, [...invocation.argv], {
           cwd,
+          env: withGitTlsBackend(environment),
           // stdin は使わない（1 タスク 1 プロセス）。stdout は解釈のために取り、
           // 子の stderr は親へ継承して人が覗けるようにする。
           stdio: ["ignore", "pipe", "inherit"],
