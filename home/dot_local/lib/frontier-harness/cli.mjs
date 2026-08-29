@@ -366,7 +366,25 @@ export function runCli(argumentsList, options = {}) {
           config,
           task,
         });
-        store.recordRoute(storedTask.id, route);
+        const storedRoute = store.recordRoute(storedTask.id, route);
+        // 塞いだ route は evidence として残す（#534）。routes テーブルには
+        // capability / provider / 軸 / 要求値 / 実際値 の 5 つ組を入れる列が無いため、
+        // 理由の追跡は evidence 側が担う。route と同じトランザクションで確定するので
+        // 「route は残ったが理由は残らない」中途半端な状態を作らない。
+        const blocked = route.blocked ?? [];
+        const blockEvidence =
+          blocked.length > 0
+            ? store.putEvidence({
+                kind: "route_block",
+                producer: "frontier-harness",
+                taskId: storedTask.id,
+                routeId: storedRoute.id,
+                claimsSupported: blocked.map(
+                  (entry) =>
+                    `${entry.capability} (${entry.provider}) was not routed: ${entry.axis} requires ${entry.required} but the provider declares ${entry.actual}`,
+                ),
+              })
+            : null;
         const execution = runWithRolloutGuard(
           config,
           `route ${route.kind}`,
@@ -375,6 +393,8 @@ export function runCli(argumentsList, options = {}) {
         return {
           task: storedTask,
           decision: route,
+          blocked,
+          blockEvidence,
           executed: execution.executed,
           executionReason: execution.reason,
           rollout: config.rollout,
