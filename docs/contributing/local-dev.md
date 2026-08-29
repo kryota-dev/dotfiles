@@ -94,10 +94,12 @@ deno lint --no-config --rules-tags= --rules-include=no-console
 - **Why `deno lint` and not `grep`.** The rule is AST-based, so `console.log` written inside a
   string literal or a comment is not a violation. `tests/agent_improvement.test.mjs` plants
   executable source as a string; a textual scan would report it.
-- **Why only one rule.** `--rules-tags=` clears the tag-driven defaults, leaving `no-console`
-  as the only rule that runs — these are mostly Node modules deno does not otherwise own, and
-  the rest of its recommended set would fire on them. `--no-config` stops a `deno.json` above
-  the checkout from changing what gets enforced.
+- **Why only one rule.** `--rules-tags=` clears the tag-driven defaults, so `no-console` is
+  the only policy rule enforced — these are mostly Node modules deno does not otherwise own,
+  and the rest of its recommended set would fire on them. deno still reports
+  `ban-unused-ignore`, because it evaluates ignore directives belonging to *enabled* rules;
+  that is what stops an exemption from outliving the call it excused. `--no-config` stops a
+  `deno.json` above the checkout from changing what gets enforced.
 - **Why it is fatal without deno.** Unlike `lint-deno`, this target does not skip itself when
   the tool is missing (`mise install deno`). A guard that opts itself out when its tool is
   absent is how the check went missing in the first place. An empty file list is fatal for the
@@ -114,8 +116,22 @@ console.log(banner);
 ```
 
 The exemption is line-scoped on purpose: a second `console.*` call in the same file still
-fails. There is no file-level opt-out, because `// deno-lint-ignore-file` would disable the
-guard for everything below it.
+fails. Delete the comment when the call goes: a directive that no longer suppresses anything
+is reported as `ban-unused-ignore`.
+
+File-level opt-out is not merely discouraged, it is rejected. deno honours
+`// deno-lint-ignore-file no-console` (and a bare `// deno-lint-ignore-file`, which disables
+every rule), either of which would silently exempt an entire file, so the target scans for
+those two forms and fails before it lints:
+
+```
+lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
+home/dot_local/lib/example/cli.mjs:1:// deno-lint-ignore-file no-console
+```
+
+A file-level directive naming only other rules (`// deno-lint-ignore-file no-explicit-any`)
+is left alone — it does not weaken this guard, and the console call underneath it is still
+reported.
 
 Most of the tree needs no exemption at all — the CLI modules under `home/dot_local/lib/`
 already write through `process.stdout.write` / `process.stderr.write`. At the time the guard

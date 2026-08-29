@@ -96,8 +96,10 @@ deno lint --no-config --rules-tags= --rules-include=no-console
   `tests/agent_improvement.test.mjs` は実行可能なソースを文字列として埋め込んでおり、
   テキスト走査ではこれを誤検出します。
 - **1 ルールだけにしている理由**: `--rules-tags=` がタグ由来の既定ルールをすべて落とすため、
-  実行されるのは `no-console` だけになります。対象の多くは deno が本来所有しない Node モジュール
-  であり、推奨ルールセットの残りはそれらに対して発火してしまいます。`--no-config` は、
+  ポリシーとして強制されるのは `no-console` だけになります。対象の多くは deno が本来所有しない
+  Node モジュールであり、推奨ルールセットの残りはそれらに対して発火してしまいます。なお deno は
+  `ban-unused-ignore` も報告します（**有効なルール**に属する ignore ディレクティブを評価するため）。
+  これが、除外マーカーがそれを正当化した呼び出しより長生きするのを防いでいます。`--no-config` は、
   チェックアウトより上位にある `deno.json` が強制内容を変えるのを防ぎます。
 - **deno 不在を致命的にしている理由**: `lint-deno` と異なり、このターゲットはツールが無いときに
   自分をスキップしません（`mise install deno`）。ツールが無いと自らを無効化するガードは、
@@ -115,8 +117,22 @@ console.log(banner);
 ```
 
 除外が行スコープなのは意図的で、同じファイル内の 2 つ目の `console.*` 呼び出しは依然として
-失敗します。ファイル単位の除外は提供していません — `// deno-lint-ignore-file` はそれ以降
-すべてに対してガードを無効化してしまうためです。
+失敗します。呼び出しを消したらコメントも消してください — 何も抑止しなくなったディレクティブは
+`ban-unused-ignore` として報告されます。
+
+ファイル単位の除外は「非推奨」ではなく**拒否**します。deno は
+`// deno-lint-ignore-file no-console`（および全ルールを無効化する裸の
+`// deno-lint-ignore-file`）を honor するため、どちらもファイル全体を黙って除外できてしまいます。
+そこでターゲットは lint の前にこの 2 形式を走査して失敗させます。
+
+```
+lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
+home/dot_local/lib/example/cli.mjs:1:// deno-lint-ignore-file no-console
+```
+
+他のルールだけを指定したファイル単位ディレクティブ（`// deno-lint-ignore-file no-explicit-any`）は
+そのまま通します — このガードを弱めることはなく、その下にある console 呼び出しは依然として
+報告されるためです。
 
 ツリーの大半はそもそも除外を必要としません。`home/dot_local/lib/` 配下の CLI モジュールは
 既に `process.stdout.write` / `process.stderr.write` 経由で出力しています。ガードを有効化した

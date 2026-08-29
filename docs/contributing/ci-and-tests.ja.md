@@ -60,7 +60,7 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 
 ### `tests/console_lint.bats`
 
-#520 で退役した `stop:check-console-log` hook の移送先である `make lint-console`（#522）の振る舞いテストです。ターゲットの `CONSOLE_LINT_ROOTS` 変数を上書きして `BATS_TEST_TMPDIR` の fixture ツリーへ検査対象を向けることで、リポジトリに違反を植え込まずに失敗ケースを検証します。カバー範囲：素の `console.log` は失敗する；`console.error` / `console.warn` も失敗する（ルールは `console.log` 単独ではなく `console.*`）；`// deno-lint-ignore no-console` コメントは自身の行だけを除外し、同じファイル内の 2 つ目の呼び出しは除外しない；`process.stdout.write` は通る；文字列リテラル内の `console.log` は通る（テキストではなく AST ベースの検査であること）；`.ts` と素の `.js` の双方が任意の深さで走査される；空のツリーは黙って成功せず失敗する；リポジトリ本体は通る；ターゲットが `make test` に配線されている；CI の両ジョブがバージョンを重複させずに mise の pin から deno を解決している。
+#520 で退役した `stop:check-console-log` hook の移送先である `make lint-console`（#522）の振る舞いテストです。ターゲットの `CONSOLE_LINT_ROOTS` 変数を上書きして `BATS_TEST_TMPDIR` の fixture ツリーへ検査対象を向けることで、リポジトリに違反を植え込まずに失敗ケースを検証します。カバー範囲：素の `console.log` は失敗する；`console.error` / `console.warn` も失敗する（ルールは `console.log` 単独ではなく `console.*`）；`// deno-lint-ignore no-console` コメントは自身の行だけを除外し、同じファイル内の 2 つ目の呼び出しは除外しない；対応する console 呼び出しより長生きしたディレクティブは `ban-unused-ignore` として報告される；ファイル単位の `// deno-lint-ignore-file no-console`（および裸のもの）は拒否され、無関係なルールだけを指定したものはそのまま通る；`process.stdout.write` は通る；文字列リテラル内の `console.log` は通る（テキストではなく AST ベースの検査であること）；宣言した 8 拡張子それぞれが個別に走査されることを確認する；任意の深さのネストも走査される；空のツリーは黙って成功せず失敗する；既定 roots が実際に `home/` と `tests/` の両方を覆う（他のケースはすべて roots を上書きするため、`Makefile` の使い捨てコピーに対して駆動する）；deno 不在は skip ではなく致命的である；リポジトリ本体は通る；`server.ts` の除外が `make lint-deno` を壊さない；ターゲットが `make test` に配線されている；CI の両ジョブがバージョンを重複させずに mise の pin から deno を解決し、ターゲット自体は lint ジョブに束縛されている。
 
 これらはテキストへのアサーションではなくターゲット自体を駆動します。存在はするが何も検出しなくなったガードは、テキスト的なアサーションをすべて通過してしまい、それがこの issue の発端となった失敗モードだからです。deno が無いときに skip しないのも同じ理由です。
 

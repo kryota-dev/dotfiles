@@ -9,11 +9,12 @@ load helpers/setup
 #
 # The target's CONSOLE_LINT_ROOTS variable exists so the scan can be pointed at a fixture
 # tree, which is the only way to assert the failing cases without planting a violation in the
-# repo itself.
+# repo itself. The default-roots case is covered separately, against a throwaway copy of the
+# Makefile, because a fixture-only suite cannot notice a root dropping out of the default.
 #
 # Nothing here skips when deno is missing. `make lint-console` is fatal without it (a guard
 # that opts itself out when its tool is absent is how #522 happened), and the clean-fixture
-# case below asserts exit 0, which cannot pass unless the linter actually ran.
+# cases below assert exit 0, which cannot pass unless the linter actually ran.
 
 setup() {
   FIXTURE="${BATS_TEST_TMPDIR}/fixture"
@@ -43,6 +44,7 @@ export function warnMe(value) {
 EOF
   lint_console
   [ "$status" -ne 0 ]
+  [[ "$output" == *"no-console"* ]]
 
   cat >"${FIXTURE}/a.mjs" <<'EOF'
 export function errorMe(value) {
@@ -51,6 +53,7 @@ export function errorMe(value) {
 EOF
   lint_console
   [ "$status" -ne 0 ]
+  [[ "$output" == *"no-console"* ]]
 }
 
 @test "lint-console: a line-level ignore with a reason passes" {
@@ -76,6 +79,54 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "lint-console: an exemption that outlives its console call is reported (ban-unused-ignore)" {
+  # deno evaluates ignore directives of *enabled* rules, so a stale exemption fails here even
+  # though only no-console is switched on. This is what keeps opt-outs from accumulating.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+// deno-lint-ignore no-console -- the call this excused was removed
+export const value = 1;
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ban-unused-ignore"* ]]
+}
+
+@test "lint-console: a whole-file opt-out naming no-console is rejected" {
+  # deno honours `// deno-lint-ignore-file no-console` and would silently exempt every call
+  # in the file, so the target rejects the directive before linting. Without this the guard
+  # has a hole wide enough to drive any file through.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+// deno-lint-ignore-file no-console -- whole-file opt-out
+console.log("hidden 1");
+console.log("hidden 2");
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file-level opt-out is not allowed"* ]]
+}
+
+@test "lint-console: a bare whole-file opt-out is rejected too" {
+  # A directive with no rule list disables every rule, no-console included.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+// deno-lint-ignore-file
+console.log("hidden");
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file-level opt-out is not allowed"* ]]
+}
+
+@test "lint-console: a whole-file opt-out for an unrelated rule is left alone" {
+  # Rejecting every file-level directive would be over-broad: one that names only other rules
+  # does not weaken this guard, and deno still reports the console call underneath it.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+// deno-lint-ignore-file no-explicit-any -- unrelated to this guard
+export const value = 1;
+EOF
+  lint_console
+  [ "$status" -eq 0 ]
+}
+
 @test "lint-console: process.stdout.write is the intentional-output escape hatch and passes" {
   cat >"${FIXTURE}/a.mjs" <<'EOF'
 export function emit(line) {
@@ -97,24 +148,19 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "lint-console: TypeScript sources are checked too" {
-  cat >"${FIXTURE}/a.ts" <<'EOF'
-export function debugMe(value: unknown): void {
-  console.log(value);
-}
-EOF
-  lint_console
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no-console"* ]]
-}
-
-@test "lint-console: plain .js is checked (the depth-1 lint-node glob misses these)" {
-  mkdir -p "${FIXTURE}/hooks-fork"
-  cat >"${FIXTURE}/hooks-fork/hook.js" <<'EOF'
-console.log("debug");
-EOF
-  lint_console
-  [ "$status" -ne 0 ]
+@test "lint-console: every declared extension is actually scanned" {
+  # The find expression lists eight extensions; assert each one individually so a name
+  # dropping out of CONSOLE_LINT_NAMES cannot pass unnoticed.
+  local ext
+  for ext in mjs cjs js mts cts ts jsx tsx; do
+    rm -f "${FIXTURE}"/probe.*
+    printf 'console.log("debug");\n' >"${FIXTURE}/probe.${ext}"
+    lint_console
+    [ "$status" -ne 0 ] || {
+      echo ".${ext} sources are not scanned by lint-console"
+      false
+    }
+  done
 }
 
 @test "lint-console: nested directories at any depth are checked" {
@@ -134,11 +180,63 @@ EOF
   [[ "$output" == *"no JS/TS sources"* ]]
 }
 
+@test "lint-console: the default roots scan both home/ and tests/" {
+  # Every other case overrides CONSOLE_LINT_ROOTS, so none of them would notice a root
+  # falling out of the default. Drive the real recipe against a throwaway tree instead.
+  local proj="${BATS_TEST_TMPDIR}/defaults"
+  mkdir -p "${proj}/home" "${proj}/tests"
+  cp "${REPO_ROOT}/Makefile" "${proj}/Makefile"
+  printf 'export const ok = 1;\n' >"${proj}/home/clean.mjs"
+  printf 'export const ok = 1;\n' >"${proj}/tests/clean.mjs"
+
+  run make -C "${proj}" lint-console
+  [ "$status" -eq 0 ] || {
+    echo "the default roots do not lint cleanly on a clean tree: ${output}"
+    false
+  }
+
+  printf 'console.log("planted");\n' >"${proj}/home/bad.mjs"
+  run make -C "${proj}" lint-console
+  [ "$status" -ne 0 ] || {
+    echo "home/ is not covered by the default CONSOLE_LINT_ROOTS"
+    false
+  }
+  rm -f "${proj}/home/bad.mjs"
+
+  printf 'console.log("planted");\n' >"${proj}/tests/bad.mjs"
+  run make -C "${proj}" lint-console
+  [ "$status" -ne 0 ] || {
+    echo "tests/ is not covered by the default CONSOLE_LINT_ROOTS"
+    false
+  }
+}
+
+@test "lint-console: a missing deno is fatal, not a skip" {
+  # lint-deno opts itself out when deno is absent; this target must not, or the guard
+  # silently disappears exactly the way the retired hook did (#522). /usr/bin:/bin holds
+  # make, find, grep and awk on both CI platforms but never the mise- or CI-installed deno.
+  run env PATH=/usr/bin:/bin make -C "${REPO_ROOT}" lint-console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"deno not found"* ]]
+}
+
 @test "lint-console: the repository itself passes the check" {
   # The guard is only safe to enable while the tree is already clean: enabling it with
   # violations in place would fail every open PR, not just the one that added them (#522).
   run make -C "${REPO_ROOT}" lint-console
   [ "$status" -eq 0 ]
+}
+
+@test "lint-console: the server.ts exemption does not break the existing lint-deno target" {
+  # ban-unused-ignore is on by default, and a directive for a rule that default lint leaves
+  # disabled must not read as unused there. Asserted rather than reasoned about, because the
+  # two targets enable different rule sets.
+  run make -C "${REPO_ROOT}" lint-deno
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"deno check/lint/fmt"* ]] || {
+    echo "lint-deno skipped instead of running; this assertion proves nothing"
+    false
+  }
 }
 
 @test "lint-console: is wired into make test so CI and local runs agree" {
@@ -152,11 +250,6 @@ EOF
   version="$(sed -n 's/^deno = "\(.*\)"$/\1/p' "$mise")"
   [ -n "$version" ] || {
     echo "no deno pin in ${mise}"
-    false
-  }
-
-  grep -qF 'make lint-console' "$ci" || {
-    echo "ci.yml never runs make lint-console"
     false
   }
 
@@ -190,4 +283,12 @@ EOF
       false
     }
   done
+
+  # Bind the target to the lint job specifically: a file-wide grep would still pass if the
+  # step drifted into the test job, which the design does not intend.
+  block="$(awk -v j="  lint:" '$0 == j { on = 1; next } /^  [a-z]/ { on = 0 } on' "$ci")"
+  grep -qF 'make lint-console' <<<"$block" || {
+    echo "the lint job does not run make lint-console"
+    false
+  }
 }

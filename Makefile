@@ -65,15 +65,22 @@ lint-node:
 # fixture tree and assert the failing cases without planting a violation in the repo.
 CONSOLE_LINT_ROOTS ?= home tests
 
+# The extensions lint-console scans, as a find expression. Kept in one variable because the
+# recipe walks the tree three times (emptiness probe, file-level opt-out check, lint) and the
+# three must never drift apart.
+CONSOLE_LINT_NAMES = -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.mts' -o -name '*.cts' -o -name '*.ts' -o -name '*.jsx' -o -name '*.tsx'
+
 # Replaces the stop:check-console-log hook retired in #520, which left the house standard
 # ("no leftover debug output") with no machine guard at all (#522).
 #
 # deno lint, not a grep: the rule is AST-based, so `console.log` inside a string literal or a
 # comment is not a violation (tests/agent_improvement.test.mjs plants executable source as a
-# string). `--rules-tags=` clears the tag-driven defaults so no-console is the only rule that
-# runs -- these are mostly Node modules deno does not otherwise own, and the rest of its
-# recommended set would fire on them. `--no-config` keeps a deno.json above the checkout from
-# changing what gets enforced.
+# string). `--rules-tags=` clears the tag-driven defaults, so the only policy rule enforced
+# here is no-console -- these are mostly Node modules deno does not otherwise own, and the
+# rest of its recommended set would fire on them. deno still reports ban-unused-ignore for a
+# stale `deno-lint-ignore no-console` (it evaluates directives of enabled rules), which is
+# what keeps exemptions from outliving the call they excused. `--no-config` keeps a deno.json
+# above the checkout from changing what gets enforced.
 #
 # Globbed like lint-node, but at any depth and including .js: lint-node's depth-1 glob
 # silently misses the two .js files outside home/dot_local/lib/*/.
@@ -84,12 +91,24 @@ CONSOLE_LINT_ROOTS ?= home tests
 ## Reject console.* calls in Node and Deno sources (opt out per line, never per file)
 lint-console:
 	@command -v deno >/dev/null 2>&1 || { echo "lint-console: deno not found; run 'mise install deno'. This guard does not skip itself." >&2; exit 1; }
-	@files=$$(find $(CONSOLE_LINT_ROOTS) -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.mts' -o -name '*.cts' -o -name '*.ts' -o -name '*.jsx' -o -name '*.tsx' \)); \
-	if [ -z "$$files" ]; then \
+	@[ -n "$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) -print -quit)" ] || { \
 		echo "lint-console: no JS/TS sources under '$(CONSOLE_LINT_ROOTS)' -- the glob regressed." >&2; \
 		exit 1; \
-	fi; \
-	deno lint --no-config --rules-tags= --rules-include=no-console $$files
+	}
+	@hits=$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+		-exec grep -nHE '^[[:space:]]*//[[:space:]]*deno-lint-ignore-file([[:space:]]|$$)' {} + || true); \
+	bad=$$(printf '%s\n' "$$hits" | awk 'NF { rest = $$0; \
+		sub(/^[^:]*:[0-9]+:/, "", rest); \
+		sub(/^[[:space:]]*\/\/[[:space:]]*deno-lint-ignore-file/, "", rest); \
+		sub(/--.*$$/, "", rest); gsub(/,/, " ", rest); \
+		if (rest ~ /^[[:space:]]*$$/ || rest ~ /(^|[[:space:]])no-console([[:space:]]|$$)/) print }'); \
+	if [ -n "$$bad" ]; then \
+		echo "lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:" >&2; \
+		printf '%s\n' "$$bad" >&2; \
+		exit 1; \
+	fi
+	@find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+		-exec deno lint --no-config --rules-tags= --rules-include=no-console {} +
 
 ## Run Node.js tests without invoking live provider credentials
 test-node:
