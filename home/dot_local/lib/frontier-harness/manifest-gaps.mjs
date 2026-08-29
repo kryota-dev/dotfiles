@@ -23,6 +23,15 @@ export const MANIFEST_GAP_KINDS = Object.freeze(
   new Set(["command", "domain", "capability"]),
 );
 
+// queue に溜められる上限。task の commands / domains は「非空文字列の配列」であることしか
+// 検証されないため、誤った（あるいは悪意ある）task が毎回異なる文字列を宣言し続けると
+// state root 配下のファイルが際限なく増える。上限に達したら新規 gap を作らない。
+//
+// 承認境界の安全性は落ちない —— gap を記録できなくても実行は止まったままで、fail-closed は
+// 保たれる。失うのは「何が足りなかったか」の記録なので、`fh gaps` で溜まった分を確認し、
+// `fh onboard --from-gaps` で捌けば再び記録されるようになる。
+export const MANIFEST_GAP_MAX_ENTRIES = 1000;
+
 const GAP_SUFFIX = ".gap.json";
 const GAP_KEYS = new Set(["version", "kind", "value", "reason", "firstSeenAt"]);
 
@@ -70,6 +79,10 @@ export function createManifestGapQueue({ directory }) {
         throw new TypeError("manifest gap value must be a non-empty string");
       }
       ensureDirectory(directory, "manifest gap directory");
+      // 上限判定は作成の直前に行う。並行 writer がいると厳密な上限にはならないが、
+      // 目的は際限のない増加を止めることなので、多少の超過は許容する
+      // （厳密化のために lock を導入すると、O_EXCL で lock を避けた設計の意味が失われる）。
+      if (this.count() >= MANIFEST_GAP_MAX_ENTRIES) return false;
       return writeJsonExclusive(
         path.join(directory, gapFileName(kind, value)),
         {
@@ -81,6 +94,16 @@ export function createManifestGapQueue({ directory }) {
         },
         "manifest gap",
       );
+    },
+
+    // 件数だけを数える。上限判定で全ファイルを読む必要はない。
+    count() {
+      try {
+        return readdirSync(directory).filter((entry) => entry.endsWith(GAP_SUFFIX)).length;
+      } catch (error) {
+        if (error?.code === "ENOENT") return 0;
+        throw error;
+      }
     },
 
     list() {

@@ -24,6 +24,7 @@ import {
 } from "../home/dot_local/lib/frontier-harness/address-classifier.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import {
+  MANIFEST_GAP_MAX_ENTRIES,
   createManifestGapQueue,
   manifestGapsDirectory,
 } from "../home/dot_local/lib/frontier-harness/manifest-gaps.mjs";
@@ -3538,7 +3539,7 @@ test("editing policy.json after approval is detected as tampering", async (conte
   );
   const run = JSON.parse(output.pop());
   assert.equal(run.policyIntegrity.ok, false);
-  assert.match(run.policyIntegrity.reason, /not backed by a recorded approval/);
+  assert.match(run.policyIntegrity.reason, /does not match the approval currently in force/);
   assert.equal(run.decision.kind, "escalation");
 });
 
@@ -3773,4 +3774,424 @@ test("an unbacked policy leaves an empty manifest rather than throwing", (contex
     findManifestGaps({ manifest: verified.manifest, commands: ["npm run test"] }).length,
     1,
   );
+});
+
+// ---------------------------------------------------------------------------
+// #556 レビュー指摘への対応を固定するテスト
+// ---------------------------------------------------------------------------
+
+test("a task blocked by the manifest never reaches the provider", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"], capabilities: ["executor.default"] },
+  });
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run deploy"],
+    }),
+  );
+
+  // shadow rollout では executed:false が rollout guard で無条件に成立してしまうため、
+  // 照合が実際に provider 経路を止めていることを実証できない。default rollout + executor spy で
+  // 「照合が先に止めた」ことを確かめる（照合を rollout guard の後ろへ移すとこのテストは落ちる）。
+  const output = [];
+  let executorCalls = 0;
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, {
+        config: defaultRolloutConfig,
+        executor: () => {
+          executorCalls += 1;
+          return "executed";
+        },
+        write: (line) => output.push(line),
+      }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.equal(run.executed, false);
+  assert.equal(executorCalls, 0, "未承認の task で provider が起動してはならない");
+  assert.equal(run.decision.kind, "escalation");
+
+  // 承認済みの command だけを宣言すれば、同じ config で executor に到達する。
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test"],
+    }),
+  );
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, {
+        config: defaultRolloutConfig,
+        executor: () => {
+          executorCalls += 1;
+          return "executed";
+        },
+        write: (line) => output.push(line),
+      }),
+    ),
+    0,
+  );
+  assert.equal(executorCalls, 1, "承認済みなら provider へ到達する（対照）");
+});
+
+test("fh verify blocked by the manifest never reaches the provider", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"] },
+  });
+
+  const output = [];
+  let executorCalls = 0;
+  assert.equal(
+    runCli(
+      ["verify", "--command", "npm run deploy", "--json"],
+      enforcementOptions(directory, {
+        config: defaultRolloutConfig,
+        executor: () => {
+          executorCalls += 1;
+          return "executed";
+        },
+        write: (line) => output.push(line),
+      }),
+    ),
+    2,
+  );
+  assert.equal(executorCalls, 0);
+  assert.equal(JSON.parse(output.pop()).evidence, null);
+});
+
+test("policy が無い repository では 3 種すべてが gap になる", (context) => {
+  const directory = temporaryDirectory(context);
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test"],
+      domains: ["example.com"],
+    }),
+  );
+
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.deepEqual(
+    run.gaps.map((gap) => gap.kind).sort(),
+    ["capability", "command", "domain"],
+  );
+  assert.equal(gapsIn(directory).length, 3);
+});
+
+test("承認をやり直すと以前の承認内容へ差し戻しても通らない", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+
+  // 広い manifest を承認し、その policy.json を控えておく（git 履歴に残るのと同じ状況）。
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test", "npm run deploy"], capabilities: ["executor.default"] },
+  });
+  const widePolicy = readFileSync(policyPath, "utf8");
+
+  // 狭い manifest へ承認し直す（= deploy の承認を取り消す）。
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"], capabilities: ["executor.default"] },
+  });
+
+  // 承認当時とバイト同一の policy.json を書き戻す（approvalHash の改変すら不要）。
+  rmSync(policyPath);
+  writeFileSync(policyPath, widePolicy, { mode: 0o600 });
+
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run deploy"],
+    }),
+  );
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.equal(run.policyIntegrity.ok, false);
+  assert.match(run.policyIntegrity.reason, /reverted to a previously approved version/);
+});
+
+test("有効な承認は policy ファイルごとに独立する", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const first = path.join(directory, "first");
+  const second = path.join(directory, "second");
+  mkdirSync(first);
+  mkdirSync(second);
+
+  // 同じ state root（= 同じリポジトリの別 worktree に相当）で別々の manifest を承認する。
+  const a = await approveManifest({
+    cwd: first,
+    statePath,
+    manifest: { capabilities: ["executor.default"] },
+  });
+  const b = await approveManifest({
+    cwd: second,
+    statePath,
+    manifest: { capabilities: ["executor.default", "semantic.judge"] },
+  });
+
+  // 後発の承認が先発の policy を無効化しない（linked worktree は state root を共有する）。
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
+  const output = [];
+  for (const [dir, policyPath] of [
+    [first, a.policyPath],
+    [second, b.policyPath],
+  ]) {
+    assert.equal(
+      runCli(["run", "--task", taskPath, "--json"], {
+        config,
+        statePath,
+        cwd: dir,
+        policyPath,
+        commandPaths: COMMAND_PATHS,
+        accountScope: "personal",
+        verifiedModels: {},
+        write: (line) => output.push(line),
+      }),
+      0,
+      `${dir} の承認が有効であること`,
+    );
+    output.pop();
+  }
+});
+
+test("承認済みのタスクランナー名でも絶対パス付きなら照合を通さない", () => {
+  const approved = approvedCommandSegments(["npm run test"]);
+  // analyzeShellCommand は binary を basename へ畳むため、セグメントだけを見ると
+  // 承認済みの `npm run test` と一致してしまう。照合側の文法検査でこれを塞ぐ。
+  for (const command of [
+    "/tmp/evil/npm run test",
+    "./npm run test",
+    "../../evil/npm run test",
+  ]) {
+    const match = matchCommand(command, approved);
+    assert.equal(match.allowed, false, command);
+    assert.match(match.reason, /not in an approvable form/);
+  }
+  // 承認済みの形は引き続き通る（空白の揺れも許容する）。
+  assert.equal(matchCommand("npm run test", approved).allowed, true);
+  assert.equal(matchCommand("npm  run   test", approved).allowed, true);
+});
+
+test("writer-plus-reviewer route は reviewer capability も照合する", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { capabilities: ["executor.default"] },
+  });
+  const taskPath = path.join(directory, "task.json");
+  // hasDeterministicOracle 未指定 = oracle 無し → writer-plus-reviewer へ昇格する。
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship" }));
+
+  const output = [];
+  assert.equal(
+    runCli(["run", "--task", taskPath, "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      policyPath,
+      commandPaths: COMMAND_PATHS,
+      accountScope: "personal",
+      verifiedModels: {},
+      write: (line) => output.push(line),
+    }),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.deepEqual(
+    run.gaps.map((gap) => gap.value),
+    ["semantic.judge"],
+    "主 capability は承認済みでも reviewer 側が未承認なら止まる",
+  );
+});
+
+test("gap queue はエントリ数の上限で頭打ちになる", (context) => {
+  const directory = temporaryDirectory(context);
+  const queue = createManifestGapQueue({
+    directory: manifestGapsDirectory(directory),
+  });
+  for (let index = 0; index < MANIFEST_GAP_MAX_ENTRIES; index += 1) {
+    assert.equal(queue.record({ kind: "command", value: `npm run task-${index}` }), true);
+  }
+  assert.equal(queue.count(), MANIFEST_GAP_MAX_ENTRIES);
+  // 上限に達したら新規は作らない。実行は止まったままなので fail-closed は保たれる。
+  assert.equal(queue.record({ kind: "command", value: "npm run overflow" }), false);
+  assert.equal(queue.count(), MANIFEST_GAP_MAX_ENTRIES);
+});
+
+test("同一 gap を並行して記録しても 1 ファイルに収束する", async (context) => {
+  const directory = temporaryDirectory(context);
+  const gapDirectory = manifestGapsDirectory(directory);
+  const queues = Array.from({ length: 8 }, () =>
+    createManifestGapQueue({ directory: gapDirectory }),
+  );
+  // 同一項目を並行に記録する。O_EXCL の作成のみなので read-modify-write の競合が起きない。
+  const results = await Promise.all(
+    queues.map(async (queue) => queue.record({ kind: "domain", value: "example.org" })),
+  );
+  assert.equal(results.filter(Boolean).length, 1, "作成に成功するのはちょうど 1 つ");
+  assert.equal(readdirSync(gapDirectory).length, 1);
+  const [gap] = createManifestGapQueue({ directory: gapDirectory }).list();
+  assert.equal(gap.value, "example.org");
+});
+
+test("fh onboard --from-gaps は承認済み manifest と gap の和集合を承認する", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"], capabilities: ["executor.default"] },
+  });
+
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test", "npm run lint"],
+    }),
+  );
+  const output = [];
+  const options = enforcementOptions(directory, { write: (line) => output.push(line) });
+  assert.equal(runCli(["run", "--task", taskPath, "--json"], options), 2);
+  output.pop();
+
+  const base = {
+    config,
+    cwd: directory,
+    statePath,
+    policyPath,
+    lookup: PUBLIC_LOOKUP,
+    write: (line) => output.push(line),
+  };
+  assert.equal(
+    await runCli(["onboard", "--from-gaps", "--json"], { ...base, pid: REVIEW_PID }),
+    2,
+  );
+  const reviewed = JSON.parse(output.pop());
+  // 既存の承認内容が候補から落ちない（和集合であること）。
+  assert.deepEqual(reviewed.manifest.commands.sort(), ["npm run lint", "npm run test"]);
+  assert.deepEqual(reviewed.manifest.capabilities, ["executor.default"]);
+
+  assert.equal(
+    await runCli(
+      ["onboard", "--from-gaps", "--approve", "--request", reviewed.request.id, "--json"],
+      { ...base, pid: APPROVE_PID },
+    ),
+    0,
+  );
+  output.pop();
+  // 承認後は元の command も新しい command も通る。
+  assert.equal(runCli(["run", "--task", taskPath, "--json"], options), 0);
+});
+
+test("承認は review 時と approve 時の両方で domain を解決する", async (context) => {
+  const directory = temporaryDirectory(context);
+  const manifestPath = path.join(directory, "candidate.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ commands: [], domains: ["drifting.example.com"], capabilities: [] }),
+  );
+  const policyPath = path.join(directory, ".harness", "policy.json");
+
+  // 1 回目（review）は公開アドレス、2 回目（approve）は link-local を返す resolver。
+  let lookups = 0;
+  const drifting = () => {
+    lookups += 1;
+    return lookups === 1
+      ? [{ address: "93.184.216.34", family: 4 }]
+      : [{ address: "169.254.169.254", family: 4 }];
+  };
+  const output = [];
+  const base = {
+    config,
+    cwd: directory,
+    statePath: path.join(directory, "state.db"),
+    policyPath,
+    lookup: drifting,
+    write: (line) => output.push(line),
+  };
+
+  assert.equal(
+    await runCli(["onboard", "--manifest", manifestPath, "--json"], {
+      ...base,
+      pid: REVIEW_PID,
+    }),
+    2,
+  );
+  const { request } = JSON.parse(output.pop());
+  await assert.rejects(
+    () =>
+      runCli(
+        ["onboard", "--manifest", manifestPath, "--approve", "--request", request.id, "--json"],
+        { ...base, pid: APPROVE_PID },
+      ),
+    /169\.254\.169\.254/,
+  );
+  assert.equal(existsSync(policyPath), false, "承認は成立しない");
+});
+
+test("task の commands / domains は境界で検証される", () => {
+  assert.deepEqual(normalizeTask({ goal: "ship" }).commands, []);
+  assert.deepEqual(normalizeTask({ goal: "ship" }).domains, []);
+  assert.deepEqual(
+    normalizeTask({ goal: "ship", commands: ["npm run test"] }).commands,
+    ["npm run test"],
+  );
+  for (const input of [
+    { goal: "ship", commands: "npm run test" },
+    { goal: "ship", commands: [""] },
+    { goal: "ship", commands: [null] },
+    { goal: "ship", commands: [123] },
+    { goal: "ship", domains: { host: "example.com" } },
+    { goal: "ship", domains: [""] },
+  ]) {
+    assert.throws(() => normalizeTask(input), /task\.(commands|domains)/, JSON.stringify(input));
+  }
 });

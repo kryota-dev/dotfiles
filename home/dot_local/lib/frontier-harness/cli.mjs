@@ -12,6 +12,10 @@ import {
   startApprovalServerCommand,
 } from "./approval-commands.mjs";
 import { assertResolvedDomainAllowed } from "./address-classifier.mjs";
+import {
+  approvedManifestDirectory,
+  createApprovedManifestStore,
+} from "./approved-manifest.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
 import { flagValue } from "./flags.mjs";
@@ -223,6 +227,12 @@ function manifestGapQueueFor(options, cwd) {
   });
 }
 
+function approvedManifestStoreFor(options, cwd) {
+  return createApprovedManifestStore({
+    directory: approvedManifestDirectory(resolveStateDirectory(options, cwd)),
+  });
+}
+
 function usage() {
   return [
     "Usage: frontier-harness <command> [--json]",
@@ -295,6 +305,7 @@ async function runOnboardCommand({ flags, options, emit }) {
     directory: onboardRequestsDirectory(stateDirectory),
   });
   const gapQueue = manifestGapQueueFor(options, cwd);
+  const approvedManifests = approvedManifestStoreFor(options, cwd);
   const policyPath = resolvePolicyPath(options, cwd);
   const scope = resolveRepositoryScope(options, cwd);
   const statePath = options.statePath ?? defaultStatePath(cwd);
@@ -309,6 +320,7 @@ async function runOnboardCommand({ flags, options, emit }) {
         policyPath,
         approvals: store.listApprovals(),
         scope,
+        currentApproval: approvedManifests.read(policyPath),
       });
       const built = candidateFromGaps(approved.manifest, gapQueue.list());
       candidate = normalizeManifest(built.candidate);
@@ -381,6 +393,14 @@ async function runOnboardCommand({ flags, options, emit }) {
     // `.harness` が symlink の repository で書き込み先が脱出しないよう、
     // symlink 検査 + O_EXCL + 予測不能な一時名を使う共通ヘルパーを経由する。
     writeJsonAtomic(policyPath, policy, "repository policy");
+    // 有効な認可状態を差し替える。これが「承認をやり直したら前の承認は失効する」を表し、
+    // 過去に承認した policy への差し戻しを塞ぐ（approved-manifest.mjs 参照）。
+    approvedManifests.write({
+      policyPath,
+      manifestHash: hash,
+      approvalId: approval.id,
+      approvedAt: approval.grantedAt,
+    });
     if (fromGaps) gapQueue.clear(includedGaps);
     emit({
       approved: true,
@@ -505,10 +525,12 @@ export function runCli(argumentsList, options = {}) {
       const taskPath = flagValue(flags, "--task");
       // task JSON は未検証の外部入力として境界で正規化する。
       const task = normalizeTask(JSON.parse(readFileSync(taskPath, "utf8")));
+      const policyPath = resolvePolicyPath(options, cwd);
       const approved = loadVerifiedManifest({
-        policyPath: resolvePolicyPath(options, cwd),
+        policyPath,
         approvals: store.listApprovals(),
         scope: resolveRepositoryScope(options, cwd),
+        currentApproval: approvedManifestStoreFor(options, cwd).read(policyPath),
       });
       const result = store.withTransaction(() => {
         const storedTask = store.createTask(task);
@@ -525,7 +547,8 @@ export function runCli(argumentsList, options = {}) {
           manifest: approved.manifest,
           commands: task.commands,
           domains: task.domains,
-          capability: route.capability,
+          // reviewer 側も provider を選ぶ軸なので照合対象に含める。
+          capabilities: [route.capability, route.reviewerCapability],
         });
         if (gaps.length > 0) {
           const blocked = {
@@ -620,10 +643,12 @@ export function runCli(argumentsList, options = {}) {
       const verificationCommand = flagValue(flags, "--command");
       // 検証コマンドも承認境界の内側にある。未承認のまま計画を記録すると、
       // rollout が昇格した時点でその計画がそのまま実行対象になる。
+      const verifyPolicyPath = resolvePolicyPath(options, cwd);
       const approved = loadVerifiedManifest({
-        policyPath: resolvePolicyPath(options, cwd),
+        policyPath: verifyPolicyPath,
         approvals: store.listApprovals(),
         scope: resolveRepositoryScope(options, cwd),
+        currentApproval: approvedManifestStoreFor(options, cwd).read(verifyPolicyPath),
       });
       const gaps = findManifestGaps({
         manifest: approved.manifest,

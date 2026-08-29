@@ -121,10 +121,28 @@ export function approvedCommandSegments(commands) {
   return approved;
 }
 
+// 空白の揺れだけを畳む。承認できる形かどうかを見るための正規化なので、引用符や
+// 制御構文はそのまま残す（残っていれば下の文法検査が弾く）。
+function collapseWhitespace(command) {
+  return command.trim().replace(/\s+/g, " ");
+}
+
 export function matchCommand(command, approvedSegments) {
   const segments = commandSegments(command);
   if (segments === null) {
     return { allowed: false, reason: "the command cannot be interpreted statically" };
+  }
+  // 照合側にも「承認できる形か」の文法検査をかける。
+  //
+  // `analyzeShellCommand` は binary を basename へ畳む。同ファイルが明記するとおり
+  // 「候補を増やす方向にしか働かない」正規化で、escalation（deny リスト）では安全側だが、
+  // **allowlist では方向が逆**になる —— `/tmp/evil/npm run test` が承認済みの
+  // `npm run test` と同じセグメントへ畳まれ、未承認の絶対パスのバイナリが一致してしまう。
+  // セグメントは basename 化された後なのでこの差を復元できないため、生のコマンド文字列に
+  // 対して承認可能な形（プロジェクトのタスクランナーで始まり、引数が安全な字集合）を要求する。
+  const rejection = manifestEntryRejection("commands", collapseWhitespace(command));
+  if (rejection) {
+    return { allowed: false, reason: `the command is not in an approvable form: ${rejection}` };
   }
   const unapproved = segments.filter((segment) => !approvedSegments.has(segment));
   if (unapproved.length > 0) {
@@ -166,7 +184,12 @@ export function normalizePolicy(input) {
 // 裏付けが取れない場合でも throw せず、空 manifest と理由を返す。呼び出し側（`fh run`）は
 // これを route: escalation として**記録**したいので、例外にすると gap も route も残らず、
 // 「なぜ止まったか」の監査証跡が消える。実行が止まる点は変わらない（空 manifest = 全部未承認）。
-export function loadVerifiedManifest({ policyPath, approvals, scope }) {
+export function loadVerifiedManifest({
+  policyPath,
+  approvals,
+  scope,
+  currentApproval = null,
+}) {
   let policy;
   try {
     policy = readPolicyFile(policyPath);
@@ -197,9 +220,35 @@ export function loadVerifiedManifest({ policyPath, approvals, scope }) {
   }
 
   const hash = manifestHash(manifest);
+
+  // 有効な認可状態はポインタが持つ。台帳のどの行かに一致すれば良い形にすると、
+  // 過去に承認した内容へ policy を差し戻すだけで承認が復活する（approved-manifest.mjs 参照）。
+  if (!currentApproval) {
+    return {
+      manifest: EMPTY_MANIFEST,
+      integrity: {
+        ok: false,
+        reason:
+          "no approval is currently in force for this repository policy; run the onboarding ceremony",
+      },
+    };
+  }
+  if (currentApproval.manifestHash !== hash) {
+    return {
+      manifest: EMPTY_MANIFEST,
+      integrity: {
+        ok: false,
+        reason:
+          "repository policy does not match the approval currently in force; it may have been modified, copied, or reverted to a previously approved version",
+      },
+    };
+  }
+
+  // 台帳側にも裏付けを要求する。ポインタだけを信頼すると、監査証跡を消しても認可が残る。
   const matched = (approvals ?? []).some(
     (approval) =>
       approval.kind === REPOSITORY_MANIFEST_APPROVAL_KIND &&
+      approval.id === currentApproval.approvalId &&
       approval.subjectHash === hash &&
       approval.scope === scope,
   );
@@ -209,7 +258,7 @@ export function loadVerifiedManifest({ policyPath, approvals, scope }) {
       integrity: {
         ok: false,
         reason:
-          "repository policy is not backed by a recorded approval for this repository; it may have been modified or copied after approval",
+          "the approval in force has no matching row in the approvals ledger for this repository",
       },
     };
   }
@@ -222,7 +271,10 @@ export function loadVerifiedManifest({ policyPath, approvals, scope }) {
 
 // 承認済み manifest に対して task の要求を突き合わせ、未承認のものを列挙する。
 // 空配列なら実行してよい。1 件でもあれば呼び出し側が実行を止めて queue に積む。
-export function findManifestGaps({ manifest, commands = [], domains = [], capability = null }) {
+// capability は配列で受ける。`chooseRoute` は writer-plus-reviewer route のとき主 capability に
+// 加えて `reviewerCapability` を返し、そちらも実際に provider を選ぶ軸になる。単数で受けると
+// reviewer 側が承認照合をすり抜ける（#556 レビュー指摘）。
+export function findManifestGaps({ manifest, commands = [], domains = [], capabilities = [] }) {
   const gaps = [];
   const approvedSegments = approvedCommandSegments(manifest.commands);
   for (const command of commands) {
@@ -241,12 +293,15 @@ export function findManifestGaps({ manifest, commands = [], domains = [], capabi
       });
     }
   }
-  if (capability && !manifest.capabilities.includes(capability)) {
-    gaps.push({
-      kind: "capability",
-      value: capability,
-      reason: "the routed capability is not in the approved manifest",
-    });
+  // 同じ capability が主・reviewer 双方に現れても gap は 1 件に畳む。
+  for (const capability of new Set(capabilities.filter(Boolean))) {
+    if (!manifest.capabilities.includes(capability)) {
+      gaps.push({
+        kind: "capability",
+        value: capability,
+        reason: "the routed capability is not in the approved manifest",
+      });
+    }
   }
   return gaps;
 }
