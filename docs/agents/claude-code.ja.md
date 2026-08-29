@@ -299,12 +299,12 @@ $HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js <hook-id> <script-path
 
 ```
 L1  <ホスト>  <ディレクトリ>  <ブランチ> [*dirty] [⇡N⇣N]  [worktree]
-L2  <モデル>  [effort]  [🧬N]  <ctx○>  [5h%]  [7d%]  <billable-cost>
+L2  <モデル>  [effort]  <ctx○>  [5h%]  [7d%]  <billable-cost>
 L3  [battery%]  <network-RTT>  <claude-service-status>
 ```
 
 - **L1**: ホストアイコン、プロジェクト相対ディレクトリ、dirty/ahead/behind インジケーター付き git ブランチ、worktree 名（worktree 内の場合）
-- **L2**: モデル表示名、effort レベル、CLV2 本能クラスター数（🧬N）、残りコンテキストの円（●◕◑◔○）、5 時間・7 日レート制限のパーセンテージとリセット時刻、および請求対象コスト（dim の `incl.` マーカー、またはセッション／日次の金額を JPY で表示。換算レートがキャッシュされていない場合は USD）。金額の意味は [請求デルタコスト](#請求デルタコスト) を参照
+- **L2**: モデル表示名、effort レベル、残りコンテキストの円（●◕◑◔○）、5 時間・7 日レート制限のパーセンテージとリセット時刻、および請求対象コスト（dim の `incl.` マーカー、またはセッション／日次の金額を JPY で表示。換算レートがキャッシュされていない場合は USD）。金額の意味は [請求デルタコスト](#請求デルタコスト) を参照
 - **L3**: バッテリー残量（macOS ラップトップのみ、`pmset` 経由）、ネットワーク RTT ティア（1.1.1.1 への ping）、Claude サービスステータス
 
 ### 実装上の制約
@@ -341,13 +341,7 @@ L3  [battery%]  <network-RTT>  <claude-service-status>
 
 **R06 アカウントバッジ。** `CLAUDE_CONFIG_DIR` が `~/.claude-r06` を指す場合、ステータスラインはリバースビデオの `R06` バッジをレンダリングしてアクティブアカウントを視覚的に区別します。
 
-**CLV2 🧬N セグメント。** `clv2_cluster_count()` 関数は `<homunculus>/.review-ready-clusters` にキャッシュされた整数を読み取ります。その writer（`clv2-session-notify.sh`）は #496 で削除されたため（[CLV2 オブザーバー配線](#clv2-オブザーバー配線)参照）、このセグメントはキャッシュが最後に受け取った値のまま変化しません。レンダラーの除去はステータスライン側の変更に属します。以下の優先順位は、将来 writer が復活したときに両者が乖離しないようそのまま残しています：
-
-1. `$CLV2_HOMUNCULUS_DIR`（設定されており絶対パスの場合）
-2. `$XDG_DATA_HOME/ecc-homunculus`（`XDG_DATA_HOME` が絶対パスの場合のみ）
-3. `$HOME/.local/share/ecc-homunculus`（フォールバック）
-
-非絶対パスの `XDG_DATA_HOME` は無視されます（そのまま使用されません）。プロデューサーとコンシューマーがこの優先順位で一致している必要があります；不一致はセグメントが古いデータやゼロを読み取る原因になります。
+**除去済み: CLV2 🧬N セグメント。** 以前は行 2 に `<homunculus>/.review-ready-clusters` から読み取った本能クラスター数を表示していました。その唯一の writer は #496 で削除され（[CLV2 オブザーバー配線](#clv2-オブザーバー配線)参照）、二度と変化しないキャッシュを読み続けるだけのレンダラーが残ったため、#523 でレンダラーも除去しました。この数値を再び表示するには producer の再導入が前提であり、それはステータスラインの変更ではなく別途の設計判断として扱います。
 
 ---
 
@@ -361,7 +355,7 @@ CLV2 (continuous-learning v2) はツール呼び出しを観察し、繰り返�
 
 `SessionStart` に残るのは `session:start` で、オブザーバーの session lease を登録します。文脈注入は無効（`ECC_SESSION_START_CONTEXT=off`、#473 AC-025）ですが、エントリ自体は残す必要があります — `session-start.js` は lease を**注入ゲートより前**に書き込むため、エントリごと削除するとループが依存する観測まで止まります。
 
-ステータスラインは今も `<homunculus>/.review-ready-clusters` から 🧬N セグメントを描画しますが、このキャッシュには writer がいません。したがってセグメントは最後に書かれた値で凍結します。レンダラーの除去はステータスライン側の変更に属するため、ここでは行いません。
+ステータスラインは以前 `<homunculus>/.review-ready-clusters` から 🧬N セグメントを描画しており、writer 不在の reader が残っていました。#523 でそのレンダラーを除去しました。キャッシュファイル自体は意図的にディスク上へ残します: これはアカウントごとの homunculus ディレクトリ配下のランタイム状態で、本リポジトリの管理対象外であり（`home/.chezmoiignore` 参照）、現在は読み手も書き手も存在しない不活性なファイルだからです。
 
 ### ツール呼び出しごとのオブザーバー
 

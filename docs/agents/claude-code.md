@@ -301,12 +301,12 @@ Only `prompt-conform-suggest.js` (the [UserPromptSubmit](#userpromptsubmit) hook
 
 ```
 L1  <host>  <dir>  <branch> [*dirty] [⇡N⇣N]  [worktree]
-L2  <model>  [effort]  [🧬N]  <ctx○>  [5h%]  [7d%]  <billable-cost>
+L2  <model>  [effort]  <ctx○>  [5h%]  [7d%]  <billable-cost>
 L3  [battery%]  <network-RTT>  <claude-service-status>
 ```
 
 - **L1**: host icon, project-relative directory, git branch with dirty/ahead/behind indicators, worktree name when in a worktree
-- **L2**: model display name, effort level, CLV2 instinct-cluster count (🧬N), context remaining circle (●◕◑◔○), 5-hour and 7-day rate-limit percentages with reset times, and the billable cost — either a dim `incl.` marker or session/daily amounts in JPY (falls back to USD when no exchange rate is cached). See [Billable-delta cost](#billable-delta-cost) for what the amounts mean
+- **L2**: model display name, effort level, context remaining circle (●◕◑◔○), 5-hour and 7-day rate-limit percentages with reset times, and the billable cost — either a dim `incl.` marker or session/daily amounts in JPY (falls back to USD when no exchange rate is cached). See [Billable-delta cost](#billable-delta-cost) for what the amounts mean
 - **L3**: battery level (macOS laptop only, via `pmset`), network RTT tier (ping to 1.1.1.1), Claude service status (from Claude status API)
 
 ### Implementation constraints
@@ -343,13 +343,7 @@ The baseline is anchored on the exhausted window that resets **last**, since tha
 
 **R06 account badge.** When `CLAUDE_CONFIG_DIR` points to `~/.claude-r06`, the statusline renders a reverse-video `R06` badge to make the active account visually distinct.
 
-**CLV2 🧬N segment.** The `clv2_cluster_count()` function reads the integer cached at `<homunculus>/.review-ready-clusters`. Its writer (`clv2-session-notify.sh`) was removed in #496 (see [CLV2 observer wiring](#clv2-observer-wiring)), so the segment now shows the last value that cache received and never changes; removing the renderer belongs with the statusline. The precedence below is kept verbatim so the two halves cannot drift if a writer is ever restored:
-
-1. `$CLV2_HOMUNCULUS_DIR` if set and absolute
-2. `$XDG_DATA_HOME/ecc-homunculus` if `XDG_DATA_HOME` is absolute
-3. `$HOME/.local/share/ecc-homunculus` (fallback)
-
-A non-absolute `XDG_DATA_HOME` is ignored (not used verbatim). Producer and consumer must agree on this precedence; a mismatch would cause the segment to read stale or zero data.
+**Removed: the CLV2 🧬N segment.** Line 2 used to carry an instinct-cluster count read from `<homunculus>/.review-ready-clusters`. Its only writer was removed in #496 (see [CLV2 observer wiring](#clv2-observer-wiring)), which left the renderer reading a cache that could never change again, so #523 removed the renderer too. Restoring the count means restoring a producer first — a separate design decision, not a statusline change.
 
 ---
 
@@ -363,7 +357,7 @@ CLV2 (continuous-learning v2) is an ECC skill that observes tool calls, clusters
 
 What remains at `SessionStart` is `session:start`, which registers the observer's session lease. Its context injection is off (`ECC_SESSION_START_CONTEXT=off`, #473 AC-025), but the entry must stay wired — `session-start.js` writes the lease *before* it evaluates the injection gate, so removing the entry would stop the observation the loop depends on.
 
-The statusline still renders a 🧬N segment from `<homunculus>/.review-ready-clusters`, and that cache no longer has a writer. Its last value is therefore frozen until the renderer is removed; that removal belongs with the statusline, not here.
+The statusline used to render a 🧬N segment from `<homunculus>/.review-ready-clusters`, which left a reader with no writer. #523 removed that renderer. The cache file itself is deliberately left on disk: it is runtime state under a per-account homunculus directory, which this repository does not manage (see `home/.chezmoiignore`), and it is now inert — nothing reads it and nothing writes it.
 
 ### Per-tool-call observer
 
