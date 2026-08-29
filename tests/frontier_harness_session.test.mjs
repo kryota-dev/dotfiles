@@ -514,6 +514,26 @@ test("the launched argv carries every pre-emptive isolation flag", async (contex
   assert.equal(call.argv[call.argv.indexOf("--session-id") + 1], SESSION_ID);
 });
 
+test("the child is told what the sandbox denies before it hits the wall", async (context) => {
+  // 実運用で 2 セッションとも、作業を終えてから commit で初めて「署名 socket が塞がれている」
+  // ことを知り、そこで止まった。制約を各 prompt に書かせる運用ルールにすると必ず書き漏れるので、
+  // sandbox を課している側（fh）が prompt の先頭で構造的に伝える。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 0);
+  const [call] = spawnFake.calls;
+  const prompt = call.argv[call.argv.indexOf("-p") + 1];
+  // 塞がれている 3 点が、失敗する前に読める形で入っていること。
+  assert.match(prompt, /github\.com/);
+  assert.match(prompt, /commit\.gpgsign=false/);
+  assert.match(prompt, /dangerouslyDisableSandbox/);
+  // 呼び出し側の prompt は落とさない。
+  assert.ok(prompt.includes(PROMPT_BODY));
+});
+
 test("a child without AskUserQuestion is terminated instead of left running", async (context) => {
   const { directory, statePath, policyPath } = await preparedDirectory(context);
   const spawnFake = createFakeSpawn({

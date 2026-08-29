@@ -49,6 +49,34 @@ export const DEFAULT_SESSION_CAPABILITY = "session.child";
 export const DEFAULT_SESSION_SANDBOX = "workspace-write";
 export const SESSION_EVIDENCE_KIND = "child_session";
 
+// 子は自分に課された sandbox の効き方を、**失敗する前に**知る必要がある。
+//
+// 実運用で 2 セッションとも、実装・テスト・文書を終えたあと commit で初めて「署名 socket が
+// 塞がれている」ことを知り、そこで止まった（作業は無事だが、往復が 1 回増える）。これを
+// 「各 prompt に書く」運用ルールで塞ごうとすると必ず書き漏れるので、**sandbox を課している
+// 側が構造的に伝える**。ここに置くのは fh 自身が決めた固定の語彙だけで、呼び出し側の
+// 自由文は入らない（記録に会話内容を残さない方針と衝突しない）。
+//
+// 許可ドメインの実体は adapter が持つ（SANDBOX_ALLOWED_DOMAINS）。ここで文面に埋め込むと
+// drift するので、説明は「PR を出す先だけが開いている」という不変の性質に留める。
+const SANDBOX_BRIEFING = [
+  "<sandbox>",
+  "このセッションは frontier-harness が課した sandbox の下で走っている。次の 3 点は仕様であり、",
+  "回避策を探す対象ではない。",
+  "",
+  "1. **outbound 通信は github.com とそのサブドメインだけに開いている。** それ以外のホストへの",
+  "   通信はプロンプトを出さずに拒否される。取得できない情報があれば、迂回せずその旨を報告する。",
+  "2. **commit 署名は使えない。** 1Password の agent socket へは接続できないので、`git commit` は",
+  "   `git -c commit.gpgsign=false commit ...` の形で署名を切って実行する。中間コミットが未署名に",
+  "   なるのは意図した運用で、main へ入る squash コミットは GitHub 側が署名する。",
+  "3. **`dangerouslyDisableSandbox` は無効化されている。** sandbox の外へ出る抜け道は無い。",
+  "",
+  "上記で塞がれた操作に出会ったら、迂回路を組み立てず、AskUserQuestion で確認すること。",
+  "</sandbox>",
+  "",
+  "",
+].join("\n");
+
 const PRODUCER = "frontier-harness";
 const SESSION_ACTIONS = new Set(["launch", "resume"]);
 // route_decisions.kind の語彙。子セッションは 1 つの capability が単独で走るので single-worker。
@@ -158,7 +186,8 @@ export async function runSessionCommand({
     optionalFlagValue(flags, "--capability") ?? DEFAULT_SESSION_CAPABILITY;
   const capability = selectCapability(config, capabilityName);
   const worktree = requireWorktree(flagValue(flags, "--worktree"));
-  const prompt = readPrompt(flags);
+  // 制約の説明を先に置く。呼び出し側の prompt はそのまま後ろに続く。
+  const prompt = `${SANDBOX_BRIEFING}${readPrompt(flags)}`;
   const label = readLabel(flags);
   const sandbox = normalizeSandboxPolicy(
     { mode: optionalFlagValue(flags, "--sandbox") ?? DEFAULT_SESSION_SANDBOX },
