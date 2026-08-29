@@ -250,6 +250,10 @@ onboarding step で実装予定であり、この shadow foundation には含ま
 承認済み manifest を記録するだけで、それを参照する command はまだありません）。credential、migration、
 external contract、deploy、force push、release、merge は常に明示的な escalation です。
 
+task は必要なものを自分で宣言します。実行の途中で人が判断しなければならない task には
+`requiresApproval`、ファイルを書き換える task には `requiresWrite` を付けます。どちらも既定は false で、
+選ばれた provider の宣言と突き合わされます（後述の「承認チャネルと書き込み可否が route を塞ぐ」）。
+
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
 記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
 approvals には手を触れません。`--dry-run` で影響を確認できます。
@@ -316,9 +320,56 @@ Antigravity は、承認できないツール呼び出しをソフト拒否す�
 唯一持っている境界を外します。adapter はどちらも出さず、書き込みを伴う invocation の組み立てを拒否し、
 書き込み能力を `unenforceable` と宣言します。
 
+### 承認チャネルと書き込み可否が route を塞ぐ
+
+上の表の承認チャネルと書き込み可否は、最初から各 adapter が宣言していました。ところが routing の
+段階では長らく誰も読んでおらず、`chooseRoute` は可用性しか見ず、書き込みの軸は実行直前に 1 度だけ
+参照されるだけでした。そのため、人の判断が要る task が「承認を求められない provider」へ route されえて、
+そこではソフト拒否されるか素通しされるかのどちらかになり、いずれにせよ gate は失われていました。
+
+いまは両方の軸を route 段階で突き合わせます。値は実測された場所に置いたままです。adapter の宣言が
+唯一の写しで、`provider-capabilities.mjs` がそれを provider 名で引ける表に束ね、router がそれを読みます。
+`config.json` へは複製しません。同じ実測事実が 2 箇所にあると、`providers.mjs` が一方で `agy`、
+他方で `antigravity` を持つに至ったのと同じことが起きるからです。
+
+- `requiresApproval` の task は、チャネルが `external` の provider へしか route されません。
+  エージェント自身のレビューは人の gate ではないので、`agent-review` は要求を満たしません。
+- `requiresWrite` の task は、書き込み能力が `supported` の provider へしか route されません。
+- adapter が登録されていない provider、語彙外の宣言は、最弱の組（チャネル無し・封じ込め不能）に
+  解決されます。adapter の登録漏れは gate を開けるのではなく閉じる方向に倒れます。
+
+要求フラグ自体の既定は *false* で、`hasDeterministicOracle` とは逆向きです。これは意図的です。
+oracle の欠落を「oracle 無し」と読むのは reviewer を**足す**方向にしか振れません。一方、承認フラグの
+欠落を「承認が要る」と読むと、出荷 registry には外部チャネルを持つ executor が 1 つも無いため
+あらゆる route が escalation になり、軸そのものが使えなくなります。fail-closed は供給側が担います。
+
+**塞いだ route を黙って別の provider へ向け直すことはしません。** router が既に持っている fallback が
+あればそれを使います。書き込みを伴う browser task は Antigravity へ行けないので、frontend が利用不可の
+ときと同じ経路をたどって `executor.default` に着きます。fallback が無い場合 —— `executor.default` 自身が
+要求を満たさない場合 —— は escalation になり、provider は起動しません。軸を満たすために役割を跨ぐことも
+しません。チャネルを持っているからといって reviewer capability を writer に流用すれば、なぜその provider が
+走ったのかを後から説明する手立てが無くなります。
+
+reviewer も軸では塞ぎません。`semantic.judge` は書き込みも人の gate も担わないため、ここで拒否すると
+「reviewer を足す」が「escalation」に化けるだけで、安全性は何も買えません。
+
+escalation になった route は、rollout が何であれ provider を起動しません。これが無いと
+「塞いだ route は実行せず記録する」は「たまたま rollout が `shadow` だから」成り立っているだけで、
+昇格して実起動を配線した瞬間に、塞いだはずの route が provider へ届いてしまいます —— gate は
+route 段階では通っているのに実行段で漏れる、という形です。同じガードは、この軸より前から存在する
+risk による escalation にも効きます。`shadow` の間は rollout guard が既に executor を呼んで
+いないため、挙動は変わりません。
+
+塞いだ route はすべて記録されます。decision は遮断 1 件ごとに capability・provider・軸・要求値・宣言値を
+持ち、`fh run` はそれを task と route に紐付いた `route_block` evidence として、route を記録するのと同じ
+トランザクションの中で書きます。routes テーブルにはこの 5 つ組を入れる列が無く、足すのは migration に
+なるため、理由は evidence 側に置いています。risk による escalation はこの軸より前から存在し、kind と
+reason だけで説明が閉じるので、遮断の一覧は持ちません。
+
 ### adapter が実行前に検査すること
 
-router は provider 非依存の言葉で可用性を判断します。adapter は実行の直前に、同じ discovery 一覧に対して
+router は provider 非依存の言葉で可用性を判断し、上記 2 つの宣言軸は config の複製ではなく adapter
+registry から読みます。adapter は実行の直前に、同じ discovery 一覧に対して
 exact model ID を再検査します（route 決定から実行までの間に readiness キャッシュは失効しうるため）。
 そのうえで、router にはできない検査を足します。
 

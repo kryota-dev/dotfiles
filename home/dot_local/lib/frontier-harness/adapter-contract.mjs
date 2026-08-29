@@ -25,8 +25,12 @@ import {
 export const ADAPTER_OUTCOMES = new Set(["succeeded", "failed", "indeterminate"]);
 
 // 承認要求を外部へ往復させられるか。#526 §7.2 の実測を provider の事実として持つ。
-// **ここでは記述するだけで route を塞ぐ判断はしない**（それは #534 の範囲）。
-// registry（config.json）へ軸として足す作業も #534 が行うため、設定スキーマは変更しない。
+// ここは語彙と形の SSOT であり、route を塞ぐ判断そのものは持たない。判断は
+// provider-capabilities.mjs が adapter 宣言を表に束ね、router.mjs が task の要求
+// （requiresApproval）と突き合わせて行う（#534）。
+// **config.json 側へ複製はしない**: 同じ実測事実が 2 箇所にあると必ず drift するため
+// （providers.mjs 冒頭が記録している `agy` / `antigravity` 乖離が前例）、設定スキーマは
+// 変更せず、adapter 宣言を唯一の正本とする。
 export const APPROVAL_CHANNELS = new Set(["external", "agent-review", "none"]);
 
 // サンドボックスを何が強制するか。#526 が provider ごとに実測した差。
@@ -34,6 +38,8 @@ export const APPROVAL_CHANNELS = new Set(["external", "agent-review", "none"]);
 export const SANDBOX_ENFORCEMENTS = new Set(["os", "settings", "policy"]);
 
 // 書き込みを伴う実行に使えるか。unenforceable は「封じ込めを保証できない」を意味する。
+// 実行直前の checkCapabilityExecutable()（adapters.mjs）に加え、route 段階でも
+// task.requiresWrite と突き合わせて弾く（#534 が #536 の registry 表現分を吸収）。
 export const WRITE_ACCESS_LEVELS = new Set(["supported", "unenforceable"]);
 
 export const INVOCATION_PHASES = new Set(["launch", "resume"]);
