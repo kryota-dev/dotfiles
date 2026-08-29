@@ -526,10 +526,15 @@ test("the child is told what the sandbox denies before it hits the wall", async 
   assert.equal(code, 0);
   const [call] = spawnFake.calls;
   const prompt = call.argv[call.argv.indexOf("-p") + 1];
-  // 塞がれている 3 点が、失敗する前に読める形で入っていること。
-  assert.match(prompt, /github\.com/);
+  // 塞がれている点が、失敗する前に読める形で入っていること。
+  //
+  // **許可ドメインの一覧そのものは検査しない。** 一覧は adapter が持つので、文面に埋め込むと
+  // 二重管理になり drift する（実際、一覧を広げたときに文面だけが古くなった）。ここで確かめる
+  // のは「制約の存在が伝わるか」であって、許可の中身ではない。
+  assert.match(prompt, /許可リスト/);
   assert.match(prompt, /commit\.gpgsign=false/);
   assert.match(prompt, /dangerouslyDisableSandbox/);
+  assert.match(prompt, /secure-transport/);
   // 呼び出し側の prompt は落とさない。
   assert.ok(prompt.includes(PROMPT_BODY));
 });
