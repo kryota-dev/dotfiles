@@ -354,7 +354,10 @@ test("claude carries the identical sandbox settings into a resumed run", () => {
     failIfUnavailable: true,
     autoAllowBashIfSandboxed: true,
     allowUnsandboxedCommands: false,
-    network: { strictAllowlist: true },
+    network: {
+      strictAllowlist: true,
+      allowedDomains: ["github.com", "*.github.com"],
+    },
   });
   // model / effort が argv に反映されていること（flag と値の対で確認する）。
   const pairOf = (argv, flag) => argv.slice(argv.indexOf(flag), argv.indexOf(flag) + 2);
@@ -386,6 +389,37 @@ test("claude pairs stream-json with --verbose in both phases", () => {
     assert.ok(invocation.argv.includes("--output-format"));
     assert.ok(invocation.argv.includes("--verbose"));
   }
+});
+
+test("claude pre-allows exactly the domains the child needs", () => {
+  // 公式 docs［原文］: "Claude Code pre-allows no domains by default"。`strictAllowlist: true`
+  // だけを立てると sandboxed Bash はどのホストへも到達できず、子は push も gh も打てない。
+  // 許可は PR を出す先だけに限る。署名 socket（allowUnixSockets）は**与えない** ——
+  // 自律的に走る子に 1Password の鍵で署名する能力を渡さないため。
+  const launch = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
+  const settings = JSON.parse(launch.argv[launch.argv.indexOf("--settings") + 1]);
+  assert.deepEqual(settings.sandbox.network.allowedDomains, ["github.com", "*.github.com"]);
+  assert.equal(settings.sandbox.network.strictAllowlist, true);
+  assert.ok(!Object.hasOwn(settings.sandbox.network, "allowUnixSockets"));
+  assert.ok(!Object.hasOwn(settings.sandbox.network, "allowAllUnixSockets"));
+});
+
+test("claude reads back no sandbox when the domain allowlist is widened", () => {
+  // strictAllowlist が立っていることだけを見ると、広げた allowlist を忍ばせた argv が
+  // 封印を通る（fail-open）。宣言どおりの許可リストであることまで読み戻す。
+  const widened = JSON.stringify({
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      network: { strictAllowlist: true, allowedDomains: ["*"] },
+    },
+  });
+  assert.equal(
+    claudeAdapter.readEffectiveSandbox({ argv: ["-p", "go", "--settings", widened] }),
+    null,
+  );
 });
 
 test("claude never emits a sandbox flag that does not exist", () => {

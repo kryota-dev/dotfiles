@@ -31,6 +31,17 @@ const SETTINGS_FLAG = "--settings";
 // 無いと CLI は NDJSON を 1 行も出さずに exit 1 するので、起動時検査からは
 // 「init イベントが無かった」としか見えない。ストリーム形式と対で出す。
 const VERBOSE_FLAG = "--verbose";
+
+// 子が届く必要のあるホスト。公式 docs［原文］: "Claude Code pre-allows no domains by default"
+// —— つまり `strictAllowlist: true` を allowedDomains 無しで立てると、sandboxed な shell は
+// **どのホストへも到達できない**。子は pr-workflow を走らせるので push と gh が要る。
+//
+// **署名 socket は開けない。** `network.allowUnixSockets` を与えれば 1Password の agent socket
+// 経由で commit 署名が通るが、それは自律的に走る子へ「vault の鍵で署名する能力」を渡すことに
+// なる。docs も Unix socket の許可を privilege escalation の経路として名指ししている。
+// 代わりに子へは「署名を切ってコミットする」ことを session-command.mjs が明示的に伝える
+// —— 中間コミットが未署名でも、main へ入る squash コミットは GitHub が署名する。
+export const SANDBOX_ALLOWED_DOMAINS = Object.freeze(["github.com", "*.github.com"]);
 // #526 §1.6［原文］: `--bare` を付けない `-p` は、信頼していないフォルダでも repository の
 // `.mcp.json` の server に接続する。
 const PROJECT_MCP_FILE = ".mcp.json";
@@ -81,7 +92,10 @@ function sandboxSettings() {
       failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
       allowUnsandboxedCommands: false,
-      network: { strictAllowlist: true },
+      network: {
+        strictAllowlist: true,
+        allowedDomains: [...SANDBOX_ALLOWED_DOMAINS],
+      },
     },
   };
 }
@@ -267,6 +281,17 @@ function readEffectiveSandbox(invocation) {
     sandbox.failIfUnavailable !== true ||
     sandbox.allowUnsandboxedCommands !== false ||
     sandbox.network?.strictAllowlist !== true
+  ) {
+    return null;
+  }
+  // strictAllowlist が立っていることだけを見ると、広げた allowlist を忍ばせた argv が
+  // 「サンドボックスされている」として封印を通る。宣言した許可リストと同一であることまで
+  // 読み戻す（他のフラグと同じく、読み取れない形・食い違う形は一致とみなさない）。
+  const domains = sandbox.network?.allowedDomains;
+  if (
+    !Array.isArray(domains) ||
+    domains.length !== SANDBOX_ALLOWED_DOMAINS.length ||
+    !SANDBOX_ALLOWED_DOMAINS.every((domain, index) => domains[index] === domain)
   ) {
     return null;
   }
