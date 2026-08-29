@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  copyFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -17,7 +18,28 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import test from "node:test";
 
+import {
+  assertResolvedDomainAllowed,
+  classifyDomainLiteral,
+} from "../home/dot_local/lib/frontier-harness/address-classifier.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
+import {
+  createManifestGapQueue,
+  manifestGapsDirectory,
+} from "../home/dot_local/lib/frontier-harness/manifest-gaps.mjs";
+import {
+  approvedCommandSegments,
+  findManifestGaps,
+  loadVerifiedManifest,
+  manifestHash,
+  matchCommand,
+  normalizeManifest,
+} from "../home/dot_local/lib/frontier-harness/manifest-policy.mjs";
+import {
+  ONBOARD_REQUEST_TTL_MS,
+  createOnboardRequestStore,
+  onboardRequestsDirectory,
+} from "../home/dot_local/lib/frontier-harness/onboard-requests.mjs";
 import { findCommand, runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { createDoctorReport } from "../home/dot_local/lib/frontier-harness/doctor.mjs";
 import {
@@ -187,6 +209,63 @@ function initRepository(directory) {
   git(directory, ["init", "--quiet", directory]);
   git(directory, ["commit", "--quiet", "--allow-empty", "--no-verify", "-m", "init"]);
   return directory;
+}
+
+// #494 で承認境界が実効化されたため、`fh run` / `fh verify` を通すテストは先に manifest を
+// 承認しておく必要がある。承認は 2 段階儀式（review → approve）なので、その往復をまとめる。
+// pid を明示的に分けているのは、儀式が「同一プロセスでのレビューと承認」を拒否するため
+// （テストは 1 プロセスで両方を呼ぶので、実運用の 2 プロセスを pid の注入で模す）。
+const PUBLIC_LOOKUP = () => [{ address: "93.184.216.34", family: 4 }];
+const REVIEW_PID = 4242;
+const APPROVE_PID = 4243;
+
+async function approveManifest({
+  cwd,
+  statePath,
+  manifest,
+  lookup = PUBLIC_LOOKUP,
+  config: approvalConfig = config,
+}) {
+  const manifestPath = path.join(cwd, "approved-manifest.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ commands: [], domains: [], capabilities: [], ...manifest }),
+  );
+  const policyPath = path.join(cwd, ".harness", "policy.json");
+  const output = [];
+  const base = {
+    config: approvalConfig,
+    cwd,
+    policyPath,
+    lookup,
+    write: (line) => output.push(line),
+  };
+  if (statePath) base.statePath = statePath;
+
+  assert.equal(
+    await runCli(["onboard", "--manifest", manifestPath, "--json"], {
+      ...base,
+      pid: REVIEW_PID,
+    }),
+    2,
+  );
+  const { request } = JSON.parse(output.pop());
+  assert.equal(
+    await runCli(
+      [
+        "onboard",
+        "--manifest",
+        manifestPath,
+        "--approve",
+        "--request",
+        request.id,
+        "--json",
+      ],
+      { ...base, pid: APPROVE_PID },
+    ),
+    0,
+  );
+  return { policyPath, approval: JSON.parse(output.pop()) };
 }
 
 function writeTask(directory) {
@@ -698,9 +777,13 @@ test("fh doctor --probe persists readiness without persisting credentials", (con
   assert.equal(readFileSync(readinessPath, "utf8").includes("credential"), false);
 });
 
-test("fh doctor --probe persists readiness through the default state root", (context) => {
+test("fh doctor --probe persists readiness through the default state root", async (context) => {
   const directory = temporaryDirectory(context);
   execFileSync("git", ["init", "--quiet", directory]);
+  await approveManifest({
+    cwd: directory,
+    manifest: { capabilities: ["frontend.primary"] },
+  });
   const output = [];
 
   // 実 CLI と同じく statePath / readinessPath を注入しない経路を検証する。
@@ -755,10 +838,15 @@ test("fh doctor --probe persists readiness through the default state root", (con
   assert.equal(JSON.parse(output.pop()).decision.capability, "frontend.primary");
 });
 
-test("fh run records a shadow route without starting a provider", (context) => {
+test("fh run records a shadow route without starting a provider", async (context) => {
   const directory = temporaryDirectory(context);
   const taskPath = path.join(directory, "task.json");
   const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { capabilities: ["frontend.primary"] },
+  });
   writeFileSync(
     taskPath,
     JSON.stringify({
@@ -777,6 +865,8 @@ test("fh run records a shadow route without starting a provider", (context) => {
     config,
     verifiedModels: VERIFIED_MODELS,
     statePath,
+    cwd: directory,
+    policyPath,
     // shadow の間は executor が渡されていても呼ばれないこと。
     executor: () => {
       executorCalls += 1;
@@ -797,9 +887,15 @@ test("fh run records a shadow route without starting a provider", (context) => {
   assert.equal(status.routes[0].capability, "frontend.primary");
 });
 
-test("fh run treats a Codex-only r06 environment as r06 for account safety", (context) => {
+test("fh run treats a Codex-only r06 environment as r06 for account safety", async (context) => {
   const directory = temporaryDirectory(context);
   const taskPath = path.join(directory, "task.json");
+  const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { capabilities: ["executor.default"] },
+  });
   writeFileSync(
     taskPath,
     JSON.stringify({
@@ -819,7 +915,9 @@ test("fh run treats a Codex-only r06 environment as r06 for account safety", (co
       commandPaths: COMMAND_PATHS,
       verifiedModels: VERIFIED_MODELS,
       config,
-      statePath: path.join(directory, "state.db"),
+      statePath,
+      cwd: directory,
+      policyPath,
       write: (line) => output.push(line),
     }),
     0,
@@ -840,36 +938,37 @@ test("fh run rejects a flag used as another flag's value", (context) => {
   );
 });
 
-test("fh onboard writes one approved repository capability manifest", (context) => {
+test("fh onboard writes one approved repository capability manifest", async (context) => {
   const directory = temporaryDirectory(context);
-  const manifestPath = path.join(directory, "candidate.json");
-  const policyPath = path.join(directory, ".harness", "policy.json");
-  writeFileSync(
-    manifestPath,
-    JSON.stringify({
+  const statePath = path.join(directory, "state.db");
+  const { policyPath, approval } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: {
       commands: ["npm run test"],
       domains: ["localhost"],
       capabilities: ["frontend.primary"],
-    }),
-  );
-
-  const output = [];
-  const exitCode = runCli(["onboard", "--manifest", manifestPath, "--approve", "--json"], {
-    config,
-    policyPath,
-    write: (line) => output.push(line),
+    },
   });
 
-  assert.equal(exitCode, 0);
   assert.equal(existsSync(policyPath), true);
   const policy = JSON.parse(readFileSync(policyPath, "utf8"));
   assert.match(policy.approvalHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(policy.manifest.commands, ["npm run test"]);
   assert.equal(statSync(policyPath).mode & 0o777, 0o600);
-  assert.equal(JSON.parse(output.pop()).policyPath, policyPath);
+  assert.equal(approval.policyPath, policyPath);
+
+  // 承認は台帳側にも 1 行残り、policy.json の hash と結びついている（AC-009）。
+  const store = createStateStore(statePath);
+  const approvals = store.listApprovals();
+  store.close();
+  assert.equal(approvals.length, 1);
+  assert.equal(approvals[0].kind, "repository_manifest");
+  assert.equal(approvals[0].subjectHash, policy.approvalHash);
+  assert.equal(approvals[0].grantedBy, "user");
 });
 
-test("fh onboard refuses to write through a symlinked .harness directory", (context) => {
+test("fh onboard refuses to write through a symlinked .harness directory", async (context) => {
   const directory = temporaryDirectory(context);
   const repository = path.join(directory, "repo");
   const outside = path.join(directory, "outside");
@@ -877,6 +976,7 @@ test("fh onboard refuses to write through a symlinked .harness directory", (cont
   mkdirSync(outside);
   symlinkSync(outside, path.join(repository, ".harness"));
   const manifestPath = path.join(directory, "candidate.json");
+  const statePath = path.join(directory, "state.db");
   writeFileSync(
     manifestPath,
     JSON.stringify({
@@ -885,29 +985,74 @@ test("fh onboard refuses to write through a symlinked .harness directory", (cont
       capabilities: ["frontend.primary"],
     }),
   );
+  const options = {
+    config,
+    cwd: repository,
+    statePath,
+    policyPath: path.join(repository, ".harness", "policy.json"),
+    lookup: PUBLIC_LOOKUP,
+    write: () => {},
+  };
 
-  assert.throws(
+  const output = [];
+  assert.equal(
+    await runCli(["onboard", "--manifest", manifestPath, "--json"], {
+      ...options,
+      pid: REVIEW_PID,
+      write: (line) => output.push(line),
+    }),
+    2,
+  );
+  const { request } = JSON.parse(output.pop());
+  await assert.rejects(
     () =>
-      runCli(["onboard", "--manifest", manifestPath, "--approve", "--json"], {
-        config,
-        policyPath: path.join(repository, ".harness", "policy.json"),
-        write: () => {},
-      }),
+      runCli(
+        [
+          "onboard",
+          "--manifest",
+          manifestPath,
+          "--approve",
+          "--request",
+          request.id,
+          "--json",
+        ],
+        { ...options, pid: APPROVE_PID },
+      ),
     /symbolic link/,
   );
   assert.equal(existsSync(path.join(outside, "policy.json")), false);
 });
 
-test("fh onboard rejects unknown manifest keys and unsafe commands", () => {
-  const output = [];
-  assert.throws(
+test("fh onboard rejects unknown manifest keys and unsafe commands", async (context) => {
+  const directory = temporaryDirectory(context);
+  const options = {
+    config,
+    cwd: directory,
+    statePath: path.join(directory, "state.db"),
+    policyPath: path.join(directory, ".harness", "policy.json"),
+    lookup: PUBLIC_LOOKUP,
+    write: () => {},
+  };
+
+  await assert.rejects(
     () =>
-      runCli(["onboard", "--manifest", "/tmp/unused", "--approve", "--json"], {
-        config,
+      runCli(["onboard", "--manifest", "/tmp/unused", "--json"], {
+        ...options,
         readManifest: () => ({ commands: ["npm run test"], token: "secret" }),
-        write: (line) => output.push(line),
       }),
     /manifest/,
+  );
+  await assert.rejects(
+    () =>
+      runCli(["onboard", "--manifest", "/tmp/unused", "--json"], {
+        ...options,
+        readManifest: () => ({
+          commands: ["curl http://example.com"],
+          domains: [],
+          capabilities: [],
+        }),
+      }),
+    /manifest\.commands/,
   );
 });
 
@@ -946,14 +1091,21 @@ test("fh clean applies the configured raw evidence retention window", (context) 
   assert.equal(JSON.parse(output.pop()).prunedEvidence, 1);
 });
 
-test("fh verify and review record shadow plans without running a shell command", (context) => {
+test("fh verify and review record shadow plans without running a shell command", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"] },
+  });
   const output = [];
   let executorCalls = 0;
   const options = {
     config,
     statePath,
+    cwd: directory,
+    policyPath,
     executor: () => {
       executorCalls += 1;
       return "executed";
@@ -1186,11 +1338,18 @@ test("fh refuses a git common directory the working tree does not own", (context
   assert.equal(existsSync(path.join(other, ".git", "frontier-harness")), false);
 });
 
-test("fh resolves the state root through a linked worktree", (context) => {
+test("fh resolves the state root through a linked worktree", async (context) => {
   const directory = temporaryDirectory(context);
   const main = initRepository(path.join(directory, "main"));
   const linked = path.join(directory, "linked");
   git(main, ["worktree", "add", "--quiet", linked, "-b", "linked-branch"]);
+  // 承認も同じ state root を使うため、linked worktree 側から承認しておけば run も通る。
+  // readiness を注入していないので route は executor.default へ落ちる。両方を承認して、
+  // このテストが観測したい state root の解決だけを残す。
+  await approveManifest({
+    cwd: linked,
+    manifest: { capabilities: ["frontend.primary", "executor.default"] },
+  });
 
   const output = [];
   assert.equal(
@@ -1210,7 +1369,7 @@ test("fh resolves the state root through a linked worktree", (context) => {
   );
 });
 
-test("fh resolves the state root inside a submodule working tree", (context) => {
+test("fh resolves the state root inside a submodule working tree", async (context) => {
   const directory = temporaryDirectory(context);
   const parent = initRepository(path.join(directory, "parent"));
   const child = initRepository(path.join(directory, "child"));
@@ -1224,6 +1383,10 @@ test("fh resolves the state root inside a submodule working tree", (context) => 
     child,
     "sub",
   ]);
+  await approveManifest({
+    cwd: path.join(parent, "sub"),
+    manifest: { capabilities: ["frontend.primary", "executor.default"] },
+  });
 
   const output = [];
   assert.equal(
@@ -1449,9 +1612,16 @@ test("fh doctor propagates an unowned state root instead of swallowing it", (con
   assert.equal(existsSync(path.join(other, ".git", "frontier-harness")), false);
 });
 
-test("a run under another account scope does not reuse verified readiness", (context) => {
+test("a run under another account scope does not reuse verified readiness", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
+  // どちらの scope の route も承認済みにして、readiness の分離だけを観測できるようにする。
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    config: scopeAgnosticConfig,
+    manifest: { capabilities: ["frontend.primary", "executor.default"] },
+  });
   const output = [];
   assert.equal(
     runCli(["doctor", "--probe", "--json"], {
@@ -1476,6 +1646,8 @@ test("a run under another account scope does not reuse verified readiness", (con
       accountScope: "personal",
       config: scopeAgnosticConfig,
       statePath,
+      cwd: directory,
+      policyPath,
       commandPaths: COMMAND_PATHS,
       write: (line) => output.push(line),
     }),
@@ -1489,6 +1661,8 @@ test("a run under another account scope does not reuse verified readiness", (con
       accountScope: "r06",
       config: scopeAgnosticConfig,
       statePath,
+      cwd: directory,
+      policyPath,
       commandPaths: COMMAND_PATHS,
       write: (line) => output.push(line),
     }),
@@ -1761,16 +1935,23 @@ test("an escalation route stores no model, effort, or reviewer", () => {
   store.close();
 });
 
-test("fh status reports the model and effort the route selected", (context) => {
+test("fh status reports the model and effort the route selected", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const taskPath = path.join(directory, "task.json");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { capabilities: ["executor.default"] },
+  });
   writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
 
   const output = [];
   const options = {
     config,
     statePath,
+    cwd: directory,
+    policyPath,
     commandPaths: COMMAND_PATHS,
     accountScope: "personal",
     verifiedModels: {},
@@ -2939,4 +3120,653 @@ test("state store keeps the database owner-only under a umask that strips owner 
   store.close();
 
   assert.equal(statSync(statePath).mode & 0o777, 0o600);
+});
+
+// ---------------------------------------------------------------------------
+// #494: repository capability manifest を実行前照合の承認境界として実効化する
+// ---------------------------------------------------------------------------
+
+function enforcementOptions(directory, extra = {}) {
+  const statePath = path.join(directory, "state.db");
+  return {
+    config,
+    statePath,
+    cwd: directory,
+    policyPath: path.join(directory, ".harness", "policy.json"),
+    commandPaths: COMMAND_PATHS,
+    accountScope: "personal",
+    verifiedModels: {},
+    ...extra,
+  };
+}
+
+function gapsIn(directory) {
+  return createManifestGapQueue({
+    directory: manifestGapsDirectory(directory),
+  }).list();
+}
+
+test("fh run refuses a routed capability that no approved manifest covers", (context) => {
+  const directory = temporaryDirectory(context);
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
+
+  const output = [];
+  // policy.json が無い repository は空 manifest 扱い（fail-closed）。
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.equal(run.decision.kind, "escalation");
+  assert.equal(run.decision.capability, null);
+  assert.equal(run.executed, false);
+  assert.deepEqual(
+    run.gaps.map((gap) => [gap.kind, gap.value]),
+    [["capability", "executor.default"]],
+  );
+
+  // 止めた事実は queue に残り、route も escalation として記録される。
+  assert.deepEqual(
+    gapsIn(directory).map((gap) => gap.value),
+    ["executor.default"],
+  );
+  assert.equal(
+    runCli(
+      ["status", "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).routes[0].kind, "escalation");
+});
+
+test("fh run refuses a command the approved manifest does not list", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"], capabilities: ["executor.default"] },
+  });
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test", "npm run deploy"],
+    }),
+  );
+
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.deepEqual(
+    run.gaps.map((gap) => [gap.kind, gap.value]),
+    [["command", "npm run deploy"]],
+  );
+  assert.equal(run.decision.kind, "escalation");
+});
+
+test("fh run passes once every declared request is approved", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: {
+      commands: ["npm run test"],
+      domains: ["example.com"],
+      capabilities: ["executor.default"],
+    },
+  });
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test"],
+      domains: ["example.com"],
+    }),
+  );
+
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    0,
+  );
+  const run = JSON.parse(output.pop());
+  assert.deepEqual(run.gaps, []);
+  assert.equal(run.decision.capability, "executor.default");
+  assert.deepEqual(gapsIn(directory), []);
+});
+
+test("a repeated gap is recorded once and stays byte-identical", (context) => {
+  const directory = temporaryDirectory(context);
+  const queue = createManifestGapQueue({
+    directory: manifestGapsDirectory(directory),
+  });
+  assert.equal(queue.record({ kind: "command", value: "npm run deploy" }), true);
+  const first = readdirSync(manifestGapsDirectory(directory));
+  const firstBody = readFileSync(
+    path.join(manifestGapsDirectory(directory), first[0]),
+    "utf8",
+  );
+
+  // 2 度目は作成しない。並行 writer が read-modify-write で互いを潰さないよう、
+  // 既存ファイルには一切触れない。
+  assert.equal(queue.record({ kind: "command", value: "npm run deploy" }), false);
+  assert.deepEqual(readdirSync(manifestGapsDirectory(directory)), first);
+  assert.equal(
+    readFileSync(path.join(manifestGapsDirectory(directory), first[0]), "utf8"),
+    firstBody,
+  );
+  assert.equal(queue.list().length, 1);
+});
+
+test("fh gaps lists what the manifest refused", (context) => {
+  const directory = temporaryDirectory(context);
+  createManifestGapQueue({ directory: manifestGapsDirectory(directory) }).record({
+    kind: "domain",
+    value: "example.org",
+    reason: "the domain is not in the approved manifest",
+  });
+
+  const output = [];
+  assert.equal(
+    runCli(["gaps", "--json"], {
+      stateDirectory: directory,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const { gaps } = JSON.parse(output.pop());
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].kind, "domain");
+  assert.equal(gaps[0].value, "example.org");
+});
+
+test("fh onboard --from-gaps approves the queue in one wave-boundary ceremony", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const policyPath = path.join(directory, ".harness", "policy.json");
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test", "curl http://example.com"],
+      domains: ["example.com"],
+    }),
+  );
+
+  const output = [];
+  const options = enforcementOptions(directory, {
+    write: (line) => output.push(line),
+  });
+  assert.equal(runCli(["run", "--task", taskPath, "--json"], options), 2);
+  output.pop();
+  assert.equal(gapsIn(directory).length, 4);
+
+  // review: 承認できる gap だけが候補に載り、載せられないものは理由付きで報告される。
+  const base = {
+    config,
+    cwd: directory,
+    statePath,
+    policyPath,
+    lookup: PUBLIC_LOOKUP,
+    write: (line) => output.push(line),
+  };
+  assert.equal(
+    await runCli(["onboard", "--from-gaps", "--json"], { ...base, pid: REVIEW_PID }),
+    2,
+  );
+  const reviewed = JSON.parse(output.pop());
+  assert.deepEqual(reviewed.manifest.commands, ["npm run test"]);
+  assert.deepEqual(reviewed.manifest.domains, ["example.com"]);
+  assert.deepEqual(reviewed.manifest.capabilities, ["executor.default"]);
+  assert.deepEqual(
+    reviewed.gapsRejected.map((gap) => gap.value),
+    ["curl http://example.com"],
+  );
+
+  assert.equal(
+    await runCli(
+      ["onboard", "--from-gaps", "--approve", "--request", reviewed.request.id, "--json"],
+      { ...base, pid: APPROVE_PID },
+    ),
+    0,
+  );
+  output.pop();
+  // 取り込んだ gap だけが消え、承認できなかったものは未承認のまま残る。
+  assert.deepEqual(
+    gapsIn(directory).map((gap) => gap.value),
+    ["curl http://example.com"],
+  );
+
+  // 承認できなかったコマンドを外せば、同じ task が通る。
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run test"],
+      domains: ["example.com"],
+    }),
+  );
+  assert.equal(runCli(["run", "--task", taskPath, "--json"], options), 0);
+});
+
+test("fh onboard refuses to review and approve in the same invocation", async (context) => {
+  const directory = temporaryDirectory(context);
+  const manifestPath = path.join(directory, "candidate.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ commands: [], domains: [], capabilities: ["executor.default"] }),
+  );
+
+  await assert.rejects(
+    () =>
+      runCli(["onboard", "--manifest", manifestPath, "--approve", "--json"], {
+        config,
+        cwd: directory,
+        statePath: path.join(directory, "state.db"),
+        policyPath: path.join(directory, ".harness", "policy.json"),
+        lookup: PUBLIC_LOOKUP,
+        write: () => {},
+      }),
+    /--approve requires --request/,
+  );
+  assert.equal(existsSync(path.join(directory, ".harness", "policy.json")), false);
+});
+
+test("fh onboard refuses to take the candidate manifest from two sources", async (context) => {
+  const directory = temporaryDirectory(context);
+  const manifestPath = path.join(directory, "candidate.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ commands: [], domains: [], capabilities: [] }),
+  );
+
+  await assert.rejects(
+    () =>
+      runCli(["onboard", "--from-gaps", "--manifest", manifestPath, "--json"], {
+        config,
+        cwd: directory,
+        statePath: path.join(directory, "state.db"),
+        policyPath: path.join(directory, ".harness", "policy.json"),
+        lookup: PUBLIC_LOOKUP,
+        write: () => {},
+      }),
+    /either --from-gaps or --manifest/,
+  );
+});
+
+test("an onboard request is single use and bound to the reviewed manifest", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const manifestPath = path.join(directory, "candidate.json");
+  const manifest = { commands: [], domains: [], capabilities: ["executor.default"] };
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+
+  const output = [];
+  const base = {
+    config,
+    cwd: directory,
+    statePath,
+    policyPath: path.join(directory, ".harness", "policy.json"),
+    lookup: PUBLIC_LOOKUP,
+    write: (line) => output.push(line),
+  };
+  assert.equal(
+    await runCli(["onboard", "--manifest", manifestPath, "--json"], {
+      ...base,
+      pid: REVIEW_PID,
+    }),
+    2,
+  );
+  const { request } = JSON.parse(output.pop());
+  const approve = (options) =>
+    runCli(
+      ["onboard", "--manifest", manifestPath, "--approve", "--request", request.id, "--json"],
+      options,
+    );
+
+  // 発行したプロセスと同じ pid では承認できない。
+  await assert.rejects(
+    () => approve({ ...base, pid: REVIEW_PID }),
+    /cannot be approved by the process that created it/,
+  );
+
+  // レビュー後に manifest を書き換えたら、その request では承認できない。
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ ...manifest, capabilities: ["executor.default", "semantic.judge"] }),
+  );
+  await assert.rejects(
+    () => approve({ ...base, pid: APPROVE_PID }),
+    /manifest changed after it was reviewed/,
+  );
+
+  // 元に戻せば通る。そして同じ request は二度目には使えない。
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  assert.equal(await approve({ ...base, pid: APPROVE_PID }), 0);
+  output.pop();
+  await assert.rejects(() => approve({ ...base, pid: APPROVE_PID }), /was not found/);
+});
+
+test("an expired onboard request cannot approve a manifest", (context) => {
+  const directory = temporaryDirectory(context);
+  const store = createOnboardRequestStore({
+    directory: onboardRequestsDirectory(directory),
+  });
+  const manifest = { commands: [], domains: [], capabilities: ["executor.default"] };
+  const created = new Date("2026-08-29T00:00:00.000Z");
+  const request = store.create({
+    manifest,
+    manifestHash: manifestHash(manifest),
+    now: created,
+    pid: REVIEW_PID,
+  });
+
+  assert.throws(
+    () =>
+      store.consume({
+        id: request.id,
+        manifestHash: manifestHash(manifest),
+        now: new Date(created.getTime() + ONBOARD_REQUEST_TTL_MS + 1),
+        pid: APPROVE_PID,
+      }),
+    /expired/,
+  );
+  // 期限切れで拒否したときは request を消費しない（誤って消して再レビューを強いない）。
+  assert.notEqual(store.load(request.id), null);
+});
+
+test("editing policy.json after approval is detected as tampering", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"], capabilities: ["executor.default"] },
+  });
+
+  // 承認後に manifest を書き換え、同梱の hash も辻褄が合うよう作り直す。
+  // hash が manifest から計算できる以上、ファイル内で完結する検査では検知できない。
+  const policy = JSON.parse(readFileSync(policyPath, "utf8"));
+  policy.manifest.commands.push("npm run deploy");
+  policy.approvalHash = manifestHash(policy.manifest);
+  rmSync(policyPath);
+  writeJsonAtomic(policyPath, policy, "repository policy");
+
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(
+    taskPath,
+    JSON.stringify({
+      goal: "ship",
+      hasDeterministicOracle: true,
+      commands: ["npm run deploy"],
+    }),
+  );
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  const run = JSON.parse(output.pop());
+  assert.equal(run.policyIntegrity.ok, false);
+  assert.match(run.policyIntegrity.reason, /not backed by a recorded approval/);
+  assert.equal(run.decision.kind, "escalation");
+});
+
+test("a policy copied from another repository does not verify", async (context) => {
+  const source = temporaryDirectory(context);
+  const target = temporaryDirectory(context);
+  const sourceState = path.join(source, "state.db");
+  const { policyPath } = await approveManifest({
+    cwd: source,
+    statePath: sourceState,
+    manifest: { capabilities: ["executor.default"] },
+  });
+
+  // policy.json と承認台帳の両方を持ち込んでも、台帳行の scope が元の repository を
+  // 指しているため突合が成立しない。
+  mkdirSync(path.join(target, ".harness"), { recursive: true });
+  copyFileSync(policyPath, path.join(target, ".harness", "policy.json"));
+  copyFileSync(sourceState, path.join(target, "state.db"));
+
+  const taskPath = path.join(target, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(target, { write: (line) => output.push(line) }),
+    ),
+    2,
+  );
+  assert.equal(JSON.parse(output.pop()).policyIntegrity.ok, false);
+});
+
+test("fh verify refuses a command the approved manifest does not list", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { commands: ["npm run test"] },
+  });
+
+  const output = [];
+  const options = enforcementOptions(directory, {
+    write: (line) => output.push(line),
+  });
+  assert.equal(
+    runCli(["verify", "--command", "npm run deploy", "--json"], options),
+    2,
+  );
+  const refused = JSON.parse(output.pop());
+  assert.equal(refused.evidence, null);
+  assert.equal(refused.executed, false);
+  assert.deepEqual(
+    refused.gaps.map((gap) => gap.value),
+    ["npm run deploy"],
+  );
+
+  // 未承認のまま計画を記録しない。
+  const store = createStateStore(statePath);
+  assert.deepEqual(store.listEvidence(), []);
+  store.close();
+  assert.deepEqual(
+    gapsIn(directory).map((gap) => gap.value),
+    ["npm run deploy"],
+  );
+});
+
+test("command matching normalizes tokens and refuses concatenation", () => {
+  const approved = approvedCommandSegments(["npm run test"]);
+  assert.equal(matchCommand("npm run test", approved).allowed, true);
+  // 空白の揺れは正規化して同じ扱いにする。
+  assert.equal(matchCommand("npm  run   test", approved).allowed, true);
+
+  // 連結された 2 本目以降も照合対象になる。
+  for (const command of [
+    "npm run test; curl http://169.254.169.254/",
+    "npm run test && rm -rf /",
+    "npm run test | tee /tmp/out",
+  ]) {
+    assert.equal(matchCommand(command, approved).allowed, false, command);
+  }
+
+  // 静的に解釈できないものは fail-safe で拒否する。
+  const ambiguous = matchCommand('bash -c "npm run test"', approved);
+  assert.equal(ambiguous.allowed, false);
+  assert.match(ambiguous.reason, /cannot be interpreted statically/);
+});
+
+test("a manifest cannot approve a command that cannot be interpreted statically", () => {
+  assert.throws(
+    () =>
+      normalizeManifest({
+        commands: ["npm run test; curl http://example.com"],
+        domains: [],
+        capabilities: [],
+      }),
+    /manifest\.commands/,
+  );
+});
+
+test("manifest domains reject internal and metadata addresses in every encoding", () => {
+  const blocked = [
+    // 169.254.169.254 を指す 4 通りの表記。inet_aton はいずれも同じアドレスへ解く。
+    "169.254.169.254",
+    "2852039166",
+    "0251.0376.0251.0376",
+    "0xA9FEA9FE",
+    "169.254.43518",
+    "::ffff:169.254.169.254",
+    "64:ff9b::a9fe:a9fe",
+    // 内部レンジ。
+    "10.0.0.1",
+    "172.16.5.5",
+    "192.168.1.1",
+    "100.100.100.200",
+    "0.0.0.0",
+    "127.0.0.2",
+    "224.0.0.1",
+    "240.0.0.1",
+    "::",
+    "fe80::1",
+    "fc00::1",
+    // メタデータ用ホスト名と予約された内部ゾーン。
+    "metadata.google.internal",
+    "instance-data.ec2.internal",
+  ];
+  for (const domain of blocked) {
+    assert.notEqual(classifyDomainLiteral(domain), null, domain);
+    assert.throws(
+      () => normalizeManifest({ commands: [], domains: [domain], capabilities: [] }),
+      /manifest\.domains/,
+      domain,
+    );
+  }
+
+  // loopback はリテラル指定のみ許可する（ローカル開発サーバの正当な用途を残す）。
+  for (const domain of ["localhost", "127.0.0.1", "::1", "example.com", "8.8.8.8"]) {
+    assert.equal(classifyDomainLiteral(domain), null, domain);
+  }
+});
+
+test("onboard refuses a public name that resolves to a metadata endpoint", async () => {
+  await assert.rejects(
+    () =>
+      assertResolvedDomainAllowed("harmless.example.com", {
+        lookup: () => [{ address: "169.254.169.254", family: 4 }],
+      }),
+    /169\.254\.169\.254/,
+  );
+
+  // 名前が loopback へ解決する場合も拒否する（リテラル許可は解決結果へ広げない）。
+  await assert.rejects(
+    () =>
+      assertResolvedDomainAllowed("harmless.example.com", {
+        lookup: () => [{ address: "127.0.0.1", family: 4 }],
+      }),
+    /loopback/,
+  );
+
+  // 解決できない名前は承認しない（fail-closed）。
+  await assert.rejects(
+    () =>
+      assertResolvedDomainAllowed("harmless.example.com", {
+        lookup: () => {
+          throw new Error("ENOTFOUND");
+        },
+      }),
+    /address resolution failed/,
+  );
+
+  // 公開アドレスへ解決するなら通る。
+  await assertResolvedDomainAllowed("harmless.example.com", {
+    lookup: () => [{ address: "93.184.216.34", family: 4 }],
+  });
+});
+
+test("fh onboard rejects a manifest whose domain resolves to an internal address", async (context) => {
+  const directory = temporaryDirectory(context);
+  const manifestPath = path.join(directory, "candidate.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({
+      commands: [],
+      domains: ["harmless.example.com"],
+      capabilities: [],
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      runCli(["onboard", "--manifest", manifestPath, "--json"], {
+        config,
+        cwd: directory,
+        statePath: path.join(directory, "state.db"),
+        policyPath: path.join(directory, ".harness", "policy.json"),
+        lookup: () => [{ address: "169.254.169.254", family: 4 }],
+        write: () => {},
+      }),
+    /169\.254\.169\.254/,
+  );
+  assert.equal(
+    existsSync(onboardRequestsDirectory(directory)),
+    false,
+    "拒否した manifest の review request を残さない",
+  );
+});
+
+test("an unbacked policy leaves an empty manifest rather than throwing", (context) => {
+  const directory = temporaryDirectory(context);
+  const policyPath = path.join(directory, ".harness", "policy.json");
+  const manifest = { commands: ["npm run test"], domains: [], capabilities: [] };
+  writeJsonAtomic(
+    policyPath,
+    {
+      version: 1,
+      approvedAt: "2026-08-29T00:00:00.000Z",
+      approvalHash: manifestHash(manifest),
+      manifest,
+    },
+    "repository policy",
+  );
+
+  const verified = loadVerifiedManifest({
+    policyPath,
+    approvals: [],
+    scope: directory,
+  });
+  assert.equal(verified.integrity.ok, false);
+  assert.deepEqual(verified.manifest.commands, []);
+  // 空 manifest なので、あらゆる要求が gap になる（fail-closed）。
+  assert.equal(
+    findManifestGaps({ manifest: verified.manifest, commands: ["npm run test"] }).length,
+    1,
+  );
 });
