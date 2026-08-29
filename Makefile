@@ -85,6 +85,21 @@ CONSOLE_LINT_NAMES = -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.
 # Globbed like lint-node, but at any depth and including .js: lint-node's depth-1 glob
 # silently misses the two .js files outside home/dot_local/lib/*/.
 #
+# The file-level opt-out preflight lets awk read each file itself (FILENAME/FNR) rather than
+# re-parsing `grep -H` output: a path containing `:<digits>:` makes the prefix strip match in
+# the wrong place, and a bare `// deno-lint-ignore-file` then slips through and exempts the
+# whole file. It reports only file:line, never the offending text, so a file cannot smuggle
+# terminal escapes into a developer's console or a CI log through the diagnostic.
+#
+# That preflight scans whole files rather than just the region deno honours a directive in.
+# The region is wider than it looks -- blank lines, `//` comments, `/* */` comments and a
+# shebang all keep a later directive live, and only the first statement ends it -- so a model
+# of it that is slightly wrong misses real bypasses. Scanning everything can only produce a
+# loud false positive (the directive's exact text at the start of a line inside a template
+# literal, which deno reads as a string); getting the region wrong produces a silent hole,
+# which is the failure mode this guard exists to prevent. The trade is deliberate and pinned
+# by tests/console_lint.bats.
+#
 # Unlike lint-deno this is deliberately not best-effort. It is part of `test`, and a guard
 # that skips itself when its tool is missing is the failure mode #522 was filed about, so an
 # absent deno and an empty file list are both fatal.
@@ -95,13 +110,14 @@ lint-console:
 		echo "lint-console: no JS/TS sources under '$(CONSOLE_LINT_ROOTS)' -- the glob regressed." >&2; \
 		exit 1; \
 	}
-	@hits=$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
-		-exec grep -nHE '^[[:space:]]*//[[:space:]]*deno-lint-ignore-file([[:space:]]|$$)' {} + || true); \
-	bad=$$(printf '%s\n' "$$hits" | awk 'NF { rest = $$0; \
-		sub(/^[^:]*:[0-9]+:/, "", rest); \
-		sub(/^[[:space:]]*\/\/[[:space:]]*deno-lint-ignore-file/, "", rest); \
-		sub(/--.*$$/, "", rest); gsub(/,/, " ", rest); \
-		if (rest ~ /^[[:space:]]*$$/ || rest ~ /(^|[[:space:]])no-console([[:space:]]|$$)/) print }'); \
+	@bad=$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+		-exec awk '/^[[:space:]]*\/\/[[:space:]]*deno-lint-ignore-file([[:space:]]|$$)/ { \
+			rest = $$0; \
+			sub(/^[[:space:]]*\/\/[[:space:]]*deno-lint-ignore-file/, "", rest); \
+			sub(/--.*$$/, "", rest); gsub(/,/, " ", rest); \
+			if (rest ~ /^[[:space:]]*$$/ || rest ~ /(^|[[:space:]])no-console([[:space:]]|$$)/) \
+				printf "%s:%d\n", FILENAME, FNR; \
+		}' {} +); \
 	if [ -n "$$bad" ]; then \
 		echo "lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:" >&2; \
 		printf '%s\n' "$$bad" >&2; \

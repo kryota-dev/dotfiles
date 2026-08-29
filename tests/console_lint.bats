@@ -118,13 +118,59 @@ EOF
 
 @test "lint-console: a whole-file opt-out for an unrelated rule is left alone" {
   # Rejecting every file-level directive would be over-broad: one that names only other rules
-  # does not weaken this guard, and deno still reports the console call underneath it.
+  # does not weaken this guard. The fixture carries a console call on purpose -- without one,
+  # an implementation that wrongly skipped the whole file would pass this test too.
   cat >"${FIXTURE}/a.mjs" <<'EOF'
 // deno-lint-ignore-file no-explicit-any -- unrelated to this guard
-export const value = 1;
+console.log("must still be reported");
 EOF
   lint_console
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no-console"* ]]
+  [[ "$output" != *"file-level opt-out is not allowed"* ]]
+}
+
+@test "lint-console: a path containing a colon cannot smuggle a whole-file opt-out past the check" {
+  # The first cut re-parsed `grep -H` output as <path>:<line>:<text>. A path holding
+  # `:<digits>:` makes that strip match in the wrong place, and a bare directive then slips
+  # through and exempts every call in the file (reproduced: exit 0 on this exact fixture).
+  cat >"${FIXTURE}/weird:9:evil.mjs" <<'EOF'
+// deno-lint-ignore-file
+console.log("hidden 1");
+console.log("hidden 2");
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file-level opt-out is not allowed"* ]]
+}
+
+@test "lint-console: the opt-out check errs toward false positives, never a silent hole" {
+  # deno keeps a file-level directive live through blank lines, `//` and `/* */` comments and
+  # a shebang, and only the first statement ends that region -- so scanning just the region
+  # risks missing a real bypass. Scanning whole files instead costs this: the directive's
+  # exact text at the start of a line inside a template literal is rejected even though deno
+  # reads it as a string. Pinned as the deliberate trade it is, not left as an accident.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+export const SAMPLE = `
+// deno-lint-ignore-file
+`;
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"file-level opt-out is not allowed"* ]]
+}
+
+@test "lint-console: the opt-out diagnostic reports file:line only, never the file's own text" {
+  # The offending line is attacker-controlled text. Echoing it to stderr would let a file
+  # smuggle terminal escapes into a developer's console or a CI log.
+  cat >"${FIXTURE}/a.mjs" <<'EOF'
+// deno-lint-ignore-file no-console -- SENTINELTEXT
+console.log("x");
+EOF
+  lint_console
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"a.mjs:1"* ]]
+  [[ "$output" != *"SENTINELTEXT"* ]]
 }
 
 @test "lint-console: process.stdout.write is the intentional-output escape hatch and passes" {
@@ -156,8 +202,10 @@ EOF
     rm -f "${FIXTURE}"/probe.*
     printf 'console.log("debug");\n' >"${FIXTURE}/probe.${ext}"
     lint_console
-    [ "$status" -ne 0 ] || {
-      echo ".${ext} sources are not scanned by lint-console"
+    # Exit code alone is not enough: if an extension fell out of CONSOLE_LINT_NAMES the tree
+    # would look empty, and the emptiness guard's non-zero exit would pass this test.
+    [ "$status" -ne 0 ] && [[ "$output" == *"no-console"* ]] || {
+      echo ".${ext} was not linted by no-console: ${output}"
       false
     }
   done
@@ -213,9 +261,28 @@ EOF
 
 @test "lint-console: a missing deno is fatal, not a skip" {
   # lint-deno opts itself out when deno is absent; this target must not, or the guard
-  # silently disappears exactly the way the retired hook did (#522). /usr/bin:/bin holds
-  # make, find, grep and awk on both CI platforms but never the mise- or CI-installed deno.
-  run env PATH=/usr/bin:/bin make -C "${REPO_ROOT}" lint-console
+  # silently disappears exactly the way the retired hook did (#522). Build a PATH holding
+  # only what the recipe needs, rather than assuming a system dir happens to lack deno --
+  # on a machine with deno in /usr/bin that assumption would make this pass for free.
+  local bindir="${BATS_TEST_TMPDIR}/no-deno-bin"
+  mkdir -p "$bindir"
+  local tool resolved
+  for tool in make find awk; do
+    resolved="$(command -v "$tool")" || {
+      echo "cannot build the probe PATH: ${tool} not found"
+      false
+    }
+    ln -sf "$resolved" "${bindir}/${tool}"
+  done
+
+  # Prove the probe PATH really hides deno, so a pass cannot mean "the check never ran".
+  # Deliberately not `run`: a 127 there is the expected result, and bats would warn about it.
+  if env -i PATH="$bindir" sh -c 'command -v deno' >/dev/null 2>&1; then
+    echo "the probe PATH still resolves deno; this test would prove nothing"
+    false
+  fi
+
+  run env -i PATH="$bindir" make -C "${REPO_ROOT}" lint-console
   [ "$status" -ne 0 ]
   [[ "$output" == *"deno not found"* ]]
 }
