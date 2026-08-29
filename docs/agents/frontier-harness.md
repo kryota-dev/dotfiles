@@ -47,7 +47,7 @@ Configuration, policy, and mutable state have different owners:
 | Location | Contents | Git state |
 |---|---|---|
 | `$HOME/.config/frontier-harness/config.json`, or an absolute `FH_CONFIG_PATH` | capability registry, rollout, retention | chezmoi-managed |
-| `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`; enforcement lands with the onboarding step) | repository policy |
+| `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`, checked before every routed run) | repository policy |
 | the verified `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
 
 `fh` is meant to run on untrusted checkouts, so neither location is taken at
@@ -106,10 +106,14 @@ produced by the adapter that wrote the file.
 
 `approvals.granted_by` is a recorded label, not proof of provenance: any code in the
 harness can write `granted_by = 'user'`, and the column constraint only pins the
-vocabulary. A consumer that exempts an escalation on the strength of an approval row
-therefore must establish provenance itself — the schema does not carry it. Deciding how
-an approval is proved and verified belongs to the onboarding work that will write these
-rows, not to the schema that stores them.
+vocabulary. Repository onboarding therefore does not rest on that column. It binds an
+approval to a manifest by recording a `repository_manifest` row whose `subject_hash` is
+the SHA-256 of the normalized manifest and whose `scope` is the resolved state root, then
+re-deriving that hash from `.harness/policy.json` before every routed run. The two live in
+different stores — the policy travels with the checkout, the ledger does not — so editing
+the policy after approval no longer verifies, even if its self-reported hash is recomputed
+to match. See [Repository onboarding](#repository-onboarding) for the boundary this does
+and does not draw.
 
 `telemetry_events` has no free-form column at all. Every text column is either a
 closed enum or a short lowercase token, so "aggregate telemetry contains no
@@ -268,18 +272,104 @@ avoid it.
 ## Repository onboarding
 
 Approve a repository's command/domain/capability manifest once rather than
-interrupting every task or every wave child:
+interrupting every task or every wave child. Approval takes **two runs**, and the
+second must name the request the first issued:
 
 ```bash
-fh onboard --manifest candidate.json
-fh onboard --manifest candidate.json --approve --json
+fh onboard --manifest candidate.json                       # review; prints a request id
+fh onboard --manifest candidate.json --approve --request <id> --json
 ```
 
-Unknown commands and domains are not executed. Queueing them for a single
-wave-level batch approval is planned for the onboarding step and is not part of
-this shadow foundation: today `fh onboard` records an approved manifest and no
-command consumes it yet. Credentials, migrations, external contract changes,
+`--approve` without `--request` is refused. The request id is unguessable and lives in the
+state root, so a single invocation cannot both propose a manifest and approve it — the id
+only exists once the review run has printed the manifest for a human to read. A request is
+single use, expires after
+<!-- FACT:fh-onboard-request-ttl-ms -->86400000<!-- /FACT --> ms (24 h), is rejected when
+the process approving it is the one that created it, and stops verifying the moment the
+manifest changes underneath it.
+
+### What enforcement actually checks
+
+`fh run` and `fh verify` load `.harness/policy.json`, re-derive its manifest hash, and
+require a matching `repository_manifest` row in the approvals ledger for this state root.
+A repository with no policy is treated as an **empty** manifest, so everything is
+unapproved — the default is fail-closed, not fail-open. Then:
+
+- **Commands** are tokenized with the same analyzer the approval channel uses, and matched
+  as normalized segments. `npm run test; curl …` splits into two segments, and the second
+  has no approved match, so it is refused. A command that cannot be interpreted statically
+  — built dynamically, or run through a shell or wrapper — is refused rather than guessed at.
+- **Domains** are matched exactly against the approved list, and a manifest can only
+  approve a domain that is not an internal or metadata address. Every `inet_aton` spelling
+  of an address is decoded first, so `169.254.169.254`, `2852039166`, `0251.0376.0251.0376`,
+  `0xA9FEA9FE`, and `169.254.43518` are all rejected as the one address they are. Private,
+  carrier-grade NAT, link-local, multicast, reserved, unspecified, IPv4-mapped and
+  NAT64-embedded ranges are rejected the same way. `localhost`, `127.0.0.1`, and `::1` stay
+  approvable **as literals**, because a local dev server is a legitimate target; a name that
+  *resolves* to loopback is not. Approval resolves each name and refuses if any answer lands
+  in a blocked range, and refuses names it cannot resolve at all.
+- **Capabilities** are matched against the capability the router chose, so a manifest that
+  does not list `executor.default` stops that route.
+
+Anything unapproved is not executed. The route is recorded as an `escalation`, the request
+is written to a gap queue in the state root (one file per item, created-only so concurrent
+wave children never overwrite each other), and the command exits 2. Review the queue and
+approve it at a wave boundary through the same two-step ceremony:
+
+```bash
+fh gaps --json
+fh onboard --from-gaps                                     # review; prints a request id
+fh onboard --from-gaps --approve --request <id> --json
+```
+
+`--from-gaps` proposes the approved manifest plus every queued item that a manifest is
+allowed to hold, and reports the rest as `gapsRejected` rather than failing the whole
+batch. Rejected items stay unapproved. Credentials, migrations, external contract changes,
 deploys, force pushes, releases, and merges remain explicit escalations.
+
+### How an approval is superseded
+
+The approvals ledger is append-only — it is the audit trail, and `fh clean` never prunes it.
+Authorization therefore cannot live in the ledger alone: "any recorded row matches" would
+mean a manifest approved once stays approved forever, so narrowing a manifest would not
+actually revoke anything and restoring an older `.harness/policy.json` would re-enable it.
+
+So the two are separate. The ledger records **what was approved and when**; a pointer in the
+state root records **which approval is in force**, and approving again replaces it. Checking
+a policy means re-deriving its manifest hash and comparing it to that pointer, then
+confirming the pointer's approval still has its ledger row.
+
+The pointer is keyed by the **policy file's path**, not by the repository. A state root is
+shared by every linked worktree of a repository while each worktree has its own
+`.harness/policy.json`, so a repository-wide pointer would let the worktree that onboarded
+most recently silently un-approve the others. Keying by path also removes any need to order
+approvals by time, which the random ids in the ledger cannot do meaningfully.
+
+### The boundary this does not draw
+
+Binding a policy to the approval in force detects a policy edited, replaced, reverted to a
+previously approved version, or copied in from another repository — the checkout carries the
+policy, and never the state root. It does **not** draw these boundaries:
+
+- **An attacker already running as the same uid.** They can rewrite the pointer and the
+  ledger as easily as the policy. This is the same caveat that applies to
+  `approvals.granted_by` and to the approval directory: the record says what was approved, it
+  does not prove who approved it.
+- **An autonomous agent approving its own request.** The two-step ceremony refuses an
+  approval from the process that created the request, so a single invocation cannot approve
+  itself. Two invocations can — anything with a shell can read the request id from the review
+  run's output and pass it to a second run. What the ceremony guarantees is that the manifest
+  was printed for review before it could be approved, not that a human read it.
+- **A domain whose address changes after approval.** Names are resolved when the manifest is
+  approved, not when a task runs, so `fh run` and `fh verify` match domain strings only. A
+  name that resolves somewhere harmless at approval time can point at an internal address
+  later. The layer that actually opens a connection must re-check at that moment; that layer
+  arrives with the rollout promotion.
+- **`fh review`.** It records a review plan without consulting the manifest. The deterministic
+  verifier and review registry own that path, and gating it belongs with them.
+
+Upgrading an existing repository requires re-running the ceremony, because a policy written
+before enforcement has no approval in force behind it.
 
 ## Shadow commands
 
@@ -289,6 +379,7 @@ fh verify --command "npm run test" --json
 fh review --task task_example --json
 fh status --json
 fh clean --dry-run --json
+fh gaps --json
 ```
 
 A task declares what it needs: `requiresApproval` when a human has to decide something

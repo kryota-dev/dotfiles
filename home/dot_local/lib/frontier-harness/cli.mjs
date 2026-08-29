@@ -1,4 +1,4 @@
-import { accessSync, chmodSync, constants, readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -14,17 +14,25 @@ import {
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
 import { flagValue } from "./flags.mjs";
-import { sha256Hex } from "./hash.mjs";
-import { ensureDirectory, writeJsonAtomic } from "./paths.mjs";
+import {
+  findManifestGaps,
+  loadVerifiedManifest,
+} from "./manifest-policy.mjs";
+import { runOnboardCommand } from "./onboard-commands.mjs";
 import { PROVIDER_COMMANDS } from "./providers.mjs";
-import { requireObject } from "./record-validation.mjs";
 import { retentionCutoffs } from "./retention.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
 import {
-  GitWorktreeUnavailableError,
-  resolveGitCommonDirectory,
-} from "./state-root.mjs";
+  approvedManifestStoreFor,
+  defaultStateDirectory,
+  defaultStatePath,
+  manifestGapQueueFor,
+  readinessPathFor,
+  resolvePolicyPath,
+  resolveReadinessPath,
+  resolveRepositoryScope,
+} from "./state-paths.mjs";
 import { createStateStore } from "./state-store.mjs";
 import { normalizeTask } from "./task.mjs";
 import { resolveTrustedPath } from "./trusted-path.mjs";
@@ -34,7 +42,10 @@ import {
   writeReadiness,
 } from "./readiness.mjs";
 
-const MANIFEST_KEYS = new Set(["commands", "domains", "capabilities"]);
+// 承認待ちで実行を止めたときの終了コード。`onboard` が「まだ承認していない」に使っていた
+// ものを、承認境界が実行を止めた全経路（run / verify）へ広げる。0 と区別できないと、
+// 呼び出し側スクリプトが「承認が要る」を「成功」と読んでしまう。
+const BLOCKED_PENDING_APPROVAL = 2;
 // --dry-run は state を変更しないので、削除件数はすべて 0 で返す。
 const EMPTY_RAW_PRUNE_COUNTS = Object.freeze({
   evidence: 0,
@@ -113,50 +124,6 @@ function defaultCommandPaths(environment) {
   );
 }
 
-function defaultStateDirectory(cwd) {
-  const stateDirectory = path.join(
-    resolveGitCommonDirectory(cwd),
-    "frontier-harness",
-  );
-  ensureDirectory(stateDirectory, "frontier-harness state directory");
-  chmodSync(stateDirectory, 0o700);
-  return stateDirectory;
-}
-
-function defaultStatePath(cwd) {
-  return path.join(defaultStateDirectory(cwd), "state.db");
-}
-
-// readiness は account scope ごとに分ける。共有すると、あるプロファイルで確定した
-// provider の可用性が、別プロファイルとして解決される実行に流用される。
-function readinessPathFor(statePath, accountScope) {
-  if (
-    typeof accountScope !== "string" ||
-    !ACCOUNT_SCOPE_PATTERN.test(accountScope)
-  ) {
-    throw new TypeError(
-      `account scope ${accountScope} cannot be used as a readiness cache key`,
-    );
-  }
-  return path.join(path.dirname(statePath), `readiness.${accountScope}.json`);
-}
-
-// doctor も run と同じ state root から readiness path を解決する。
-// これが無いと `doctor --probe` の結果が保存されず、後続の `run` が常に unverified になる。
-function resolveReadinessPath(options, accountScope) {
-  try {
-    const statePath =
-      options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
-    return readinessPathFor(statePath, accountScope);
-  } catch (error) {
-    // git working tree の外では state root を解決できないため readiness を永続化しない。
-    if (error instanceof GitWorktreeUnavailableError) return null;
-    // 信頼できない state root の検出は握り潰さない。
-    // 握り潰すと doctor 経路だけガードが無効化される。
-    throw error;
-  }
-}
-
 function providerAvailability(commandPaths, verifiedModels = {}) {
   return Object.fromEntries(
     Object.keys(PROVIDER_COMMANDS).map((provider) => {
@@ -176,43 +143,6 @@ function providerAvailability(commandPaths, verifiedModels = {}) {
   );
 }
 
-function normalizeManifest(input) {
-  requireObject(input, "manifest");
-  const unknownKey = Object.keys(input).find((key) => !MANIFEST_KEYS.has(key));
-  if (unknownKey) {
-    throw new TypeError(`manifest contains unsupported key: ${unknownKey}`);
-  }
-  for (const key of MANIFEST_KEYS) {
-    if (!Array.isArray(input[key])) {
-      throw new TypeError(`manifest.${key} must be an array`);
-    }
-    if (input[key].some((value) => typeof value !== "string" || value.length === 0)) {
-      throw new TypeError(`manifest.${key} entries must be non-empty strings`);
-    }
-  }
-  if (
-    input.commands.some(
-      (command) =>
-        !/^(?:npm run|pnpm run|yarn run|bun run|uv run|pytest|go test|cargo test)(?: [A-Za-z0-9_./:@=-]+)+$/.test(
-          command,
-        ),
-    )
-  ) {
-    throw new TypeError("manifest.commands contains an unsafe command");
-  }
-  if (input.domains.some((domain) => !/^(?:localhost|127\.0\.0\.1|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)$/.test(domain))) {
-    throw new TypeError("manifest.domains contains an invalid domain");
-  }
-  if (input.capabilities.some((name) => !/^[a-z][a-z0-9._-]*$/.test(name))) {
-    throw new TypeError("manifest.capabilities contains an invalid capability");
-  }
-  return {
-    commands: [...input.commands],
-    domains: [...input.domains],
-    capabilities: [...input.capabilities],
-  };
-}
-
 function usage() {
   return [
     "Usage: frontier-harness <command> [--json]",
@@ -225,7 +155,12 @@ function usage() {
     "                  --progress-interval-ms; path flags must be absolute)",
     "  doctor  Report adapter and capability readiness",
     "  clean   Prune expired raw evidence and aggregate telemetry",
-    "  onboard Approve one repository capability manifest",
+    "  gaps    List command/domain/capability requests the manifest did not approve",
+    "  onboard Review and approve the repository capability manifest, in two steps:",
+    "            fh onboard --manifest <path>            review; prints a request id",
+    "            fh onboard --manifest <path> --approve --request <id>",
+    "          --from-gaps builds the candidate from the approved manifest plus",
+    "          everything queued by `fh gaps`",
     "  run     Record a shadow route for a task JSON file",
     "  status  Show recorded route decisions",
     "  verify  Record a deterministic verification plan",
@@ -233,6 +168,11 @@ function usage() {
   ].join("\n");
 }
 
+// 戻り値は command で型が分かれる: `onboard` は domain のアドレス解決を伴うため
+// **Promise<number>** を返し、それ以外は同期に number を返す。プログラムから呼ぶ場合は
+// `Promise.resolve(runCli(...))` で受けるか、ファイル末尾の entrypoint と同じく
+// `instanceof Promise` で分岐すること（`process.exitCode = runCli(...)` と素朴に書くと、
+// onboard 経路で Promise オブジェクトが exitCode に入り静かに壊れる）。
 export function runCli(argumentsList, options = {}) {
   const environment = options.environment ?? process.env;
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
@@ -240,6 +180,7 @@ export function runCli(argumentsList, options = {}) {
   const asJson = flags.includes("--json");
   const emit = (value) =>
     write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
+  const cwd = options.cwd ?? process.cwd();
 
   // 承認チャネルは SQLite state も config.json も必要としない。承認待ちは既定 8 時間に
   // 及ぶため、その間 DB を開いたままにせず、無関係な config.json の生死にも巻き込まない
@@ -249,7 +190,6 @@ export function runCli(argumentsList, options = {}) {
     command === "approvals" ||
     command === "approve"
   ) {
-    const cwd = options.cwd ?? process.cwd();
     const directory = resolveApprovalsDirectory({
       flags,
       stateDirectory: () => options.stateDirectory ?? defaultStateDirectory(cwd),
@@ -279,6 +219,14 @@ export function runCli(argumentsList, options = {}) {
     return command === "approvals"
       ? runApprovalsCommand({ queue, emit, flags })
       : runApproveCommand({ queue, emit, flags });
+  }
+
+  // gap queue も state root だけを読む。承認境界が実行を止めた記録を確認するのに
+  // capability registry は要らないので、config.json の有無に巻き込まない
+  // （config を未デプロイの環境で `fh gaps` が落ちると、なぜ止まったのかを調べる手段が消える）。
+  if (command === "gaps") {
+    emit({ gaps: manifestGapQueueFor(options, cwd).list() });
+    return 0;
   }
 
   // 設定パスの解決は遅延させる。設定そのものを注入された呼び出しで、
@@ -315,40 +263,14 @@ export function runCli(argumentsList, options = {}) {
     return 0;
   }
 
+  // onboard だけは domain のアドレス解決を伴うため Promise を返す。呼び出し側
+  // （下の entrypoint とテスト）はこの 1 コマンドだけ await すればよく、他のコマンドの
+  // 同期な戻り値の契約は変えない。
   if (command === "onboard") {
-    const manifestPath = flagValue(flags, "--manifest");
-    const manifest = normalizeManifest(
-      options.readManifest
-        ? options.readManifest(manifestPath)
-        : JSON.parse(readFileSync(manifestPath, "utf8")),
-    );
-    if (!flags.includes("--approve")) {
-      write(
-        JSON.stringify({
-          approved: false,
-          manifest,
-          reason: "re-run with --approve after reviewing the capability manifest",
-        }),
-      );
-      return 2;
-    }
-    const policyPath =
-      options.policyPath ??
-      path.join(options.cwd ?? process.cwd(), ".harness", "policy.json");
-    const policy = {
-      version: 1,
-      approvedAt: new Date().toISOString(),
-      approvalHash: sha256Hex(manifest),
-      manifest,
-    };
-    // `.harness` が symlink の repository で書き込み先が脱出しないよう、
-    // symlink 検査 + O_EXCL + 予測不能な一時名を使う共通ヘルパーを経由する。
-    writeJsonAtomic(policyPath, policy, "repository policy");
-    emit({ approved: true, policyPath, approvalHash: policy.approvalHash });
-    return 0;
+    return runOnboardCommand({ flags, options, emit });
   }
 
-  const statePath = options.statePath ?? defaultStatePath(options.cwd ?? process.cwd());
+  const statePath = options.statePath ?? defaultStatePath(cwd);
   const verifiedModels =
     options.verifiedModels ??
     loadVerifiedModels(readinessPathFor(statePath, accountScope));
@@ -358,6 +280,13 @@ export function runCli(argumentsList, options = {}) {
       const taskPath = flagValue(flags, "--task");
       // task JSON は未検証の外部入力として境界で正規化する。
       const task = normalizeTask(JSON.parse(readFileSync(taskPath, "utf8")));
+      const policyPath = resolvePolicyPath(options, cwd);
+      const approved = loadVerifiedManifest({
+        policyPath,
+        approvals: store.listApprovals(),
+        scope: resolveRepositoryScope(options, cwd),
+        currentApproval: approvedManifestStoreFor(options, cwd).read(policyPath),
+      });
       const result = store.withTransaction(() => {
         const storedTask = store.createTask(task);
         const route = chooseRoute({
@@ -366,7 +295,28 @@ export function runCli(argumentsList, options = {}) {
           config,
           task,
         });
-        const storedRoute = store.recordRoute(storedTask.id, route);
+        // 承認境界はここで効く。route が選んだ capability（reviewer 側も provider を
+        // 選ぶ軸なので含める）と、task が宣言した command / domain を承認済み manifest と
+        // 突き合わせ、1 つでも欠ければ escalation へ差し替える。
+        const gaps = findManifestGaps({
+          manifest: approved.manifest,
+          commands: task.commands,
+          domains: task.domains,
+          capabilities: [route.capability, route.reviewerCapability],
+        });
+        // #534 の「塞いだ route は escalation として記録する」と同じ形に揃える。
+        // 別種の route を作らず kind を escalation にすることで、下の
+        // 「escalation は provider を起動しない」ガードがそのまま manifest gate にも効く。
+        const effectiveRoute =
+          gaps.length > 0
+            ? {
+                kind: "escalation",
+                capability: null,
+                provider: null,
+                reason: `${gaps.length} request(s) are not covered by the approved repository capability manifest: ${approved.integrity.reason ?? "see gaps"}`,
+              }
+            : route;
+        const storedRoute = store.recordRoute(storedTask.id, effectiveRoute);
         // 塞いだ route は evidence として残す（#534）。routes テーブルには
         // capability / provider / 軸 / 要求値 / 実際値 の 5 つ組を入れる列が無いため、
         // 理由の追跡は evidence 側が担う。route と同じトランザクションで確定するので
@@ -389,27 +339,40 @@ export function runCli(argumentsList, options = {}) {
         // 起動しない。#534 が選んだ扱い（塞いだ route は実行せず記録する）はここで初めて
         // 構造になる —— これが無いと不変条件は「rollout が shadow である」ことに依存し、
         // #502 で昇格して executor を配線した瞬間に gate が実行段ですり抜ける。
-        // shadow の間は runWithRolloutGuard も executor を呼ばないため、挙動は変わらない。
+        // manifest の gap による escalation もこの経路を通るため、承認境界も同じ構造で守られる。
         const execution =
-          route.kind === "escalation"
+          effectiveRoute.kind === "escalation"
             ? {
                 executed: false,
                 reason:
-                  "escalation route requires user judgement; recorded without provider execution",
+                  gaps.length > 0
+                    ? "the repository capability manifest does not approve this task"
+                    : "escalation route requires user judgement; recorded without provider execution",
               }
-            : runWithRolloutGuard(config, `route ${route.kind}`, options.executor);
+            : runWithRolloutGuard(
+                config,
+                `route ${effectiveRoute.kind}`,
+                options.executor,
+              );
         return {
           task: storedTask,
-          decision: route,
+          decision: effectiveRoute,
           blocked,
           blockEvidence,
           executed: execution.executed,
           executionReason: execution.reason,
           rollout: config.rollout,
+          gaps,
+          policyIntegrity: approved.integrity,
         };
       });
+      // gap の記録はトランザクションの外で行う。ファイル書き込みは SQLite の
+      // ロールバックに巻き戻されないので、中で書くと「route は無いのに gap だけ残る」
+      // 不整合を作れてしまう。
+      const gapQueue = manifestGapQueueFor(options, cwd);
+      for (const gap of result.gaps) gapQueue.record(gap);
       emit(result);
-      return 0;
+      return result.gaps.length > 0 ? BLOCKED_PENDING_APPROVAL : 0;
     }
 
     if (command === "status") {
@@ -459,6 +422,33 @@ export function runCli(argumentsList, options = {}) {
 
     if (command === "verify") {
       const verificationCommand = flagValue(flags, "--command");
+      // 検証コマンドも承認境界の内側にある。未承認のまま計画を記録すると、
+      // rollout が昇格した時点でその計画がそのまま実行対象になる。
+      const verifyPolicyPath = resolvePolicyPath(options, cwd);
+      const approved = loadVerifiedManifest({
+        policyPath: verifyPolicyPath,
+        approvals: store.listApprovals(),
+        scope: resolveRepositoryScope(options, cwd),
+        currentApproval: approvedManifestStoreFor(options, cwd).read(verifyPolicyPath),
+      });
+      const gaps = findManifestGaps({
+        manifest: approved.manifest,
+        commands: [verificationCommand],
+      });
+      if (gaps.length > 0) {
+        const gapQueue = manifestGapQueueFor(options, cwd);
+        for (const gap of gaps) gapQueue.record(gap);
+        emit({
+          evidence: null,
+          executed: false,
+          executionReason:
+            "the repository capability manifest does not approve this verification command",
+          rollout: config.rollout,
+          gaps,
+          policyIntegrity: approved.integrity,
+        });
+        return BLOCKED_PENDING_APPROVAL;
+      }
       const evidence = store.putEvidence({
         kind: "verification_plan",
         producer: "frontier-harness",
@@ -475,6 +465,8 @@ export function runCli(argumentsList, options = {}) {
         executed: execution.executed,
         executionReason: execution.reason,
         rollout: config.rollout,
+        gaps: [],
+        policyIntegrity: approved.integrity,
       });
       return 0;
     }
@@ -509,5 +501,15 @@ export function runCli(argumentsList, options = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = runCli(process.argv.slice(2));
+  // `onboard` は domain のアドレス解決を伴うため Promise を返す。他のコマンドは同期の
+  // ままなので、Promise でないときは従来どおりその場で exitCode を確定させる
+  // （同期経路の挙動をマイクロタスク 1 つ分でも変えない）。
+  const result = runCli(process.argv.slice(2));
+  if (result instanceof Promise) {
+    result.then((code) => {
+      process.exitCode = code;
+    });
+  } else {
+    process.exitCode = result;
+  }
 }

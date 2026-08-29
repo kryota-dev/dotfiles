@@ -120,6 +120,54 @@ function writeTask(directory, task) {
   return taskPath;
 }
 
+// #494 で承認境界が実効化されたため、`fh run` を通すテストは先に manifest を承認しておく。
+// 承認は 2 段階儀式（review → approve）で、儀式は同一プロセスでのレビューと承認を拒否するため、
+// 実運用の 2 プロセスを pid の注入で模す。
+const PUBLIC_LOOKUP = () => [{ address: "93.184.216.34", family: 4 }];
+
+async function approveCapabilities(directory, capabilities, statePath) {
+  const manifestPath = path.join(directory, "approved-manifest.json");
+  writeFileSync(
+    manifestPath,
+    JSON.stringify({ commands: [], domains: [], capabilities }),
+  );
+  const policyPath = path.join(directory, ".harness", "policy.json");
+  const base = {
+    config,
+    cwd: directory,
+    statePath,
+    policyPath,
+    lookup: PUBLIC_LOOKUP,
+    write: () => {},
+  };
+  const output = [];
+  assert.equal(
+    await runCli(["onboard", "--manifest", manifestPath, "--json"], {
+      ...base,
+      pid: 4242,
+      write: (line) => output.push(line),
+    }),
+    2,
+  );
+  const { request } = JSON.parse(output.pop());
+  assert.equal(
+    await runCli(
+      [
+        "onboard",
+        "--manifest",
+        manifestPath,
+        "--approve",
+        "--request",
+        request.id,
+        "--json",
+      ],
+      { ...base, pid: 4243 },
+    ),
+    0,
+  );
+  return policyPath;
+}
+
 // ---------------------------------------------------------------------------
 // 供給側: adapter の宣言を route 段階が引ける表に束ねる
 // ---------------------------------------------------------------------------
@@ -590,7 +638,7 @@ test("fh run records a blocked route as evidence tied to the task and route", (c
   assert.equal(routes[0].kind, "escalation");
 });
 
-test("fh run records no route_block evidence when nothing was blocked", (context) => {
+test("fh run records no route_block evidence when nothing was blocked", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const taskPath = writeTask(directory, {
@@ -598,6 +646,11 @@ test("fh run records no route_block evidence when nothing was blocked", (context
     modality: ["browser"],
     hasDeterministicOracle: true,
   });
+  const policyPath = await approveCapabilities(
+    directory,
+    ["frontend.primary"],
+    statePath,
+  );
 
   const output = [];
   assert.equal(
@@ -607,6 +660,8 @@ test("fh run records no route_block evidence when nothing was blocked", (context
       config,
       verifiedModels: VERIFIED_MODELS,
       statePath,
+      cwd: directory,
+      policyPath,
       write: (line) => output.push(line),
     }),
     0,
@@ -622,7 +677,7 @@ test("fh run records no route_block evidence when nothing was blocked", (context
   assert.deepEqual(store.listEvidence(), []);
 });
 
-test("fh run keeps a browser fallback routed while recording why it moved", (context) => {
+test("fh run keeps a browser fallback routed while recording why it moved", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const taskPath = writeTask(directory, {
@@ -631,6 +686,11 @@ test("fh run keeps a browser fallback routed while recording why it moved", (con
     requiresWrite: true,
     hasDeterministicOracle: true,
   });
+  const policyPath = await approveCapabilities(
+    directory,
+    ["executor.default"],
+    statePath,
+  );
 
   const output = [];
   assert.equal(
@@ -640,6 +700,8 @@ test("fh run keeps a browser fallback routed while recording why it moved", (con
       config,
       verifiedModels: VERIFIED_MODELS,
       statePath,
+      cwd: directory,
+      policyPath,
       write: (line) => output.push(line),
     }),
     0,
@@ -835,7 +897,7 @@ test("a risk escalation also withholds provider execution", (context) => {
   assert.equal(run.blockEvidence, null);
 });
 
-test("a routed run still reaches the executor under a non-shadow rollout", (context) => {
+test("a routed run still reaches the executor under a non-shadow rollout", async (context) => {
   // escalation ガードが「塞がなかった route」まで止めていないこと（過剰遮断の回帰防止）。
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
@@ -844,6 +906,11 @@ test("a routed run still reaches the executor under a non-shadow rollout", (cont
     modality: ["browser"],
     hasDeterministicOracle: true,
   });
+  const policyPath = await approveCapabilities(
+    directory,
+    ["frontend.primary"],
+    statePath,
+  );
 
   const output = [];
   let executorCalls = 0;
@@ -854,6 +921,8 @@ test("a routed run still reaches the executor under a non-shadow rollout", (cont
       config: normalizeConfig({ ...baseConfigInput, rollout: "default" }),
       verifiedModels: VERIFIED_MODELS,
       statePath,
+      cwd: directory,
+      policyPath,
       executor: () => {
         executorCalls += 1;
         return "executed";

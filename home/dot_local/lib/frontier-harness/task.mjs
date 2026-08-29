@@ -34,6 +34,12 @@ export function normalizeTask(input) {
     goal: input.goal,
     modality: Object.freeze(requireStringArray(input.modality, "modality")),
     risk: Object.freeze(requireStringArray(input.risk, "risk")),
+    // task が実行を要求する command / domain。承認済み repository capability manifest との
+    // 照合対象になる（#494）。未指定は「何も要求しない」= 空配列で、承認済み manifest が
+    // 何であっても照合を通る。宣言しないことで照合を免れるわけではない —— 宣言しなかった
+    // command を実際に走らせる経路そのものが、承認境界の外側として塞がれる。
+    commands: Object.freeze(requireStringArray(input.commands, "commands")),
+    domains: Object.freeze(requireStringArray(input.domains, "domains")),
     // 未指定は「deterministic oracle 無し」= 安全側とみなし、independent review へ昇格させる。
     hasDeterministicOracle: optionalBoolean(
       input.hasDeterministicOracle,

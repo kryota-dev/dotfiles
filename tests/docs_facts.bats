@@ -376,3 +376,35 @@ _assert_lifecycle_scripts_documented() {
     done
   done
 }
+
+@test "docs_facts: the <!-- FACT:fh-onboard-request-ttl-ms --> marker matches the onboard request TTL" {
+  # 承認儀式の review request が生きている時間。長すぎると「いつ何を見たのか」が承認と
+  # 結びつかなくなるので load-bearing な値であり、docs の記述を定数へ固定する。
+  local source="${HOME_DIR}/dot_local/lib/frontier-harness/onboard-requests.mjs"
+  [ -f "$source" ] || {
+    echo "missing ${source#"${REPO_ROOT}/"} — the onboard request store moved"
+    false
+  }
+
+  local marker="fh-onboard-request-ttl-ms"
+  local actual count f val
+  actual="$(grep -oE 'export const ONBOARD_REQUEST_TTL_MS = [0-9]+' "$source" | grep -oE '[0-9]+$')"
+  [ -n "$actual" ] || {
+    echo "sanity: could not read ONBOARD_REQUEST_TTL_MS from ${source#"${REPO_ROOT}/"} — the extractor likely broke"
+    false
+  }
+
+  for f in "${DOCS_DIR}/agents/frontier-harness.md" "${DOCS_DIR}/agents/frontier-harness.ja.md"; do
+    count="$(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -c . || true)"
+    [ "$count" = 1 ] || {
+      echo "${f#"${REPO_ROOT}/"}: expected exactly 1 FACT:${marker} marker, found ${count}"
+      false
+    }
+    while IFS= read -r val; do
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ONBOARD_REQUEST_TTL_MS is $actual"
+        false
+      }
+    done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+  done
+}
