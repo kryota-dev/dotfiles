@@ -123,7 +123,11 @@ export function approvedCommandSegments(commands) {
 
 // 空白の揺れだけを畳む。承認できる形かどうかを見るための正規化なので、引用符や
 // 制御構文はそのまま残す（残っていれば下の文法検査が弾く）。
-function collapseWhitespace(command) {
+//
+// **照合と実行で同じ正規化を使う。** export しているのは `check-runner.mjs` が実行直前の
+// 再検査でこれを共有するためで、片方だけが畳むと「承認は通るのに実行が落ちる」コマンドが
+// できる（`npm  run   test` のような空白の揺れがまさにそれだった）。
+export function collapseWhitespace(command) {
   return command.trim().replace(/\s+/g, " ");
 }
 

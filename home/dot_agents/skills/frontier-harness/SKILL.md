@@ -109,9 +109,14 @@ fh candidate discard --candidate <id> --json
 ```
 
 - primary worktree と PR ブランチは `pr-workflow` の所有物。candidate はそれを置き換えない。
-- 取り込めるのは、**candidate 作成以降**に記録された決定的チェックがすべて通った candidate だけ。
+- 取り込めるのは、**その candidate に対して**記録された決定的チェックがすべて通ったものだけ。
   チェックは `fh verify --candidate <id>` で走らせる（`--worktree` でツリーを直接指すと、
   policy.json が未コミットのとき承認境界が正しく止める）。
+- 合格した**後に** candidate のツリーへ書き込むと、取り込みは断られる（tree hash が食い違うため）。
+  書き換えたら `fh verify` をやり直す。
+- 承認済みコマンドの実行はサンドボックスされない。`npm run test` を承認することは、その時点の
+  `package.json` が書いてある内容を自分の環境で実行してよい、という意味になる。未検証の差分を
+  抱えた candidate を検証するときは、この点を踏まえること。
 - **衝突したら捨てない。** `conflicted` にしてツリーを保持し、終了コード 2 で user の判断へ戻す。
   自分で rebase したり衝突を解決したりしない。
 - 取り込みは patch の適用まで。commit も push もしない。

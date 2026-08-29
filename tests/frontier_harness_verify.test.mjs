@@ -10,6 +10,10 @@ import {
   runDeterministicCheck,
 } from "../home/dot_local/lib/frontier-harness/check-runner.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import {
+  approvedCommandSegments,
+  matchCommand,
+} from "../home/dot_local/lib/frontier-harness/manifest-policy.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import {
   createManifestGapQueue,
@@ -143,6 +147,7 @@ async function verify({
   spawnFake,
   environment,
   verifyConfig = config,
+  terminationGraceMs,
 }) {
   const output = [];
   const code = await runCli(
@@ -154,6 +159,7 @@ async function verify({
       policyPath,
       environment: environment ?? { PATH: fakeBinDirectory(directory) },
       spawn: spawnFake?.spawn,
+      terminationGraceMs,
       write: (line) => output.push(line),
     },
   );
@@ -171,6 +177,17 @@ test("an approved command becomes argv without a shell", () => {
     "test",
     "--workspace",
   ]);
+});
+
+test("whitespace variants the approval gate accepts are also runnable", () => {
+  // 承認ゲート（`matchCommand`）は `collapseWhitespace` を掛けてから文法を見るので、
+  // 空白の揺れたコマンドは承認を通る。実行側が同じ正規化をしないと、「承認は通ったのに
+  // 実行だけ TypeError で落ちる」コマンドができ、argv にも空要素が混ざる。
+  const approved = approvedCommandSegments(["npm run test"]);
+  for (const command of ["npm  run   test", "  npm run test  ", "npm\trun\ttest"]) {
+    assert.equal(matchCommand(command, approved).allowed, true, `gate: ${command}`);
+    assert.deepEqual(checkCommandArgv(command), ["npm", "run", "test"], `argv: ${command}`);
+  }
 });
 
 test("a command that a shell would reinterpret is refused at execution time", () => {
@@ -258,7 +275,7 @@ test("the harness never captures the check's output", async (context) => {
   const persisted = JSON.stringify({
     evidence: store.listEvidence(),
     results: store.listVerificationResults(),
-    tasks: store.listRoutes(),
+    routes: store.listRoutes(),
   });
   store.close();
   assert.equal(persisted.includes(CHECK_OUTPUT), false);
@@ -279,6 +296,17 @@ test("stdout is inherited rather than piped, so there is nothing to capture", as
   assert.deepEqual(call.argv, ["run", "test"]);
   // チェックはその作業ツリーで走る。
   assert.equal(call.options.cwd, fixture.directory);
+});
+
+test("the check runs with the environment the caller passed, not an inherited one", async (context) => {
+  const fixture = await prepared(context);
+  const spawnFake = createFakeSpawn();
+  const environment = { PATH: fakeBinDirectory(fixture.directory), FH_MARKER: "scoped" };
+  await verify({ ...fixture, spawnFake, environment });
+
+  // `env` を渡さないと Node は `process.env` を継承する。本番では偶然一致するので、
+  // 「この引数が子の環境を決めている」ことはここで固定しないと担保されない。
+  assert.equal(spawnFake.calls[0].options.env, environment);
 });
 
 test("evidence claims are a closed vocabulary, not the check's words", () => {
@@ -394,6 +422,8 @@ test("a check that outlives its limit is escalated to SIGKILL and recorded as er
     ...fixture,
     spawnFake,
     extraFlags: ["--timeout-ms", "20"],
+    // 猶予は既定 5 秒。実時間で待つ理由は無いので、テストからは詰めて観測する。
+    terminationGraceMs: 10,
   });
 
   assert.equal(code, 1);

@@ -197,6 +197,25 @@ function backfillEvidenceContentHash(database) {
   }
 }
 
+// v3: 検証結果を「どのツリーを検証したか」に結び付ける（#495 のレビュー指摘）。
+//
+// v2 までの `verification_results` は task_id と created_at しか持たず、`fh candidate adopt` は
+// 「この task の、candidate 作成以降の結果がすべて passed」だけで取り込みを判断していた。これは
+// 同じ task に複数の candidate がある場合に破れる —— C1 を検証した合格が、一度も検証していない
+// C2 の取り込み根拠として流用できてしまう（C2 の作成後に記録されてさえいれば条件を満たすため）。
+//
+// `candidate_id` は「どの candidate のツリーで走ったか」、`tree_hash` は「そのとき何が入っていたか」
+// を固定する。前者が別ツリーの合格の借用を塞ぎ、後者が「合格したあとにツリーを書き換えて
+// 取り込む」経路を塞ぐ。どちらも nullable —— 主ワークツリーに対する検証（candidate 無し）は
+// 引き続き正当で、その行は candidate の取り込み根拠にはならない。
+const VERIFICATION_PROVENANCE_DDL = `
+  ALTER TABLE verification_results ADD COLUMN candidate_id TEXT;
+  ALTER TABLE verification_results ADD COLUMN tree_hash TEXT;
+
+  CREATE INDEX IF NOT EXISTS verification_results_candidate_id_idx
+    ON verification_results (candidate_id);
+`;
+
 // 配列の添字 + 1 がそのまま user_version になる。末尾に足すだけで版が上がるため、
 // 「定数を上げ忘れる / ステップを足し忘れる」という drift が起こらない。
 const MIGRATIONS = [
@@ -206,6 +225,9 @@ const MIGRATIONS = [
   function applyEvidenceBusSchema(database) {
     database.exec(EVIDENCE_BUS_DDL);
     backfillEvidenceContentHash(database);
+  },
+  function applyVerificationProvenance(database) {
+    database.exec(VERIFICATION_PROVENANCE_DDL);
   },
 ];
 

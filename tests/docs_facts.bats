@@ -384,7 +384,8 @@ _assert_lifecycle_scripts_documented() {
   local triple marker constant source actual count f val
   for triple in "fh-check-timeout-ms:DEFAULT_CHECK_TIMEOUT_MS:check-runner.mjs" \
     "fh-candidate-max-live:CANDIDATE_MAX_LIVE_ENTRIES:candidate-store.mjs" \
-    "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs"; do
+    "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs" \
+    "fh-review-diff-max-bytes:MAX_DIFF_BYTES:git-worktree.mjs"; do
     marker="${triple%%:*}"
     constant="$(echo "$triple" | cut -d: -f2)"
     source="${HOME_DIR}/dot_local/lib/frontier-harness/$(echo "$triple" | cut -d: -f3)"

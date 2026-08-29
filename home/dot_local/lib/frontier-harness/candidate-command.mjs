@@ -4,8 +4,6 @@ import {
   CANDIDATE_MAX_LIVE_ENTRIES,
   LIVE_CANDIDATE_STATUSES,
   assertCandidateLabel,
-  candidatesDirectory,
-  createCandidateStore,
 } from "./candidate-store.mjs";
 import { BLOCKED_PENDING_APPROVAL, CANDIDATE_NOT_ADOPTED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue } from "./flags.mjs";
@@ -18,12 +16,14 @@ import {
   patchApplies,
   removeWorktree,
   worktreeDiff,
+  worktreeTreeHash,
 } from "./git-worktree.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
-import { ensureDirectory } from "./paths.mjs";
+import { requireAbsolutePath } from "./paths.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import {
   approvedManifestStoreFor,
+  candidateStoreFor,
   defaultStatePath,
   manifestGapQueueFor,
   resolvePolicyPath,
@@ -58,22 +58,44 @@ const PRODUCER = "frontier-harness";
 const CANDIDATE_ACTIONS = new Set(["create", "list", "adopt", "discard"]);
 const DEFAULT_CANDIDATE_BASE = "HEAD";
 
-function requireAbsolutePath(value, label) {
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
-    throw new TypeError(`${label} must be an absolute path`);
+// 取り込み判定。
+//
+// **この candidate のツリーで走った検証だけを見る。** task と時刻だけで絞ると、同じ task の
+// 別 candidate を検証した合格が、一度も検証していない candidate の取り込み根拠として流用できる
+// （C1 を検証 → その結果は C2 の作成時刻より後なので C2 の条件も満たす、という経路）。
+// `candidate_id` の一致を要求することで、その借用を塞ぐ。
+//
+// **合格したときの中身と、今から取り込む中身が同じであることも要求する。** 合格後に candidate の
+// ツリーへ書き込めば、検証していない差分を「検証済み」として取り込めてしまう。`treeHash` は
+// 検証時点のツリーを指すので、取り込み直前に再計算して突き合わせる。
+export function adoptionVerdict({ candidate, results, treeHash = null }) {
+  const forCandidate = results.filter(
+    (result) =>
+      result.candidateId === candidate.id && result.createdAt >= candidate.createdAt,
+  );
+  if (forCandidate.length === 0) {
+    return {
+      verified: false,
+      relevant: forCandidate,
+      reason:
+        "no deterministic verification has been recorded for this candidate since it was created",
+    };
   }
-  return value;
-}
-
-// 取り込み判定。candidate 作成以降に記録された検証結果だけを見る。
-export function adoptionVerdict({ candidate, results }) {
-  const relevant = results.filter((result) => result.createdAt >= candidate.createdAt);
+  // 検証時に tree hash を採れていない結果（旧スキーマの行）は根拠にしない。
+  // 「hash が無いから素通し」にすると、この gate を無効化する最も簡単な方法になる。
+  const pinned = forCandidate.filter((result) => result.treeHash);
+  // **「今から取り込むツリー」についての結果だけを見る。** 別のツリーに対する結果は、
+  // 合否どちらであれこのツリーについて何も言っていない。全件一致を要求すると、
+  // 書き換えて再検証しても古い結果が永久に残って二度と取り込めなくなる。
+  const relevant = pinned.filter((result) => result.treeHash === treeHash);
   if (relevant.length === 0) {
     return {
       verified: false,
       relevant,
       reason:
-        "no deterministic verification has been recorded for this task since the candidate was created",
+        pinned.length === 0
+          ? `${forCandidate.length} deterministic check(s) did not record the tree they verified`
+          : "the candidate worktree changed after it was verified; re-run the check before adopting",
     };
   }
   const unmet = relevant.filter((result) => result.status !== "passed");
@@ -91,9 +113,7 @@ function candidateCreate({ flags, emit, config, worktree, store, candidates, run
   const taskId = flagValue(flags, "--task");
   const base = optionalFlagValue(flags, "--base") ?? DEFAULT_CANDIDATE_BASE;
   const label = assertCandidateLabel(optionalFlagValue(flags, "--label") ?? null);
-  if (!store.findTask(taskId)) {
-    throw new TypeError(`task ${taskId} is not in the state database`);
-  }
+  store.requireTask(taskId);
 
   const live = candidates.countLive();
   if (live >= CANDIDATE_MAX_LIVE_ENTRIES) {
@@ -166,6 +186,12 @@ function candidateAdopt({
   const verdict = adoptionVerdict({
     candidate,
     results: store.listVerificationResultsForTask(candidate.taskId),
+    // 「今から取り込む中身」の hash。検証時に記録した hash と突き合わせる。
+    treeHash: worktreeTreeHash({
+      worktree: candidate.worktree,
+      base: candidate.base,
+      runGit,
+    }),
   });
   if (!verdict.verified) {
     emit({
@@ -243,9 +269,12 @@ function candidateAdopt({
     return CANDIDATE_NOT_ADOPTED;
   }
 
-  // 取り込みが済んだツリーは使い捨てなので撤去する。中身は主ワークツリーへ移っている。
-  removeWorktree({ repository: worktree, target: candidate.worktree, runGit });
+  // **登記簿を先に進めてからツリーを撤去する。** 逆順だと、撤去は成功したのに登記簿の
+  // 書き込みが失敗した場合に「live なのに実体が無い」状態で固着し、`adopt` も `discard` も
+  // 通らなくなる。先に adopted にしておけば、撤去に失敗しても残るのは「adopted なのにツリーが
+  // 残っている」という、手で消せる側の不整合になる。
   const adopted = candidates.setStatus(candidate.id, "adopted");
+  removeWorktree({ repository: worktree, target: candidate.worktree, runGit });
   const evidence = store.withTransaction(() =>
     store.putEvidence({
       kind: CANDIDATE_EVIDENCE_KIND,
@@ -268,16 +297,30 @@ function candidateAdopt({
   return 0;
 }
 
-function candidateDiscard({ flags, emit, worktree, candidates, runGit }) {
+function candidateDiscard({ flags, emit, config, worktree, candidates, runGit }) {
   const candidateId = flagValue(flags, "--candidate");
   const candidate = candidates.read(candidateId);
   if (!candidate) {
     throw new TypeError(`candidate ${candidateId} does not exist`);
   }
-  if (LIVE_CANDIDATE_STATUSES.has(candidate.status)) {
-    removeWorktree({ repository: worktree, target: candidate.worktree, runGit });
+  if (!LIVE_CANDIDATE_STATUSES.has(candidate.status)) {
+    emit({ action: "discard", candidate, executed: false, executionReason: "already discarded" });
+    return 0;
   }
-  emit({ action: "discard", candidate: candidates.setStatus(candidate.id, "discarded") });
+  // 撤去も git の実プロセスを起こすので rollout guard を通す。`shadow` でツリーが消えると、
+  // 「shadow へ戻せば何も起きない」という非常停止レバーの意味が壊れる。
+  const guarded = runWithRolloutGuard(config, "candidate worktree removal", () =>
+    removeWorktree({ repository: worktree, target: candidate.worktree, runGit }),
+  );
+  if (!guarded.executed) {
+    emit({ action: "discard", candidate, executed: false, executionReason: guarded.reason });
+    return 0;
+  }
+  emit({
+    action: "discard",
+    candidate: candidates.setStatus(candidate.id, "discarded"),
+    executed: true,
+  });
   return 0;
 }
 
@@ -295,9 +338,7 @@ export function runCandidateCommand({ flags, options = {}, emit, config, cwd }) 
     "--worktree",
   );
   const stateDirectory = resolveStateDirectory(options, worktree);
-  const candidates = createCandidateStore({
-    directory: ensureDirectory(candidatesDirectory(stateDirectory), "candidate directory"),
-  });
+  const candidates = candidateStoreFor(options, worktree);
 
   if (action === "list") {
     emit({ action: "list", candidates: candidates.list() });

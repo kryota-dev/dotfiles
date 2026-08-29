@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 
 import { findCommand } from "./command-paths.mjs";
-import { manifestEntryRejection } from "./manifest-policy.mjs";
+import { collapseWhitespace, manifestEntryRejection } from "./manifest-policy.mjs";
 
 // 承認済みの決定的チェックを実プロセスとして走らせる唯一の場所。
 //
@@ -30,12 +30,17 @@ export const TIMED_OUT_EXIT_CODE = 124;
 // 検査する。`manifest-policy.mjs` は承認と照合の時点で同じ検査をしているが、そこと実行の間に
 // 文字列が別経路で組み立て直される余地を残さないため、実行側でも独立に確かめる。
 export function checkCommandArgv(command) {
-  const rejection = manifestEntryRejection("commands", command);
+  // **承認ゲートと同じ正規化を先に通す。** `matchCommand` は `collapseWhitespace` を掛けてから
+  // 文法を見るので、`npm  run   test` のような空白の揺れは承認を通る。ここで畳まずに検査すると
+  // 同じ文字列が実行直前に TypeError になり、「承認は通ったのに実行できない」コマンドができる。
+  // 畳まずに `split(" ")` すると argv に空要素が混ざる、という二次被害もある。
+  const normalized = collapseWhitespace(command);
+  const rejection = manifestEntryRejection("commands", normalized);
   if (rejection) {
     throw new TypeError(`verification command is not in an approvable form: ${rejection}`);
   }
-  // 承認可能な形は単一スペース区切りしか許さないため、分割で argv が復元できる。
-  return command.split(" ");
+  // 正規化後は単一スペース区切りなので、分割で argv が復元できる。
+  return normalized.split(" ");
 }
 
 // 実行ファイルを PATH から絶対パスで解決する。相対要素・空要素を候補にしないのは
@@ -76,6 +81,10 @@ export async function runDeterministicCheck({
     try {
       child = spawn(executable, argv.slice(1), {
         cwd,
+        // `environment` を明示的に渡す。渡さなくても Node は `process.env` を継承するので
+        // **本番では偶然一致する**が、それはこの引数がチェックの環境を制御している証拠にならない。
+        // 将来ここで資格情報を間引く強化を入れたとき、黙って無視される形にしておかない。
+        env: environment,
         // stdin は使わない（決定的チェックは対話しない）。stdout / stderr は親へ継承する
         // ので、harness はチェックの出力を一切保持しない。
         stdio: ["ignore", "inherit", "inherit"],

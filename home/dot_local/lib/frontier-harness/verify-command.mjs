@@ -1,26 +1,24 @@
 import path from "node:path";
 
-import {
-  LIVE_CANDIDATE_STATUSES,
-  candidatesDirectory,
-  createCandidateStore,
-} from "./candidate-store.mjs";
+import { LIVE_CANDIDATE_STATUSES } from "./candidate-store.mjs";
 import {
   DEFAULT_CHECK_TIMEOUT_MS,
   runDeterministicCheck,
 } from "./check-runner.mjs";
+import { createGitRunner, worktreeTreeHash } from "./git-worktree.mjs";
 import { BLOCKED_PENDING_APPROVAL, VERIFICATION_FAILED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue, positiveIntegerFlag } from "./flags.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
+import { requireAbsolutePath } from "./paths.mjs";
 import { VERIFICATION_CHECK_KINDS, requireEnum } from "./record-validation.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import {
   approvedManifestStoreFor,
+  candidateStoreFor,
   defaultStatePath,
   manifestGapQueueFor,
   resolvePolicyPath,
   resolveRepositoryScope,
-  resolveStateDirectory,
 } from "./state-paths.mjs";
 import { createStateStore } from "./state-store.mjs";
 
@@ -51,13 +49,6 @@ export const DEFAULT_CHECK_KIND = "test";
 export const VERIFICATION_EVIDENCE_KIND = "verification_run";
 
 const PRODUCER = "frontier-harness";
-
-function requireAbsolutePath(value, label) {
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
-    throw new TypeError(`${label} must be an absolute path`);
-  }
-  return value;
-}
 
 // evidence に載せてよいのは固定語彙だけ。status と checkKind はどちらも閉じた enum なので、
 // ここから組み立てた文が自由文になることはない（`session-command.mjs` の sessionClaims と同じ規律）。
@@ -99,18 +90,14 @@ export async function runVerifyCommand({
   const statePath = options.statePath ?? defaultStatePath(worktree);
   const store = createStateStore(statePath);
   try {
-    const task = store.findTask(taskId);
-    if (!task) {
-      throw new TypeError(`task ${taskId} is not in the state database`);
-    }
+    store.requireTask(taskId);
 
     // チェックを走らせるツリー。`--candidate` のときだけ、承認を引くツリー（リポジトリ）と
     // チェックが走るツリー（candidate）が分かれる。
     let checkCwd = worktree;
+    let verifiedCandidate = null;
     if (candidateId !== undefined) {
-      const candidate = createCandidateStore({
-        directory: candidatesDirectory(resolveStateDirectory(options, worktree)),
-      }).read(candidateId);
+      const candidate = candidateStoreFor(options, worktree).read(candidateId);
       if (!candidate) {
         throw new TypeError(`candidate ${candidateId} does not exist`);
       }
@@ -119,6 +106,16 @@ export async function runVerifyCommand({
           `candidate ${candidateId} is ${candidate.status} and has no worktree to verify`,
         );
       }
+      // **task の取り違えを通さない。** 記録は `--task` の値で行うので、ここが食い違うと
+      // 「candidate A のツリーで走った合格」が task B の結果として残る。取り込み判定は
+      // candidate id で照合するようになったため直接の bypass にはならないが、
+      // 監査証跡が嘘になるうえ、呼び出し側の取り違えを黙って受け入れることになる。
+      if (candidate.taskId !== taskId) {
+        throw new TypeError(
+          `candidate ${candidateId} belongs to task ${candidate.taskId}, not ${taskId}`,
+        );
+      }
+      verifiedCandidate = candidate;
       checkCwd = candidate.worktree;
     }
 
@@ -168,6 +165,11 @@ export async function runVerifyCommand({
         environment,
         spawn: options.spawn,
         timeoutMs,
+        // CLI フラグにはしない（運用で変える値ではない）。テストが実時間で猶予を待たずに
+        // SIGKILL への昇格を観測できるようにするための内部の口。
+        ...(options.terminationGraceMs === undefined
+          ? {}
+          : { terminationGraceMs: options.terminationGraceMs }),
       }),
     );
     if (!guarded.executed) {
@@ -185,6 +187,16 @@ export async function runVerifyCommand({
     // ここから先はトランザクションの外。await している間、書き込みロックは握っていない。
     const outcome = await guarded.result;
 
+    // 検証した「中身」を固定する。取り込み直前に再計算して突き合わせることで、合格した
+    // あとに candidate のツリーを書き換えて取り込む経路を塞ぐ（`adoptionVerdict` 参照）。
+    const treeHash = verifiedCandidate
+      ? worktreeTreeHash({
+          worktree: verifiedCandidate.worktree,
+          base: verifiedCandidate.base,
+          runGit: options.runGit ?? createGitRunner(),
+        })
+      : null;
+
     const stored = store.withTransaction(() => {
       const evidence = store.putEvidence({
         kind: VERIFICATION_EVIDENCE_KIND,
@@ -201,6 +213,10 @@ export async function runVerifyCommand({
       });
       const result = store.recordVerificationResult({
         taskId,
+        // どのツリーを検証したかを結果に焼き付ける。null は主ワークツリーに対する検証で、
+        // candidate の取り込み根拠にはならない。
+        candidateId: verifiedCandidate ? verifiedCandidate.id : null,
+        treeHash,
         checkKind,
         status: outcome.status,
         command,

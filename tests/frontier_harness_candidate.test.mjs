@@ -22,7 +22,12 @@ import {
   createCandidateStore,
 } from "../home/dot_local/lib/frontier-harness/candidate-store.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import {
+  createGitRunner,
+  worktreeTreeHash,
+} from "../home/dot_local/lib/frontier-harness/git-worktree.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
+import { defaultStatePath } from "../home/dot_local/lib/frontier-harness/state-paths.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 
 // 使い捨て candidate worktree（#495）専用のスイート。
@@ -94,10 +99,11 @@ async function approveManifest(directory, statePath, manifest) {
   const base = {
     config,
     cwd: directory,
-    statePath,
     policyPath,
     lookup: PUBLIC_LOOKUP,
     write: () => {},
+    // statePath を省いた呼び出しは、git topology からの既定解決を使う。
+    ...(statePath === undefined ? {} : { statePath }),
   };
   const output = [];
   assert.equal(
@@ -150,14 +156,23 @@ async function candidate(argumentsList, fixture, { candidateConfig = config } = 
   return { code, report: output.length ? JSON.parse(output.at(-1)) : null };
 }
 
-// candidate の task に対して決定的チェックの結果を 1 件記録する。実際に `fh verify` を
-// 走らせる経路は frontier_harness_verify.test.mjs が押さえているので、ここでは取り込み
-// 判定への入力として直接置く。
-function recordCheck(fixture, { status = "passed", exitCode = 0 } = {}) {
+// candidate に対する決定的チェックの結果を 1 件記録する。実際に `fh verify` を走らせる経路は
+// frontier_harness_verify.test.mjs が押さえているので、ここでは取り込み判定への入力として直接置く。
+//
+// **来歴は本物を入れる。** `candidateId` と、そのツリーの実際の `treeHash` を `fh verify` と
+// 同じ方法で採る。ここで適当な値を入れると、取り込み判定が本番と別のものを見ることになり、
+// 「検証を通った candidate だけを取り込む」ことを確かめているつもりのテストが何も確かめなくなる。
+function recordCheck(fixture, candidate, { status = "passed", exitCode = 0 } = {}) {
   const store = createStateStore(fixture.statePath);
   try {
     return store.recordVerificationResult({
       taskId: fixture.task.id,
+      candidateId: candidate.id,
+      treeHash: worktreeTreeHash({
+        worktree: candidate.worktree,
+        base: candidate.base,
+        runGit: createGitRunner(),
+      }),
       checkKind: "test",
       status,
       command: APPROVED_COMMAND,
@@ -221,6 +236,42 @@ test("the candidate registry lives outside the primary worktree", async (context
   assert.equal(record.worktree.startsWith(fixture.repository + path.sep), false);
 });
 
+test("with real state resolution the candidate tree sits inside the git common directory", async (context) => {
+  // 他のテストは state を repository の外へ注入しているため、「git common directory の
+  // 内側」という docs の主張そのものは確かめられない（`/tmp` でも上の assertion は通る）。
+  // ここだけ statePath を注入せず、git topology からの既定解決に委ねて実配置を確認する。
+  const directory = temporaryDirectory(context);
+  const repository = initRepository(path.join(directory, "repo"));
+  const policyPath = await approveManifest(repository, undefined, {
+    capabilities: [CANDIDATE_CAPABILITY],
+    commands: [APPROVED_COMMAND],
+  });
+  const store = createStateStore(defaultStatePath(repository));
+  const task = store.createTask({ goal: "default state resolution" });
+  store.close();
+
+  const output = [];
+  assert.equal(
+    await runCli(["candidate", "create", "--task", task.id, "--json"], {
+      config,
+      cwd: repository,
+      policyPath,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const record = JSON.parse(output.pop()).candidate;
+
+  const commonDirectory = git(repository, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir",
+  ]).trim();
+  assert.equal(record.worktree.startsWith(commonDirectory + path.sep), true);
+  // git は `.git` の内側を走査しないので、候補ツリーは主ワークツリーの status に現れない。
+  assert.equal(git(repository, ["status", "--porcelain"]).includes("frontier-harness"), false);
+});
+
 // ---------------------------------------------------------------------------
 // 承認境界と rollout
 // ---------------------------------------------------------------------------
@@ -260,34 +311,101 @@ test("the shadow rollout creates no worktree at all", async (context) => {
 // 取り込み判定
 // ---------------------------------------------------------------------------
 
-test("adoption requires a check recorded after the candidate was created", () => {
-  const candidateRecord = { createdAt: "2026-08-29T12:00:00.000Z" };
+test("adoption requires a check recorded for this candidate, after it was created", () => {
+  const candidateRecord = { id: "cand_a", createdAt: "2026-08-29T12:00:00.000Z" };
+  const TREE = "tree_aaa";
+  const pass = (overrides) => ({
+    candidateId: "cand_a",
+    treeHash: TREE,
+    status: "passed",
+    createdAt: "2026-08-29T12:00:01.000Z",
+    ...overrides,
+  });
+  const verdict = (results) =>
+    adoptionVerdict({ candidate: candidateRecord, results, treeHash: TREE });
+
+  assert.equal(verdict([pass()]).verified, true);
   // 作成より前の緑は、このツリーの中身について何も言っていない。
-  assert.equal(
-    adoptionVerdict({
-      candidate: candidateRecord,
-      results: [{ status: "passed", createdAt: "2026-08-29T11:59:59.000Z" }],
-    }).verified,
-    false,
-  );
-  assert.equal(
-    adoptionVerdict({
-      candidate: candidateRecord,
-      results: [{ status: "passed", createdAt: "2026-08-29T12:00:01.000Z" }],
-    }).verified,
-    true,
-  );
+  assert.equal(verdict([pass({ createdAt: "2026-08-29T11:59:59.000Z" })]).verified, false);
   // 1 件でも通っていなければ取り込まない。
   assert.equal(
-    adoptionVerdict({
-      candidate: candidateRecord,
-      results: [
-        { status: "passed", createdAt: "2026-08-29T12:00:01.000Z" },
-        { status: "failed", createdAt: "2026-08-29T12:00:02.000Z" },
-      ],
-    }).verified,
+    verdict([pass(), pass({ status: "failed", createdAt: "2026-08-29T12:00:02.000Z" })]).verified,
     false,
   );
+});
+
+test("a pass recorded for another candidate cannot be borrowed", () => {
+  // 同じ task の別 candidate を検証した合格が、一度も検証していない candidate の取り込み
+  // 根拠に流用できてはならない（task と時刻だけで絞ると成立してしまう経路）。
+  const other = {
+    candidateId: "cand_other",
+    treeHash: "tree_aaa",
+    status: "passed",
+    createdAt: "2026-08-29T12:00:05.000Z",
+  };
+  const mine = { id: "cand_mine", createdAt: "2026-08-29T12:00:00.000Z" };
+  const outcome = adoptionVerdict({ candidate: mine, results: [other], treeHash: "tree_aaa" });
+  assert.equal(outcome.verified, false);
+  assert.match(outcome.reason, /recorded for this candidate/);
+});
+
+test("a candidate edited after it passed is not adopted on the stale result", () => {
+  const candidateRecord = { id: "cand_a", createdAt: "2026-08-29T12:00:00.000Z" };
+  const results = [
+    {
+      candidateId: "cand_a",
+      treeHash: "tree_at_check_time",
+      status: "passed",
+      createdAt: "2026-08-29T12:00:01.000Z",
+    },
+  ];
+  const outcome = adoptionVerdict({
+    candidate: candidateRecord,
+    results,
+    treeHash: "tree_after_more_edits",
+  });
+  assert.equal(outcome.verified, false);
+  assert.match(outcome.reason, /changed after it was verified/);
+});
+
+test("re-verifying after an edit supersedes the stale result", () => {
+  // 古いツリーに対する結果は「このツリーについて何も言っていない」だけで、永久の拒否理由には
+  // しない。全件一致を要求すると、書き換えて再検証しても二度と取り込めなくなる。
+  const candidateRecord = { id: "cand_a", createdAt: "2026-08-29T12:00:00.000Z" };
+  const results = [
+    { candidateId: "cand_a", treeHash: "tree_old", status: "passed", createdAt: "2026-08-29T12:00:01.000Z" },
+    { candidateId: "cand_a", treeHash: "tree_new", status: "passed", createdAt: "2026-08-29T12:00:09.000Z" },
+  ];
+  assert.equal(
+    adoptionVerdict({ candidate: candidateRecord, results, treeHash: "tree_new" }).verified,
+    true,
+  );
+  // ただし現在のツリーで落ちた結果があれば、それは止める理由になる。
+  const withFailure = [
+    ...results,
+    { candidateId: "cand_a", treeHash: "tree_new", status: "failed", createdAt: "2026-08-29T12:00:10.000Z" },
+  ];
+  const outcome = adoptionVerdict({
+    candidate: candidateRecord,
+    results: withFailure,
+    treeHash: "tree_new",
+  });
+  assert.equal(outcome.verified, false);
+  assert.match(outcome.reason, /did not pass/);
+});
+
+test("a result that did not pin the tree it verified is not an adoption basis", () => {
+  // 旧スキーマ由来の行（tree_hash なし）で gate を素通りさせない。
+  const candidateRecord = { id: "cand_a", createdAt: "2026-08-29T12:00:00.000Z" };
+  const outcome = adoptionVerdict({
+    candidate: candidateRecord,
+    results: [
+      { candidateId: "cand_a", treeHash: null, status: "passed", createdAt: "2026-08-29T12:00:01.000Z" },
+    ],
+    treeHash: "tree_aaa",
+  });
+  assert.equal(outcome.verified, false);
+  assert.match(outcome.reason, /did not record the tree/);
 });
 
 test("an unverified candidate is not adopted and its worktree is kept", async (context) => {
@@ -313,7 +431,7 @@ test("a candidate whose check went red is not adopted", async (context) => {
   const fixture = await prepared(context);
   const record = await createCandidate(fixture);
   writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
-  recordCheck(fixture, { status: "failed", exitCode: 1 });
+  recordCheck(fixture, record, { status: "failed", exitCode: 1 });
 
   const { code, report } = await candidate(
     ["candidate", "adopt", "--candidate", record.id],
@@ -331,7 +449,7 @@ test("a verified candidate moves into the primary worktree and is then disposed 
   const record = await createCandidate(fixture);
   writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
   writeFileSync(path.join(record.worktree, "added.txt"), "from the candidate\n");
-  recordCheck(fixture);
+  recordCheck(fixture, record);
 
   const { code, report } = await candidate(
     ["candidate", "adopt", "--candidate", record.id],
@@ -364,7 +482,7 @@ test("a verified candidate moves into the primary worktree and is then disposed 
 test("an empty candidate is refused rather than adopted as a no-op", async (context) => {
   const fixture = await prepared(context);
   const record = await createCandidate(fixture);
-  recordCheck(fixture);
+  recordCheck(fixture, record);
 
   const { code, report } = await candidate(
     ["candidate", "adopt", "--candidate", record.id],
@@ -483,7 +601,7 @@ test("a conflicting candidate is retained, not discarded, and escalates", async 
   const fixture = await prepared(context);
   const record = await createCandidate(fixture);
   writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
-  recordCheck(fixture);
+  recordCheck(fixture, record);
 
   // 主ワークツリーが同じ行を別の内容へ動かす（衝突を作る）。
   writeFileSync(path.join(fixture.repository, "tracked.txt"), "one\nPRIMARY\nthree\n");
@@ -516,7 +634,7 @@ test("a retained candidate can be adopted once the conflict is gone", async (con
   const fixture = await prepared(context);
   const record = await createCandidate(fixture);
   writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
-  recordCheck(fixture);
+  recordCheck(fixture, record);
   writeFileSync(path.join(fixture.repository, "tracked.txt"), "one\nPRIMARY\nthree\n");
   assert.equal(
     (await candidate(["candidate", "adopt", "--candidate", record.id], fixture)).code,
@@ -540,6 +658,87 @@ test("a retained candidate can be adopted once the conflict is gone", async (con
 // ---------------------------------------------------------------------------
 // 登記簿
 // ---------------------------------------------------------------------------
+
+test("the shadow rollout removes no worktree on discard", async (context) => {
+  const fixture = await prepared(context);
+  const record = await createCandidate(fixture);
+  writeFileSync(path.join(record.worktree, "tracked.txt"), "one\nCANDIDATE\nthree\n");
+
+  const { code, report } = await candidate(
+    ["candidate", "discard", "--candidate", record.id],
+    fixture,
+    { candidateConfig: shadowConfig },
+  );
+
+  // 撤去も git の実プロセスを起こす。`shadow` でツリーが消えると「戻せば何も起きない」が壊れる。
+  assert.equal(code, 0);
+  assert.equal(report.executed, false);
+  assert.match(report.executionReason, /shadow rollout/);
+  assert.equal(existsSync(record.worktree), true);
+  assert.equal(createCandidateStore({
+    directory: candidatesDirectory(path.dirname(fixture.statePath)),
+  }).read(record.id).status, "open");
+});
+
+test("a check aimed at a candidate must name that candidate's own task", async (context) => {
+  const fixture = await prepared(context);
+  const record = await createCandidate(fixture);
+  const store = createStateStore(fixture.statePath);
+  const otherTask = store.createTask({ goal: "a different task" });
+  store.close();
+
+  const bin = path.join(fixture.directory, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, "npm"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  // task を取り違えたまま記録すると、監査証跡が「どの candidate をどの task の検証として
+  // 扱ったか」について嘘をつく。呼び出し側の取り違えはここで止める。
+  await assert.rejects(
+    () =>
+      runCli(
+        [
+          "verify",
+          "--task",
+          otherTask.id,
+          "--candidate",
+          record.id,
+          "--command",
+          APPROVED_COMMAND,
+          "--json",
+        ],
+        {
+          config,
+          statePath: fixture.statePath,
+          cwd: fixture.repository,
+          policyPath: fixture.policyPath,
+          environment: { PATH: bin },
+          write: () => {},
+        },
+      ),
+    /belongs to task/,
+  );
+});
+
+test("a label is recorded, and a malformed one is refused", async (context) => {
+  const fixture = await prepared(context);
+  const { report } = await candidate(
+    ["candidate", "create", "--task", fixture.task.id, "--label", "wave-3/feat-495"],
+    fixture,
+  );
+  assert.equal(report.candidate.label, "wave-3/feat-495");
+
+  for (const bad of ["has space", "-leading-dash", "a".repeat(200)]) {
+    await assert.rejects(
+      () =>
+        candidate(
+          ["candidate", "create", "--task", fixture.task.id, "--label", bad],
+          fixture,
+        ),
+      /--label must match/,
+      bad,
+    );
+  }
+});
 
 test("discard removes the worktree and records that it was discarded", async (context) => {
   const fixture = await prepared(context);

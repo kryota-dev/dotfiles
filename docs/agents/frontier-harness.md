@@ -83,7 +83,7 @@ reasoning as its interchange format.
 
 ### Normalized state schema
 
-The SQLite state is at schema version 2. Every record class is normalized, and
+The SQLite state is at schema version 3. Every record class is normalized, and
 each one belongs to exactly one retention class:
 
 | Table | Holds | Retention |
@@ -92,7 +92,7 @@ each one belongs to exactly one retention class:
 | `route_decisions` | the chosen capability, provider, **model, effort**, and reviewer | kept |
 | `evidence` | raw payload references, a SHA-256 `content_hash` over the record's content fields, and the task/route it belongs to | raw |
 | `adapter_runs` | one adapter execution: capability, provider, model, effort, status, start/finish, exit code | raw |
-| `verification_results` | one deterministic check that actually ran: kind, status, approved command, exit code, evidence reference | raw |
+| `verification_results` | one deterministic check that actually ran: kind, status, approved command, exit code, evidence reference, **and the candidate + tree hash it verified** | raw |
 | `review_findings` | one finding: severity, uncertainty, one-line summary, discriminating experiment, evidence reference | raw |
 | `approvals` | what was authorized: kind, subject hash, scope, grantor, grant/expiry | **never pruned** |
 | `telemetry_events` | content-free aggregate measurements (category, risk, provider/model/effort, timings, token counts, outcome) | aggregate |
@@ -459,6 +459,15 @@ the tree **through the registry**, which is what establishes that the tree belon
 repository: the approval comes from the owning repository while only the check runs in the
 candidate. No caller-supplied path is trusted, so the `--worktree` boundary is not weakened.
 
+**What "approved" actually authorizes.** The approvable grammar is a project task runner, but
+those runners hand off to scripts the repository controls — `npm run test` runs whatever
+`package.json` currently says, and that file changes with the diff. The check also inherits the
+caller's environment and has no network or filesystem confinement of its own; the sandbox that
+`fh session` seals around a provider does not apply here. So approving a command is closer to
+"this repository's task runner may execute, with my environment, whenever a check runs" than to
+"this exact program is safe". That is the sharpest edge in this path, and it matters most when
+the tree being checked is a candidate holding a diff nobody has read yet.
+
 Killing a check reaches the process the harness started, not its descendants. A test runner
 that spawns its own children and ignores SIGTERM can leave them behind. Putting the check in
 its own process group would fix that and introduce a worse failure — orphans that outlive the
@@ -484,11 +493,15 @@ parameter through which a prompt, a transcript, or an adapter's output could arr
 sections come from places the writer does not control — the normalized task row, the approved
 manifest, `verification_results`, and git.
 
+`--out` is written without re-permissioning a directory that already exists: the 0700 the state
+root requires is imposed only on directories the harness itself creates, so pointing `--out` at
+an existing shared directory does not quietly close it to anybody else.
+
 The diff includes tracked modifications and untracked new files, and it is produced through a
 throwaway `GIT_INDEX_FILE` seeded from the base commit. The worktree's own index is never
 touched, because staging state belongs to `pr-workflow`. That scratch index is placed inside
-the worktree's git directory, where `git add -A` will not find it. A packet larger than 1 MiB
-is truncated with `truncated: true` set, so a reviewer cannot be told it saw a whole change it
+the worktree's git directory, where `git add -A` will not find it. A packet larger than
+<!-- FACT:fh-review-diff-max-bytes -->1048576<!-- /FACT --> bytes is truncated with `truncated: true` set, so a reviewer cannot be told it saw a whole change it
 did not. The packet is written to `--out` and never printed, so the diff does not travel
 through stdout and into a log.
 
@@ -497,7 +510,9 @@ finding carries a severity, an uncertainty, a one-line summary, and optionally a
 discriminating experiment. Unknown keys are refused rather than dropped, so a `transcript` or
 `rationale` field is a loud error instead of a silent one. The summary is bounded at
 <!-- FACT:fh-review-text-max-length -->300<!-- /FACT --> characters and must be a single line
-of printable text; that bound is what keeps the column from becoming a place to paste a review
+of printable text — which rejects `Zl` and `Zp` (U+2028, U+2029) as well as the control and
+format categories, because those two are line breaks nearly everywhere they are rendered while
+belonging to neither `Cc` nor `Cf`; that bound is what keeps the column from becoming a place to paste a review
 body. The task id comes from `--task`, never from the document, so a reviewer cannot attach
 findings to somebody else's task.
 
@@ -780,10 +795,22 @@ it stays out of the primary worktree's `git status`.
 
 **Adoption is gated on measurement, not on a claim.** Run the check with
 `fh verify --candidate <id>`; a candidate is adopted only when `verification_results` holds at
-least one check for its task and every one of them passed —
-and only checks recorded *after* the candidate was created count, because a green run from
-before it existed says nothing about what is in it. An unverified or red candidate is refused
-with exit 2 and its tree is left alone.
+least one check **recorded for that candidate** and every one of them passed.
+
+Three things have to line up, and each closes a way of faking the first:
+
+- **The check must name this candidate.** Results carry `candidate_id`, and adoption matches on
+  it. Matching on the task alone is not enough: two candidates can share a task, so a pass
+  earned by one would authorize adopting the other, which was never checked at all.
+- **The check must post-date the candidate.** A green run from before it existed says nothing
+  about what is in it.
+- **The tree must not have moved since.** Results also carry `tree_hash`, the git tree the check
+  actually saw. Adoption re-derives it and refuses on a mismatch, so writing to the candidate
+  after it passed does not smuggle unverified changes in under the old verdict. A result with no
+  `tree_hash` is not an adoption basis — treating a missing hash as "fine" would be the easiest
+  way to switch this gate off.
+
+An unverified, red, or stale candidate is refused with exit 2 and its tree is left alone.
 
 **A conflict retains the work.** If the patch does not apply cleanly to the target worktree,
 the candidate moves to `conflicted`, **the tree is kept**, and the command exits 2 — the same

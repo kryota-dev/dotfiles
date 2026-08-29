@@ -6,6 +6,10 @@ import {
   createApprovedManifestStore,
 } from "./approved-manifest.mjs";
 import {
+  candidatesDirectory,
+  createCandidateStore,
+} from "./candidate-store.mjs";
+import {
   createManifestGapQueue,
   manifestGapsDirectory,
 } from "./manifest-gaps.mjs";
@@ -97,6 +101,18 @@ export function resolvePolicyPath(options, cwd) {
 export function manifestGapQueueFor(options, cwd) {
   return createManifestGapQueue({
     directory: manifestGapsDirectory(resolveStateDirectory(options, cwd)),
+  });
+}
+
+// candidate 登記簿も他のストアと同じくここで解決する。`state-paths.mjs` 冒頭が述べるとおり
+// 「置き場所の決定は security 不変条件に直結するので分散させない」——
+// 呼び出し側でインライン構築すると、候補だけ解決規則が分岐しうる。
+export function candidateStoreFor(options, cwd) {
+  return createCandidateStore({
+    directory: ensureDirectory(
+      candidatesDirectory(resolveStateDirectory(options, cwd)),
+      "candidate directory",
+    ),
   });
 }
 

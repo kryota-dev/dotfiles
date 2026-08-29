@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
+import { MAX_DIFF_BYTES } from "../home/dot_local/lib/frontier-harness/git-worktree.mjs";
 import {
+  REVIEWER_CAPABILITY_MAX_LENGTH,
   REVIEW_FINDINGS_MAX_ENTRIES,
   REVIEW_TEXT_MAX_LENGTH,
   normalizeFindingsDocument,
@@ -25,7 +35,7 @@ const APPROVED_COMMAND = "npm run test";
 // writer 側の会話。packet にも registry にも現れてはいけない文字列。
 const WRITER_CONVERSATION = "SECRET-WRITER-CONVERSATION do not hand this to a reviewer";
 
-const config = normalizeConfig({
+const baseConfigInput = {
   version: 1,
   rollout: "pilot",
   retention: { rawArtifactsDays: 30, aggregateTelemetryDays: 180 },
@@ -34,7 +44,9 @@ const config = normalizeConfig({
     "semantic.judge": { provider: "claude", model: "claude-opus-5", effort: "high" },
   },
   risk: { alwaysEscalate: ["merge"] },
-});
+};
+const config = normalizeConfig(baseConfigInput);
+const shadowConfig = normalizeConfig({ ...baseConfigInput, rollout: "shadow" });
 
 const PUBLIC_LOOKUP = () => [{ address: "93.184.216.34", family: 4 }];
 
@@ -135,10 +147,15 @@ function writeFindings(directory, document) {
   return target;
 }
 
-async function review(argumentsList, { repository, statePath, policyPath }) {
+async function review(
+  argumentsList,
+  { repository, statePath, policyPath },
+  { reviewConfig = config, runGit } = {},
+) {
   const output = [];
   const code = await runCli([...argumentsList, "--json"], {
-    config,
+    config: reviewConfig,
+    runGit,
     statePath,
     cwd: repository,
     policyPath,
@@ -467,6 +484,149 @@ test("building a packet leaves the worktree's own index untouched", async (conte
   assert.equal(git(fixture.repository, ["status", "--porcelain"]), before);
   assert.match(before, /^ M tracked\.txt$/m);
   assert.match(before, /^\?\? added\.txt$/m);
+});
+
+test("a line separator cannot smuggle a second line past the one-line guard", () => {
+  // U+2028 / U+2029 は Cc にも Cf にも属さないため、カテゴリを 2 つだけ見る実装では
+  // 素通りし、多くの端末・ブラウザで改行として描画される。1 行保証がそこだけ破れる。
+  for (const [name, separator] of [
+    ["U+2028", "\u2028"],
+    ["U+2029", "\u2029"],
+    ["U+0085", "\u0085"],
+    ["newline", "\n"],
+  ]) {
+    assert.throws(
+      () =>
+        normalizeFindingsDocument(
+          findingsDocument([
+            {
+              severity: "must",
+              uncertainty: "low",
+              summary: `first line${separator}second line`,
+            },
+          ]),
+          { taskId: "task_1" },
+        ),
+      /single line/,
+      name,
+    );
+  }
+});
+
+test("the reviewer capability is bounded, not just pattern-matched", () => {
+  const tooLong = `a${"b".repeat(REVIEWER_CAPABILITY_MAX_LENGTH)}`;
+  assert.throws(
+    () => normalizeFindingsDocument(findingsDocument([], tooLong), { taskId: "task_1" }),
+    /at most/,
+  );
+  // ちょうど上限は通る（off-by-one の取り違えを検出する）。
+  const atLimit = `a${"b".repeat(REVIEWER_CAPABILITY_MAX_LENGTH - 1)}`;
+  assert.equal(
+    normalizeFindingsDocument(findingsDocument([], atLimit), { taskId: "task_1" })
+      .reviewerCapability,
+    atLimit,
+  );
+});
+
+test("exactly the maximum number of findings is accepted", () => {
+  // 上限 + 1 の拒否だけを見ると、境界を 1 件ずらしても気づけない。
+  const atLimit = Array.from({ length: REVIEW_FINDINGS_MAX_ENTRIES }, (_unused, index) => ({
+    severity: "nits",
+    uncertainty: "low",
+    summary: `finding ${index}`,
+  }));
+  assert.equal(
+    normalizeFindingsDocument(findingsDocument(atLimit), { taskId: "task_1" }).findings.length,
+    REVIEW_FINDINGS_MAX_ENTRIES,
+  );
+});
+
+test("the shadow rollout builds no packet and starts no git process", async (context) => {
+  const fixture = await prepared(context);
+  writeFileSync(path.join(fixture.repository, "tracked.txt"), "one\nCHANGED\n");
+  const out = path.join(fixture.directory, "packet.json");
+
+  let gitCalls = 0;
+  const { code, report } = await review(
+    ["review", "packet", "--task", fixture.task.id, "--out", out],
+    fixture,
+    {
+      reviewConfig: shadowConfig,
+      runGit: () => {
+        gitCalls += 1;
+        throw new Error("the shadow rollout must not reach git");
+      },
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(report.executed, false);
+  assert.match(report.executionReason, /shadow rollout/);
+  assert.equal(gitCalls, 0);
+  // 走らなかった packet を、書き出したかのように残さない。
+  assert.equal(existsSync(out), false);
+});
+
+test("a diff past the cap is truncated, flagged, and cut on a character boundary", async (context) => {
+  const fixture = await prepared(context);
+  // 1 MiB を超える追跡済み変更を作る。マルチバイト文字を含めることで、切り詰めが
+  // バイト境界で行われていれば末尾に U+FFFD が現れる。
+  writeFileSync(
+    path.join(fixture.repository, "tracked.txt"),
+    `${"あ".repeat(MAX_DIFF_BYTES)}\n`,
+  );
+  const out = path.join(fixture.directory, "packet.json");
+  const { report } = await review(
+    ["review", "packet", "--task", fixture.task.id, "--out", out],
+    fixture,
+  );
+
+  assert.equal(report.diffTruncated, true);
+  const packet = JSON.parse(readFileSync(out, "utf8"));
+  assert.equal(packet.diff.truncated, true);
+  assert.equal(Buffer.byteLength(packet.diff.patch, "utf8") <= MAX_DIFF_BYTES, true);
+  // 文字境界で切っていれば置換文字は生まれない。
+  assert.equal(packet.diff.patch.includes("\uFFFD"), false);
+});
+
+test("a non-default base changes what the packet diffs against", async (context) => {
+  const fixture = await prepared(context);
+  writeFileSync(path.join(fixture.repository, "tracked.txt"), "one\nSECOND\n");
+  git(fixture.repository, ["add", "-A"]);
+  git(fixture.repository, ["commit", "--quiet", "-m", "second"]);
+  writeFileSync(path.join(fixture.repository, "tracked.txt"), "one\nTHIRD\n");
+
+  const against = async (base) => {
+    const out = path.join(fixture.directory, `packet-${base}.json`);
+    await review(
+      ["review", "packet", "--task", fixture.task.id, "--out", out, "--base", base],
+      fixture,
+    );
+    return JSON.parse(readFileSync(out, "utf8")).diff.patch;
+  };
+
+  // HEAD 起点なら 2 つ目のコミット以降の変更だけ、HEAD~1 起点ならその前の変更も含む。
+  const fromHead = await against("HEAD");
+  assert.match(fromHead, /-SECOND/);
+  assert.equal(fromHead.includes("-two"), false);
+  const fromParent = await against("HEAD~1");
+  assert.match(fromParent, /-two/);
+});
+
+test("writing a packet does not re-permission a directory the caller chose", async (context) => {
+  const fixture = await prepared(context);
+  const shared = path.join(fixture.directory, "shared-reports");
+  mkdirSync(shared, { mode: 0o755 });
+  const before = statSync(shared).mode;
+
+  await review(
+    ["review", "packet", "--task", fixture.task.id, "--out", path.join(shared, "packet.json")],
+    fixture,
+  );
+
+  // state root 用の 0700 強制を、利用者が選んだ既存ディレクトリへ持ち込まない
+  // （共有ディレクトリが黙って他者から読めなくなる）。
+  assert.equal(statSync(shared).mode, before);
 });
 
 test("a revision that git would read as a flag is refused", async (context) => {

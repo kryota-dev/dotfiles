@@ -184,6 +184,8 @@ const VERIFICATION_RESULT_KEYS = new Set([
   "id",
   "taskId",
   "adapterRunId",
+  "candidateId",
+  "treeHash",
   "checkKind",
   "status",
   "command",
@@ -202,6 +204,15 @@ export function normalizeVerificationResult(input) {
       input.adapterRunId,
       "verification result adapterRunId",
     ),
+    // どの candidate のツリーで走ったか。null は「主ワークツリーに対する検証」を意味し、
+    // candidate の取り込み根拠にはならない（`adoptionVerdict` が id 一致を要求する）。
+    candidateId: optionalNonEmptyString(
+      input.candidateId,
+      "verification result candidateId",
+    ),
+    // 検証した時点のツリー内容（git tree object の hash）。取り込み直前に再計算して
+    // 突き合わせることで、「合格したあとに書き換えて取り込む」経路を塞ぐ。
+    treeHash: optionalNonEmptyString(input.treeHash, "verification result treeHash"),
     checkKind: requireEnum(
       input.checkKind,
       VERIFICATION_CHECK_KINDS,

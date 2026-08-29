@@ -5,7 +5,8 @@ import { VERIFICATION_FAILED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue } from "./flags.mjs";
 import { createGitRunner } from "./git-worktree.mjs";
 import { loadVerifiedManifest } from "./manifest-policy.mjs";
-import { writeJsonAtomic } from "./paths.mjs";
+import { runWithRolloutGuard } from "./rollout.mjs";
+import { requireAbsolutePath, writeJsonToChosenPath } from "./paths.mjs";
 import { buildReviewPacket } from "./review-packet.mjs";
 import {
   normalizeFindingsDocument,
@@ -36,13 +37,6 @@ export const DEFAULT_REVIEW_BASE = "HEAD";
 const PRODUCER = "frontier-harness";
 const REVIEW_ACTIONS = new Set(["packet", "record"]);
 
-function requireAbsolutePath(value, label) {
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
-    throw new TypeError(`${label} must be an absolute path`);
-  }
-  return value;
-}
-
 function reviewPacketCommand({ flags, options, emit, config, worktree, store }) {
   const taskId = flagValue(flags, "--task");
   const out = requireAbsolutePath(flagValue(flags, "--out"), "--out");
@@ -59,16 +53,33 @@ function reviewPacketCommand({ flags, options, emit, config, worktree, store }) 
     currentApproval: approvedManifestStoreFor(options, worktree).read(policyPath),
   });
 
-  const packet = buildReviewPacket({
-    store,
-    taskId,
-    worktree,
-    base,
-    manifest: approved.manifest,
-    rollout: config.rollout,
-    runGit: options.runGit ?? createGitRunner(),
-  });
-  writeJsonAtomic(out, packet, "review packet");
+  // packet の組み立ては git の実プロセスを起こすので、他の新経路と同じく rollout guard を通す。
+  // ここだけ素通しにすると、「`shadow` へ戻せば一切のプロセスが起きない」という非常停止レバーの
+  // 保証が 1 経路だけ破れる（docs はその保証を明記している）。
+  const guarded = runWithRolloutGuard(config, "review packet diff", () =>
+    buildReviewPacket({
+      store,
+      taskId,
+      worktree,
+      base,
+      manifest: approved.manifest,
+      rollout: config.rollout,
+      runGit: options.runGit ?? createGitRunner(),
+    }),
+  );
+  if (!guarded.executed) {
+    emit({
+      action: "packet",
+      taskId,
+      out: null,
+      executed: false,
+      executionReason: guarded.reason,
+      policyIntegrity: approved.integrity,
+    });
+    return 0;
+  }
+  const packet = guarded.result;
+  writeJsonToChosenPath(out, packet, "review packet");
 
   // **packet 本体を stdout へ出さない。** diff がそのまま端末とログへ流れるうえ、
   // 呼び出し側が「出力をそのまま prompt へ貼る」形になると、渡してよいものの境界を
@@ -77,6 +88,7 @@ function reviewPacketCommand({ flags, options, emit, config, worktree, store }) 
     action: "packet",
     taskId,
     out,
+    executed: true,
     base: packet.diff.base,
     diffTruncated: packet.diff.truncated,
     verificationResults: packet.verification.length,
@@ -92,9 +104,7 @@ function reviewRecordCommand({ flags, emit, config, store }) {
     "--findings",
   );
 
-  if (!store.findTask(taskId)) {
-    throw new TypeError(`task ${taskId} is not in the state database`);
-  }
+  store.requireTask(taskId);
   // reviewer の出力は未検証の外部入力として境界で正規化する（task JSON と同じ規律）。
   const document = normalizeFindingsDocument(
     JSON.parse(readFileSync(findingsPath, "utf8")),

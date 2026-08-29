@@ -35,9 +35,16 @@ const FINDING_KEYS = new Set([
 ]);
 // reviewer capability は config の capability 名と同じ字集合に限る。
 const REVIEWER_CAPABILITY_PATTERN = /^[a-z][a-z0-9._-]*$/;
-// 改行・制御文字・書式文字を弾く。これが「1 行の指摘」を「レビュー本文」から隔てる境界で、
-// 同時に端末へ ANSI エスケープを流し込む経路も塞ぐ（`fh review --json` の出力は人が読む）。
-const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}]/u;
+// capability 名も長さを縛る。`summary` だけ上限を課しても、この値が evidence の claim へ
+// 埋め込まれる以上、無制限なら同じ経路で state を肥やせる（`records.mjs` の token 上限と同趣旨）。
+export const REVIEWER_CAPABILITY_MAX_LENGTH = 64;
+// 改行・制御文字・書式文字・**行区切り文字**を弾く。これが「1 行の指摘」を「レビュー本文」から
+// 隔てる境界で、同時に端末へ ANSI エスケープを流し込む経路も塞ぐ。
+//
+// `Zl`（U+2028 LINE SEPARATOR）と `Zp`（U+2029 PARAGRAPH SEPARATOR）を落としてはいけない:
+// どちらも `Cc` にも `Cf` にも属さないため、カテゴリを 2 つだけ見る実装では素通りし、
+// 多くの端末・ブラウザで改行として描画される。つまり「1 行」の保証がそこだけ破れる。
+const CONTROL_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
 // finding の 1 行テキスト。空白の揺れだけ畳み、内容は変えない。
 export function requireFindingText(value, label) {
@@ -77,6 +84,11 @@ export function normalizeFindingsDocument(input, { taskId }) {
   ) {
     throw new TypeError(
       `review findings document reviewerCapability must match ${REVIEWER_CAPABILITY_PATTERN}`,
+    );
+  }
+  if (reviewerCapability.length > REVIEWER_CAPABILITY_MAX_LENGTH) {
+    throw new TypeError(
+      `review findings document reviewerCapability must be at most ${REVIEWER_CAPABILITY_MAX_LENGTH} characters`,
     );
   }
   if (!Array.isArray(input.findings)) {

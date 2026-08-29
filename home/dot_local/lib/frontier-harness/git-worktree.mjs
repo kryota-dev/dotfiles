@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { closeSync, constants, openSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { requireAbsolutePath } from "./paths.mjs";
+
 // harness が git を呼ぶ唯一の場所。candidate worktree の作成・差分・適用・撤去と、
 // reviewer packet の差分がここを通る（`state-root.mjs` は state root の解決だけを行い、
 // 作業ツリーを操作しない。役割が違うので統合しない）。
@@ -31,12 +33,10 @@ export function assertRevision(value, label) {
   return value;
 }
 
-export function assertAbsolutePath(value, label) {
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
-    throw new TypeError(`${label} must be an absolute path`);
-  }
-  return value;
-}
+// 別名を残すのは呼び出し側の語彙（assert*）に合わせるためで、実装は持たない。
+// 2 つ目の実装を置くと、片方だけ強化されたときに黙って食い違う。
+// `export { x as y }` ではモジュール内に `y` の束縛ができないため、const で別名を作る。
+export const assertAbsolutePath = requireAbsolutePath;
 
 // 例外を投げず `{ status, stdout, stderr }` を返す。`git apply --check` のように
 // 「非 0 終了そのものが答え」である呼び出しがあるため、成功/失敗の判定は呼び出し側が行う。
@@ -74,6 +74,28 @@ export function resolveRevision(worktree, revision, runGit) {
   return output.trim();
 }
 
+// base を流し込んだ使い捨て index にワークツリー全体を stage し、その index に対して
+// 任意の git コマンドを走らせる。diff と tree hash が同じ「何が入っているか」の定義を
+// 共有するために切り出してある（2 つが別々に stage すると、両者の指す内容がずれうる）。
+function withStagedIndex(worktree, base, runGit, action) {
+  assertAbsolutePath(worktree, "worktree");
+  const gitDirectory = requireGit(
+    runGit(worktree, ["rev-parse", "--absolute-git-dir"]),
+    "locating the git directory",
+  ).trim();
+  const baseCommit = resolveRevision(worktree, base, runGit);
+  const indexFile = path.join(gitDirectory, `fh-index-${randomUUID()}.index`);
+  const withIndex = { GIT_INDEX_FILE: indexFile };
+  try {
+    requireGit(runGit(worktree, ["read-tree", baseCommit], withIndex), "seeding a scratch index");
+    requireGit(runGit(worktree, ["add", "-A", "--", "."], withIndex), "staging the worktree");
+    return action({ baseCommit, withIndex });
+  } finally {
+    // 使い捨て index を残さない。存在しなくても失敗しない。
+    rmSync(indexFile, { force: true });
+  }
+}
+
 // 追跡済みの変更と未追跡の新規ファイルの両方を含む patch を作る。
 //
 // 使い捨ての index を使うため、対象ワークツリーの index は一切変わらない。`.gitignore` は
@@ -83,29 +105,28 @@ export function resolveRevision(worktree, revision, runGit) {
 // `git add -A` がその index ファイル自身を patch へ取り込む。git ディレクトリ配下は
 // git が決して走査しないので、そこから導出すれば呼び出し側が何を渡しても壊れない。
 export function worktreeDiff({ worktree, base, runGit, maxBytes = MAX_DIFF_BYTES }) {
-  assertAbsolutePath(worktree, "worktree");
-  const gitDirectory = requireGit(
-    runGit(worktree, ["rev-parse", "--absolute-git-dir"]),
-    "locating the git directory",
-  ).trim();
-  const baseCommit = resolveRevision(worktree, base, runGit);
-  const indexFile = path.join(gitDirectory, `fh-diff-${randomUUID()}.index`);
-  const withIndex = { GIT_INDEX_FILE: indexFile };
-  try {
-    requireGit(runGit(worktree, ["read-tree", baseCommit], withIndex), "seeding a scratch index");
-    requireGit(runGit(worktree, ["add", "-A", "--", "."], withIndex), "staging the worktree");
+  return withStagedIndex(worktree, base, runGit, ({ baseCommit, withIndex }) => {
     const patch = requireGit(
       runGit(worktree, ["diff", "--binary", "--cached", baseCommit], withIndex),
       "diffing the worktree",
     );
     const bytes = Buffer.from(patch, "utf8");
-    return bytes.byteLength > maxBytes
-      ? { base: baseCommit, patch: bytes.subarray(0, maxBytes).toString("utf8"), truncated: true }
-      : { base: baseCommit, patch, truncated: false };
-  } finally {
-    // 使い捨て index を残さない。存在しなくても失敗しない。
-    rmSync(indexFile, { force: true });
-  }
+    if (bytes.byteLength <= maxBytes) return { base: baseCommit, patch, truncated: false };
+    // **文字境界で切る。** バイト境界で切ると多バイト文字を割り、末尾に U+FFFD が生まれる。
+    // patch はここで既に適用不能（truncated）だが、壊れた文字を reviewer へ見せる意味は無い。
+    const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
+    const head = decoder.decode(bytes.subarray(0, maxBytes), { stream: true });
+    return { base: baseCommit, patch: head, truncated: true };
+  });
+}
+
+// 「検証した時点でツリーに何が入っていたか」を一意に表す git tree object の hash。
+// `verification_results.tree_hash` に記録し、取り込み直前に再計算して突き合わせる
+// ことで、「合格したあとにツリーを書き換えて取り込む」経路を塞ぐ。
+export function worktreeTreeHash({ worktree, base, runGit }) {
+  return withStagedIndex(worktree, base, runGit, ({ withIndex }) =>
+    requireGit(runGit(worktree, ["write-tree"], withIndex), "hashing the worktree").trim(),
+  );
 }
 
 export function createDetachedWorktree({ repository, target, base, runGit }) {

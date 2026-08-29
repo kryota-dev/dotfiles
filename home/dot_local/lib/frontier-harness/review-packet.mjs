@@ -23,10 +23,7 @@ export function buildReviewPacket({
   rollout,
   runGit = createGitRunner(),
 }) {
-  const stored = store.findTask(taskId);
-  if (!stored) {
-    throw new TypeError(`task ${taskId} is not in the state database`);
-  }
+  const stored = store.requireTask(taskId);
 
   const diff = worktreeDiff({ worktree, base, runGit });
 

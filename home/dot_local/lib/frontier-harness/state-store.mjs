@@ -178,6 +178,15 @@ export function createStateStore(databasePath) {
         createdAt: row.created_at,
       };
     },
+    // `findTask` を「必須」にした版。同じガード文とエラーメッセージが呼び出し側に散ると、
+    // 語彙が経路ごとにずれる。存在確認を伴う参照はこちらを使う。
+    requireTask(taskId) {
+      const stored = this.findTask(taskId);
+      if (!stored) {
+        throw new TypeError(`task ${taskId} is not in the state database`);
+      }
+      return stored;
+    },
     // chooseRoute が返す model / effort / reviewerCapability も保存する。
     // 以前は捨てていたため、どの capability の「どの model を」選んだ route だったかを
     // 後から再現できなかった。escalation route はこれらを持たないので NULL になる。

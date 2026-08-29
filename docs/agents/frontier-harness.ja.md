@@ -66,7 +66,7 @@ Evidence Bus には diff、command result、log、trace、screenshot、browser r
 
 ### 正規化された state schema
 
-SQLite state は schema version 2 です。各レコード種別は正規化され、
+SQLite state は schema version 3 です。各レコード種別は正規化され、
 それぞれちょうど 1 つの保持クラスに属します。
 
 | テーブル | 内容 | 保持 |
@@ -75,7 +75,7 @@ SQLite state は schema version 2 です。各レコード種別は正規化さ�
 | `route_decisions` | 選択した capability、provider、**model、effort**、reviewer | 保持 |
 | `evidence` | raw payload への参照、内容フィールドに対する SHA-256 の `content_hash`、所属する task / route | raw |
 | `adapter_runs` | adapter 実行 1 回分: capability、provider、model、effort、状態、開始/終了、exit code | raw |
-| `verification_results` | 実際に走った決定的チェック 1 件: 種別、状態、承認済み command、exit code、evidence 参照 | raw |
+| `verification_results` | 実際に走った決定的チェック 1 件: 種別、状態、承認済み command、exit code、evidence 参照、**検証した candidate と tree hash** | raw |
 | `review_findings` | 所見 1 件: severity、uncertainty、1 行の要約、discriminating experiment、evidence 参照 | raw |
 | `approvals` | 承認された内容: 種別、subject hash、scope、承認者、承認/失効時刻 | **削除しない** |
 | `telemetry_events` | 内容を含まない集約値（category、risk、provider/model/effort、所要時間、token 数、結果） | 集約 |
@@ -397,6 +397,14 @@ candidate は base commit の detached checkout なので、`.harness/policy.jso
 登記簿であり、承認は所有元リポジトリのものを使い、candidate のツリーで走るのはチェックだけです。
 呼び出し側が渡した path を信用するわけではないので、`--worktree` の境界は弱まりません。
 
+**「承認済み」が実際に何を許しているか。** 承認可能な文法はプロジェクトのタスクランナーですが、その
+ランナーはリポジトリ側のスクリプトへ処理を委ねます —— `npm run test` はその時点の `package.json` が
+書いてある内容を実行し、その内容は差分とともに変わります。チェックは呼び出し元の環境をそのまま継承し、
+ネットワークやファイルシステムの封じ込めも持ちません（`fh session` が provider に対して封をする sandbox は
+ここには効きません）。つまりコマンドの承認は「このプログラムは安全」ではなく「このリポジトリのタスク
+ランナーを、私の環境で、チェックのたびに実行してよい」に近い意味を持ちます。この経路で最も鋭い縁であり、
+検証対象が「まだ誰も読んでいない差分を抱えた candidate」であるときに最も効いてきます。
+
 kill が届くのは harness が起こしたプロセスまでで、その子孫には届きません。自分で孫プロセスを起こし
 SIGTERM を無視するテストランナーは、それらを残しうります。process group ごと落とせば直りますが、
 今度は harness より長く timeout 分だけ生き残る孤児という、より悪い失敗を作ります。時間切れは
@@ -420,17 +428,23 @@ fh review record --task <task id> --findings <abs path> --json
 だけで、prompt も transcript も adapter の出力も**渡す口が存在しません**。4 つの出所も writer が
 自由に書ける場所ではありません —— 正規化済みの task 行、承認済み manifest、`verification_results`、git です。
 
+`--out` は、既に存在するディレクトリの権限を変更せずに書き出します。state root が要求する 0700 を
+課すのは harness 自身が作ったディレクトリだけなので、既存の共有ディレクトリを `--out` に指しても、
+そこが黙って他者から見えなくなることはありません。
+
 差分は追跡済みの変更と未追跡の新規ファイルの両方を含み、base commit から流し込んだ使い捨ての
 `GIT_INDEX_FILE` を通して作ります。対象ワークツリーの index は決して触りません。ステージング状態は
 `pr-workflow` の持ち物だからです。その使い捨て index はワークツリーの git ディレクトリ配下に置くので、
-`git add -A` が拾うことはありません。1 MiB を超える packet は `truncated: true` を立てて切り詰めます
+`git add -A` が拾うことはありません。<!-- FACT:fh-review-diff-max-bytes -->1048576<!-- /FACT --> バイトを超える packet は `truncated: true` を立てて切り詰めます
 ——「差分を全部見た」と reviewer に思わせないためです。packet は `--out` へ書き出し、印字しません。
 差分が stdout を経由してログへ流れないようにするためです。
 
 finding のドキュメントは version・reviewer capability・finding 群を宣言し、各 finding は severity・
 uncertainty・1 行の要約・任意の反証実験を持ちます。未知キーは黙って捨てず拒否するので、`transcript` や
 `rationale` を足せば静かに通るのではなく loud に落ちます。要約は
-<!-- FACT:fh-review-text-max-length -->300<!-- /FACT --> 文字を上限とし、印字可能な 1 行でなければなりません。
+<!-- FACT:fh-review-text-max-length -->300<!-- /FACT --> 文字を上限とし、印字可能な 1 行でなければなりません
+（制御・書式カテゴリに加えて `Zl` / `Zp`、すなわち U+2028 / U+2029 も拒否します。この 2 つは `Cc` にも `Cf` にも
+属さない一方、描画される場所のほとんどで改行として扱われるためです）。
 この上限が、その列をレビュー本文の貼り付け先にしないための境界です。task id は `--task` が決め、
 ドキュメント側からは指定できません —— reviewer が他人の task に finding を紐付けられないようにするためです。
 
@@ -689,10 +703,21 @@ evidence で判定します。
 現れません。
 
 **取り込みの根拠は主張ではなく実測です。** チェックは `fh verify --candidate <id>` で走らせます。
-candidate を取り込むのは、その task の `verification_results` が 1 件以上あり、そのすべてが passed の
-ときだけです。しかも数えるのは **candidate 作成以降**に記録された
-チェックに限ります —— 作成前の緑は、そのツリーの中身について何も言っていないからです。未検証あるいは
-赤の candidate は終了コード 2 で断り、ツリーには手を触れません。
+candidate を取り込むのは、**その candidate に対して記録された** `verification_results` が 1 件以上あり、
+そのすべてが passed のときだけです。
+
+揃うべき条件は 3 つあり、それぞれが「1 つ目を偽装する方法」を潰しています:
+
+- **そのチェックがこの candidate を名指ししていること。** 結果は `candidate_id` を持ち、取り込み判定は
+  それで照合します。task だけで照合すると、同じ task の別 candidate が得た合格が、一度も検証していない
+  candidate の取り込み根拠になってしまいます。
+- **チェックが candidate 作成より後であること。** 作成前の緑は、そのツリーの中身について何も言っていません。
+- **その後ツリーが動いていないこと。** 結果は `tree_hash`（チェックが実際に見た git tree）も持ちます。
+  取り込み直前に再計算して食い違えば断るので、合格後に candidate へ書き込んで未検証の差分を
+  古い判定のまま持ち込むことはできません。`tree_hash` を持たない結果は取り込み根拠にしません
+  —— hash が無いことを「問題なし」と扱うのが、この gate を無効化する最も簡単な方法だからです。
+
+未検証・赤・古い判定のいずれかであれば終了コード 2 で断り、ツリーには手を触れません。
 
 **衝突したら作業を残します。** patch が対象ワークツリーへ clean に当たらなければ、candidate を
 `conflicted` にし、**ツリーは保持**して終了コード 2 で戻します。承認境界と同じコードなのは、どちらも
