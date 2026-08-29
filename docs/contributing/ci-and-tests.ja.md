@@ -4,7 +4,7 @@
 
 ← [ドキュメント目次](../README.ja.md)
 
-CI はローカルの `make` コマンドを忠実に反映しています。CI 固有の lint ロジックは存在せず、`make lint`・`make lint-node`・`make test-node`・`make test-bats` が契約であり、CI はそれを呼び出すだけです。4 つを合わせるとローカルの `make test` と同じ範囲を実行します。
+CI はローカルの `make` コマンドを忠実に反映しています。CI 固有の lint ロジックは存在せず、`make lint`・`make lint-node`・`make lint-console`・`make test-node`・`make test-bats` が契約であり、CI はそれを呼び出すだけです。5 つを合わせるとローカルの `make test` と同じ範囲を実行します。
 
 ---
 
@@ -14,13 +14,13 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 
 | ジョブ | コマンド | ランナー |
 |---|---|---|
-| `lint` | `make lint` の後に `make lint-node` | `ubuntu-latest` |
+| `lint` | `make lint`、`make lint-node`、`make lint-console` の順 | `ubuntu-latest` |
 | `test` | `make test-node` の後に `make test-bats` | `ubuntu-latest`（needs: lint） |
 | `sync-ghq-completion` | `make sync-ghq-completion`（ベンダリングした `_ghq` が変更された場合は自動コミット） | `ubuntu-latest`、同一リポジトリの PR のみ |
 
-両ジョブとも、シェル系ツールを mise の pin から解決します。`run` ステップが `home/dot_config/mise/config.toml` からバージョンを読み取り、インストールステップがその GitHub リリースを取得し、インストール済みバイナリが pin どおりのバージョンを報告することを検証します。lint ジョブは shellcheck と shfmt について、test ジョブは shellcheck について（`tests/shellcheck.bats` と `tests/brew_launcher.bats` が直接実行するため）これを行います。`zsh` は両ジョブとも、`bats` と `jq` は test ジョブで、引き続き `apt-get` から入ります。Node.js も同じ「pin を読む」パターンで `actions/setup-node` に渡されます。したがって、これらのバージョンの宣言箇所は mise の pin ただ 1 つです。#475 以前は lint ジョブが shellcheck を一切インストールせず、ランナーイメージ同梱のビルドで暗黙に検査していたため、同じ差分でもローカルの `make lint` が通って CI が落ちることがありました。ワークフローにバージョン literal が復活しないよう、現在は `tests/files.bats` がガードしています。他に CI 固有のロジックは存在しません — `Makefile` が単一情報源です。
+両ジョブとも、シェル系ツールを mise の pin から解決します。`run` ステップが `home/dot_config/mise/config.toml` からバージョンを読み取り、インストールステップがその GitHub リリースを取得し、インストール済みバイナリが pin どおりのバージョンを報告することを検証します。lint ジョブは shellcheck と shfmt について、test ジョブは shellcheck について（`tests/shellcheck.bats` と `tests/brew_launcher.bats` が直接実行するため）これを行います。deno については両ジョブで行います — lint ジョブは `make lint-console` を実行し、test ジョブは同ターゲットを直接駆動する `tests/console_lint.bats` を実行するためです。ここで deno を入れるのは console ガードの linter としてのみであり、`make lint-deno` / `make test-deno` は引き続き opt-in で CI では実行されません。`zsh` は両ジョブとも、`bats` と `jq` は test ジョブで、引き続き `apt-get` から入ります。Node.js も同じ「pin を読む」パターンで `actions/setup-node` に渡されます。したがって、これらのバージョンの宣言箇所は mise の pin ただ 1 つです。#475 以前は lint ジョブが shellcheck を一切インストールせず、ランナーイメージ同梱のビルドで暗黙に検査していたため、同じ差分でもローカルの `make lint` が通って CI が落ちることがありました。ワークフローにバージョン literal が復活しないよう、現在は `tests/files.bats` がガードしています。他に CI 固有のロジックは存在しません — `Makefile` が単一情報源です。
 
-コントリビューターはプッシュ前にローカルで `make test` を実行してください — CI が実行するのと同じ 4 つのターゲットを連鎖させます。
+コントリビューターはプッシュ前にローカルで `make test` を実行してください — CI が実行するのと同じ 5 つのターゲットを連鎖させます。
 
 ### トリガー
 
@@ -57,6 +57,12 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 ### `tests/zsh_syntax.bats`
 
 各 zsh モジュールに個別に `zsh -n` を実行します。対象モジュール：`aliases.zsh.tmpl`（`sed '/{{/d'` 後）、`git.zsh`、`docker.zsh`、`claude.zsh`、`codex.zsh`、`functions.zsh`、`completions.zsh`、`wtp.zsh`、`ghq.zsh`。
+
+### `tests/console_lint.bats`
+
+#520 で退役した `stop:check-console-log` hook の移送先である `make lint-console`（#522）の振る舞いテストです。ターゲットの `CONSOLE_LINT_ROOTS` 変数を上書きして `BATS_TEST_TMPDIR` の fixture ツリーへ検査対象を向けることで、リポジトリに違反を植え込まずに失敗ケースを検証します。カバー範囲：素の `console.log` は失敗する；`console.error` / `console.warn` も失敗する（ルールは `console.log` 単独ではなく `console.*`）；`// deno-lint-ignore no-console` コメントは自身の行だけを除外し、同じファイル内の 2 つ目の呼び出しは除外しない；`process.stdout.write` は通る；文字列リテラル内の `console.log` は通る（テキストではなく AST ベースの検査であること）；`.ts` と素の `.js` の双方が任意の深さで走査される；空のツリーは黙って成功せず失敗する；リポジトリ本体は通る；ターゲットが `make test` に配線されている；CI の両ジョブがバージョンを重複させずに mise の pin から deno を解決している。
+
+これらはテキストへのアサーションではなくターゲット自体を駆動します。存在はするが何も検出しなくなったガードは、テキスト的なアサーションをすべて通過してしまい、それがこの issue の発端となった失敗モードだからです。deno が無いときに skip しないのも同じ理由です。
 
 ### `tests/statusline.bats`
 

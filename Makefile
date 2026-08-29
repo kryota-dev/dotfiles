@@ -1,4 +1,4 @@
-.PHONY: all help lint fmt test test-bats lint-node test-node lint-deno test-deno benchmark sync-ghq-completion
+.PHONY: all help lint fmt test test-bats lint-node lint-console test-node lint-deno test-deno benchmark sync-ghq-completion
 
 # Default target — show help (avoid accidental mutation of $HOME via apply)
 all: help
@@ -43,19 +43,53 @@ fmt:
 # ========================================
 
 ## Run all checks (lint + Bats tests)
-test: lint lint-node test-node test-bats
+test: lint lint-node lint-console test-node test-bats
 
 ## Run Bats tests
 test-bats:
 	@bats tests/*.bats
 
-## Syntax-check Node.js modules and tests
 # Globbed rather than enumerated: a new home/dot_local/lib/<tool>/ or tests/<tool>.test.mjs
 # must not need a Makefile edit to be linted (the literal list silently skipped new files).
+#
+# The `## ` line has to sit directly above the target: the help target's awk clears the
+# pending description on any line that is not a `## ` comment, so a prose block between the
+# two silently drops the target from `make help` (which is where lint-node had gone).
+## Syntax-check Node.js modules and tests
 lint-node:
 	@for f in home/dot_local/lib/*/*.mjs tests/*.test.mjs; do \
 		node --check "$$f" || exit 1; \
 	done
+
+# Scan roots for lint-console. Overridable so tests/console_lint.bats can aim the target at a
+# fixture tree and assert the failing cases without planting a violation in the repo.
+CONSOLE_LINT_ROOTS ?= home tests
+
+# Replaces the stop:check-console-log hook retired in #520, which left the house standard
+# ("no leftover debug output") with no machine guard at all (#522).
+#
+# deno lint, not a grep: the rule is AST-based, so `console.log` inside a string literal or a
+# comment is not a violation (tests/agent_improvement.test.mjs plants executable source as a
+# string). `--rules-tags=` clears the tag-driven defaults so no-console is the only rule that
+# runs -- these are mostly Node modules deno does not otherwise own, and the rest of its
+# recommended set would fire on them. `--no-config` keeps a deno.json above the checkout from
+# changing what gets enforced.
+#
+# Globbed like lint-node, but at any depth and including .js: lint-node's depth-1 glob
+# silently misses the two .js files outside home/dot_local/lib/*/.
+#
+# Unlike lint-deno this is deliberately not best-effort. It is part of `test`, and a guard
+# that skips itself when its tool is missing is the failure mode #522 was filed about, so an
+# absent deno and an empty file list are both fatal.
+## Reject console.* calls in Node and Deno sources (opt out per line, never per file)
+lint-console:
+	@command -v deno >/dev/null 2>&1 || { echo "lint-console: deno not found; run 'mise install deno'. This guard does not skip itself." >&2; exit 1; }
+	@files=$$(find $(CONSOLE_LINT_ROOTS) -type f \( -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.mts' -o -name '*.cts' -o -name '*.ts' -o -name '*.jsx' -o -name '*.tsx' \)); \
+	if [ -z "$$files" ]; then \
+		echo "lint-console: no JS/TS sources under '$(CONSOLE_LINT_ROOTS)' -- the glob regressed." >&2; \
+		exit 1; \
+	fi; \
+	deno lint --no-config --rules-tags= --rules-include=no-console $$files
 
 ## Run Node.js tests without invoking live provider credentials
 test-node:

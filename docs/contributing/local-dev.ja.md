@@ -17,9 +17,10 @@
 | `help`（デフォルト） | `## ` ドキュメントコメント行を `awk` でパースしてターゲット一覧を表示 |
 | `lint` | shellcheck + shfmt diff チェック + `zsh -n` 構文チェック（後述） |
 | `fmt` | `.sh` ファイルを `shfmt -w -i 2 -ci` でインプレース整形；`.sh.tmpl` は差分表示のみ |
-| `test` | `lint`、`lint-node`、`test-node`、`test-bats` の順 |
+| `test` | `lint`、`lint-node`、`lint-console`、`test-node`、`test-bats` の順 |
 | `test-bats` | `bats tests/*.bats` |
 | `lint-node` | frontier-harness module/test に対する `node --check` |
+| `lint-console` | `home/` と `tests/` 配下の全 JS/TS ソースに対し、`no-console` だけを有効にした `deno lint`（後述） |
 | `test-node` | live provider credential を使わない `node --test tests/frontier_harness.test.mjs` |
 | `benchmark` | `scripts/benchmark.sh`（コールドスタート + 10 回平均） |
 | `sync-ghq-completion` | mise でピンした ghq バージョンに対応する `_ghq` をアップストリームから取得してベンダリング |
@@ -74,6 +75,56 @@ shfmt -d -i 2 -ci
 - `home/dot_config/zsh/*.zsh` ファイル（すべて直接）
 - `home/dot_config/zsh/*.zsh.tmpl` ファイル（テンプレート行を除去した後）
 - `home/dot_config/zsh/completions/_ghq`
+
+---
+
+## console ガード
+
+`make lint-console` は「debug 出力を残さない」というハウスルールを機械的に担保するチェックです。
+#520 で退役した `stop:check-console-log` hook の移送先であり、その除去によってルールを強制する
+仕組みが失われていました（#522）。
+
+```
+deno lint --no-config --rules-tags= --rules-include=no-console
+```
+
+- **検査対象**: `home/` と `tests/` 配下の、任意の深さにある `.mjs`・`.cjs`・`.js`・`.mts`・
+  `.cts`・`.ts`・`.jsx`・`.tsx` すべて。glob が深さ 1 段で `.js` を含まない `lint-node` より
+  意図的に広く取っています。
+- **`grep` ではなく `deno lint` である理由**: ルールが AST ベースのため、文字列リテラルや
+  コメント中に書かれた `console.log` を違反として報告しません。
+  `tests/agent_improvement.test.mjs` は実行可能なソースを文字列として埋め込んでおり、
+  テキスト走査ではこれを誤検出します。
+- **1 ルールだけにしている理由**: `--rules-tags=` がタグ由来の既定ルールをすべて落とすため、
+  実行されるのは `no-console` だけになります。対象の多くは deno が本来所有しない Node モジュール
+  であり、推奨ルールセットの残りはそれらに対して発火してしまいます。`--no-config` は、
+  チェックアウトより上位にある `deno.json` が強制内容を変えるのを防ぎます。
+- **deno 不在を致命的にしている理由**: `lint-deno` と異なり、このターゲットはツールが無いときに
+  自分をスキップしません（`mise install deno`）。ツールが無いと自らを無効化するガードは、
+  そもそもこの検査が失われた経緯そのものです。検査対象が 0 件の場合も同じ理由で失敗させます —
+  何にもマッチしない glob が「違反なし」と読めてはなりません。
+
+### 行単位で除外する
+
+意図的な出力（CLI の利用者向け出力、サーバー側ログなど）は、`--` の後ろに理由を書いて
+行単位で除外します。
+
+```js
+// deno-lint-ignore no-console -- user-facing CLI output, not a debug leftover
+console.log(banner);
+```
+
+除外が行スコープなのは意図的で、同じファイル内の 2 つ目の `console.*` 呼び出しは依然として
+失敗します。ファイル単位の除外は提供していません — `// deno-lint-ignore-file` はそれ以降
+すべてに対してガードを無効化してしまうためです。
+
+ツリーの大半はそもそも除外を必要としません。`home/dot_local/lib/` 配下の CLI モジュールは
+既に `process.stdout.write` / `process.stderr.write` 経由で出力しています。ガードを有効化した
+時点でリポジトリに存在した除外は、ntfy dashboard のサーバー側エラーログ 1 件のみでした。
+
+`tests/console_lint.bats` は、テキストへのアサーションではなく、上書き可能な
+`CONSOLE_LINT_ROOTS` を使って fixture ツリーに対してターゲットを実行します。存在はするが
+何も検出しなくなったガードは、テキスト的なアサーションをすべて通過してしまうためです。
 
 ---
 
