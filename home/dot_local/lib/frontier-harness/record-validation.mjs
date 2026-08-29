@@ -89,6 +89,9 @@ export const TELEMETRY_RISK_MAX_ENTRIES = 16;
 
 // provider は providers.mjs の PROVIDER_COMMANDS が唯一の語彙。ここで再定義しない。
 export const TELEMETRY_PROVIDERS = new Set(Object.keys(PROVIDER_COMMANDS));
+// telemetry 列の制約であると同時に、**harness で唯一の effort 語彙**である。
+// adapter-contract.mjs の requireCapabilityTokens が実行前検査にも同じ Set を使うため、
+// ここを変えると adapter が受け付ける effort も変わる（2 つ目の語彙を作らないための共有）。
 export const TELEMETRY_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 
 // ---------------------------------------------------------------------------

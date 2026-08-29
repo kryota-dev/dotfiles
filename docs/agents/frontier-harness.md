@@ -166,6 +166,91 @@ starting a provider or arbitrary shell command. `clean` reports and removes
 expired raw records and expired aggregate telemetry on their own windows, and
 leaves approvals alone; use `--dry-run` to inspect its impact first.
 
+## Provider adapters
+
+The three CLIs are not interchangeable. Their non-interactive capabilities are asymmetric, so each
+provider gets its own adapter rather than one parameterised launcher:
+
+| | Claude Code | Codex | Antigravity |
+|---|---|---|---|
+| launch | `-p` with `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
+| resume | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
+| sandbox | settings JSON via `--settings`; no `--sandbox` flag exists | `--sandbox` on launch, `-c sandbox_mode="…"` on resume | not expressible: `--sandbox` does not stop file writes |
+| approval channel | external round trip | agent review | none |
+| success | `result` event, `is_error`, `permission_denials[]` | `turn.completed` and `error` events | **cannot be determined** from exit code and status alone |
+
+Adapters are pure: they build an invocation and interpret a process result. They never import
+Node's child-process API, which a test pins by reading their sources. `createAdapterExecutor`
+therefore requires an injected runner and ships **no default** — starting real processes belongs to
+the rollout promotion, not to this layer. The insertion point is the `executor` argument of
+`runWithRolloutGuard`, so a `shadow` rollout still never reaches a provider.
+
+An invocation carries a provider, an absolute executable path, an argv array, optional stdin, and
+its phase. It has no environment or credential field at all: authentication stays with each CLI's
+own launcher and keychain, and the harness never handles a token or a profile path.
+
+Everything that reaches argv is shape-checked first. A capability's model and effort go inside
+Codex's `-c key=value`, so a value carrying a quote or an equals sign could inject a different
+setting — `sandbox_mode` included. Resume identifiers, session ids, and prompt-tool names get the
+same treatment for a different reason: Codex takes its session id as a *positional* argument, so a
+value beginning with `-` lands where a flag would. Codex additionally allows only the flags this
+adapter itself emits, so a flag smuggled through any position fails the sandbox read-back rather
+than relying on a denylist that has to chase every new CLI flag.
+
+### The sandbox is sealed at construction
+
+Codex accepts `-s/--sandbox` when it starts a run and rejects it when it resumes one; the only
+sandbox-related flag `codex exec resume` accepts is the one that *weakens* containment. Writing that
+asymmetry by hand produces a resumed run that silently falls back to the configured default.
+
+Every invocation — launch or resume — is therefore built through `sealInvocation`, which reads the
+effective sandbox back out of the argv it has just produced and throws when it does not match what
+the caller asked for. A resume form that forgets the config override fails when it is built, not
+when somebody reviews it. `resume` also takes the sandbox policy as a required argument, so "resume
+without a policy" has no representation.
+
+The policy vocabulary is deliberately small: `read-only` and `workspace-write`, with no value
+meaning "no sandbox" — a resume path could otherwise fall into it — and no network axis, because the
+allowlist syntax has never been measured. Network containment is *not* uniform across providers, and
+the harness does not claim it is: Claude renders a strict allowlist in its settings blob and Codex
+leaves `workspace-write` networking off by default, both measured, but Antigravity's network default
+was never established and the adapter emits nothing that controls it.
+
+### Antigravity is implemented but stays read-only
+
+When Antigravity soft-denies a tool it cannot approve, it exits 0 with a `SUCCESS` status and an
+empty response, so a caller reading the exit code and status alone records work that never happened.
+This adapter therefore never reports success. It reports the failures it *can* determine — a
+non-zero exit, an explicit failure status — and returns *indeterminate* otherwise, which maps to a
+`failed` adapter run carrying a reason rather than inventing a new status value. Implementing a real
+success determination, from a non-empty response plus a stderr scan, is separate work.
+
+Its `--sandbox` flag does not stop file writes; it only breaks shell execution. And
+`--dangerously-skip-permissions` removes the one boundary it does have. The adapter emits neither,
+refuses to build a write-capable invocation, and declares its write access `unenforceable`.
+
+### What an adapter checks before it runs
+
+The router decides availability in provider-independent terms. The adapter re-checks the exact model
+ID against the same discovery list immediately before running — the readiness cache can expire
+between routing and execution — and adds the checks the router cannot make:
+
+- `model` and `effort` must be safe tokens. Codex embeds both inside `-c key=value`, so a value
+  carrying a quote or an equals sign could inject a different setting, `sandbox_mode` included.
+- `effort` must belong to the vocabulary the harness already ships; adapters do not declare a
+  second one. Per-provider accepted values have not been measured, so no per-provider set is
+  claimed either.
+- The capability's account scope must match the resolved scope. This is the router's rule too, and
+  dropping it here would make the second line of defence asymmetric: the shipped registry really
+  does declare a personal-only capability, and an `r06` session must never fall back to it.
+- A write-capable run is refused when the adapter cannot enforce containment.
+
+A refusal is a returned verdict rather than an exception: the runner is never called, the result
+records that the provider did not run, and re-routing stays the caller's decision. Availability may
+be passed as a function so the check reads it when the run happens rather than when the executor was
+built — a value would freeze it at construction and quietly turn "re-checked before running" into a
+convention. Nothing in this layer changes the capability registry schema.
+
 ## Worktrees and rollout
 
 `pr-workflow` owns the primary worktree and PR branch. When a non-shadow route
@@ -177,4 +262,6 @@ but merge and other irreversible external actions always remain with the user.
 The promotion path is shadow → pilot → default. A `--legacy` rollback flag is
 planned for that promotion work and is not implemented yet. Until then the
 rollout stays on `shadow`, which the CLI enforces as an explicit guard rather
-than relying on the provider adapter being absent.
+than relying on the provider adapter being absent. That guard is now the only thing standing
+between a route and a provider, since the adapters exist; they ship no default runner, so promotion
+has to wire one deliberately.
