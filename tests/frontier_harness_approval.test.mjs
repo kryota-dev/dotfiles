@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -1350,4 +1351,87 @@ test("the approvals directory falls back to the state root layout", (context) =>
     ),
   );
   assert.equal(stored.id, request.id);
+});
+
+// ---------------------------------------------------------------------------
+// 後始末（#537: 質問文と選択肢を wave の終了後に残さない）
+// ---------------------------------------------------------------------------
+
+test("purging drops decided requests and their answers but keeps pending ones", (context) => {
+  const { queue } = createQueueFixture(context);
+  const decided = createPendingRequest(queue);
+  const pending = createPendingRequest(queue, { toolUseId: "toolu_02" });
+
+  queue.writeAnswer(decided.id, answerRecord(decided.id));
+  queue.recordOutcome(decided.id, {
+    status: "allowed",
+    behavior: "allow",
+    decidedBy: "user",
+  });
+
+  const result = queue.purgeDecided();
+  assert.equal(result.purged, 1);
+  assert.equal(result.pending, 1);
+  assert.deepEqual(result.skipped, []);
+
+  // 決着済みは要求も回答も消える。pending はどちらも残る。
+  assert.throws(() => queue.readRequest(decided.id), /does not exist/);
+  assert.equal(queue.hasAnswer(decided.id), false);
+  assert.equal(queue.readRequest(pending.id).status, "pending");
+  assert.equal(queue.listRequests().requests.length, 1);
+});
+
+test("purging leaves a request it could not read", (context) => {
+  const { directory, queue } = createQueueFixture(context);
+  const decided = createPendingRequest(queue);
+  queue.recordOutcome(decided.id, {
+    status: "denied",
+    behavior: "deny",
+    decidedBy: "user",
+  });
+  // 壊れた要求ファイル。pending でないことを確認できないものを消すのは fail-open。
+  const brokenId = `appreq_${"a".repeat(32)}`;
+  writeFileSync(path.join(directory, `${brokenId}.request.json`), "{ not json");
+
+  const result = queue.purgeDecided();
+  assert.equal(result.purged, 1);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(existsSync(path.join(directory, `${brokenId}.request.json`)), true);
+});
+
+test("fh approvals --purge reports what it removed without listing content", (context) => {
+  const { directory, queue } = createQueueFixture(context);
+  const decided = createPendingRequest(queue);
+  queue.recordOutcome(decided.id, {
+    status: "allowed",
+    behavior: "allow",
+    decidedBy: "user",
+  });
+
+  const output = [];
+  assert.equal(
+    runCli(["approvals", "--purge", "--approvals-dir", directory, "--json"], {
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  const report = JSON.parse(output.pop());
+  assert.deepEqual(report, { purged: 1, pending: 0, skipped: [] });
+  // 一覧ではないので、要求の中身（コマンド文字列）は出力に現れない。
+  assert.equal(output.join("").includes("git merge"), false);
+});
+
+test("AskUserQuestion escalates no matter what the rules say", () => {
+  // approver は一次ソースの裏取りができないので、選択肢への回答を代理しない。
+  // 経路が tmux から承認チャネルへ移っても、この不変条件は動かない（#529 PRD §6 ガード 3）。
+  const permissive = compileApprovalRules({
+    defaultDecision: "allow",
+    additionalRules: [],
+  });
+  const verdict = classifyToolCall(
+    { toolName: "AskUserQuestion", input: { questions: [] } },
+    permissive,
+  );
+  assert.equal(verdict.decision, "escalate");
+  assert.equal(verdict.rule.risk, "user-question");
 });
