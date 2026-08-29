@@ -7,8 +7,11 @@
 `frontier-harness`（`fh`）は、進化中の `pr-workflow` の背後で task を capability へ route し、
 evidence を記録するモデル非依存の実行レイヤーです。model の自己申告よりも決定論的な検証を上位に置きます。
 
-初期 rollout は **shadow** です。route、verification、review の計画だけを保存し、provider による
-書き込み実行は開始しません。既存の `pr-workflow` を保ったまま router の証拠を蓄積するためです。
+rollout は **pilot** で、その影響範囲は意図的に狭く取っています。`run` / `verify` / `review` は
+今も route、verification、review の計画だけを保存します —— runner を注入しないので、rollout が
+何であれ provider には到達しません。実プロセスを起こす唯一のコマンドは `fh session` で、
+wave orchestrator が駆動する子セッションを起動します。rollout を `shadow` に戻せばその経路が
+止まるので、この設定値はラベルではなく非常停止レバーです。
 
 ## 導入と readiness
 
@@ -196,15 +199,22 @@ responder は 2 系統が交換可能で、queue はどちらが使われてい�
 
 ```bash
 fh approvals --json                                    # 何が待っていて、なぜ待っているか
+fh approvals --all --json                              # 決着済みも含める
 fh approve --request <id> --allow                      # 通す
 fh approve --request <id> --deny --message "..."       # 理由を model へ返して拒否する
 fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUserQuestion
+fh approvals --purge --json                            # wave が終わったら決着済みを捨てる
 ```
 
 通常は wave orchestrator が仲介する（queue を読み、user に問い、回答を書き戻す）が、user が同じ
 コマンドで直接答えることもできる。これは重要で、orchestrator が落ちても pending な承認は決着できる。
 `AskUserQuestion` への回答は提示された選択肢に対して**両側**で検証されるため、打ち間違いや手編集した
 ファイル経由で「user が表明していない判断」が model に届くことはない。
+
+要求は質問文と選択肢を保持する（答えるために必要だから）。それを保持する場所は他に無いので、
+終わった wave がそのテキストを持ち続けないための手段が `fh approvals --purge` である。終端状態に
+達した要求とその回答を削除し、**pending は残す**。読めなかった要求も残す —— 状態を確認できていない
+記録を消すのは、まだ待っている子を黙って捨てることになる。
 
 ### 待機の時間
 
@@ -336,9 +346,50 @@ task は必要なものを自分で宣言します。実行の途中で人が判
 `requiresApproval`、ファイルを書き換える task には `requiresWrite` を付けます。どちらも既定は false で、
 選ばれた provider の宣言と突き合わされます（後述の「承認チャネルと書き込み可否が route を塞ぐ」）。
 
-shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
-記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
+`run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を記録するだけです。
+これは `shadow` のときだけでなく**どの rollout でも**成り立ちます —— `runWithRolloutGuard` に runner を
+渡さないからです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
 approvals には手を触れません。`--dry-run` で影響を確認できます。
+
+## 子セッション
+
+`fh session` は provider プロセスを起こす唯一のコマンドです。wave orchestrator のためにあり、
+その子は「user に問える」必要のある `pr-workflow` セッションそのものです。
+
+```bash
+fh session launch --worktree <abs> --prompt-file <abs> --label feat-537-child
+fh session resume --worktree <abs> --prompt-file <abs> --resume-key <session id>
+```
+
+**router を通しません。** `chooseRoute` は `executor.default` を選びますが、その provider は
+外部の承認チャネルを宣言していないため、人の判断が要る task はすべて escalation になり子が 1 本も
+起動しません。そこへ claude fallback を足すのは routing の意味論の変更にあたります。子の model と
+effort は `model-fitness-check` の contract が決めるものなので、capability を名前で指定します
+（`--capability`、既定 `session.child`）。それ以外は従来どおりです: capability registry が
+provider / model / effort を供給し、repository capability manifest がその capability を承認して
+いなければ gap を queue して exit 2 で終わり、`checkCapabilityExecutable` が account scope・
+model discovery・書き込み封じ込めを再検査し、rollout guard が実行の可否を決めます。
+
+承認チャネルは 3 層で確認します。いずれも警告ではなく拒否します。
+
+1. **構造。** `sealInvocation` は `--permission-prompt-tool` と inline の `--mcp-config` server
+   ちょうど 1 つを欠いた argv を組み立てません。配線漏れではプロセスが 1 つも起きません。
+2. **起動前。** 宣言した承認 server を 1 度起こし、MCP handshake（`initialize` → `tools/list`）を
+   通します。`approve` ツールが公開されなければ —— 存在しない、読めない、遅い、別のプログラムを
+   指している —— 子を起こしません。
+3. **最初の init イベント。** 子の構造化出力を stream として読み、`system/init` に
+   `readInitHealth` を当てます。`AskUserQuestion` が無い、承認 server が接続していない、
+   MCP / plugin のエラーを報告している、のいずれかなら**その場で子を終了**し、run を failed として
+   記録します。完了後の出力ではなく stream を読むことが、これを「起動時検査」として成立させます ——
+   gate が黙って消えた子は最初の 1 秒で止まり、1 タスク分の作業を終えてから診断されることがありません。
+
+init イベントが来ないまま終わった実行も同じ扱いです。検査を読み取れないことは、検査を通ったことの
+証拠ではありません。
+
+記録には会話内容が残りません。`adapter_runs` は設計上 prompt や argv の列を持たず、evidence の claim は
+固定語彙 ＋ resume key ＋ 健全性の判定 ＋ 拒否されたツールの**名前**だけです。prompt は引数ではなく
+ファイルから読むので `fh` 自身の `ps` エントリにも載らず、子の stdout はメモリ上でのみ解釈して
+ディスクへ書かず、stderr へ出るのは liveness の heartbeat としての各イベントの型名だけです。
 
 ## provider adapter
 
@@ -356,9 +407,12 @@ approvals には手を触れません。`--dry-run` で影響を確認できま�
 
 adapter は純粋です。invocation を組み立て、プロセス結果を解釈するだけで、Node の子プロセス API を
 import しません（テストがソースを走査して固定しています）。したがって `createAdapterExecutor` は
-runner の注入を必須とし、**既定の runner を持ちません** —— 実プロセスの起動はこの層ではなく
-rollout の昇格作業に属します。挿入点は `runWithRolloutGuard` の `executor` 引数なので、
-`shadow` の間は route が provider に到達しません。
+runner の注入を必須とし、**既定の runner を持ちません** —— 実プロセスの起動はこの層の外に属します。
+唯一の注入元は `fh session` で、runner の実体は `child-runner.mjs` にあります。挿入点は
+`runWithRolloutGuard` の `executor` 引数なので、`shadow` の間は route が provider に到達しません。
+この runner は非同期です。承認チャネルが消えた子を**作業を始める前に**止める手段が、最初の
+`system/init` イベントを読むことしか無いからです。`createAdapterExecutor` は runner が Promise を
+返したときだけ Promise を返すので、他の呼び出し側が依存している同期契約は変わりません。
 
 invocation が持つのは provider、実行ファイルの絶対パス、argv 配列、任意の stdin、そして phase だけです。
 環境変数や credential の欄はそもそも存在しません。認証は各 CLI 自身のランチャーと keychain が持ち、
@@ -514,8 +568,12 @@ primary worktree と PR branch は `pr-workflow` が所有します。将来の 
 verified かつ clean apply 可能な candidate は primary へ反映できますが、merge と不可逆な外部操作は
 常に user が行います。
 
-promotion は shadow → pilot → default です。`--legacy` による rollback flag はその promotion 作業で
-実装する予定であり、現時点では未実装です。それまで rollout は `shadow` のままで、CLI 側が
-（provider adapter が未実装であることに依存せず）明示的なガードとして shadow を強制します。
-adapter が実装された今、route と provider の間に立っているのはこのガードだけです。adapter は
-既定の runner を持たないので、昇格作業は runner の配線を明示的に行う必要があります。
+promotion は shadow → pilot → default です。rollout は現在 `pilot` で、CLI 側が
+（provider adapter が未実装であることに依存せず）明示的なガードとしてこれを強制します。
+route と provider の間に立っているのはこのガードだけであり、`pilot` が開けている経路は
+ちょうど 1 つ —— 子セッションの起動役である `fh session` —— です。他のコマンドは今も runner を
+渡さないので、昇格が広げたのは設定値ではなく「意図して足した 1 コマンド」の分だけです。
+
+rollback は `rollout` を `shadow` へ書き戻すことです。ガードはプロセスが起きる前に
+`executed: false` を返します。`default` への昇格、`--legacy` による rollback flag、次の昇格を
+正当化するテレメトリの定義は、いずれも未着手です。
