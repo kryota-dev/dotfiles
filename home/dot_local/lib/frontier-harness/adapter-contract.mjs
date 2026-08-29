@@ -48,6 +48,7 @@ const ADAPTER_METHODS = Object.freeze([
   "launch",
   "resume",
   "readEffectiveSandbox",
+  "readEffectiveConfigIsolation",
   "interpret",
 ]);
 
@@ -125,6 +126,36 @@ export function requireSafeArgumentValue(value, label) {
   return value;
 }
 
+// argv を「フラグとその値の対」として走査する。`flagTable` は `{ "--flag": true }`（true =
+// 値を 1 つ取る）の形で、**フラグ位置に現れてよいトークンの allowlist を兼ねる**。
+//
+// denylist（危険フラグの列挙）は CLI に新しいフラグが増えるたび追随が要り、追随漏れがそのまま
+// 素通りになる。表に無いトークンがフラグ位置に現れたら null を返し、呼び出し側を fail-closed に
+// 倒す形にすると、その追随が要らなくなる。値を消費するので、`-` で始まるプロンプトを渡しても
+// フラグと誤読しない。
+//
+// vendor 固有なのは**表の中身**だけなので、走査そのものはここに置く。位置引数を取る provider
+// （Codex の prompt / session id）はこの形に当てはまらないため、自前の allowlist を使う。
+export function walkFlagPairs(argv, flagTable) {
+  if (!Array.isArray(argv)) return null;
+  const values = new Map();
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (typeof token !== "string" || !Object.hasOwn(flagTable, token)) return null;
+    const takesValue = flagTable[token];
+    let value = null;
+    if (takesValue) {
+      value = argv[index + 1];
+      if (typeof value !== "string") return null;
+      index += 1;
+    }
+    const existing = values.get(token);
+    if (existing) existing.push(value);
+    else values.set(token, [value]);
+  }
+  return values;
+}
+
 // 起動形・再開形のどちらの入口でも共通に要る値。adapter 固有の追加値（session id や
 // permission prompt tool）は各 adapter が自分で検証する。
 export function requireInvocationRequest(input, label) {
@@ -142,6 +173,14 @@ export function requireInvocationRequest(input, label) {
 // **要件 2 の中核**: 生成した argv から実効サンドボックスを読み戻し、要求した policy と
 // 一致しなければ throw する。「初回だけ pin して再開で弱まる」退行は、テストを待たずに
 // その invocation を作った瞬間に失敗する。
+//
+// 同じ封印を**設定源**にも掛ける（#538）。子セッションは issue 由来のブランチを含む作業ツリーの
+// 中で起動するので、`.claude/settings.json` の hooks や `.mcp.json` の server は信頼境界の外から
+// 来る。非対話モードには対話モードの信頼確認ダイアログが無く、壊れた設定は黙って無視され、
+// 起動直後の hook はセッション情報が読める時点より前に走る（#526 §1.6 / R2）。よって
+// 「起動後にログを見て異常を検出する」では手遅れであり、遮断は起動フラグで行うほかない。
+// readEffectiveConfigIsolation を**既定値なしの必須引数**にするのは、フラグの付与を任意にする
+// 経路（reader を渡さない adapter）を残すと、その adapter が黙って素通りするからである。
 export function sealInvocation({
   provider,
   executable,
@@ -150,6 +189,7 @@ export function sealInvocation({
   phase,
   sandbox,
   readEffectiveSandbox,
+  readEffectiveConfigIsolation,
 }) {
   requireToken(provider, "invocation provider");
   requireEnum(phase, INVOCATION_PHASES, "invocation phase");
@@ -169,6 +209,9 @@ export function sealInvocation({
   if (typeof readEffectiveSandbox !== "function") {
     throw new TypeError("invocation requires a readEffectiveSandbox reader");
   }
+  if (typeof readEffectiveConfigIsolation !== "function") {
+    throw new TypeError("invocation requires a readEffectiveConfigIsolation reader");
+  }
   const policy = normalizeSandboxPolicy(sandbox, `${provider} ${phase} sandbox`);
 
   // credential・プロファイルパス・環境変数を運ぶキーを構造として持たない。
@@ -186,6 +229,13 @@ export function sealInvocation({
     throw new Error(
       `${provider} ${phase} invocation would run under ${describeSandboxPolicy(effective)} ` +
         `instead of the requested ${describeSandboxPolicy(policy)}`,
+    );
+  }
+  // 真偽以外（undefined を返す reader、truthy な非 boolean）を成立とみなさない。
+  // sandbox 側で null を一致とみなさないのと同じ理由で、読み取れないことは遮断できたことではない。
+  if (readEffectiveConfigIsolation(invocation) !== true) {
+    throw new Error(
+      `${provider} ${phase} invocation would let the working tree configure the child session`,
     );
   }
   return invocation;

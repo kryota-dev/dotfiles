@@ -268,6 +268,7 @@ approvals には手を触れません。`--dry-run` で影響を確認できま�
 | 起動 | `-p` ＋ `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
 | 再開 | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
 | サンドボックス | `--settings` の設定 JSON。`--sandbox` フラグは存在しない | 起動は `--sandbox`、再開は `-c sandbox_mode="…"` | 表現できない（`--sandbox` はファイル書き込みを止めない） |
+| 作業ツリー由来の設定 | `--setting-sources user` と `--strict-mcp-config` で遮断 | 設定源を足すフラグを出さない（設定は `$CODEX_HOME` 由来） | 設定源を足すフラグを出さない（暗黙の探索は未実測） |
 | 承認チャネル | 外部への往復が可能 | エージェントによるレビュー | 無し |
 | 成功判定 | `result` イベント / `is_error` / `permission_denials[]` | `turn.completed` と `error` イベント | 終了コードと status だけでは**判定できない** |
 
@@ -306,6 +307,43 @@ policy の語彙は意図的に小さくしてあります。`read-only` と `wo
 **ネットワークの実効性は provider ごとに異なり、harness はそれを一律とは主張しません**。
 Claude は設定 JSON の strict allowlist、Codex は `workspace-write` の既定 off（いずれも実測）ですが、
 **Antigravity のネットワーク既定は確認されておらず、adapter もそれを制御する argv を出しません**。
+
+### 作業ツリーは子セッションを設定できない
+
+子セッションは、issue 由来のブランチをチェックアウトした worktree の中で走ります。つまり
+`.claude/settings.json`・`.claude/settings.local.json`・`.mcp.json` は、信頼境界の外から届きます。
+対話モードの CLI はフォルダを信頼する前に確認しますが、`-p` は確認しません。加えて、検証に失敗した
+設定ファイルを何も言わずに無視し、セッション最初の hook は構造化イベントが読める時点より前に走ります。
+出力を見て問題を検出するのは構造上つねに手遅れなので、遮断は起動フラグで行います。
+
+Claude の invocation はすべて `--setting-sources user` と `--strict-mcp-config` を持ち、
+`sealInvocation` がそれをサンドボックスと同じやり方で読み戻します。`readEffectiveConfigIsolation` は
+既定値を持たない必須引数で、reader が `true` を返さない invocation は返されません。フラグを外すのは
+「うっかりできる間違い」ではなく、**その形自体が存在しない**ということです。例外リストも、信頼済み
+worktree の台帳も持ちません。台帳はそれ自体が新しい信頼境界になり、改竄検知が別途必要になるからです。
+worktree の hook や skill が本当に要る作業は、対話セッションで行います。
+
+検査と説明は 1 つの導出から作るので、両者が食い違うことがありません。`configSourcesFor` は argv を
+「子が読む設定ファイルの集合」へ変換し —— `--setting-sources` が選ぶ user / project / local の設定
+ファイルと、`--strict-mcp-config` が抑止する project の `.mcp.json` です —— isolation の reader は
+そのどれもが作業ツリーの中に無いことを確認します。テストは一時 worktree に本物の敵対的ファイルを
+書き出して導出がそれらを含まないことを確かめ、negative control は 2 つのフラグを外すと同じ 3 ファイルが
+戻ってくることを確かめます。後者があるので、前者は自分自身の言い換えになりません。argv の走査が
+解釈できないもの —— 未知のフラグ、重複した `--setting-sources`、inline JSON のはずが渡されたパス ——
+はすべて「全設定源が有効」に解決され、fail-closed になります。
+
+承認チャネルはその例外ではなく、許可リストとして表現します。`--strict-mcp-config` は `--mcp-config` が
+名指しした server しか通さないので、宣言せずに `--permission-prompt-tool` だけを配線すると、prompt tool の
+参照先が存在しない子ができあがります —— これは配線しない場合とまったく同じ「gate が静かに消える」失敗です。
+そのため adapter は prompt tool と承認 server を**両方揃えるか、両方持たないか**しか受け付けず、server は
+inline JSON 文字列でちょうど 1 つだけ宣言し（ファイルパスは作業ツリーから差し替えられます）、その server を
+指していない prompt tool を拒否します。宣言が運ぶのはコマンドと引数だけで、env ブロックは運びません。
+
+`readInitHealth` は `system/init` イベントを読み、prompt tool を配線したときに `AskUserQuestion` が
+存在するか、宣言した承認 server が接続したか、子が MCP / plugin のエラーを報告したかを返します。
+**これは二次的な検査であって、境界ではありません。** 設定ミスの検出には有効ですが、エラーを出さずに
+接続して応答するものは素通りしますし、起動時に走る hook はこのイベントが読める時点で既に走り終えています。
+実際の起動シーケンスへ配線するのは別の作業です。
 
 ### Antigravity は実装するが read-only に留める
 

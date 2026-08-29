@@ -3,6 +3,7 @@ import {
   requireInvocationRequest,
   requireSafeArgumentValue,
   sealInvocation,
+  walkFlagPairs,
 } from "./adapter-contract.mjs";
 
 // Antigravity CLI（`agy`）の headless 実行。
@@ -37,6 +38,26 @@ function readEffectiveSandbox(invocation) {
   if (FORBIDDEN_FLAGS.some((flag) => argv.includes(flag))) return null;
   // 封じ込めは既定の権限ポリシー層だけであり、それが成立するのは read-only 用途に限る。
   return { mode: "read-only" };
+}
+
+// この adapter が出してよいフラグと、それが値を取るかどうか（walkFlagPairs の allowlist）。
+const ANTIGRAVITY_FLAGS = Object.freeze({
+  "-p": true,
+  "--output-format": true,
+  "--model": true,
+  "--effort": true,
+  "--conversation": true,
+});
+
+// argv が作業ツリー由来の設定源を有効にしていないか（#538）。この adapter は設定ファイルを指す
+// フラグを 1 つも出さないので、表に無いトークンが argv に現れないことがそのまま判定になる。
+//
+// **この reader が答えるのは「argv が作業ツリー由来の設定源を有効にしていないか」であって、
+// vendor が暗黙に探索するものの有無ではない**。`agy` が workspace 配下の設定を自動で読むかは
+// #526 でも実測しておらず、ここでは断定しない。書き込みを伴う実行に使わない
+// （writeAccess: unenforceable）ことが、その未確定を抱えたままでいられる前提である。
+function readEffectiveConfigIsolation(invocation) {
+  return walkFlagPairs(invocation?.argv, ANTIGRAVITY_FLAGS) !== null;
 }
 
 function requireReadOnly(sandbox, phase) {
@@ -75,6 +96,7 @@ function seal({ request, phase, conversationId }) {
     phase,
     sandbox,
     readEffectiveSandbox,
+    readEffectiveConfigIsolation,
   });
 }
 
@@ -162,5 +184,6 @@ export const antigravityAdapter = Object.freeze({
   launch,
   resume,
   readEffectiveSandbox,
+  readEffectiveConfigIsolation,
   interpret,
 });
