@@ -68,7 +68,34 @@ export const SANDBOX_ALLOWED_DOMAINS = Object.freeze([
   // Go: go.mod 群に GOPROXY 上書きが無い ＝ 既定の module proxy と checksum db。
   "proxy.golang.org",
   "sum.golang.org",
+  // codex（`multi-review` の多様性フロアが Codex leg を要求する）。実測で必要だったのはこの 2 件
+  // だけで、`api.openai.com` などの OpenAI 系は不要だった。apex と subdomain の両方が要る
+  // ——`*.chatgpt.com` は `chatgpt.com` にマッチしない（実測。github の 2 行と同じ理由）。
+  "chatgpt.com",
+  "*.chatgpt.com",
 ]);
+
+// codex の状態ディレクトリ。**account ごとに分かれる。**
+//
+// ランチャー（`home/dot_local/launchers/codex`）が `CLAUDE_CONFIG_DIR` から `CODEX_HOME` を
+// 導出する（`*.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）。子は親の
+// `CLAUDE_CONFIG_DIR` を継承するので、子の codex home も account で決まる。両方を開けると
+// personal の子が work account の codex 状態へ書けてしまい、profile 分離が意味を失う。
+//
+// suffix の対応は `cli.mjs` の `resolveAccountScope` が持つ表と同じものである（振る舞いの
+// SSOT はランチャー）。**scope が不明なときは何も開けない** —— 推測で開くと、開いた先が
+// 間違っていても codex は動いてしまい、どちらの account を汚したかが分からなくなる。
+const CODEX_HOME_SUFFIX_BY_SCOPE = Object.freeze({
+  personal: ".codex",
+  r06: ".codex-r06",
+});
+
+// 子の codex が書き込む必要のあるパスを返す。scope が未知なら null（＝許可を出さない）。
+export function codexHomeFor(accountScope, home) {
+  if (typeof home !== "string" || home.length === 0) return null;
+  if (!Object.hasOwn(CODEX_HOME_SUFFIX_BY_SCOPE, accountScope)) return null;
+  return path.join(home, CODEX_HOME_SUFFIX_BY_SCOPE[accountScope]);
+}
 // #526 §1.6［原文］: `--bare` を付けない `-p` は、信頼していないフォルダでも repository の
 // `.mcp.json` の server に接続する。
 const PROJECT_MCP_FILE = ".mcp.json";
@@ -112,9 +139,25 @@ const USER_SETTING_SOURCE = "user";
 // - allowUnsandboxedCommands: 失敗コマンドの sandbox 外リトライを許さない。
 // - network.strictAllowlist: ホスト名の許可リストを厳格化する。許可ドメインは指定しない
 //   （許可リストの記法は実測していないので、閉じた状態だけを描画する）。
-function sandboxSettings() {
+function sandboxSettings(codexHome) {
+  // codex は `~/.codex` 直下の sqlite（goals / logs）を更新する。書けないと
+  // `failed to initialize in-process app-server client: Operation not permitted` で落ちる
+  // ——これは IPC ではなくファイル書き込みの拒否である（実測）。
+  //
+  // 同じディレクトリに `auth.json`（0600・認証情報）が同居するので、**そこだけ denyWrite で
+  // 守る**。deny は wider allow の内側でも効くと docs が明記しており、実測でも
+  // 「auth.json を denyWrite したまま codex が完走する」ことを確認した。
+  const filesystem = codexHome
+    ? {
+        filesystem: {
+          allowWrite: [codexHome],
+          denyWrite: [path.join(codexHome, "auth.json")],
+        },
+      }
+    : {};
   return {
     sandbox: {
+      ...filesystem,
       enabled: true,
       failIfUnavailable: true,
       autoAllowBashIfSandboxed: true,
@@ -417,6 +460,7 @@ function buildArgv({
   session,
   permissionPromptTool,
   approvalServer,
+  codexHome,
 }) {
   const argv = [
     "-p",
@@ -436,7 +480,7 @@ function buildArgv({
     USER_SETTING_SOURCE,
     STRICT_MCP_CONFIG_FLAG,
     SETTINGS_FLAG,
-    JSON.stringify(sandboxSettings()),
+    JSON.stringify(sandboxSettings(codexHome)),
   ];
   if (session) argv.push(session.flag, session.value);
   // 承認チャネルの受け口そのものは #533 が作り、配線の要否は #534 の capability registry が決める。
@@ -485,6 +529,9 @@ function seal({ request, phase, session }) {
       session,
       permissionPromptTool: request.permissionPromptTool,
       approvalServer: request.approvalServer,
+      // 呼び出し側が account に応じて解決した codex home。渡されなければ codex の書き込みは
+      // 開かない（scope 不明のまま推測で開かないため。codexHomeFor 参照）。
+      codexHome: request.codexHome,
     }),
     phase,
     sandbox,
