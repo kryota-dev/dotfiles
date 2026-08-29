@@ -176,7 +176,9 @@ test("a finding summary is one printable line, not a review body", () => {
   const bad = [
     ["a".repeat(REVIEW_TEXT_MAX_LENGTH + 1), /at most/],
     ["first line\nsecond line", /single line/],
-    ["colours [31mred[0m", /single line/],
+    // 生の ESC バイトをソースへ埋め込まない。実行時の文字列は同じだが、raw だと diff 表示・
+    // `gh pr diff`・CI ログといった経路へ制御文字がそのまま漏れる。
+    ["colours \u001b[31mred\u001b[0m", /single line/],
     ["   ", /must not be empty/],
   ];
   for (const [summary, pattern] of bad) {
