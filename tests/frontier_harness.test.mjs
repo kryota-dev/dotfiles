@@ -1093,7 +1093,7 @@ test("fh clean applies the configured raw evidence retention window", (context) 
   assert.equal(JSON.parse(output.pop()).prunedEvidence, 1);
 });
 
-test("fh verify and review record shadow plans without running a shell command", async (context) => {
+test("fh verify starts no process and records nothing while the rollout is shadow", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const { policyPath } = await approveManifest({
@@ -1101,40 +1101,39 @@ test("fh verify and review record shadow plans without running a shell command",
     statePath,
     manifest: { commands: ["npm run test"] },
   });
+  const seed = createStateStore(statePath);
+  const task = seed.createTask({ goal: "verify under shadow" });
+  seed.close();
+
   const output = [];
-  let executorCalls = 0;
-  const options = {
-    config,
-    statePath,
-    cwd: directory,
-    policyPath,
-    executor: () => {
-      executorCalls += 1;
-      return "executed";
-    },
-    write: (line) => output.push(line),
-  };
-
+  let spawnCalls = 0;
   assert.equal(
-    runCli(["verify", "--command", "npm run test", "--json"], options),
+    await runCli(
+      ["verify", "--task", task.id, "--command", "npm run test", "--json"],
+      {
+        // baseConfigInput の rollout は shadow。
+        config,
+        statePath,
+        cwd: directory,
+        policyPath,
+        spawn: () => {
+          spawnCalls += 1;
+          throw new Error("the shadow rollout must not reach a process");
+        },
+        write: (line) => output.push(line),
+      },
+    ),
     0,
   );
-  assert.equal(JSON.parse(output.pop()).executed, false);
-  assert.equal(
-    runCli(["review", "--task", "task_example", "--json"], options),
-    0,
-  );
-  assert.equal(JSON.parse(output.pop()).executed, false);
-  assert.equal(executorCalls, 0);
+  const report = JSON.parse(output.pop());
+  assert.equal(report.executed, false);
+  assert.match(report.executionReason, /shadow rollout/);
+  assert.equal(spawnCalls, 0);
 
+  // 走らなかった検証の結果を、走ったかのように残さない。
   const store = createStateStore(statePath);
-  assert.deepEqual(
-    store
-      .listEvidence()
-      .map((evidence) => evidence.kind)
-      .sort(),
-    ["review_plan", "verification_plan"],
-  );
+  assert.deepEqual(store.listVerificationResults(), []);
+  assert.deepEqual(store.listEvidence(), []);
   store.close();
 });
 
@@ -3582,12 +3581,19 @@ test("fh verify refuses a command the approved manifest does not list", async (c
     manifest: { commands: ["npm run test"] },
   });
 
+  const seed = createStateStore(statePath);
+  const task = seed.createTask({ goal: "verify an unapproved command" });
+  seed.close();
+
   const output = [];
   const options = enforcementOptions(directory, {
     write: (line) => output.push(line),
   });
   assert.equal(
-    runCli(["verify", "--command", "npm run deploy", "--json"], options),
+    await runCli(
+      ["verify", "--task", task.id, "--command", "npm run deploy", "--json"],
+      options,
+    ),
     2,
   );
   const refused = JSON.parse(output.pop());
@@ -3598,9 +3604,10 @@ test("fh verify refuses a command the approved manifest does not list", async (c
     ["npm run deploy"],
   );
 
-  // 未承認のまま計画を記録しない。
+  // 未承認のまま検証結果も evidence も記録しない。
   const store = createStateStore(statePath);
   assert.deepEqual(store.listEvidence(), []);
+  assert.deepEqual(store.listVerificationResults(), []);
   store.close();
   assert.deepEqual(
     gapsIn(directory).map((gap) => gap.value),
@@ -3849,6 +3856,48 @@ test("a task blocked by the manifest never reaches the provider", async (context
   assert.equal(executorCalls, 1, "承認済みなら provider へ到達する（対照）");
 });
 
+test("fh run calls the executor outside the write transaction", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  await approveManifest({
+    cwd: directory,
+    statePath,
+    manifest: { capabilities: ["executor.default", "semantic.judge"] },
+  });
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "ship", hasDeterministicOracle: true }));
+
+  // executor が走っている最中に別接続から書けること = 書き込みロックを握っていないこと。
+  // 握っていれば SQLITE_BUSY で落ちる。#502 で executor を配線した瞬間に、同じリポジトリの
+  // 他の `fh` が provider の実行時間ぶん全部詰まることになるので、罠のうちに固定する。
+  let writeDuringRun = null;
+  const output = [];
+  assert.equal(
+    runCli(
+      ["run", "--task", taskPath, "--json"],
+      enforcementOptions(directory, {
+        config: defaultRolloutConfig,
+        executor: () => {
+          const other = createStateStore(statePath);
+          try {
+            other.createTask({ goal: "concurrent probe" });
+            writeDuringRun = true;
+          } catch (error) {
+            writeDuringRun = error.message;
+          } finally {
+            other.close();
+          }
+          return "executed";
+        },
+        write: (line) => output.push(line),
+      }),
+    ),
+    0,
+  );
+  assert.equal(JSON.parse(output.pop()).executed, true);
+  assert.equal(writeDuringRun, true, "a concurrent write must not be blocked");
+});
+
 test("fh verify blocked by the manifest never reaches the provider", async (context) => {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
@@ -3858,23 +3907,29 @@ test("fh verify blocked by the manifest never reaches the provider", async (cont
     manifest: { commands: ["npm run test"] },
   });
 
+  const seed = createStateStore(statePath);
+  const task = seed.createTask({ goal: "verify past the manifest" });
+  seed.close();
+
   const output = [];
-  let executorCalls = 0;
+  let spawnCalls = 0;
+  // default rollout + spawn spy で「照合が先に止めた」ことを確かめる。shadow のままでは
+  // rollout guard が無条件に止めるため、承認境界が効いていることを実証できない。
   assert.equal(
-    runCli(
-      ["verify", "--command", "npm run deploy", "--json"],
+    await runCli(
+      ["verify", "--task", task.id, "--command", "npm run deploy", "--json"],
       enforcementOptions(directory, {
         config: defaultRolloutConfig,
-        executor: () => {
-          executorCalls += 1;
-          return "executed";
+        spawn: () => {
+          spawnCalls += 1;
+          throw new Error("an unapproved command must never be spawned");
         },
         write: (line) => output.push(line),
       }),
     ),
     2,
   );
-  assert.equal(executorCalls, 0);
+  assert.equal(spawnCalls, 0);
   assert.equal(JSON.parse(output.pop()).evidence, null);
 });
 

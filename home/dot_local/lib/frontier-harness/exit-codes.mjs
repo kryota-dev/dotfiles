@@ -11,6 +11,15 @@ export const BLOCKED_PENDING_APPROVAL = 2;
 // 承認境界による停止（2）と区別する: こちらは「承認はあるが実行が失敗した」である。
 export const CHILD_RUN_FAILED = 1;
 
+// 決定的チェックが通らなかった（failed / errored）。値は CHILD_RUN_FAILED と同じだが、
+// 意味が違うので別の名前を与える —— 呼び出し側にとって「子が起動できなかった」と
+// 「チェックが赤だった」は同じ 1 でも次の行動が違う。0 は「検証が通った」だけを指す。
+export const VERIFICATION_FAILED = 1;
+
+// candidate を取り込めなかった（検証未達、または衝突）。どちらも user の判断へ戻すので、
+// 承認境界による停止と同じ 2 を使う: 呼び出し側から見れば「人が見るまで進めない」で同じ意味になる。
+export const CANDIDATE_NOT_ADOPTED = 2;
+
 // 未知のコマンド。sysexits.h の EX_USAGE。
 export const USAGE = 64;
 

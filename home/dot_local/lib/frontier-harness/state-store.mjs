@@ -70,6 +70,12 @@ export function createStateStore(databasePath) {
   const insertTask = database.prepare(`
     INSERT INTO tasks (id, goal, task_json, created_at) VALUES (?, ?, ?, ?)
   `);
+  // task を id で引く。`verification_results` / `review_findings` / candidate はどれも
+  // task_id に FK を持つので、存在しない id は INSERT 時に FK 違反で落ちる。それでは
+  // 「どの引数が間違っていたか」が呼び出し側に伝わらないため、境界で先に引いて名指しで拒否する。
+  const selectTask = database.prepare(`
+    SELECT id, goal, task_json, created_at FROM tasks WHERE id = ?
+  `);
   const insertRoute = database.prepare(`
     INSERT INTO route_decisions (
       id, task_id, kind, capability, provider, reason, created_at,
@@ -159,6 +165,26 @@ export function createStateStore(databasePath) {
         createdAt: new Date().toISOString(),
       };
       insertTask.run(stored.id, stored.goal, JSON.stringify(task), stored.createdAt);
+      return stored;
+    },
+    findTask(taskId) {
+      const row = selectTask.get(taskId);
+      if (!row) return null;
+      return {
+        id: row.id,
+        goal: row.goal,
+        // 保存時に normalizeTask を通した JSON なので、読み出しでもう一度正規化はしない。
+        task: JSON.parse(row.task_json),
+        createdAt: row.created_at,
+      };
+    },
+    // `findTask` を「必須」にした版。同じガード文とエラーメッセージが呼び出し側に散ると、
+    // 語彙が経路ごとにずれる。存在確認を伴う参照はこちらを使う。
+    requireTask(taskId) {
+      const stored = this.findTask(taskId);
+      if (!stored) {
+        throw new TypeError(`task ${taskId} is not in the state database`);
+      }
       return stored;
     },
     // chooseRoute が返す model / effort / reviewerCapability も保存する。

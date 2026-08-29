@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import path from "node:path";
 
 import { codexHomeFor } from "./adapter-claude.mjs";
 import { requireSafeArgumentValue } from "./adapter-contract.mjs";
@@ -20,6 +19,7 @@ import { flagValue, optionalFlagValue, positiveIntegerFlag } from "./flags.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
 import { providerCommand } from "./providers.mjs";
 import { loadVerifiedModels } from "./readiness.mjs";
+import { requireAbsolutePath } from "./paths.mjs";
 import { nowIso } from "./record-validation.mjs";
 import { isProviderExecutionAllowed, runWithRolloutGuard } from "./rollout.mjs";
 import { allowsWrite, normalizeSandboxPolicy } from "./sandbox.mjs";
@@ -92,13 +92,6 @@ const ROUTE_KIND = "single-worker";
 const LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
 // 拒否ツール名の上限。子の stdout 由来の値を evidence へ載せる前に縛る。
 const DENIAL_NAME_MAX_LENGTH = 128;
-
-function requireAbsolutePath(value, label) {
-  if (typeof value !== "string" || !path.isAbsolute(value)) {
-    throw new TypeError(`${label} must be an absolute path`);
-  }
-  return value;
-}
 
 function requireWorktree(value) {
   const worktree = requireAbsolutePath(value, "--worktree");

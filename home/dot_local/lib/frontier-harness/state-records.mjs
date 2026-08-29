@@ -35,6 +35,8 @@ function toVerificationResult(row) {
     id: row.id,
     taskId: row.task_id,
     adapterRunId: row.adapter_run_id,
+    candidateId: row.candidate_id,
+    treeHash: row.tree_hash,
     checkKind: row.check_kind,
     status: row.status,
     command: row.command,
@@ -114,14 +116,24 @@ export function createRecordAccessors(database) {
 
   const insertVerificationResult = database.prepare(`
     INSERT INTO verification_results (
-      id, task_id, adapter_run_id, check_kind, status,
+      id, task_id, adapter_run_id, candidate_id, tree_hash, check_kind, status,
       command, exit_code, evidence_id, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectVerificationResults = database.prepare(`
-    SELECT id, task_id, adapter_run_id, check_kind, status,
+    SELECT id, task_id, adapter_run_id, candidate_id, tree_hash, check_kind, status,
            command, exit_code, evidence_id, created_at
     FROM verification_results
+    ORDER BY created_at, id
+  `);
+  // task 単位の絞り込み。candidate の取り込み判定と reviewer packet はどちらも「この task の
+  // 検証結果」しか要らないので、全件を読んで JS 側で filter しない（state は全 worktree で
+  // 共有され、無関係な task の行が無制限に混ざる）。
+  const selectVerificationResultsForTask = database.prepare(`
+    SELECT id, task_id, adapter_run_id, candidate_id, tree_hash, check_kind, status,
+           command, exit_code, evidence_id, created_at
+    FROM verification_results
+    WHERE task_id = ?
     ORDER BY created_at, id
   `);
 
@@ -135,6 +147,13 @@ export function createRecordAccessors(database) {
     SELECT id, task_id, adapter_run_id, reviewer_capability, severity, uncertainty,
            summary, discriminating_experiment, evidence_id, created_at
     FROM review_findings
+    ORDER BY created_at, id
+  `);
+  const selectReviewFindingsForTask = database.prepare(`
+    SELECT id, task_id, adapter_run_id, reviewer_capability, severity, uncertainty,
+           summary, discriminating_experiment, evidence_id, created_at
+    FROM review_findings
+    WHERE task_id = ?
     ORDER BY created_at, id
   `);
 
@@ -267,6 +286,8 @@ export function createRecordAccessors(database) {
         result.id,
         result.taskId,
         result.adapterRunId,
+        result.candidateId,
+        result.treeHash,
         result.checkKind,
         result.status,
         result.command,
@@ -278,6 +299,9 @@ export function createRecordAccessors(database) {
     },
     listVerificationResults() {
       return selectVerificationResults.all().map(toVerificationResult);
+    },
+    listVerificationResultsForTask(taskId) {
+      return selectVerificationResultsForTask.all(taskId).map(toVerificationResult);
     },
 
     recordReviewFinding(input) {
@@ -299,6 +323,9 @@ export function createRecordAccessors(database) {
     },
     listReviewFindings() {
       return selectReviewFindings.all().map(toReviewFinding);
+    },
+    listReviewFindingsForTask(taskId) {
+      return selectReviewFindingsForTask.all(taskId).map(toReviewFinding);
     },
 
     recordApproval(input) {

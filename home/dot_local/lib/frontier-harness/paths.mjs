@@ -31,6 +31,17 @@ function lstatOrNull(target) {
   }
 }
 
+// 絶対パス必須の検査。CLI のパスフラグ（`--worktree` / `--out` / `--prompt-file` 等）は
+// 相対値を受けると呼び出し元の cwd 基準で解決され、「どのツリーに対する操作か」が
+// 呼び出し位置で変わってしまう。同じ検査が各コマンドへ散らばると、片方だけ強化されたときに
+// 残りが黙って追従しないため、ここを唯一の実装にする。
+export function requireAbsolutePath(value, label) {
+  if (typeof value !== "string" || !path.isAbsolute(value)) {
+    throw new TypeError(`${label} must be an absolute path`);
+  }
+  return value;
+}
+
 // 対象パス自身が symlink なら拒否する。存在しない場合は許可（これから作る）。
 export function assertNotSymlink(target, label) {
   if (lstatOrNull(target)?.isSymbolicLink()) {
@@ -182,8 +193,32 @@ export function ensureStateFile(target, label) {
 
 // 一時ファイル名は予測可能にしない（先置き symlink による任意ファイル上書きを防ぐ）。
 // O_CREAT|O_EXCL は、既存ファイル・既存 symlink があれば EEXIST で失敗する。
+// 呼び出し側が選んだ出力先へ書く版。`writeJsonAtomic` と違い、**既存ディレクトリの権限を
+// 変更しない**。`ensureDirectory` は state root（0700 が前提）のための関数なので、`--out` の
+// ように利用者が任意の絶対パスを選べる経路でそれを呼ぶと、既存の共有ディレクトリを黙って
+// 0700 へ狭めてしまう（他のツールやユーザーがそこへ入れなくなる可用性障害）。
+// symlink ガードと atomic rename は同じままにする。
+export function writeJsonToChosenPath(targetPath, value, label) {
+  const directory = path.dirname(targetPath);
+  if (lstatOrNull(directory)) {
+    // **既存でも symlink 検査は落とさない。** 権限の強制だけを省きたいのであって、
+    // 安全境界を省きたいわけではない。`ensureDirectory` を丸ごと飛ばすと、この検査まで
+    // 一緒に消え、`writeJsonAtomic` は拒否する symlink 化した親を素通りさせてしまう
+    // （2 つの書き手で安全性が非対称になる）。
+    assertNotSymlink(directory, `${label} directory`);
+  } else {
+    // 存在しないときだけ作る。作る場合は state と同じ 0700 を課す。
+    ensureDirectory(directory, `${label} directory`);
+  }
+  return writeJsonAtomicInto(targetPath, value, label);
+}
+
 export function writeJsonAtomic(targetPath, value, label) {
   ensureDirectory(path.dirname(targetPath), `${label} directory`);
+  return writeJsonAtomicInto(targetPath, value, label);
+}
+
+function writeJsonAtomicInto(targetPath, value, label) {
   assertNotSymlink(targetPath, label);
   const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
   const payload = `${JSON.stringify(value, null, 2)}\n`;

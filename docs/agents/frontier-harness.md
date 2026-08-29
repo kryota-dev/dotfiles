@@ -9,12 +9,14 @@ evolving `pr-workflow`. It routes a normalized task to a provider capability,
 records evidence in repository-local runtime state, and makes deterministic
 verification higher priority than any model's self-assessment.
 
-The rollout is **pilot**, and its blast radius is deliberately narrow. `run`,
-`verify`, and `review` still only record route, verification, and review plans:
-they inject no runner, so they reach no provider whatever the rollout says. The
-one command that starts a real process is `fh session`, which launches the child
-sessions the wave orchestrator drives. Setting the rollout back to `shadow` stops
-that path, which makes the config value an emergency brake rather than a label.
+The rollout is **pilot**, and its blast radius is deliberately narrow. `run` still
+only records a route: it injects no runner, so it reaches no provider whatever the
+rollout says. Four commands start a real process, and each is gated before it does.
+`fh session` launches the child sessions the wave orchestrator drives. `fh verify`
+runs an approved deterministic check. `fh candidate` creates and adopts disposable
+child worktrees. `fh review packet` reads a diff out of git. Every one of them passes
+through `runWithRolloutGuard`, so setting the rollout back to `shadow` stops all of
+them — which is what makes the config value an emergency brake rather than a label.
 
 ## Installation and readiness
 
@@ -81,7 +83,7 @@ reasoning as its interchange format.
 
 ### Normalized state schema
 
-The SQLite state is at schema version 2. Every record class is normalized, and
+The SQLite state is at schema version 3. Every record class is normalized, and
 each one belongs to exactly one retention class:
 
 | Table | Holds | Retention |
@@ -90,8 +92,8 @@ each one belongs to exactly one retention class:
 | `route_decisions` | the chosen capability, provider, **model, effort**, and reviewer | kept |
 | `evidence` | raw payload references, a SHA-256 `content_hash` over the record's content fields, and the task/route it belongs to | raw |
 | `adapter_runs` | one adapter execution: capability, provider, model, effort, status, start/finish, exit code | raw |
-| `verification_results` | one deterministic check: kind, status, command, exit code, evidence reference | raw |
-| `review_findings` | one finding: severity, uncertainty, summary, discriminating experiment, evidence reference | raw |
+| `verification_results` | one deterministic check that actually ran: kind, status, approved command, exit code, evidence reference, **and the candidate + tree hash it verified** | raw |
+| `review_findings` | one finding: severity, uncertainty, one-line summary, discriminating experiment, evidence reference | raw |
 | `approvals` | what was authorized: kind, subject hash, scope, grantor, grant/expiry | **never pruned** |
 | `telemetry_events` | content-free aggregate measurements (category, risk, provider/model/effort, timings, token counts, outcome) | aggregate |
 
@@ -117,6 +119,10 @@ different stores — the policy travels with the checkout, the ledger does not �
 the policy after approval no longer verifies, even if its self-reported hash is recomputed
 to match. See [Repository onboarding](#repository-onboarding) for the boundary this does
 and does not draw.
+
+Disposable candidate worktrees are deliberately **not** in this table set; see
+[Candidate worktrees](#candidate-worktrees) for why a retention window is the wrong
+lifetime for them.
 
 `telemetry_events` has no free-form column at all. Every text column is either a
 closed enum or a short lowercase token, so "aggregate telemetry contains no
@@ -376,18 +382,19 @@ policy, and never the state root. It does **not** draw these boundaries:
   name that resolves somewhere harmless at approval time can point at an internal address
   later. The layer that actually opens a connection must re-check at that moment; that layer
   arrives with the rollout promotion.
-- **`fh review`.** It records a review plan without consulting the manifest. The deterministic
-  verifier and review registry own that path, and gating it belongs with them.
+- **`fh review`.** Neither subcommand consults the capability manifest. `record` only writes
+  normalized findings into the registry, and `packet` only reads — it starts no provider and
+  runs no repository command. What `packet` does read is the *approved* manifest, so an
+  unapproved repository hands the reviewer an empty constraint list rather than the raw
+  `.harness/policy.json`.
 
 Upgrading an existing repository requires re-running the ceremony, because a policy written
 before enforcement has no approval in force behind it.
 
-## Shadow commands
+## Recording a route
 
 ```bash
 fh run --task task.json --json
-fh verify --command "npm run test" --json
-fh review --task task_example --json
 fh status --json
 fh clean --dry-run --json
 fh gaps --json
@@ -398,11 +405,124 @@ mid-run, `requiresWrite` when the run modifies files. Both default to false, and
 matched against what the chosen provider declares — see *The route is gated on approval
 channel and write access* below.
 
-`run`, `verify`, and `review` persist a normalized plan without starting a provider or an
-arbitrary shell command. They do so at every rollout, not only under `shadow`, because they
-pass no runner to `runWithRolloutGuard`. `clean` reports and removes expired raw records and
-expired aggregate telemetry on their own windows, and leaves approvals alone; use `--dry-run`
-to inspect its impact first.
+`run` persists a normalized route without starting a provider, at every rollout and not only
+under `shadow`, because it passes no runner to `runWithRolloutGuard`. It records the route
+inside a write transaction and then leaves that transaction before the guard runs, so a future
+executor cannot hold `BEGIN IMMEDIATE` for the length of a provider call and stall every other
+`fh` in the repository. `clean` reports and removes expired raw records and expired aggregate
+telemetry on their own windows, and leaves approvals alone; use `--dry-run` to inspect its
+impact first.
+
+## Deterministic verification
+
+```bash
+fh verify --task <task id> --command "npm run test" --json
+fh verify --task <task id> --command "npm run lint" --kind lint --json
+fh verify --task <task id> --candidate <candidate id> --command "npm run test" --json
+```
+
+`fh verify` runs the check and records what happened. It used to write a
+`verification_plan` row and stop, which meant a completion claim rested on nothing sturdier
+than a model saying the tests passed.
+
+Four properties make the result worth more than that claim:
+
+- **The command must already be approved.** It is matched against the repository capability
+  manifest before anything is spawned, and a miss is queued by `fh gaps` and exits 2. The
+  approvable grammar is a project task runner with arguments drawn from a narrow character
+  set, and `check-runner.mjs` re-checks that grammar immediately before executing — so the
+  string cannot be rebuilt into something else between matching and running.
+- **No shell is involved.** The approved string splits into argv, the binary resolves to an
+  absolute PATH entry, and `spawn` receives the array. There is no stage at which `;`, `&&`,
+  `$(…)`, or a glob could be reinterpreted.
+- **The harness never sees the output.** The child's stdout and stderr are inherited by the
+  terminal, not piped. The only thing the harness learns is the exit code, so "no free text
+  reaches the state database" is a property of what was captured rather than a rule about
+  what gets written.
+- **The exit code is the verdict.** 0 records `passed`, anything else records `failed`. A check
+  that could not be started at all — the binary is not on `PATH`, or `spawn` failed — is recorded
+  as `errored` rather than raised, so "we tried to verify and could not" still leaves a trace. And
+  a check that outlives
+  <!-- FACT:fh-check-timeout-ms -->900000<!-- /FACT --> ms (overridable with `--timeout-ms`, itself
+  capped at <!-- FACT:fh-check-max-timeout-ms -->3600000<!-- /FACT --> ms, because the check window
+  is the one interval in which a candidate can change without being noticed)
+  is terminated — SIGTERM, then SIGKILL after a grace period — and recorded as `errored` with
+  exit code 124. `fh verify` itself exits 0 only when the check passed.
+
+The check runs in `--worktree` (default: the working directory), and the state, the manifest,
+and the gap queue all resolve from that same tree, for the reason `fh session` resolves them
+from its `--worktree`: resolving them from the caller's directory would let a caller inside an
+approved repository point at another tree and keep the approval.
+
+Verifying inside a candidate uses `--candidate` rather than pointing `--worktree` at its
+directory. A candidate is a detached checkout of a base commit, so if `.harness/policy.json`
+is not committed it does not exist in that tree, and aiming `--worktree` at it means the
+approval boundary correctly concludes the repository has approved nothing — which is
+fail-closed but leaves isolate → verify → adopt with no way through. `--candidate` resolves
+the tree **through the registry**, which is what establishes that the tree belongs to this
+repository: the approval comes from the owning repository while only the check runs in the
+candidate. No caller-supplied path is trusted, so the `--worktree` boundary is not weakened.
+
+**What "approved" actually authorizes.** The approvable grammar is a project task runner, but
+those runners hand off to scripts the repository controls — `npm run test` runs whatever
+`package.json` currently says, and that file changes with the diff. The check also inherits the
+caller's environment and has no network or filesystem confinement of its own; the sandbox that
+`fh session` seals around a provider does not apply here. So approving a command is closer to
+"this repository's task runner may execute, with my environment, whenever a check runs" than to
+"this exact program is safe". That is the sharpest edge in this path, and it matters most when
+the tree being checked is a candidate holding a diff nobody has read yet.
+
+Killing a check reaches the process the harness started, not its descendants. A test runner
+that spawns its own children and ignores SIGTERM can leave them behind. Putting the check in
+its own process group would fix that and introduce a worse failure — orphans that outlive the
+harness by the full timeout — so the timeout stays a safety valve rather than a guarantee.
+
+## Review registry
+
+```bash
+fh review packet --task <task id> --out <abs path> [--base <rev>] --json
+fh review record --task <task id> --findings <abs path> --json
+```
+
+Reviews are handled as normalized findings rather than prose. `packet` builds what a reviewer
+is allowed to receive; `record` takes findings back and returns a verdict. The two are separate
+because they have different powers: `packet` reads git and starts nothing, `record` writes state
+and touches no repository. Neither starts a provider — running one is `fh session`'s job, and a
+second path into a provider is exactly what #537 decided not to build.
+
+**A packet carries four things: the task, the constraints, the diff, and the verification
+results.** The writer's conversation is not among them, and the guarantee is structural rather
+than a rule: `buildReviewPacket` takes a task id, a worktree, and a base revision, and has no
+parameter through which a prompt, a transcript, or an adapter's output could arrive. The four
+sections come from places the writer does not control — the normalized task row, the approved
+manifest, `verification_results`, and git.
+
+`--out` is written without re-permissioning a directory that already exists: the 0700 the state
+root requires is imposed only on directories the harness itself creates, so pointing `--out` at
+an existing shared directory does not quietly close it to anybody else.
+
+The diff includes tracked modifications and untracked new files, and it is produced through a
+throwaway `GIT_INDEX_FILE` seeded from the base commit. The worktree's own index is never
+touched, because staging state belongs to `pr-workflow`. That scratch index is placed inside
+the worktree's git directory, where `git add -A` will not find it. A packet larger than
+<!-- FACT:fh-review-diff-max-bytes -->1048576<!-- /FACT --> bytes is truncated with `truncated: true` set, so a reviewer cannot be told it saw a whole change it
+did not. The packet is written to `--out` and never printed, so the diff does not travel
+through stdout and into a log.
+
+A findings document declares a version, the reviewer capability, and the findings; each
+finding carries a severity, an uncertainty, a one-line summary, and optionally a
+discriminating experiment. Unknown keys are refused rather than dropped, so a `transcript` or
+`rationale` field is a loud error instead of a silent one. The summary is bounded at
+<!-- FACT:fh-review-text-max-length -->300<!-- /FACT --> characters and must be a single line
+of printable text — which rejects `Zl` and `Zp` (U+2028, U+2029) as well as the control and
+format categories, because those two are line breaks nearly everywhere they are rendered while
+belonging to neither `Cc` nor `Cf`; that bound is what keeps the column from becoming a place to paste a review
+body. The task id comes from `--task`, never from the document, so a reviewer cannot attach
+findings to somebody else's task.
+
+Evidence records counts and a verdict, never the findings themselves. One `must` finding makes
+the verdict `blocked` and `fh review record` exits non-zero, so a calling script cannot read an
+unresolved `must` as success.
 
 ## Child sessions
 
@@ -653,20 +773,87 @@ be passed as a function so the check reads it when the run happens rather than w
 built — a value would freeze it at construction and quietly turn "re-checked before running" into a
 convention. Nothing in this layer changes the capability registry schema.
 
-## Worktrees and rollout
+## Candidate worktrees
 
-`pr-workflow` owns the primary worktree and PR branch. When a non-shadow route
-needs independent writable candidates, the harness will create only disposable
-child worktrees through `wtp`; read-only investigation does not create one.
-A verified, cleanly applicable candidate may move into the primary worktree,
-but merge and other irreversible external actions always remain with the user.
+```bash
+fh candidate create --task <task id> [--base <rev>] [--label <l>] --json
+fh candidate list --json
+fh candidate adopt --candidate <id> --json
+fh candidate discard --candidate <id> --json
+```
+
+A write-capable diversification route needs somewhere to write that is not the branch under
+review. `fh candidate` gives it a disposable child worktree and decides, on evidence, whether
+what it produced is allowed back out.
+
+**`pr-workflow` keeps the primary worktree and the PR branch.** A candidate is a detached
+checkout with no branch of its own, so it cannot stand in for the PR branch, and adoption
+applies a patch and stops — it does not commit, and it does not push. Merge and every other
+irreversible external action stay with the user.
+
+**Candidates do not come from `wtp`.** The repository's `.wtp.yml` symlinks `.env` into every
+worktree it creates. That is right for a worktree a person will work in and wrong for one an
+autonomous route writes to, so candidates use `git worktree add --detach`, which runs no
+post-create hooks. The tree lives under the state root, inside the git common directory, where
+it stays out of the primary worktree's `git status`.
+
+**Adoption is gated on measurement, not on a claim.** Run the check with
+`fh verify --candidate <id>`; a candidate is adopted only when `verification_results` holds at
+least one check **recorded for that candidate** and every one of them passed.
+
+Three things have to line up, and each closes a way of faking the first:
+
+- **The check must name this candidate.** Results carry `candidate_id`, and adoption matches on
+  it. Matching on the task alone is not enough: two candidates can share a task, so a pass
+  earned by one would authorize adopting the other, which was never checked at all.
+- **The check must post-date the candidate.** A green run from before it existed says nothing
+  about what is in it.
+- **The tree must not have moved since.** Results also carry `tree_hash`, the git tree the check
+  actually saw. It is derived **both before and after** the check and the two must agree: hashing
+  only afterwards would record whatever the tree became, not what was measured, and a check may
+  run for many minutes. If the tree moves mid-check the result is recorded as `errored` with no
+  hash, because it then describes no single tree. Adoption re-derives the hash and refuses on a
+  mismatch, so writing to the candidate after it passed does not smuggle unverified changes in
+  under the old verdict. A result with no `tree_hash` is not an adoption basis — treating a
+  missing hash as "fine" would be the easiest way to switch this gate off.
+
+Adoption reads the hash and builds the patch from **one** staging pass, so the thing that was
+checked and the thing that gets applied cannot drift apart between two separate reads.
+
+An unverified, red, or stale candidate is refused with exit 2 and its tree is left alone. The whole
+judgement — hashing, verdict, diff, apply — sits inside the rollout guard, so `shadow` reaches no
+git process here either.
+
+`discard` keys off whether the tree still exists rather than the recorded status, which makes it
+idempotent: a removal that failed halfway leaves an orphaned tree, and a status-only check would
+leave no way to clean it up.
+
+**A conflict retains the work.** If the patch does not apply cleanly to the target worktree,
+the candidate moves to `conflicted`, **the tree is kept**, and the command exits 2 — the same
+code the approval boundary uses, because both mean "a person has to look". Nothing is rebased
+and no conflict is auto-resolved: doing either would quietly turn the verified content into
+something that was never verified. Once the user clears the conflict, the retained candidate
+adopts normally. A candidate that applies cleanly is adopted and its tree is then removed,
+since its contents now live in the target.
+
+The registry is files under the state root, not a table. A candidate is a fact about a
+directory on disk, so putting it in a retention window would eventually delete the row and
+leave the tree — the registry would report nothing while `git worktree add` kept failing on a
+path collision. At most
+<!-- FACT:fh-candidate-max-live -->8<!-- /FACT --> candidates may be live at once; each is a
+full checkout, so the limit is far lower than the gap queue's.
+
+## Rollout
 
 The promotion path is shadow → pilot → default. The rollout is now `pilot`, which the CLI
 enforces as an explicit guard rather than relying on the provider adapter being absent. That
-guard is the only thing standing between a route and a provider, and `pilot` opens exactly one
-path: `fh session`, the child-session launcher. Every other command still passes no runner, so
-promotion widened the surface by one deliberate command rather than by a config value.
+guard is the only thing standing between the harness and a process it starts, and `pilot` opens
+exactly four paths: `fh session` (a child provider), `fh verify` (an approved check),
+`fh candidate` (a disposable worktree and its adoption), and the git call behind
+`fh review packet`. `fh run` still passes no runner. The surface grows one deliberate command
+at a time rather than by a config value.
 
 Rolling back is editing `rollout` to `shadow`: the guard then returns `executed: false` before
-any process starts. Promoting to `default`, adding a `--legacy` rollback flag, and defining the
+any process starts — no check is spawned, no worktree is created, and nothing is recorded as
+though it had run. Promoting to `default`, adding a `--legacy` rollback flag, and defining the
 telemetry that justifies the next promotion are still open work.
