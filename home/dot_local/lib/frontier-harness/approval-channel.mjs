@@ -177,9 +177,25 @@ export function probeApprovalServer({
   return { ok: true, reason: null };
 }
 
-// 子セッションを走らせる provider。承認チャネルを外部へ往復できるのは claude だけなので
-// （#526 §7.2 / provider-capabilities.mjs の approvalChannel 軸）、他 provider の capability を
-// 子セッションとして起動しない。
+// 子セッションを走らせる provider。
+//
+// **これは `provider-capabilities.mjs` の `approvalChannel` 軸の重複ではない。** あちらは
+// router が「人の判断を外部へ往復できるか」を照合するための一般的な能力軸で、こちらは
+// 「この子セッション transport を実装済みの provider はどれか」の allowlist である。両者は
+// 今日たまたま同じ集合（claude だけ）を指すが、意味が違う。
+//
+// 軸の判定（`resolveProviderCapabilities(...).approvalChannel === HUMAN_APPROVAL_CHANNEL`）へ
+// 置き換えてはならない。子セッションの経路は claude 固有の実装に固定されている:
+// `child-runner.mjs` は `adapter-claude.mjs` の `readInitHealth` を直接 import して
+// `system/init` を検査し、`--mcp-config` / `--permission-prompt-tool` の配線を出すのも
+// claude adapter だけである（`adapter-codex.mjs` の argv はそれらを消費しない）。将来ほかの
+// adapter が能力宣言だけを `external` へ上げると、軸判定はその provider を起動前に止められず、
+// **承認が配線されていない子を実際に起こしてから失敗させる**ことになる。
+//
+// したがって allowlist は、未実装の provider-general な session protocol を誤って許可しない
+// ための意図的な fail-closed 境界である。ほかの provider を子セッションへ対応させるときは、
+// 能力宣言だけでなく承認 server の配線・argv の封印検証・provider 固有の起動時健全性検査を
+// 揃えたうえで、この定数を広げること。
 export const SESSION_PROVIDER = "claude";
 
 export function assertSessionProvider(provider) {

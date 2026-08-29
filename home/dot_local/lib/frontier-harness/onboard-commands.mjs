@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { assertResolvedDomainAllowed } from "./address-classifier.mjs";
+import { BLOCKED_PENDING_APPROVAL } from "./exit-codes.mjs";
 import { flagValue } from "./flags.mjs";
 import {
   REPOSITORY_MANIFEST_APPROVAL_KIND,
@@ -28,9 +29,6 @@ import { createStateStore } from "./state-store.mjs";
 // （approval-commands.mjs と同じ規約）。onboard は 2 段階儀式・`--from-gaps` の一括承認・
 // domain のアドレス解決を伴う非同期処理・台帳記録・policy 書き込みを持ち、兄弟コマンドの
 // どれより複雑なので、cli.mjs 本体に置くと分岐の見通しが失われる。
-
-// 承認待ちで実行を止めたときの終了コード。cli.mjs 側と同じ値を使う。
-const BLOCKED_PENDING_APPROVAL = 2;
 
 export async function runOnboardCommand({ flags, options, emit }) {
   const cwd = options.cwd ?? process.cwd();

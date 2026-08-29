@@ -446,8 +446,27 @@ What the run leaves behind carries no conversation. `adapter_runs` has no column
 an argv by design, and the evidence row's claims are a fixed vocabulary plus the resume key, the
 health verdict, and the **names** of denied tools. The prompt is read from a file rather than an
 argument so it never reaches `fh`'s own `ps` entry, the child's stdout is interpreted in memory
-and never written to disk, and the only thing echoed to stderr is the type name of each event,
-as a liveness heartbeat.
+and never written to disk, and the only thing **`fh` itself** writes to stderr is the type name of
+each event, as a liveness heartbeat.
+
+The child's own stderr is a different stream, and it is inherited rather than filtered. That is
+deliberate: a pane running `fh session` is the window a person looks through, which is the one
+guard the move away from tmux was never willing to give up. `fh` does not control what goes into
+it, and what a `claude -p` writes there has not been measured, so treat it as capable of carrying
+conversation: watch it, do not persist it. Redirecting a child's stderr into a log file is how
+this design's one non-negotiable — no conversation in the record — gets broken from the outside.
+
+`fh session` also does not carry an account selection. The child resolves `claude` from PATH,
+and that launcher keeps an inherited `CLAUDE_CONFIG_DIR`, so a child always runs on the account
+of the session that launched it. Pinning a child to a specific account is done the existing way —
+by declaring `accountScope` on its capability, which `checkCapabilityExecutable` enforces — not
+by passing a launcher name through this command.
+
+A repository's approval is bound to the worktree the child will run in, not to the directory the
+command was invoked from. The manifest, the approval scope, the state root, and the child's
+working directory all resolve from `--worktree`. Resolving them from the caller's cwd would let
+an approved repository launch a child into an unapproved one, which is the capability gate
+answering a question nobody asked.
 
 ## Provider adapters
 

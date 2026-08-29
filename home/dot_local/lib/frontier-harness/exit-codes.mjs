@@ -13,3 +13,7 @@ export const CHILD_RUN_FAILED = 1;
 
 // 未知のコマンド。sysexits.h の EX_USAGE。
 export const USAGE = 64;
+
+// 想定外の例外で終わった。sysexits.h の EX_SOFTWARE。
+// 承認待ち（2）・実行失敗（1）・使い方の誤り（64）のいずれでもない、内部の不整合を指す。
+export const INTERNAL_ERROR = 70;

@@ -11,14 +11,10 @@ import {
   runApproveCommand,
   startApprovalServerCommand,
 } from "./approval-commands.mjs";
-import {
-  defaultCommandPaths,
-  findCommand,
-  providerAvailability,
-} from "./command-paths.mjs";
+import { defaultCommandPaths, providerAvailability } from "./command-paths.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
-import { BLOCKED_PENDING_APPROVAL, USAGE } from "./exit-codes.mjs";
+import { BLOCKED_PENDING_APPROVAL, INTERNAL_ERROR, USAGE } from "./exit-codes.mjs";
 import { flagValue } from "./flags.mjs";
 import {
   findManifestGaps,
@@ -47,10 +43,6 @@ import {
   probeAntigravity,
   writeReadiness,
 } from "./readiness.mjs";
-
-// PATH 解決と provider 可用性は command-paths.mjs へ切り出した（承認 server の実行ファイル
-// 解決と子セッションの起動が同じ規則を要るため）。既存の import 元を壊さないよう再輸出する。
-export { findCommand };
 
 // --dry-run は state を変更しないので、削除件数はすべて 0 で返す。
 const EMPTY_RAW_PRUNE_COUNTS = Object.freeze({
@@ -176,7 +168,7 @@ export function runCli(argumentsList, options = {}) {
         },
         (error) => {
           process.stderr.write(`frontier-harness: ${error.message}\n`);
-          process.exitCode = 70;
+          process.exitCode = INTERNAL_ERROR;
         },
       );
       return 0;
@@ -240,12 +232,14 @@ export function runCli(argumentsList, options = {}) {
   // 起動時検査を行う（事後検査にすると、gate を失った子が丸ごと 1 タスク走ったあとになる）。
   // state store はコマンド側が自分で開閉する —— 子は数時間走りうるので、下の try/finally の
   // ように「コマンド実行の間ずっと開いたまま」にしない。
+  //
+  // **cwd を渡さない。** 承認境界・state・承認 queue は子が走るワークツリーから解決する
+  // （呼び出し元の cwd から解決すると `--worktree` で別リポジトリを指すだけで gate を迂回できる）。
   if (command === "session") {
     return runSessionCommand({
       flags,
       options,
       environment,
-      cwd,
       emit,
       config,
       commandPaths,
@@ -490,9 +484,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // （同期経路の挙動をマイクロタスク 1 つ分でも変えない）。
   const result = runCli(process.argv.slice(2));
   if (result instanceof Promise) {
-    result.then((code) => {
-      process.exitCode = code;
-    });
+    // **rejection を握る。** `.then` だけで受けると未処理の rejection になり、Node は
+    // スタックトレースを出して落ちる —— `emit()` の JSON も、設計した終了コード契約
+    // （2 = 承認待ち / 1 = 実行失敗）も一切経由しない。子が既に走ったあとで記録の書き込みが
+    // 失敗した場合、それは「何が起きたか」を再構成する手段が丸ごと消えることを意味する。
+    result.then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (error) => {
+        // 引数の検証はすべて TypeError で落ちる。使い方の誤りを内部エラーと同じコードで
+        // 返すと、呼び出し側スクリプトが「直せる誤り」と「直せない不整合」を区別できない。
+        const usageError = error instanceof TypeError;
+        process.stderr.write(
+          `frontier-harness: ${usageError ? error.message : (error?.stack ?? error)}\n`,
+        );
+        process.exitCode = usageError ? USAGE : INTERNAL_ERROR;
+      },
+    );
   } else {
     process.exitCode = result;
   }

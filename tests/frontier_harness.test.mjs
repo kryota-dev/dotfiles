@@ -41,7 +41,8 @@ import {
   createOnboardRequestStore,
   onboardRequestsDirectory,
 } from "../home/dot_local/lib/frontier-harness/onboard-requests.mjs";
-import { findCommand, runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import { findCommand } from "../home/dot_local/lib/frontier-harness/command-paths.mjs";
 import { createDoctorReport } from "../home/dot_local/lib/frontier-harness/doctor.mjs";
 import {
   SCHEMA_VERSION,

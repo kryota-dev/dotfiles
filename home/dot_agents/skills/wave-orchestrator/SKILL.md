@@ -232,7 +232,22 @@ fh session launch \
 
 - `--capability` は既定 `session.child`。floor を下回る capability を選ばない。
 - `--sandbox` は既定 `workspace-write`（子は自分のワークツリーへ書く）。
+- `--worktree` は**承認境界そのもの**でもある。manifest・承認 scope・state はこのワークツリーから
+  解決されるので、別リポジトリを指せば「そのリポジトリの承認」が問われる（呼び出し元の cwd の
+  承認では通らない）。
 - 完走すると JSON が出る。`resumeKey` / `status` / `initHealth` / `denials` を控える。
+
+**`--profile` はこの経路では運べない。** 子は PATH から `claude` を解決し、そのランチャーは
+継承した `CLAUDE_CONFIG_DIR` を保持するので、**子は必ず親と同じ account で走る**。親と異なる
+profile を指定されたら、この経路では**黙って親の account で起動しない** —— 選択肢は 2 つで、
+(a) その account の親セッションから wave を起動し直す、(b) capability 側に `accountScope` を
+宣言して固定する（`checkCapabilityExecutable` が実行直前に強制する）。どちらも取れないなら
+user に上げる。**業務を別区分のアカウントで走らせることに直結するので、推測で進めない。**
+
+**子の stderr をファイルへ残さない。** `fh` 自身が書くのはイベントの型名だけだが、**子の生の
+stderr はそのまま継承される**（人が覗く窓を保つための意図的な設計）。その中身は実測されて
+いないので、会話内容を含みうる前提で扱う。ペインで覗くのはよいが、`> child.log 2>&1` の
+ようにリダイレクトして永続化しない —— それが「記録に会話内容を残さない」を外側から破る経路になる。
 
 **起動フラグを自分で組み立てない。** 事前遮断（`--setting-sources user` / `--strict-mcp-config`）と
 承認チャネルの配線は `fh` が sealed invocation として組み立て、**揃っていない argv は組み立て自体が

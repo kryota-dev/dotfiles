@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { requireSafeArgumentValue } from "./adapter-contract.mjs";
 import { createAdapterExecutor } from "./adapters.mjs";
 import {
   APPROVAL_PROMPT_TOOL,
@@ -18,6 +19,7 @@ import { flagValue, optionalFlagValue, positiveIntegerFlag } from "./flags.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
 import { providerCommand } from "./providers.mjs";
 import { loadVerifiedModels } from "./readiness.mjs";
+import { nowIso } from "./record-validation.mjs";
 import { isProviderExecutionAllowed, runWithRolloutGuard } from "./rollout.mjs";
 import { allowsWrite, normalizeSandboxPolicy } from "./sandbox.mjs";
 import {
@@ -54,6 +56,8 @@ const ROUTE_KIND = "single-worker";
 // 台帳の相関に使う識別子。wave の識別子（ブランチ名由来）を想定する。会話内容ではないが、
 // 自由文の混入を防ぐため字集合を絞る。
 const LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,119}$/;
+// 拒否ツール名の上限。子の stdout 由来の値を evidence へ載せる前に縛る。
+const DENIAL_NAME_MAX_LENGTH = 128;
 
 function requireAbsolutePath(value, label) {
   if (typeof value !== "string" || !path.isAbsolute(value)) {
@@ -121,8 +125,10 @@ function sessionClaims({ action, sandbox, health, outcome }) {
   }
   if (outcome?.resumeKey) claims.push(`resume key ${outcome.resumeKey}`);
   // 拒否されたツールは**名前だけ**（adapter-claude の denialNames が tool_input を落とす）。
+  // 名前そのものは子の未検証な stdout 由来なので、長さも縛る（failureReason 側は
+  // adapter-contract が既に truncate しており、evidence へ載る値の扱いをそれに揃える）。
   for (const name of outcome?.denials ?? []) {
-    claims.push(`the child was denied the ${name} tool`);
+    claims.push(`the child was denied the ${name.slice(0, DENIAL_NAME_MAX_LENGTH)} tool`);
   }
   return claims;
 }
@@ -135,7 +141,6 @@ export async function runSessionCommand({
   flags,
   options = {},
   environment,
-  cwd,
   emit,
   config,
   commandPaths,
@@ -163,11 +168,22 @@ export async function runSessionCommand({
   // 再開キーはそのまま子の session id である（#526 §1.3: `--resume <uuid>` で同じ
   // session_id のまま続く）。承認要求に刻む session も同じ値にしないと、`fh approvals` から
   // どの子の問いかを引けなくなる。
-  const resumeKey = action === "resume" ? flagValue(flags, "--resume-key") : null;
+  //
+  // **副作用より前に検証する。** この値は stderr へ出て、label 未指定なら `tasks.goal` にも
+  // 入る。adapter 側の検証（requireSafeArgumentValue）まで待つと、貼り間違えた自由文が
+  // 「起動は失敗したのに state には残る」形で残留する。adapter と**同じ検証器**を通すことで、
+  // 通る形が 2 か所で食い違うこともない。
+  const resumeKey =
+    action === "resume"
+      ? requireSafeArgumentValue(flagValue(flags, "--resume-key"), "--resume-key")
+      : null;
   const sessionId =
     action === "resume"
       ? resumeKey
-      : (optionalFlagValue(flags, "--session-id") ?? randomUUID());
+      : requireSafeArgumentValue(
+          optionalFlagValue(flags, "--session-id") ?? randomUUID(),
+          "--session-id",
+        );
 
   // **完走を待たずに出す。** 停止すると `ps` の argv という情報源が消えるため、
   // 台帳へ記録できるのがここしかない局面がある（wave の「中断と再開」）。
@@ -180,11 +196,17 @@ export async function runSessionCommand({
     );
   }
 
-  // 承認 queue の置き場は他コマンドと同じ解決規則を通す（state path が注入された経路でも
-  // 同じディレクトリを指すこと。ここが食い違うと、子が書いた要求を `fh approvals` が読めない）。
+  // 承認境界・state・承認 queue はすべて**子が走るワークツリー**から解決する。
+  //
+  // 呼び出し元の cwd から解決すると、承認済みリポジトリの中から `--worktree` で別リポジトリを
+  // 指すだけで capability gate を迂回できる（manifest は cwd 側、実行は worktree 側になる）。
+  // 「どのリポジトリで自律的な子を走らせてよいか」を問うている以上、その単位は子の作業ツリーで
+  // なければならない。linked worktree は git common directory を共有するので、同一リポジトリ内の
+  // ワークツリーから起動した場合の解決先は変わらない。
+  const repositoryRoot = worktree;
   const approvalsDir = resolveApprovalsDirectory({
     flags,
-    stateDirectory: () => resolveStateDirectory(options, cwd),
+    stateDirectory: () => resolveStateDirectory(options, repositoryRoot),
   });
   const approvalServer = approvalServerDeclaration({
     command: resolveApprovalServerCommand({
@@ -198,18 +220,18 @@ export async function runSessionCommand({
     progressIntervalMs: positiveIntegerFlag(flags, "--progress-interval-ms"),
   });
 
-  const statePath = options.statePath ?? defaultStatePath(cwd);
+  const statePath = options.statePath ?? defaultStatePath(repositoryRoot);
   const verifiedModels =
     options.verifiedModels ??
     loadVerifiedModels(readinessPathFor(statePath, accountScope));
   const store = createStateStore(statePath);
   try {
-    const policyPath = resolvePolicyPath(options, cwd);
+    const policyPath = resolvePolicyPath(options, repositoryRoot);
     const approved = loadVerifiedManifest({
       policyPath,
       approvals: store.listApprovals(),
-      scope: resolveRepositoryScope(options, cwd),
-      currentApproval: approvedManifestStoreFor(options, cwd).read(policyPath),
+      scope: resolveRepositoryScope(options, repositoryRoot),
+      currentApproval: approvedManifestStoreFor(options, repositoryRoot).read(policyPath),
     });
     // 承認境界はここで効く。子は任意のコマンドを走らせるので command 単位では宣言できない
     // —— そちらは承認チャネル（approval-rules）が実行時に受け持つ。ここで問うのは
@@ -265,7 +287,7 @@ export async function runSessionCommand({
     if (blocked) {
       // gap の記録はトランザクションの外。ファイル書き込みは SQLite のロールバックに
       // 巻き戻されないので、中で書くと「route は無いのに gap だけ残る」不整合を作れてしまう。
-      const gapQueue = manifestGapQueueFor(options, cwd);
+      const gapQueue = manifestGapQueueFor(options, repositoryRoot);
       for (const gap of gaps) gapQueue.record(gap);
       emit({
         ...common,
@@ -329,7 +351,40 @@ export async function runSessionCommand({
       return 0;
     }
 
-    const outcome = await guarded.result;
+    // 実行そのものが例外で終わる経路（spawn の ENOENT / EACCES / EMFILE 等）を、
+    // 未処理の rejection にしない。**子は既に走ったかもしれない**ので、記録を残さずに
+    // クラッシュするのが最悪の失敗になる（監査証跡が丸ごと消える）。
+    let outcome;
+    const attemptedAt = nowIso();
+    try {
+      outcome = await guarded.result;
+    } catch (error) {
+      const reason = `the child process could not be run: ${error.message}`;
+      const failure = store.withTransaction(() =>
+        store.recordAdapterRun({
+          taskId: recorded.task.id,
+          routeId: recorded.route.id,
+          capability: capabilityName,
+          provider: capability.provider,
+          model: capability.model,
+          effort: capability.effort,
+          status: "failed",
+          startedAt: attemptedAt,
+          finishedAt: nowIso(),
+          failureReason: reason,
+        }),
+      );
+      emit({
+        ...common,
+        executed: true,
+        status: "failed",
+        outcome: "failed",
+        failureReason: reason,
+        adapterRunId: failure.id,
+        gaps: [],
+      });
+      return CHILD_RUN_FAILED;
+    }
     const health = runner.initHealth();
     // 起動時検査が unhealthy なら、provider の結果が何であれ成功と読まない。
     // runner は子を終わらせているので通常は結果イベントが無く failed になるが、

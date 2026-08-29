@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -11,6 +12,7 @@ import {
   probeApprovalServer,
   resolveApprovalServerCommand,
 } from "../home/dot_local/lib/frontier-harness/approval-channel.mjs";
+import { createChildRunner } from "../home/dot_local/lib/frontier-harness/child-runner.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
@@ -74,13 +76,20 @@ function temporaryDirectory(context) {
 
 // 承認境界は #494 / #556 で実効化されているため、子を起こすテストは先に manifest を承認する。
 // 儀式は同一プロセスでのレビューと承認を拒否するので、実運用の 2 プロセスを pid の注入で模す。
-async function approveCapabilities(directory, capabilities, statePath) {
+async function approveCapabilities(
+  directory,
+  capabilities,
+  statePath,
+  // policy.json をどのツリーへ書くか。既定は `directory` だが、承認境界がワークツリーから
+  // 解決されることを確かめるテストは、ここを子のワークツリーへ向ける。
+  policyRoot = directory,
+) {
   const manifestPath = path.join(directory, "approved-manifest.json");
   writeFileSync(
     manifestPath,
     JSON.stringify({ commands: [], domains: [], capabilities }),
   );
-  const policyPath = path.join(directory, ".harness", "policy.json");
+  const policyPath = path.join(policyRoot, ".harness", "policy.json");
   const base = {
     config,
     cwd: directory,
@@ -141,7 +150,18 @@ function resultEvent(overrides = {}) {
 
 // 子プロセスの fake。runner が listener を張ってから流したいので、行の送出は setImmediate で
 // 遅らせる。kill は記録するだけにして、「起動時検査が子を終わらせたか」を観測できるようにする。
-function createFakeSpawn({ lines, exitCode = 0 }) {
+//
+// `onSpawn` は spawn が呼ばれた**その瞬間**に走る（子が 1 行も出す前）。「完走前に観測できるか」
+// を問うテストは、実行後の状態ではなくここで確かめないと、出力が終了後へ移動しても通ってしまう。
+function createFakeSpawn({
+  lines,
+  exitCode = 0,
+  chunks,
+  trailingNewline = true,
+  spawnError = null,
+  ignoreTerm = false,
+  onSpawn = () => {},
+}) {
   const calls = [];
   const spawn = (executable, argv, options) => {
     const child = new EventEmitter();
@@ -150,16 +170,34 @@ function createFakeSpawn({ lines, exitCode = 0 }) {
     child.stdout = stdout;
     const signals = [];
     child.kill = (signal) => signals.push(signal);
-    calls.push({ executable, argv, options, signals });
+    const call = { executable, argv, options, signals };
+    calls.push(call);
+    onSpawn(call);
 
+    if (spawnError) {
+      setImmediate(() => child.emit("error", spawnError));
+      return child;
+    }
+
+    // 明示された chunk 列があればそれを流す（行が chunk 境界をまたぐ経路の検証用）。
+    const payload =
+      chunks ??
+      lines.map(
+        (line, index) =>
+          `${JSON.stringify(line)}${
+            trailingNewline || index < lines.length - 1 ? "\n" : ""
+          }`,
+      );
     let index = 0;
     const step = () => {
-      if (index < lines.length) {
-        stdout.emit("data", `${JSON.stringify(lines[index])}\n`);
+      if (index < payload.length) {
+        stdout.emit("data", payload[index]);
         index += 1;
         setImmediate(step);
         return;
       }
+      // TERM を無視する子は close しない（SIGKILL への昇格を観測するため）。
+      if (ignoreTerm && signals.includes("SIGTERM")) return;
       // 起動時検査で終わらせた子はシグナルで死ぬ（終了コードは無い）。
       child.emit("close", signals.length > 0 ? null : exitCode);
     };
@@ -169,7 +207,7 @@ function createFakeSpawn({ lines, exitCode = 0 }) {
   return { spawn, calls };
 }
 
-function okProbe() {
+function okProbe({ tools = [{ name: "approve" }] } = {}) {
   const calls = [];
   const spawn = (command, args, options) => {
     calls.push({ command, args, options });
@@ -179,7 +217,7 @@ function okProbe() {
       error: null,
       stdout: [
         JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18" } }),
-        JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "approve" }] } }),
+        JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools } }),
       ].join("\n"),
       stderr: "",
     };
@@ -196,11 +234,14 @@ async function launch({
   spawnFake,
   probeFake = okProbe(),
   sessionConfig = config,
+  worktree: worktreeOverride,
+  sessionIdFlag = SESSION_ID,
+  promptBody = PROMPT_BODY,
 }) {
-  const worktree = path.join(directory, "worktree");
+  const worktree = worktreeOverride ?? path.join(directory, "worktree");
   mkdirSync(worktree, { recursive: true });
   const promptPath = path.join(directory, "prompt.txt");
-  writeFileSync(promptPath, `${PROMPT_BODY}\n`);
+  writeFileSync(promptPath, `${promptBody}\n`);
   const approvalsDir = path.join(directory, "approvals");
 
   const output = [];
@@ -217,7 +258,11 @@ async function launch({
       approvalsDir,
       "--approval-server-command",
       HARNESS_PATH,
-      ...(action === "launch" ? ["--session-id", SESSION_ID] : ["--resume-key", RESUME_KEY]),
+      ...(action === "resume"
+        ? ["--resume-key", RESUME_KEY]
+        : sessionIdFlag === null
+          ? []
+          : ["--session-id", sessionIdFlag]),
       ...extraFlags,
       "--json",
     ],
@@ -235,7 +280,13 @@ async function launch({
       sessionIo: { stderr: { write: (line) => stderr.push(line) } },
     },
   );
-  return { code, output, stderr, report: output.length ? JSON.parse(output.at(-1)) : null };
+  return {
+    code,
+    output,
+    stderr,
+    worktree,
+    report: output.length ? JSON.parse(output.at(-1)) : null,
+  };
 }
 
 async function preparedDirectory(context) {
@@ -615,4 +666,392 @@ test("an unknown session action is refused", async (context) => {
     launch({ directory, statePath, policyPath, action: "restart" }),
     /launch or resume/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// 承認境界はワークツリーから解決する（cross-repo での gate 迂回の回帰）
+// ---------------------------------------------------------------------------
+
+test("the manifest is read from the worktree, not from the caller's directory", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const worktree = path.join(directory, "worktree");
+  mkdirSync(worktree, { recursive: true });
+  // policy をワークツリー側へ承認する。policyPath は注入しない（解決規則そのものを見る）。
+  await approveCapabilities(directory, [SESSION_CAPABILITY], statePath, worktree);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code } = await launch({
+    directory,
+    statePath,
+    policyPath: undefined,
+    worktree,
+    spawnFake,
+  });
+
+  assert.equal(code, 0, "a worktree whose own policy approves the capability may run");
+  assert.equal(spawnFake.calls.length, 1);
+});
+
+test("a worktree outside the approved repository is blocked even when the caller's directory is approved", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  // 呼び出し元のディレクトリ側だけを承認する。
+  await approveCapabilities(directory, [SESSION_CAPABILITY], statePath);
+  const foreign = path.join(temporaryDirectory(context), "other-repo");
+  mkdirSync(foreign, { recursive: true });
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code, report } = await launch({
+    directory,
+    statePath,
+    policyPath: undefined,
+    worktree: foreign,
+    spawnFake,
+  });
+
+  // 承認済みリポジトリの中から `--worktree` で別リポジトリを指すだけで gate を
+  // 迂回できてはならない（manifest は cwd 側、実行は worktree 側になる経路）。
+  assert.equal(code, 2);
+  assert.equal(report.gaps.length, 1);
+  assert.equal(spawnFake.calls.length, 0, "no child process may be started");
+});
+
+// ---------------------------------------------------------------------------
+// セッション識別子は副作用の前に検証する
+// ---------------------------------------------------------------------------
+
+test("an unsafe session id is refused before anything is written or announced", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [] });
+
+  await assert.rejects(
+    launch({
+      directory,
+      statePath,
+      policyPath,
+      spawnFake,
+      sessionIdFlag: "not a safe value",
+    }),
+    /--session-id/,
+  );
+
+  // 起動失敗にもかかわらず state に残る、という形にしない。
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  assert.equal(store.listRoutes().length, 0);
+  assert.equal(spawnFake.calls.length, 0);
+});
+
+test("fh generates a session id when the caller does not supply one", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  let announced = null;
+  const spawnFake = createFakeSpawn({
+    lines: [initEvent(), resultEvent()],
+    onSpawn: () => {},
+  });
+
+  const { code, report, stderr } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    sessionIdFlag: null,
+  });
+
+  assert.equal(code, 0);
+  const match = /child session ([0-9a-f-]{36})/.exec(stderr.join(""));
+  assert.ok(match, "the generated id must reach stderr");
+  announced = match[1];
+  assert.equal(report.sessionId, announced, "the JSON report carries the same id");
+  const argv = spawnFake.calls[0].argv;
+  assert.equal(
+    argv[argv.indexOf("--session-id") + 1],
+    announced,
+    "the child is launched with the same id",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 起動前 handshake の中身
+// ---------------------------------------------------------------------------
+
+test("the probe speaks a real MCP handshake, not just any three bytes", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const probeFake = okProbe();
+
+  await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    probeFake,
+  });
+
+  const [probeCall] = probeFake.calls;
+  const sent = probeCall.options.input
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    sent.map((message) => message.method),
+    ["initialize", "notifications/initialized", "tools/list"],
+  );
+  assert.equal(sent[0].id, 1);
+  assert.equal(sent[1].id, undefined, "a notification carries no id");
+  assert.equal(sent[2].id, 2);
+  assert.equal(typeof sent[0].params.protocolVersion, "string");
+  // stdio server は stdin の EOF で終わるので、handshake は同期に完結する。
+  assert.equal(typeof probeCall.options.timeout, "number");
+});
+
+test("a server that answers but does not publish approve starts no child", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code, report } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    // 応答は返るが `approve` を公開していない（status 0 なので終了コードでは見抜けない）。
+    probeFake: okProbe({ tools: [{ name: "something-else" }] }),
+  });
+
+  assert.equal(code, 1);
+  assert.match(report.executionReason, /approval channel is not usable/);
+  assert.equal(spawnFake.calls.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// runner の境界
+// ---------------------------------------------------------------------------
+
+test("the child is escalated to SIGKILL when it ignores SIGTERM", async () => {
+  const spawnFake = createFakeSpawn({
+    // 承認チャネルが消えた子。TERM を無視するので、猶予後に SIGKILL へ昇格するはず。
+    lines: [initEvent({ tools: ["Bash"] })],
+    ignoreTerm: true,
+  });
+  const runner = createChildRunner({
+    cwd: "/tmp",
+    permissionPromptTool: APPROVAL_PROMPT_TOOL,
+    terminationGraceMs: 1,
+    stderr: { write: () => {} },
+    spawn: spawnFake.spawn,
+  });
+
+  runner.run({ executable: CLAUDE_PATH, argv: ["-p", "x"] });
+  // 猶予タイマーの発火を待つ。**SIGTERM の記録だけで満足しない** —— TERM を無視する子は
+  // 昇格が無ければ生き残り、gate を失ったまま作業を続けることになる。
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.deepEqual(
+    spawnFake.calls[0].signals,
+    ["SIGTERM", "SIGKILL"],
+    "a child that ignores SIGTERM must not be left running",
+  );
+  assert.equal(runner.initHealth().healthy, false);
+});
+
+test("the runner reassembles events split across chunks and a missing final newline", async () => {
+  const lines = [JSON.stringify(initEvent()), JSON.stringify(resultEvent())];
+  const joined = `${lines[0]}\n${lines[1]}`;
+  const runner = createChildRunner({
+    cwd: "/tmp",
+    permissionPromptTool: APPROVAL_PROMPT_TOOL,
+    stderr: { write: () => {} },
+    spawn: createFakeSpawn({
+      lines: [],
+      // 1 行が chunk 境界をまたぎ、最終行に改行が無い。
+      chunks: [joined.slice(0, 20), joined.slice(20, 90), joined.slice(90)],
+    }).spawn,
+  });
+
+  const result = await runner.run({ executable: CLAUDE_PATH, argv: ["-p", "x"] });
+  assert.equal(runner.initHealth().healthy, true, "init must survive chunk splitting");
+  assert.ok(
+    result.stdout.includes(lines[1]),
+    "the terminal result line must survive the missing newline",
+  );
+});
+
+test("a child that fails to spawn is recorded as a failed run, not an unhandled rejection", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({
+    lines: [],
+    spawnError: Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }),
+  });
+
+  const { code, report } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 1);
+  assert.equal(report.status, "failed");
+  assert.match(report.failureReason, /could not be run/);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const runs = store.listAdapterRuns();
+  assert.equal(runs.length, 1, "the attempt must leave an audit trail");
+  assert.equal(runs[0].status, "failed");
+});
+
+// ---------------------------------------------------------------------------
+// 観測できる時点と、記録に残らないもの
+// ---------------------------------------------------------------------------
+
+test("the session id is on stderr before the child is even spawned", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const stderrAtSpawn = [];
+  const stderr = [];
+  const spawnFake = createFakeSpawn({
+    lines: [initEvent(), resultEvent()],
+    onSpawn: () => stderrAtSpawn.push(...stderr),
+  });
+
+  // launch ヘルパーの stderr 収集と同じ配列を fake へ渡すため、ここは直接呼ぶ。
+  const worktree = path.join(directory, "worktree");
+  mkdirSync(worktree, { recursive: true });
+  const promptPath = path.join(directory, "prompt.txt");
+  writeFileSync(promptPath, `${PROMPT_BODY}\n`);
+  await runCli(
+    [
+      "session",
+      "launch",
+      "--worktree",
+      worktree,
+      "--prompt-file",
+      promptPath,
+      "--approvals-dir",
+      path.join(directory, "approvals"),
+      "--approval-server-command",
+      HARNESS_PATH,
+      "--session-id",
+      SESSION_ID,
+      "--json",
+    ],
+    {
+      accountScope: "personal",
+      commandPaths: COMMAND_PATHS,
+      config,
+      verifiedModels: VERIFIED_MODELS,
+      statePath,
+      cwd: directory,
+      policyPath,
+      write: () => {},
+      spawn: spawnFake.spawn,
+      probeSpawn: okProbe().spawn,
+      sessionIo: { stderr: { write: (line) => stderr.push(line) } },
+    },
+  );
+
+  // 停止したら `ps` の argv という情報源が消えるので、完走を待って出すのでは遅い。
+  assert.ok(
+    stderrAtSpawn.join("").includes(SESSION_ID),
+    "the ledger must be able to record the id before the child runs",
+  );
+});
+
+test("no conversation value reaches any persisted table", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  // 流出経路ごとに別の sentinel を使う。1 つに束ねると、どの経路が漏れたか分からないし、
+  // 片方だけ漏れているときに検出できない。
+  const promptSentinel = "SENTINEL-PROMPT-BODY";
+  const questionSentinel = "SENTINEL-QUESTION-TEXT";
+  const answerSentinel = "SENTINEL-FREE-TEXT-ANSWER";
+  const assistantSentinel = "SENTINEL-ASSISTANT-OUTPUT";
+  const spawnFake = createFakeSpawn({
+    lines: [
+      initEvent(),
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: assistantSentinel }] },
+      },
+      {
+        type: "user",
+        message: { content: [{ type: "text", text: answerSentinel }] },
+      },
+      resultEvent({
+        result: assistantSentinel,
+        permission_denials: [
+          {
+            tool_name: "AskUserQuestion",
+            tool_input: { questions: [{ question: questionSentinel }] },
+          },
+        ],
+      }),
+    ],
+  });
+
+  const { code, stderr, output } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    promptBody: promptSentinel,
+    extraFlags: ["--label", "feat-537-child"],
+  });
+  assert.equal(code, 0);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const database = new DatabaseSync(statePath);
+  context.after(() => database.close());
+  // 列を 1 つ足したときに検査から漏れないよう、行ごと文字列化して全テーブルを走査する。
+  const persisted = JSON.stringify([
+    database.prepare("SELECT * FROM tasks").all(),
+    database.prepare("SELECT * FROM route_decisions").all(),
+    database.prepare("SELECT * FROM adapter_runs").all(),
+    database.prepare("SELECT * FROM evidence").all(),
+    store.listTelemetryEvents(),
+  ]);
+  const observable = `${persisted}${stderr.join("")}${output.join("")}`;
+  for (const [label, sentinel] of [
+    ["prompt body", promptSentinel],
+    ["question text", questionSentinel],
+    ["free-text answer", answerSentinel],
+    ["assistant output", assistantSentinel],
+  ]) {
+    assert.equal(
+      observable.includes(sentinel),
+      false,
+      `${label} must not reach the state, the heartbeat, or the report`,
+    );
+  }
+  // 拒否されたツールは**名前だけ**なら残ってよい（これが残らないと監査が成立しない）。
+  assert.ok(persisted.includes("AskUserQuestion"));
+});
+
+test("the child runs in the worktree it was given", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { worktree } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(spawnFake.calls[0].options.cwd, worktree);
+});
+
+test("the provider runs outside the write transaction", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  let writeDuringRun = null;
+  const spawnFake = createFakeSpawn({
+    lines: [initEvent(), resultEvent()],
+    // 子が走っている最中に別接続から書けること = 書き込みロックを握っていないこと。
+    // 握っていれば SQLITE_BUSY で落ちる（子は数時間走りうるので、これは実運用の要件）。
+    onSpawn: () => {
+      const other = createStateStore(statePath);
+      try {
+        other.createTask({ goal: "concurrent probe" });
+        writeDuringRun = true;
+      } catch (error) {
+        writeDuringRun = error.message;
+      } finally {
+        other.close();
+      }
+    },
+  });
+
+  const { code } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 0);
+  assert.equal(writeDuringRun, true, "a concurrent write must not be blocked");
 });

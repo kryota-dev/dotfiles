@@ -1661,3 +1661,18 @@ print(" ".join(bad))
   # 質問文と選択肢は要求 payload に残る。wave が終わったら残さない運用に揃える。
   grep -q 'fh approvals --purge' "$SKILL_MD"
 }
+
+@test "#537 回帰: SKILL.md が account の取り違えと stderr の永続化を明示的に禁じている" {
+  # 子は必ず親と同じ account で走る（launcher が継承した CLAUDE_CONFIG_DIR を保持するため）。
+  # 「業務を別区分のアカウントで走らせる」事故は黙って起きるので、推測で進めないことを書く。
+  grep -q 'この経路では運べない' "$SKILL_MD"
+  grep -q 'accountScope' "$SKILL_MD"
+  # fh 自身はイベント型名しか書かないが、子の生 stderr は継承される（人が覗く窓）。
+  # そこをファイルへ落とすと「記録に会話内容を残さない」が外側から破れる。
+  grep -q '子の stderr をファイルへ残さない' "$SKILL_MD"
+}
+
+@test "#537 回帰: SKILL.md がワークツリーを承認境界として説明している" {
+  # 承認済みリポジトリから別リポジトリの worktree を指すだけで gate を迂回できてはならない。
+  grep -q '承認境界そのもの' "$SKILL_MD"
+}
