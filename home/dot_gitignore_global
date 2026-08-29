@@ -211,3 +211,5 @@ dogfood-output/
 .kryota-dev
 *.local.*
 AGENTS.override.md
+
+**/.claude/.cc-writes/
