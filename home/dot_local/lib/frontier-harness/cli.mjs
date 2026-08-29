@@ -11,6 +11,7 @@ import {
   runApproveCommand,
   startApprovalServerCommand,
 } from "./approval-commands.mjs";
+import { runCandidateCommand } from "./candidate-command.mjs";
 import { defaultCommandPaths, providerAvailability } from "./command-paths.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
@@ -22,9 +23,11 @@ import {
 } from "./manifest-policy.mjs";
 import { runOnboardCommand } from "./onboard-commands.mjs";
 import { retentionCutoffs } from "./retention.mjs";
+import { runReviewCommand } from "./review-command.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
 import { chooseRoute } from "./router.mjs";
 import { runSessionCommand } from "./session-command.mjs";
+import { runVerifyCommand } from "./verify-command.mjs";
 import {
   approvedManifestStoreFor,
   defaultStateDirectory,
@@ -121,14 +124,29 @@ function usage() {
     "          --sandbox, --approvals-dir, --approval-server-command, --timeout-ms,",
     "          --progress-interval-ms. Path flags must be absolute.",
     "  status  Show recorded route decisions",
-    "  verify  Record a deterministic verification plan",
-    "  review  Record an independent review plan",
+    "  verify  Run an approved deterministic check and record its result:",
+    "            fh verify --task <task id> --command <approved command>",
+    "          Optional: --kind (default test), --worktree <abs>, --timeout-ms,",
+    "          --candidate <id> to run the check inside a candidate worktree.",
+    "          Exits 0 only when the check passed.",
+    "  review  Hand a reviewer a packet, and take findings back into the registry:",
+    "            fh review packet --task <task id> --out <abs> [--base <rev>]",
+    "            fh review record --task <task id> --findings <abs>",
+    "          A packet carries the task, constraints, diff, and verification",
+    "          results, and has no channel for the writer's conversation.",
+    "  candidate  Manage disposable child worktrees for write-capable routes:",
+    "            fh candidate create --task <task id> [--base <rev>] [--label <l>]",
+    "            fh candidate list",
+    "            fh candidate adopt --candidate <id>",
+    "            fh candidate discard --candidate <id>",
+    "          Adoption requires deterministic checks recorded after creation;",
+    "          a candidate that conflicts is retained, never discarded.",
   ].join("\n");
 }
 
-// 戻り値は command で型が分かれる: `onboard`（domain のアドレス解決を伴う）と `session`
-// （子プロセスの stream を読む）は **Promise<number>** を返し、それ以外は同期に number を
-// 返す。プログラムから呼ぶ場合は `Promise.resolve(runCli(...))` で受けるか、ファイル末尾の
+// 戻り値は command で型が分かれる: `onboard`（domain のアドレス解決を伴う）、`session`
+// （子プロセスの stream を読む）、`verify`（決定的チェックの完了を待つ）は
+// **Promise<number>** を返し、それ以外は同期に number を返す。プログラムから呼ぶ場合は `Promise.resolve(runCli(...))` で受けるか、ファイル末尾の
 // entrypoint と同じく `instanceof Promise` で分岐すること（`process.exitCode = runCli(...)` と
 // 素朴に書くと、これらの経路で Promise オブジェクトが exitCode に入り静かに壊れる）。
 export function runCli(argumentsList, options = {}) {
@@ -248,6 +266,22 @@ export function runCli(argumentsList, options = {}) {
     });
   }
 
+  // verify / review / candidate も session と同じく、state store を自分で開閉する。
+  // 決定的チェックは分単位で走りうるし、candidate の git 操作もフルチェックアウトを伴うため、
+  // 下の try/finally のように「コマンド実行の間ずっと開いたまま」にはしない。
+  // 承認境界・state も、それぞれのコマンドが対象とするワークツリーから解決する。
+  if (command === "verify") {
+    return runVerifyCommand({ flags, options, environment, emit, config, cwd });
+  }
+
+  if (command === "review") {
+    return runReviewCommand({ flags, options, emit, config, cwd });
+  }
+
+  if (command === "candidate") {
+    return runCandidateCommand({ flags, options, emit, config, cwd });
+  }
+
   const statePath = options.statePath ?? defaultStatePath(cwd);
   const verifiedModels =
     options.verifiedModels ??
@@ -265,7 +299,7 @@ export function runCli(argumentsList, options = {}) {
         scope: resolveRepositoryScope(options, cwd),
         currentApproval: approvedManifestStoreFor(options, cwd).read(policyPath),
       });
-      const result = store.withTransaction(() => {
+      const recorded = store.withTransaction(() => {
         const storedTask = store.createTask(task);
         const route = chooseRoute({
           accountScope,
@@ -313,44 +347,56 @@ export function runCli(argumentsList, options = {}) {
                 ),
               })
             : null;
-        // escalation は「人の判断へ戻す」ための route なので、rollout に関わらず provider を
-        // 起動しない。#534 が選んだ扱い（塞いだ route は実行せず記録する）はここで初めて
-        // 構造になる —— これが無いと不変条件は「rollout が shadow である」ことに依存し、
-        // #502 で昇格して executor を配線した瞬間に gate が実行段ですり抜ける。
-        // manifest の gap による escalation もこの経路を通るため、承認境界も同じ構造で守られる。
-        const execution =
-          effectiveRoute.kind === "escalation"
-            ? {
-                executed: false,
-                reason:
-                  gaps.length > 0
-                    ? "the repository capability manifest does not approve this task"
-                    : "escalation route requires user judgement; recorded without provider execution",
-              }
-            : runWithRolloutGuard(
-                config,
-                `route ${effectiveRoute.kind}`,
-                options.executor,
-              );
         return {
           task: storedTask,
-          decision: effectiveRoute,
+          route: effectiveRoute,
           blocked,
           blockEvidence,
-          executed: execution.executed,
-          executionReason: execution.reason,
-          rollout: config.rollout,
           gaps,
-          policyIntegrity: approved.integrity,
         };
       });
-      // gap の記録はトランザクションの外で行う。ファイル書き込みは SQLite の
+      // **executor をトランザクションの外へ出す。** 以前はここが `withTransaction` の内側に
+      // あり、`BEGIN IMMEDIATE` の書き込みロックを握ったまま provider を待つ形だった。
+      // 通常の CLI 利用では executor を渡さないため実害は出ていなかったが、#502 で配線した
+      // 瞬間に「同じリポジトリの他の `fh` が全部詰まる」に変わる罠だった。記録用トランザクション
+      // → 実行 → という順序は `session-command.mjs` および `verify-command.mjs` と同じ形である。
+      //
+      // escalation は「人の判断へ戻す」ための route なので、rollout に関わらず provider を
+      // 起動しない。#534 が選んだ扱い（塞いだ route は実行せず記録する）はここで構造になる
+      // —— これが無いと不変条件は「rollout が shadow である」ことに依存し、#502 で昇格して
+      // executor を配線した瞬間に gate が実行段ですり抜ける。manifest の gap による escalation も
+      // この経路を通るため、承認境界も同じ構造で守られる。
+      const execution =
+        recorded.route.kind === "escalation"
+          ? {
+              executed: false,
+              reason:
+                recorded.gaps.length > 0
+                  ? "the repository capability manifest does not approve this task"
+                  : "escalation route requires user judgement; recorded without provider execution",
+            }
+          : runWithRolloutGuard(
+              config,
+              `route ${recorded.route.kind}`,
+              options.executor,
+            );
+      // gap の記録もトランザクションの外で行う。ファイル書き込みは SQLite の
       // ロールバックに巻き戻されないので、中で書くと「route は無いのに gap だけ残る」
       // 不整合を作れてしまう。
       const gapQueue = manifestGapQueueFor(options, cwd);
-      for (const gap of result.gaps) gapQueue.record(gap);
-      emit(result);
-      return result.gaps.length > 0 ? BLOCKED_PENDING_APPROVAL : 0;
+      for (const gap of recorded.gaps) gapQueue.record(gap);
+      emit({
+        task: recorded.task,
+        decision: recorded.route,
+        blocked: recorded.blocked,
+        blockEvidence: recorded.blockEvidence,
+        executed: execution.executed,
+        executionReason: execution.reason,
+        rollout: config.rollout,
+        gaps: recorded.gaps,
+        policyIntegrity: approved.integrity,
+      });
+      return recorded.gaps.length > 0 ? BLOCKED_PENDING_APPROVAL : 0;
     }
 
     if (command === "status") {
@@ -398,78 +444,6 @@ export function runCli(argumentsList, options = {}) {
       return 0;
     }
 
-    if (command === "verify") {
-      const verificationCommand = flagValue(flags, "--command");
-      // 検証コマンドも承認境界の内側にある。未承認のまま計画を記録すると、
-      // rollout が昇格した時点でその計画がそのまま実行対象になる。
-      const verifyPolicyPath = resolvePolicyPath(options, cwd);
-      const approved = loadVerifiedManifest({
-        policyPath: verifyPolicyPath,
-        approvals: store.listApprovals(),
-        scope: resolveRepositoryScope(options, cwd),
-        currentApproval: approvedManifestStoreFor(options, cwd).read(verifyPolicyPath),
-      });
-      const gaps = findManifestGaps({
-        manifest: approved.manifest,
-        commands: [verificationCommand],
-      });
-      if (gaps.length > 0) {
-        const gapQueue = manifestGapQueueFor(options, cwd);
-        for (const gap of gaps) gapQueue.record(gap);
-        emit({
-          evidence: null,
-          executed: false,
-          executionReason:
-            "the repository capability manifest does not approve this verification command",
-          rollout: config.rollout,
-          gaps,
-          policyIntegrity: approved.integrity,
-        });
-        return BLOCKED_PENDING_APPROVAL;
-      }
-      const evidence = store.putEvidence({
-        kind: "verification_plan",
-        producer: "frontier-harness",
-        command: verificationCommand,
-        claimsSupported: ["verification is planned for a shadow route"],
-      });
-      const execution = runWithRolloutGuard(
-        config,
-        "verification command",
-        options.executor,
-      );
-      emit({
-        evidence,
-        executed: execution.executed,
-        executionReason: execution.reason,
-        rollout: config.rollout,
-        gaps: [],
-        policyIntegrity: approved.integrity,
-      });
-      return 0;
-    }
-
-    if (command === "review") {
-      const taskId = flagValue(flags, "--task");
-      const evidence = store.putEvidence({
-        kind: "review_plan",
-        producer: "frontier-harness",
-        claimsSupported: [`independent review planned for ${taskId}`],
-      });
-      const execution = runWithRolloutGuard(
-        config,
-        "independent review",
-        options.executor,
-      );
-      emit({
-        evidence,
-        executed: execution.executed,
-        executionReason: execution.reason,
-        rollout: config.rollout,
-        taskId,
-      });
-      return 0;
-    }
   } finally {
     store.close();
   }
