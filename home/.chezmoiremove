@@ -121,6 +121,17 @@
 # separate explicit decision. Note the standing-declaration caveat at the top of this file —
 # these four paths are re-deleted on every apply, so re-enabling any of them means removing
 # the entry here first, not just restoring the source file.
+#
+# #523 removed the statusline renderer that was still reading clv2-session-notify.sh's
+# .review-ready-clusters cache, and reached the same verdict for that cache: not listed.
+# Three reasons, beyond the #473 precedent above. It is runtime state under a per-account
+# homunculus dir, which .chezmoiignore already declares outside this repo's management. Its
+# path is not statically enumerable — the live dir is ~/.local/share/ecc-homunculus-<slug>
+# (home/dot_local/launchers/executable_claude), with $CLV2_HOMUNCULUS_DIR and $XDG_DATA_HOME
+# overrides on top — so a literal entry would only ever cover the bare fallback. And a
+# standing delete would silently destroy the cache of any writer restored later, which #523
+# explicitly leaves open as a future design decision. The file is inert as it stands: with
+# the renderer gone, nothing reads it and nothing writes it.
 .claude/hooks-fork/governance-capture.js
 .claude/hooks-fork/post-bash-command-log.js
 .claude/hooks-fork/ecc-state-reader.js

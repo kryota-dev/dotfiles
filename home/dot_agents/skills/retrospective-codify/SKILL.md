@@ -44,7 +44,7 @@ ECC 継続学習 v2（Layer 1-3）が観測から蓄積した instinct を、`/e
 **呼び出し契機**:
 
 - **user 手動**: `/retrospective-codify --input=instinct-clusters`
-- **system push**: 廃止。CLV2 の SessionStart 通知 hook（`clv2-session-notify.sh`）が cluster≥1 でデスクトップ通知を出す経路は #496 で削除された（セッション開始の通知は行動要求ではないため）。statusline の 🧬N セグメントは残るが、値を書き込む producer がいないため凍結する。現在の起動経路は上記の user 手動のみ。
+- **system push**: 廃止。CLV2 の SessionStart 通知 hook（`clv2-session-notify.sh`）が cluster≥1 でデスクトップ通知を出す経路は #496 で削除された（セッション開始の通知は行動要求ではないため）。writer 不在で凍結キャッシュを読み続けていた statusline の 🧬N セグメントも #523 で除去された。現在の起動経路は上記の user 手動のみ。
 
 **cluster の取得**（engine は改変せず、読み取り専用で利用する）:
 
@@ -52,7 +52,7 @@ ECC 継続学習 v2（Layer 1-3）が観測から蓄積した instinct を、`/e
 python3 ~/.agents/skills/continuous-learning-v2/scripts/instinct-cli.py evolve
 ```
 
-`evolve` 出力の `## SKILL CANDIDATES` 節（各 cluster の trigger / 構成 instinct ID / avg confidence / domain / scope）を学びの候補として読む。`Potential skill clusters found: N` 行が cluster 総数（statusline 🧬N と同値）。instinct が 3 件未満のときは `evolve` が exit 1 で「Need at least 3 instincts」を返すため、その場合は **no-op で終了**し session 入力モードを案内する。
+`evolve` 出力の `## SKILL CANDIDATES` 節（各 cluster の trigger / 構成 instinct ID / avg confidence / domain / scope）を学びの候補として読む。`Potential skill clusters found: N` 行が cluster 総数（この skill が cluster 数を知る唯一の経路。statusline の 🧬N セグメントは #523 で除去済み）。instinct が 3 件未満のときは `evolve` が exit 1 で「Need at least 3 instincts」を返すため、その場合は **no-op で終了**し session 入力モードを案内する。
 
 **この入力モードでの実行フロー差分**（下記「実行フロー」の 1-2 を置換）:
 
@@ -125,7 +125,7 @@ See @.claude/conventions/<topic>.md for <description>.
 ## トリガー
 
 - **user 手動**: `/retrospective-codify`（会話からの抽出）/ `/retrospective-codify --input=instinct-clusters`（CLV2 cluster からの抽出）
-- **CLV2 push 連携**: 廃止（#496）。SessionStart 通知 hook（`clv2-session-notify.sh`）は削除され、review-ready cluster のデスクトップ通知は出ない。statusline 🧬N は残るが producer がいないため値は凍結する。cluster からの抽出は上記の user 手動起動で行う。
+- **CLV2 push 連携**: 廃止（#496）。SessionStart 通知 hook（`clv2-session-notify.sh`）は削除され、review-ready cluster のデスクトップ通知は出ない。producer 不在のまま残っていた statusline 🧬N も #523 で除去された。cluster からの抽出は上記の user 手動起動で行う。
 - **将来連携（未実装）**: Theme A SessionEnd hook からの auto trigger（interactive 既定で user 介入前提）。
 
 ## failure mode と対処
