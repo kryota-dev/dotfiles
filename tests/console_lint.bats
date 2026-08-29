@@ -168,6 +168,17 @@ EOF
   done
 }
 
+@test "lint-console: the opt-out check pins the locale so its character classes stay byte-oriented" {
+  # Behavioural proof of this lives on CI, not here: [[:space:]] only picks up U+2028 under a
+  # UTF-8 glibc locale, so a macOS run rejects the input either way and cannot notice the pin
+  # going missing. Without it the allow-list reads `<U+2028>x` as "a space and a rule name"
+  # and lets the file through -- which is exactly how this escaped a green local run once.
+  grep -qF 'LC_ALL=C find $(CONSOLE_LINT_ROOTS)' "${REPO_ROOT}/Makefile" || {
+    echo "the file-level opt-out scan no longer pins LC_ALL=C"
+    false
+  }
+}
+
 @test "lint-console: a control character in a path cannot reach the diagnostic" {
   # The path is as attacker-controlled as the file's contents, so it is sanitised too.
   local esc

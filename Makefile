@@ -103,6 +103,13 @@ CONSOLE_LINT_NAMES = -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.
 # failure mode this guard exists to prevent. Inverting the test ends that chase: unfamiliar
 # input fails loudly instead of passing quietly.
 #
+# LC_ALL=C is load-bearing, not tidiness. Character classes are locale-dependent: under a
+# UTF-8 locale glibc classifies U+2028 as [[:space:]], so `<U+2028>x` reads to the allow-list
+# as "a space and an ASCII rule name" and passes -- the same gap, reintroduced by the
+# environment. That slipped through a macOS run (byte-oriented awk) and failed on CI. Pinning
+# the locale keeps the match byte-oriented, which is the only way the allow-list means the
+# same thing on both platforms.
+#
 # The cost is false positives -- the literal text in a template literal, a block comment, or
 # prose inside a scanned file is rejected even where deno would ignore it. That is the side
 # to err on, and it is pinned by tests/console_lint.bats.
@@ -123,7 +130,7 @@ lint-console:
 		echo "lint-console: no JS/TS sources under '$(CONSOLE_LINT_ROOTS)' -- the glob regressed." >&2; \
 		exit 1; \
 	}
-	@bad=$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+	@bad=$$(LC_ALL=C find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
 		-exec awk 'match($$0, /deno-lint-ignore-file/) { \
 			rest = substr($$0, RSTART + RLENGTH); \
 			sub(/--.*$$/, "", rest); gsub(/,/, " ", rest); \
