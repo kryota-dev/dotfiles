@@ -56,6 +56,16 @@ function refuse(reason) {
   return { executable: false, reason };
 }
 
+// Promise そのものではなく thenable かどうかで見る。runner は呼び出し側が注入するので、
+// Promise のサブクラスや別 realm の Promise が来ても取りこぼさない。
+function isThenable(value) {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof value.then === "function"
+  );
+}
+
 // 実行してよいかを検査する。拒否は例外ではなく理由付きの判定として返す:
 // 「利用不可だったので実行しなかった」は記録すべき事実であって、異常終了ではない。
 export function checkCapabilityExecutable({
@@ -127,8 +137,9 @@ export function checkCapabilityExecutable({
 // `runWithRolloutGuard(config, context, executor)` の executor を作る。
 //
 // **既定の runner を持たない。** adapter 層はプロセスを起動せず、Node の子プロセス API を
-// import すらしない（テストがソースを走査して固定している）。実起動は呼び出し側が注入し、
-// その配線は rollout 昇格（#502）の範囲。それまでは shadow guard が executor を呼ばない。
+// import すらしない（テストがソースを走査して固定している）。実起動は呼び出し側が注入する:
+// 現在の注入元は `session-command.mjs`（子セッションの起動、#537）で、runner の実体は
+// `child-runner.mjs` にある。rollout が shadow の間は guard が executor を呼ばない。
 export function createAdapterExecutor({
   accountScope,
   registry = createAdapterRegistry(),
@@ -197,28 +208,37 @@ export function createAdapterExecutor({
         : adapter.resume(invocationRequest);
 
     const startedAt = clock();
-    const result = normalizeAdapterResult(
-      adapter.interpret(runner(invocation)),
-      capability.provider,
-    );
-    const finishedAt = clock();
+    const finish = (processResult) => {
+      const result = normalizeAdapterResult(
+        adapter.interpret(processResult),
+        capability.provider,
+      );
+      return Object.freeze({
+        ...identity,
+        outcome: result.outcome,
+        status: adapterRunStatusFor(result.outcome),
+        ranProvider: true,
+        phase: invocation.phase,
+        resumeKey: result.resumeKey,
+        denials: result.denials,
+        failureReason: result.failureReason,
+        exitCode: result.exitCode,
+        startedAt,
+        finishedAt: clock(),
+        // sealInvocation が「この argv はこの policy どおりに動く」ことを構築時に確認済みなので、
+        // これは要求値ではなく**その実行で有効だった値**である（#526 §7.3-4）。
+        // adapter_runs は起動方式の列を持たないため、記録先は evidence 側になる。
+        sandbox,
+      });
+    };
 
-    return Object.freeze({
-      ...identity,
-      outcome: result.outcome,
-      status: adapterRunStatusFor(result.outcome),
-      ranProvider: true,
-      phase: invocation.phase,
-      resumeKey: result.resumeKey,
-      denials: result.denials,
-      failureReason: result.failureReason,
-      exitCode: result.exitCode,
-      startedAt,
-      finishedAt,
-      // sealInvocation が「この argv はこの policy どおりに動く」ことを構築時に確認済みなので、
-      // これは要求値ではなく**その実行で有効だった値**である（#526 §7.3-4）。
-      // adapter_runs は起動方式の列を持たないため、記録先は evidence 側になる。
-      sandbox,
-    });
+    const processResult = runner(invocation);
+    // **runner が Promise を返したときだけ** executor も Promise を返す。起動時検査を
+    // stream 上で行う runner（child-runner.mjs）は非同期でないと「init を読んだ時点で子を
+    // 終わらせる」ができない一方、同期 runner の経路はマイクロタスク 1 つ分も変えない
+    // （adapter 層の同期契約と、それに乗っている既存テストをそのまま維持する）。
+    return isThenable(processResult)
+      ? processResult.then(finish)
+      : finish(processResult);
   };
 }
