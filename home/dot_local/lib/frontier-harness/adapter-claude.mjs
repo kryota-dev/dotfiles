@@ -1,9 +1,17 @@
+import path from "node:path";
+
 import {
   parseJsonLines,
   requireInvocationRequest,
   requireSafeArgumentValue,
   sealInvocation,
+  walkFlagPairs,
 } from "./adapter-contract.mjs";
+import {
+  requireNonEmptyString,
+  requireObject,
+  requireToken,
+} from "./record-validation.mjs";
 
 // Claude Code の非対話実行。起動形・再開形・結果解釈はすべて #526 の実測に基づく。
 const PROVIDER = "claude";
@@ -12,6 +20,46 @@ const PROVIDER = "claude";
 // サンドボックスが包むのは Bash のサブプロセスだけで、Read/Edit/Write は権限システム側なので、
 // 「書き込まない」を成立させるには mode 側の指定が要る。
 const READ_ONLY_PERMISSION_MODE = "dontAsk";
+
+const SETTING_SOURCES_FLAG = "--setting-sources";
+const STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config";
+const MCP_CONFIG_FLAG = "--mcp-config";
+const PERMISSION_PROMPT_TOOL_FLAG = "--permission-prompt-tool";
+const SETTINGS_FLAG = "--settings";
+// #526 §1.6［原文］: `--bare` を付けない `-p` は、信頼していないフォルダでも repository の
+// `.mcp.json` の server に接続する。
+const PROJECT_MCP_FILE = ".mcp.json";
+
+// この adapter が出してよいフラグと、それが値を取るかどうか（walkFlagPairs の allowlist）。
+//
+// `--add-dir` と `--dangerously-skip-permissions` がこの表に無いのは意図である。前者は［原文］
+// "Grants file access; **most** `.claude/` configuration is not discovered from these directories"
+// と限定付きで、残余が特定されていない以上「設定源を増やさない」とは断定できない。
+const CLAUDE_FLAGS = Object.freeze({
+  "-p": true,
+  "--output-format": true,
+  "--model": true,
+  "--effort": true,
+  "--permission-mode": true,
+  "--session-id": true,
+  "--resume": true,
+  [SETTING_SOURCES_FLAG]: true,
+  [STRICT_MCP_CONFIG_FLAG]: false,
+  [SETTINGS_FLAG]: true,
+  [MCP_CONFIG_FLAG]: true,
+  [PERMISSION_PROMPT_TOOL_FLAG]: true,
+});
+
+// docs/en/settings の scope 表［原文］に対応する。managed settings は --setting-sources の語彙に
+// 無く、作業ツリーからも書けないのでここでは扱わない。
+const SETTING_SOURCE_FILES = Object.freeze({
+  user: ({ home }) => path.join(home, ".claude", "settings.json"),
+  project: ({ worktree }) => path.join(worktree, ".claude", "settings.json"),
+  local: ({ worktree }) => path.join(worktree, ".claude", "settings.local.json"),
+});
+
+const ALL_SETTING_SOURCES = Object.freeze(Object.keys(SETTING_SOURCE_FILES));
+const USER_SETTING_SOURCE = "user";
 
 // #526 §1.5［実測］の設定でサンドボックス境界を確認している
 // （cwd 配下への書き込みは成功、$HOME への書き込みとネットワーク接続は拒否）。
@@ -38,6 +86,142 @@ function flagValue(argv, flag) {
   return argv[index + 1] ?? null;
 }
 
+// この adapter は位置引数を持たないので、argv 全体をフラグ/値の対として走査できる
+// （走査そのものは adapter-contract.mjs、表の中身だけがここの vendor 知識）。
+function walkArgv(argv) {
+  return walkFlagPairs(argv, CLAUDE_FLAGS);
+}
+
+// ファイルパスか inline JSON かを見分ける。`--settings` も `--mcp-config` も［原文］
+// 「ファイルまたは文字列」を受けるので、値の形でしか区別できない。
+function parseInlineJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+// #526 §1.6［原文］: 無指定の `-p` は repository の `.claude/settings.json` の hooks を実行する。
+// つまり「指定が無い」は「全部読む」なので、解釈できない形はすべて全源に倒す（fail-closed）。
+function settingSourcesOf(values) {
+  const declared = values.get(SETTING_SOURCES_FLAG);
+  if (!declared || declared.length !== 1) return ALL_SETTING_SOURCES;
+  const names = declared[0]
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  if (names.length === 0) return ALL_SETTING_SOURCES;
+  // 未知の源名を「読まれない」と決めつけない。
+  if (names.some((name) => !Object.hasOwn(SETTING_SOURCE_FILES, name))) {
+    return ALL_SETTING_SOURCES;
+  }
+  return names;
+}
+
+function freezeUniquePaths(paths) {
+  return Object.freeze([...new Set(paths)]);
+}
+
+// argv から「この invocation で子が読む設定ファイル」の絶対パスを導出する。
+//
+// **enforce（遮断できているか）と説明（子が何を読むか）を同じ導出から作る**ための関数である。
+// readEffectiveConfigIsolation はこの結果を見て判定し、挙動テストは実ファイルを置いた作業ツリーに
+// 対してこの結果を検証する。2 つを別実装にすると、テストが主張する読み込み対象と本番が遮断する
+// 対象が必ず drift する。
+export function configSourcesFor(invocation, { worktree, home }) {
+  requireNonEmptyString(worktree, "config sources worktree");
+  requireNonEmptyString(home, "config sources home");
+  const values = walkArgv(invocation?.argv);
+  const paths = [];
+
+  if (values === null) {
+    for (const name of ALL_SETTING_SOURCES) {
+      paths.push(SETTING_SOURCE_FILES[name]({ worktree, home }));
+    }
+    paths.push(path.join(worktree, PROJECT_MCP_FILE));
+    return freezeUniquePaths(paths);
+  }
+
+  for (const name of settingSourcesOf(values)) {
+    paths.push(SETTING_SOURCE_FILES[name]({ worktree, home }));
+  }
+  // パスで渡された設定ファイルは作業ツリーから差し替えられうるので、設定源として数える。
+  for (const flag of [SETTINGS_FLAG, MCP_CONFIG_FLAG]) {
+    for (const value of values.get(flag) ?? []) {
+      if (parseInlineJsonObject(value) === null) paths.push(path.resolve(worktree, value));
+    }
+  }
+  // ［原文］`--strict-mcp-config` は "Only use MCP servers from `--mcp-config`, ignoring all other
+  // MCP configurations"。無ければ repository の `.mcp.json` が読まれる。
+  if (!values.has(STRICT_MCP_CONFIG_FLAG)) {
+    paths.push(path.join(worktree, PROJECT_MCP_FILE));
+  }
+  return freezeUniquePaths(paths);
+}
+
+// isolation 判定に使う probe。実在しないパスでよい（この判定はファイルシステムに触れない）。
+// 「作業ツリー配下か否か」だけを見分けられればよいので、互いに包含しない固定値を置く。
+const WORKTREE_PROBE = `${path.sep}frontier-harness-worktree-probe`;
+const HOME_PROBE = `${path.sep}frontier-harness-home-probe`;
+
+function isInsideWorktreeProbe(candidate) {
+  const relative = path.relative(WORKTREE_PROBE, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+// ツール名は `mcp__<server>__<tool>`。server key は requireToken（`_` を含まない）で縛るので、
+// `__` での 3 分割は一意になる。
+function promptToolTargets(tool, serverKey) {
+  const parts = tool.split("__");
+  return (
+    parts.length === 3 &&
+    parts[0] === "mcp" &&
+    parts[1] === serverKey &&
+    parts[2].length > 0
+  );
+}
+
+// 宣言された MCP server の key。ファイルパス指定は作業ツリーから差し替えられうるので、
+// 許可リストとしては inline JSON だけを認める。
+function declaredServerKey(value) {
+  const servers = parseInlineJsonObject(value)?.mcpServers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null;
+  const keys = Object.keys(servers);
+  return keys.length === 1 ? keys[0] : null;
+}
+
+// 外部ツール接続の許可リスト。
+//
+// #526 §1.2.1［実測］: prompt tool を配線しないと、子は「user に問う」能力そのものを失う。
+// 一方 `--strict-mcp-config` は `--mcp-config` 由来以外の MCP 設定を無視するので、宣言が無ければ
+// server が 1 つも載らず、prompt tool の参照先が存在しない子ができあがる。どちらも gate が
+// 静かに消える失敗なので、「承認 server をちょうど 1 つ宣言し、prompt tool がそれを指す」以外の
+// 形を成立させない。宣言だけがある形も認めない（承認チャネル以外の接続を子へ入れないため）。
+function approvalChannelIsAllowlisted(values) {
+  const tools = values.get(PERMISSION_PROMPT_TOOL_FLAG) ?? [];
+  const configs = values.get(MCP_CONFIG_FLAG) ?? [];
+  if (tools.length === 0) return configs.length === 0;
+  if (tools.length !== 1 || configs.length !== 1) return false;
+  const key = declaredServerKey(configs[0]);
+  return key !== null && promptToolTargets(tools[0], key);
+}
+
+// argv から「作業ツリーが子セッションを設定できるか」を読み戻す。sealInvocation はこれが true を
+// 返さない invocation を組み立てさせない（#538 の完了条件「起動フラグを外した状態で子を起動できない」）。
+function readEffectiveConfigIsolation(invocation) {
+  const values = walkArgv(invocation?.argv);
+  if (values === null) return false;
+  if (!approvalChannelIsAllowlisted(values)) return false;
+  return configSourcesFor(invocation, {
+    worktree: WORKTREE_PROBE,
+    home: HOME_PROBE,
+  }).every((candidate) => !isInsideWorktreeProbe(candidate));
+}
+
 // argv から実効サンドボックスを読み戻す。読み取れない形はすべて null にして、
 // sealInvocation 側で「要求と一致しない」として弾かせる。
 function readEffectiveSandbox(invocation) {
@@ -50,7 +234,7 @@ function readEffectiveSandbox(invocation) {
   // 出す adapter は、設定 JSON 側の指定が効いていると誤認している。
   if (argv.includes("--sandbox")) return null;
 
-  const raw = flagValue(argv, "--settings");
+  const raw = flagValue(argv, SETTINGS_FLAG);
   if (raw === null) return null;
   let settings;
   try {
@@ -73,7 +257,66 @@ function readEffectiveSandbox(invocation) {
   return { mode: readOnly ? "read-only" : "workspace-write" };
 }
 
-function buildArgv({ prompt, model, effort, sandbox, session, permissionPromptTool }) {
+// 承認 server の宣言。`env` は受け取らない —— invocation が環境変数・credential のチャネルを
+// 持たないという不変条件と揃える（認証は各 CLI のランチャーと keychain が持つ）。
+const APPROVAL_SERVER_ARGUMENT_MAX_LENGTH = 256;
+const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
+
+function requireApprovalServerArgument(value, label) {
+  requireNonEmptyString(value, label);
+  if (value.length > APPROVAL_SERVER_ARGUMENT_MAX_LENGTH) {
+    throw new TypeError(
+      `${label} must be at most ${APPROVAL_SERVER_ARGUMENT_MAX_LENGTH} characters`,
+    );
+  }
+  if (CONTROL_CHARACTERS.test(value)) {
+    throw new TypeError(`${label} must not contain control characters`);
+  }
+  return value;
+}
+
+function approvalServerConfig(input, promptTool) {
+  requireObject(input, `${PROVIDER} approvalServer`);
+  const key = requireToken(input.key, `${PROVIDER} approvalServer key`);
+  const command = requireNonEmptyString(input.command, `${PROVIDER} approvalServer command`);
+  // sealInvocation が executable に課すのと同じ理由。相対パスは子の CWD（＝作業ツリー）基準で
+  // 解決され、untrusted repository が同梱した実行ファイルを承認 server に据えられる。
+  if (!path.isAbsolute(command)) {
+    throw new TypeError(`${PROVIDER} approvalServer command must be an absolute path`);
+  }
+  if (input.env !== undefined) {
+    throw new TypeError(`${PROVIDER} approvalServer must not carry an env block`);
+  }
+  const args = input.args ?? [];
+  if (!Array.isArray(args)) {
+    throw new TypeError(`${PROVIDER} approvalServer args must be an array`);
+  }
+  if (!promptToolTargets(promptTool, key)) {
+    throw new TypeError(
+      `${PROVIDER} permissionPromptTool must name the declared approval server (mcp__${key}__<tool>)`,
+    );
+  }
+  return {
+    mcpServers: {
+      [key]: {
+        command,
+        args: args.map((value, index) =>
+          requireApprovalServerArgument(value, `${PROVIDER} approvalServer args[${index}]`),
+        ),
+      },
+    },
+  };
+}
+
+function buildArgv({
+  prompt,
+  model,
+  effort,
+  sandbox,
+  session,
+  permissionPromptTool,
+  approvalServer,
+}) {
   const argv = [
     "-p",
     prompt,
@@ -86,15 +329,16 @@ function buildArgv({ prompt, model, effort, sandbox, session, permissionPromptTo
     effort,
     // #526 R2: `-p` は workspace trust を出さず、壊れた設定を黙って無視する。repository 由来の
     // hooks / MCP は起動フラグで事前に遮断する（起動後の init 検査では手遅れになる）。
-    "--setting-sources",
-    "user",
-    "--strict-mcp-config",
-    "--settings",
+    // この 2 つを外した argv は sealInvocation が組み立てさせない（readEffectiveConfigIsolation）。
+    SETTING_SOURCES_FLAG,
+    USER_SETTING_SOURCE,
+    STRICT_MCP_CONFIG_FLAG,
+    SETTINGS_FLAG,
     JSON.stringify(sandboxSettings()),
   ];
   if (session) argv.push(session.flag, session.value);
-  // 承認チャネルの受け口そのものは #533 が作る。ここでは呼び出し側が渡したときだけ配線し、
-  // 配線の要否を adapter が判断しない（判断は #534 の capability registry 軸の範囲）。
+  // 承認チャネルの受け口そのものは #533 が作り、配線の要否は #534 の capability registry が決める。
+  // ここでは「配線するなら承認 server をちょうど 1 つ inline で宣言する」形だけを組み立てる。
   //
   // **未実測の組合せ（#534 への申し送り）**: `read-only` は下で `--permission-mode dontAsk` を
   // 出すが、#526 §1.2.5［原文］の dontAsk 行は節見出しのとおり「prompt tool を**配線しない**
@@ -102,11 +346,20 @@ function buildArgv({ prompt, model, effort, sandbox, session, permissionPromptTo
   // 「dontAsk ＋ prompt tool 配線」で AskUserQuestion が通るかは**どちらの一次ソースでも
   // 確定していない**。ここで拒否も許可も決め打たず、組合せの可否は #533 の受け口の形と
   // #534 の registry 軸で決める（本 issue のスコープ外）。
-  if (permissionPromptTool) {
-    argv.push(
-      "--permission-prompt-tool",
-      requireSafeArgumentValue(permissionPromptTool, `${PROVIDER} permissionPromptTool`),
+  if (permissionPromptTool !== undefined || approvalServer !== undefined) {
+    if (!permissionPromptTool || !approvalServer) {
+      throw new TypeError(
+        `${PROVIDER} requires permissionPromptTool and approvalServer together: ` +
+          "a prompt tool without a declared server has nothing behind it under --strict-mcp-config, " +
+          "and a declared server without a prompt tool is an extra MCP server in the child",
+      );
+    }
+    const tool = requireSafeArgumentValue(
+      permissionPromptTool,
+      `${PROVIDER} permissionPromptTool`,
     );
+    argv.push(MCP_CONFIG_FLAG, JSON.stringify(approvalServerConfig(approvalServer, tool)));
+    argv.push(PERMISSION_PROMPT_TOOL_FLAG, tool);
   }
   if (sandbox.mode === "read-only") {
     argv.push("--permission-mode", READ_ONLY_PERMISSION_MODE);
@@ -129,10 +382,12 @@ function seal({ request, phase, session }) {
       sandbox,
       session,
       permissionPromptTool: request.permissionPromptTool,
+      approvalServer: request.approvalServer,
     }),
     phase,
     sandbox,
     readEffectiveSandbox,
+    readEffectiveConfigIsolation,
   });
 }
 
@@ -167,6 +422,73 @@ function resume(request) {
       value: requireSafeArgumentValue(request.resumeKey, `${PROVIDER} resumeKey`),
     },
   });
+}
+
+// 起動時の健全性確認。**事前遮断の代替ではない**。
+//
+// 正常に接続して応答するもの（＝エラーを出さないもの）はこの検査を素通りするし、起動直後に走る
+// hook はこのイベントが読める時点**より前**に実行される（#526 §1.6 / R2）。安全境界はあくまで
+// buildArgv が出す事前遮断フラグであり、この検査はその上に載る二次的な確認である
+// —— 設定ミスの検出には有効だが、単独では境界にならない。
+export const INIT_PROBLEM_NOT_AN_INIT_EVENT =
+  "the structured event was not a system init event";
+export const INIT_PROBLEM_APPROVAL_TOOL_MISSING =
+  "the child cannot ask the user: AskUserQuestion is absent from its tools";
+export const INIT_PROBLEM_APPROVAL_SERVER_UNAVAILABLE =
+  "the declared approval server did not report a connected status";
+export const INIT_PROBLEM_MCP_SERVER_ERRORS = "the child reported MCP server errors";
+export const INIT_PROBLEM_PLUGIN_ERRORS = "the child reported plugin errors";
+
+const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
+// #526 §1.4 は system/init が mcp_servers を運ぶことまでを記録している。status の語彙は
+// "connected" 以外を実測していないので、読み取れない形は健全と判定しない（fail-closed）。
+const CONNECTED_STATUS = "connected";
+
+function isInitEvent(event) {
+  return event?.type === "system" && event?.subtype === "init";
+}
+
+function hasEntries(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value !== null && typeof value === "object") return Object.keys(value).length > 0;
+  return false;
+}
+
+function approvalServerConnected(event, permissionPromptTool) {
+  const key = permissionPromptTool.split("__")[1];
+  if (!key) return false;
+  const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers : [];
+  return servers.some(
+    (server) => server?.name === key && server?.status === CONNECTED_STATUS,
+  );
+}
+
+function initHealth(problems) {
+  return Object.freeze({
+    healthy: problems.length === 0,
+    // 拒否ツールと同じ作法で、**問題の名前だけ**を運ぶ。provider の生の出力は運ばない。
+    problems: Object.freeze([...problems]),
+  });
+}
+
+export function readInitHealth(event, { permissionPromptTool = null } = {}) {
+  if (!isInitEvent(event)) return initHealth([INIT_PROBLEM_NOT_AN_INIT_EVENT]);
+
+  const problems = [];
+  if (permissionPromptTool) {
+    // #526 §1.2.1［実測］: AskUserQuestion の可用性は prompt tool の有無だけで決まる。
+    // 配線したのに現れないなら、gate が消えたまま実行が続く（最も嫌う沈黙する故障）。
+    const tools = Array.isArray(event.tools) ? event.tools : [];
+    if (!tools.includes(ASK_USER_QUESTION_TOOL)) {
+      problems.push(INIT_PROBLEM_APPROVAL_TOOL_MISSING);
+    }
+    if (!approvalServerConnected(event, permissionPromptTool)) {
+      problems.push(INIT_PROBLEM_APPROVAL_SERVER_UNAVAILABLE);
+    }
+  }
+  if (hasEntries(event.mcp_server_errors)) problems.push(INIT_PROBLEM_MCP_SERVER_ERRORS);
+  if (hasEntries(event.plugin_errors)) problems.push(INIT_PROBLEM_PLUGIN_ERRORS);
+  return initHealth(problems);
 }
 
 function isResultEvent(event) {
@@ -232,5 +554,9 @@ export const claudeAdapter = Object.freeze({
   launch,
   resume,
   readEffectiveSandbox,
+  readEffectiveConfigIsolation,
   interpret,
+  // 契約の一部ではなく Claude 固有の追加。他 provider は system/init 相当の構造化イベントを
+  // 持たないので、共通メソッドには昇格させない。起動シーケンスへの配線は #537。
+  readInitHealth,
 });

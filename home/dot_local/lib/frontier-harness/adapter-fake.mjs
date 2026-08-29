@@ -2,6 +2,7 @@ import {
   requireInvocationRequest,
   requireSafeArgumentValue,
   sealInvocation,
+  walkFlagPairs,
 } from "./adapter-contract.mjs";
 
 // 実 credential・実クォータを使わない adapter と runner。
@@ -21,6 +22,21 @@ function readEffectiveSandbox(invocation) {
   if (index === -1) return null;
   const mode = invocation.argv[index + 1];
   return typeof mode === "string" ? { mode } : null;
+}
+
+// fake も実 adapter と同じ契約を通す。ここだけ素通りにすると、契約テストが fake で緑になっても
+// 実物の保証にならない（この考え方は DEFAULT_CAPABILITIES 上のコメントと同じ）。
+const FAKE_FLAGS = Object.freeze({
+  "-p": true,
+  "--phase": true,
+  "--sandbox": true,
+  "--model": true,
+  "--effort": true,
+  "--resume": true,
+});
+
+function readEffectiveConfigIsolation(invocation) {
+  return walkFlagPairs(invocation?.argv, FAKE_FLAGS) !== null;
 }
 
 // 既定の結果解釈: stdout が正規化済みの結果 JSON なら採用し、そうでなければ終了コードで決める。
@@ -77,6 +93,7 @@ export function createFakeAdapter({
       phase,
       sandbox,
       readEffectiveSandbox,
+      readEffectiveConfigIsolation,
     });
   }
 
@@ -98,6 +115,7 @@ export function createFakeAdapter({
       });
     },
     readEffectiveSandbox,
+    readEffectiveConfigIsolation,
     interpret,
   });
 }

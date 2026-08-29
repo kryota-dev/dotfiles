@@ -95,6 +95,36 @@ function readEffectiveSandbox(invocation) {
   return wrapMode(fromCodexMode(argv[index + 1]));
 }
 
+// この adapter が出す `-c` の override キー。ここに無いキーは設定そのものを差し替えうるので
+// （`mcp_servers` を足す、`sandbox_mode` を別経路で緩めるなど）、isolation を成立させない。
+const ALLOWED_CONFIG_KEYS = new Set(["sandbox_mode", "model_reasoning_effort"]);
+
+// argv が作業ツリー由来の設定源を有効にしていないか（#538）。
+//
+// Codex の設定は `$CODEX_HOME/config.toml` から読まれ［`codex exec --help` 原文: "Override a
+// configuration value that would otherwise be loaded from `~/.codex/config.toml`"］、これは user
+// 水準であって作業ツリーではない。この adapter は設定源を足すフラグを 1 つも出さず、
+// `-p/--profile`（`$CODEX_HOME/<name>.config.toml` を重ねる）も ALLOWED_FLAGS に無いので、
+// argv 経由でそれを持ち込む余地が無い。
+//
+// **この reader が答えるのは「argv が作業ツリー由来の設定源を有効にしていないか」であって、
+// vendor が暗黙に探索するものの有無ではない**。作業ツリーの `AGENTS.md` が読まれること自体は
+// 知られているが、それが hooks や MCP server のような実行源にあたるかは未実測なので、
+// ここでは「遮断できている」とも「できていない」とも断定しない。
+function readEffectiveConfigIsolation(invocation) {
+  const argv = invocation?.argv;
+  if (!Array.isArray(argv) || !hasOnlyAllowedFlags(argv)) return false;
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== "-c" && argv[index] !== "--config") continue;
+    const pair = argv[index + 1];
+    if (typeof pair !== "string") return false;
+    const separator = pair.indexOf("=");
+    if (separator === -1) return false;
+    if (!ALLOWED_CONFIG_KEYS.has(pair.slice(0, separator))) return false;
+  }
+  return true;
+}
+
 // Codex は prompt と session id を**位置引数**で受け取る。`-` で始まる値はフラグとして
 // 解釈されうるので、静かに誤解釈させるくらいなら組み立てを拒否する。
 // session id 側にこのガードが無いと、`resume("--full-auto")` のような値がそのまま
@@ -132,6 +162,7 @@ function launch(request) {
     phase: "launch",
     sandbox,
     readEffectiveSandbox,
+    readEffectiveConfigIsolation,
   });
 }
 
@@ -171,6 +202,7 @@ function resume(request) {
     phase: "resume",
     sandbox,
     readEffectiveSandbox,
+    readEffectiveConfigIsolation,
   });
 }
 
@@ -252,5 +284,6 @@ export const codexAdapter = Object.freeze({
   launch,
   resume,
   readEffectiveSandbox,
+  readEffectiveConfigIsolation,
   interpret,
 });
