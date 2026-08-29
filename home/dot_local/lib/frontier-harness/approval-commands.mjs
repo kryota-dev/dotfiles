@@ -56,6 +56,12 @@ function summarizeRequest(request) {
 }
 
 export function runApprovalsCommand({ queue, emit, flags }) {
+  // --purge は一覧ではなく後始末。要求 payload に残る質問文と選択肢（＝会話内容）を
+  // wave の終了後に残さないための経路で、pending には触れない。
+  if (flags.includes("--purge")) {
+    emit(queue.purgeDecided());
+    return 0;
+  }
   const { requests, skipped } = queue.listRequests(
     flags.includes("--all") ? {} : { status: "pending" },
   );

@@ -207,6 +207,44 @@ export function createApprovalQueue({ directory }) {
     return assertStoredRequest(record);
   }
 
+  // 1 件の破損で pending 一覧全体が読めなくなることを避け、壊れた要求は skipped に隔離する
+  // （state-store の skippedArtifacts と同じ姿勢）。
+  //
+  // 返り値のオブジェクトのメソッドではなく関数として持つ。purgeDecided が同じ走査を使うので、
+  // `this` 経由の呼び出し（分割代入で壊れる）に依存させない。
+  function listRequests({ status } = {}) {
+    const requests = [];
+    const skipped = [];
+    let entries;
+    try {
+      entries = readdirSync(directory);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(REQUEST_SUFFIX)) continue;
+      const id = entry.slice(0, -REQUEST_SUFFIX.length);
+      if (!APPROVAL_REQUEST_ID_PATTERN.test(id)) {
+        skipped.push({ entry, reason: "unrecognized approval request file name" });
+        continue;
+      }
+      try {
+        const record = readRequest(id);
+        if (!status || record.status === status) requests.push(record);
+      } catch (error) {
+        skipped.push({ entry, reason: error.message });
+      }
+    }
+    requests.sort((left, right) => {
+      if (left.createdAt !== right.createdAt) {
+        return left.createdAt < right.createdAt ? -1 : 1;
+      }
+      return left.id < right.id ? -1 : 1;
+    });
+    return { requests, skipped };
+  }
+
   return {
     directory,
 
@@ -257,39 +295,37 @@ export function createApprovalQueue({ directory }) {
 
     readRequest,
 
-    // 1 件の破損で pending 一覧全体が読めなくなることを避け、壊れた要求は skipped に隔離する
-    // （state-store の skippedArtifacts と同じ姿勢）。
-    listRequests({ status } = {}) {
-      const requests = [];
-      const skipped = [];
-      let entries;
-      try {
-        entries = readdirSync(directory);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-        entries = [];
-      }
-      for (const entry of entries) {
-        if (!entry.endsWith(REQUEST_SUFFIX)) continue;
-        const id = entry.slice(0, -REQUEST_SUFFIX.length);
-        if (!APPROVAL_REQUEST_ID_PATTERN.test(id)) {
-          skipped.push({ entry, reason: "unrecognized approval request file name" });
+    listRequests,
+
+    // 決着済みの要求と、その回答ファイルを削除する。
+    //
+    // 要求 payload には質問文と選択肢（＝会話内容）が入る。答えるためには必要だが、
+    // wave が終わったあとまで残す理由が無い —— hook の記録を都度消してきた運用
+    // （wave-orchestrator の後始末）と同じ扱いに揃える。
+    //
+    // **pending は消さない。** そして「読めなかった要求」も消さない: pending でないことを
+    // 確認できていないものを消すのは、答えを待っている子を黙って捨てることになる。
+    purgeDecided() {
+      const { requests, skipped } = listRequests();
+      let purged = 0;
+      let pending = 0;
+      for (const request of requests) {
+        if (request.status === "pending") {
+          pending += 1;
           continue;
         }
-        try {
-          const record = readRequest(id);
-          if (!status || record.status === status) requests.push(record);
-        } catch (error) {
-          skipped.push({ entry, reason: error.message });
+        // 回答 → 要求の順に消す。逆順だと、要求が消えたのに回答だけ残った状態が
+        // listRequests から見えなくなり、掃除しそこねる。
+        for (const target of [answerPath(request.id), requestPath(request.id)]) {
+          try {
+            unlinkSync(target);
+          } catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+          }
         }
+        purged += 1;
       }
-      requests.sort((left, right) => {
-        if (left.createdAt !== right.createdAt) {
-          return left.createdAt < right.createdAt ? -1 : 1;
-        }
-        return left.id < right.id ? -1 : 1;
-      });
-      return { requests, skipped };
+      return { purged, pending, skipped };
     },
 
     hasAnswer(id) {
