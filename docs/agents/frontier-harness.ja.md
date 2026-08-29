@@ -291,14 +291,45 @@ fh onboard --from-gaps --approve --request <id> --json
 残ります。credential、migration、external contract、deploy、force push、release、merge は常に
 明示的な escalation です。
 
+### 承認はどう差し替わるか
+
+approvals 台帳は追記のみで、`fh clean` も削除しません。監査証跡だからです。したがって認可の状態を
+台帳だけで表すことはできません —— 「記録済みのどれかに一致すれば有効」とすると、一度承認した
+manifest は永久に有効になり、manifest を狭めても実際には何も取り消せず、古い
+`.harness/policy.json` を戻すだけで復活してしまいます。
+
+そこで両者を分けています。台帳が記録するのは **何をいつ承認したか**、state root 内のポインタが
+記録するのは **いまどの承認が有効か**で、承認をやり直すとポインタが差し替わります。policy の照合とは、
+その manifest の hash を導き直してポインタと突き合わせ、ポインタが指す承認が台帳にも残っていることを
+確かめることです。
+
+ポインタは repository 単位ではなく **policy ファイルのパス単位**で分けます。state root は同一
+repository の全 linked worktree で共有される一方、policy は worktree ごとの
+`.harness/policy.json` に存在するため、repository 単位にすると最後に onboarding した worktree が
+他の worktree を黙って未承認化してしまいます。パス単位にすることで、承認を時刻順に並べる必要も
+無くなります（台帳の id はランダムなので、同時刻の順序に意味を持たせられません）。
+
 ### この検知が描かない境界
 
-policy を台帳に結びつけることで、承認後に書き換えられた policy、差し替えられた policy、別の
-repository から持ち込まれた policy を検知できます。checkout は policy を運びますが、台帳は運ばない
-からです。一方これは、**すでに同一 uid で動いている攻撃者に対する境界ではありません** —— その攻撃者は
-policy と同じ手軽さで台帳も書き換えられます。`approvals.granted_by` と承認ディレクトリに付いている
-但し書きと同じで、記録は「何が承認されたか」を述べるが、「誰が承認したか」を証明しません。
-enforcement 以前に書かれた policy は台帳に裏付けが無いため、既存 repository の移行には儀式の
+有効な承認と policy を結びつけることで、承認後に書き換えられた policy、差し替えられた policy、
+**過去に承認した内容へ差し戻された policy**、別の repository から持ち込まれた policy を検知できます。
+checkout は policy を運びますが、state root は運ばないからです。一方、次の境界は描きません。
+
+- **すでに同一 uid で動いている攻撃者**。ポインタも台帳も policy と同じ手軽さで書き換えられます。
+  `approvals.granted_by` と承認ディレクトリに付いている但し書きと同じで、記録は「何が承認されたか」を
+  述べるが、「誰が承認したか」を証明しません。
+- **自律エージェントによる自己承認**。2 段階儀式は request を作成したプロセス自身による承認を拒否
+  するため、1 回の呼び出しでは自己承認できません。2 回なら可能です —— シェルを持つものは
+  レビュー実行の出力から request id を読み、2 回目に渡せます。儀式が保証するのは「承認の前に
+  manifest がレビューのため出力されたこと」であって、「人間がそれを読んだこと」ではありません。
+- **承認後にアドレスが変わる domain**。名前を解決するのは manifest の承認時であって task の実行時では
+  ないため、`fh run` と `fh verify` は domain 文字列の一致しか見ません。承認時点では無害なアドレスへ
+  解決する名前が、後から内部アドレスを指すようになりえます。実際に接続を開く層がその時点で
+  再確認する必要があり、その層は rollout 昇格とともに入ります。
+- **`fh review`**。manifest を参照せずレビュー計画を記録します。この経路は deterministic verifier と
+  review registry が所有しており、gate もそちらと一緒に入れるのが適切です。
+
+enforcement 以前に書かれた policy は有効な承認の裏付けが無いため、既存 repository の移行には儀式の
 やり直しが必要です。
 
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を

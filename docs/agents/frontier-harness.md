@@ -327,15 +327,49 @@ allowed to hold, and reports the rest as `gapsRejected` rather than failing the 
 batch. Rejected items stay unapproved. Credentials, migrations, external contract changes,
 deploys, force pushes, releases, and merges remain explicit escalations.
 
+### How an approval is superseded
+
+The approvals ledger is append-only — it is the audit trail, and `fh clean` never prunes it.
+Authorization therefore cannot live in the ledger alone: "any recorded row matches" would
+mean a manifest approved once stays approved forever, so narrowing a manifest would not
+actually revoke anything and restoring an older `.harness/policy.json` would re-enable it.
+
+So the two are separate. The ledger records **what was approved and when**; a pointer in the
+state root records **which approval is in force**, and approving again replaces it. Checking
+a policy means re-deriving its manifest hash and comparing it to that pointer, then
+confirming the pointer's approval still has its ledger row.
+
+The pointer is keyed by the **policy file's path**, not by the repository. A state root is
+shared by every linked worktree of a repository while each worktree has its own
+`.harness/policy.json`, so a repository-wide pointer would let the worktree that onboarded
+most recently silently un-approve the others. Keying by path also removes any need to order
+approvals by time, which the random ids in the ledger cannot do meaningfully.
+
 ### The boundary this does not draw
 
-Binding the policy to the ledger detects a policy edited, replaced, or copied in from
-another repository — the checkout carries the policy, and never the ledger. It is **not** a
-boundary against an attacker already running as the same uid, who can rewrite the ledger as
-easily as the policy. This is the same caveat that applies to `approvals.granted_by` and to
-the approval directory: the record says what was approved, it does not prove who approved
-it. Upgrading an existing repository requires re-running the ceremony, because a policy
-written before enforcement has no ledger row behind it.
+Binding a policy to the approval in force detects a policy edited, replaced, reverted to a
+previously approved version, or copied in from another repository — the checkout carries the
+policy, and never the state root. It does **not** draw these boundaries:
+
+- **An attacker already running as the same uid.** They can rewrite the pointer and the
+  ledger as easily as the policy. This is the same caveat that applies to
+  `approvals.granted_by` and to the approval directory: the record says what was approved, it
+  does not prove who approved it.
+- **An autonomous agent approving its own request.** The two-step ceremony refuses an
+  approval from the process that created the request, so a single invocation cannot approve
+  itself. Two invocations can — anything with a shell can read the request id from the review
+  run's output and pass it to a second run. What the ceremony guarantees is that the manifest
+  was printed for review before it could be approved, not that a human read it.
+- **A domain whose address changes after approval.** Names are resolved when the manifest is
+  approved, not when a task runs, so `fh run` and `fh verify` match domain strings only. A
+  name that resolves somewhere harmless at approval time can point at an internal address
+  later. The layer that actually opens a connection must re-check at that moment; that layer
+  arrives with the rollout promotion.
+- **`fh review`.** It records a review plan without consulting the manifest. The deterministic
+  verifier and review registry own that path, and gating it belongs with them.
+
+Upgrading an existing repository requires re-running the ceremony, because a policy written
+before enforcement has no approval in force behind it.
 
 ## Shadow commands
 
