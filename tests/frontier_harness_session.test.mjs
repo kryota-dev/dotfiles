@@ -534,6 +534,33 @@ test("the child is told what the sandbox denies before it hits the wall", async 
   assert.ok(prompt.includes(PROMPT_BODY));
 });
 
+test("the child git uses a TLS backend that works inside the sandbox", async (context) => {
+  // ［実測］sandbox はプロキシ経由の egress を課すため、git は OpenSSL 系バックエンドに落ちて
+  // CA バンドルを読もうとし、その読み取りが sandbox に塞がれて失敗する。secure-transport
+  // バックエンドは CA ファイルを読まず macOS の trust 評価を使うので通る（実測で ls-remote 成功）。
+  //
+  // 各コマンドに `-c` を付ける運用ルールにすると付け忘れるので、環境変数で全 git 呼び出しへ
+  // 効かせる。利用者側の設定には一切触れない。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code } = await launch({ directory, statePath, policyPath, spawnFake });
+
+  assert.equal(code, 0);
+  const [call] = spawnFake.calls;
+  const env = call.options.env;
+  const count = Number(env.GIT_CONFIG_COUNT);
+  assert.ok(count >= 1, "GIT_CONFIG_COUNT must cover the injected entry");
+  const entries = [];
+  for (let index = 0; index < count; index += 1) {
+    entries.push([env[`GIT_CONFIG_KEY_${index}`], env[`GIT_CONFIG_VALUE_${index}`]]);
+  }
+  assert.ok(
+    entries.some(([key, value]) => key === "http.sslBackend" && value === "secure-transport"),
+    "the child must inherit an http.sslBackend override",
+  );
+});
+
 test("a child without AskUserQuestion is terminated instead of left running", async (context) => {
   const { directory, statePath, policyPath } = await preparedDirectory(context);
   const spawnFake = createFakeSpawn({
