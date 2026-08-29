@@ -38,6 +38,8 @@ full transcript、任意 shell command を含めない。未知 capability は�
 ## Shadow route
 
 task JSON には少なくとも `goal`、`modality`、`risk`、`hasDeterministicOracle` を含める。
+人の判断が必須の task には `requiresApproval: true` を、書き込みを伴う task には
+`requiresWrite: true` を付ける（どちらも省略時は `false`）。
 
 ```bash
 fh run --task <task.json> --json
@@ -50,6 +52,17 @@ route は以下を守る。
 - 通常 implementation は Codex default capability を候補にする。
 - deterministic oracle がない task は independent reviewer を追加する。
 - credential、migration、deploy、external contract、force push、merge、release は無条件 escalation にする。
+- `requiresApproval` の task は、承認要求を外部へ往復できる provider（`approvalChannel` が
+  `external`）へしか route しない。Codex の agent review も Antigravity の無言のソフト拒否も
+  人の gate ではないので、要求を満たさない。
+- `requiresWrite` の task は、封じ込めを保証できる provider（`writeAccess` が `supported`）へしか
+  route しない。Antigravity は `--sandbox` を付けても書き込みを止められないため対象外である。
+- 塞いだ route は捨てずに記録する。browser task のように既存の fallback（frontend が使えない
+  ときの Codex default capability）がある場合はそちらへ回し、fallback が無い場合は provider を
+  起動せず escalation にする。承認チャネルを理由に capability の役割（executor / reviewer /
+  frontend）を跨いだ代替はしない。
+- 塞いだ route は `route_block` evidence として task と route に紐付けて残る。`fh run --json` の
+  `blocked` と `blockEvidence` から、どの capability のどの provider がどの軸で外れたかを追える。
 
 ## Evidence と cleanup
 

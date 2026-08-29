@@ -295,48 +295,74 @@ export function runCli(argumentsList, options = {}) {
           config,
           task,
         });
-        // 承認境界はここで効く。route が選んだ capability と、task が宣言した
-        // command / domain を承認済み manifest と突き合わせ、1 つでも欠ければ
-        // provider へ渡さず escalation として記録する。
+        // 承認境界はここで効く。route が選んだ capability（reviewer 側も provider を
+        // 選ぶ軸なので含める）と、task が宣言した command / domain を承認済み manifest と
+        // 突き合わせ、1 つでも欠ければ escalation へ差し替える。
         const gaps = findManifestGaps({
           manifest: approved.manifest,
           commands: task.commands,
           domains: task.domains,
-          // reviewer 側も provider を選ぶ軸なので照合対象に含める。
           capabilities: [route.capability, route.reviewerCapability],
         });
-        if (gaps.length > 0) {
-          const blocked = {
-            kind: "escalation",
-            capability: null,
-            provider: null,
-            reason: `${gaps.length} request(s) are not covered by the approved repository capability manifest: ${approved.integrity.reason ?? "see gaps"}`,
-          };
-          store.recordRoute(storedTask.id, blocked);
-          return {
-            task: storedTask,
-            decision: blocked,
-            executed: false,
-            executionReason:
-              "the repository capability manifest does not approve this task",
-            rollout: config.rollout,
-            gaps,
-            policyIntegrity: approved.integrity,
-          };
-        }
-        store.recordRoute(storedTask.id, route);
-        const execution = runWithRolloutGuard(
-          config,
-          `route ${route.kind}`,
-          options.executor,
-        );
+        // #534 の「塞いだ route は escalation として記録する」と同じ形に揃える。
+        // 別種の route を作らず kind を escalation にすることで、下の
+        // 「escalation は provider を起動しない」ガードがそのまま manifest gate にも効く。
+        const effectiveRoute =
+          gaps.length > 0
+            ? {
+                kind: "escalation",
+                capability: null,
+                provider: null,
+                reason: `${gaps.length} request(s) are not covered by the approved repository capability manifest: ${approved.integrity.reason ?? "see gaps"}`,
+              }
+            : route;
+        const storedRoute = store.recordRoute(storedTask.id, effectiveRoute);
+        // 塞いだ route は evidence として残す（#534）。routes テーブルには
+        // capability / provider / 軸 / 要求値 / 実際値 の 5 つ組を入れる列が無いため、
+        // 理由の追跡は evidence 側が担う。route と同じトランザクションで確定するので
+        // 「route は残ったが理由は残らない」中途半端な状態を作らない。
+        const blocked = route.blocked ?? [];
+        const blockEvidence =
+          blocked.length > 0
+            ? store.putEvidence({
+                kind: "route_block",
+                producer: "frontier-harness",
+                taskId: storedTask.id,
+                routeId: storedRoute.id,
+                claimsSupported: blocked.map(
+                  (entry) =>
+                    `${entry.capability} (${entry.provider}) was not routed: ${entry.axis} requires ${entry.required} but the provider declares ${entry.actual}`,
+                ),
+              })
+            : null;
+        // escalation は「人の判断へ戻す」ための route なので、rollout に関わらず provider を
+        // 起動しない。#534 が選んだ扱い（塞いだ route は実行せず記録する）はここで初めて
+        // 構造になる —— これが無いと不変条件は「rollout が shadow である」ことに依存し、
+        // #502 で昇格して executor を配線した瞬間に gate が実行段ですり抜ける。
+        // manifest の gap による escalation もこの経路を通るため、承認境界も同じ構造で守られる。
+        const execution =
+          effectiveRoute.kind === "escalation"
+            ? {
+                executed: false,
+                reason:
+                  gaps.length > 0
+                    ? "the repository capability manifest does not approve this task"
+                    : "escalation route requires user judgement; recorded without provider execution",
+              }
+            : runWithRolloutGuard(
+                config,
+                `route ${effectiveRoute.kind}`,
+                options.executor,
+              );
         return {
           task: storedTask,
-          decision: route,
+          decision: effectiveRoute,
+          blocked,
+          blockEvidence,
           executed: execution.executed,
           executionReason: execution.reason,
           rollout: config.rollout,
-          gaps: [],
+          gaps,
           policyIntegrity: approved.integrity,
         };
       });

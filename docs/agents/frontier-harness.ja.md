@@ -332,6 +332,10 @@ checkout は policy を運びますが、state root は運ばないからです�
 enforcement 以前に書かれた policy は有効な承認の裏付けが無いため、既存 repository の移行には儀式の
 やり直しが必要です。
 
+task は必要なものを自分で宣言します。実行の途中で人が判断しなければならない task には
+`requiresApproval`、ファイルを書き換える task には `requiresWrite` を付けます。どちらも既定は false で、
+選ばれた provider の宣言と突き合わされます（後述の「承認チャネルと書き込み可否が route を塞ぐ」）。
+
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
 記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
 approvals には手を触れません。`--dry-run` で影響を確認できます。
@@ -346,6 +350,7 @@ approvals には手を触れません。`--dry-run` で影響を確認できま�
 | 起動 | `-p` ＋ `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
 | 再開 | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
 | サンドボックス | `--settings` の設定 JSON。`--sandbox` フラグは存在しない | 起動は `--sandbox`、再開は `-c sandbox_mode="…"` | 表現できない（`--sandbox` はファイル書き込みを止めない） |
+| 作業ツリー由来の設定 | `--setting-sources user` と `--strict-mcp-config` で遮断 | 設定源を足すフラグを出さない（設定は `$CODEX_HOME` 由来） | 設定源を足すフラグを出さない（暗黙の探索は未実測） |
 | 承認チャネル | 外部への往復が可能 | エージェントによるレビュー | 無し |
 | 成功判定 | `result` イベント / `is_error` / `permission_denials[]` | `turn.completed` と `error` イベント | 終了コードと status だけでは**判定できない** |
 
@@ -385,6 +390,43 @@ policy の語彙は意図的に小さくしてあります。`read-only` と `wo
 Claude は設定 JSON の strict allowlist、Codex は `workspace-write` の既定 off（いずれも実測）ですが、
 **Antigravity のネットワーク既定は確認されておらず、adapter もそれを制御する argv を出しません**。
 
+### 作業ツリーは子セッションを設定できない
+
+子セッションは、issue 由来のブランチをチェックアウトした worktree の中で走ります。つまり
+`.claude/settings.json`・`.claude/settings.local.json`・`.mcp.json` は、信頼境界の外から届きます。
+対話モードの CLI はフォルダを信頼する前に確認しますが、`-p` は確認しません。加えて、検証に失敗した
+設定ファイルを何も言わずに無視し、セッション最初の hook は構造化イベントが読める時点より前に走ります。
+出力を見て問題を検出するのは構造上つねに手遅れなので、遮断は起動フラグで行います。
+
+Claude の invocation はすべて `--setting-sources user` と `--strict-mcp-config` を持ち、
+`sealInvocation` がそれをサンドボックスと同じやり方で読み戻します。`readEffectiveConfigIsolation` は
+既定値を持たない必須引数で、reader が `true` を返さない invocation は返されません。フラグを外すのは
+「うっかりできる間違い」ではなく、**その形自体が存在しない**ということです。例外リストも、信頼済み
+worktree の台帳も持ちません。台帳はそれ自体が新しい信頼境界になり、改竄検知が別途必要になるからです。
+worktree の hook や skill が本当に要る作業は、対話セッションで行います。
+
+検査と説明は 1 つの導出から作るので、両者が食い違うことがありません。`configSourcesFor` は argv を
+「子が読む設定ファイルの集合」へ変換し —— `--setting-sources` が選ぶ user / project / local の設定
+ファイルと、`--strict-mcp-config` が抑止する project の `.mcp.json` です —— isolation の reader は
+そのどれもが作業ツリーの中に無いことを確認します。テストは一時 worktree に本物の敵対的ファイルを
+書き出して導出がそれらを含まないことを確かめ、negative control は 2 つのフラグを外すと同じ 3 ファイルが
+戻ってくることを確かめます。後者があるので、前者は自分自身の言い換えになりません。argv の走査が
+解釈できないもの —— 未知のフラグ、重複した `--setting-sources`、inline JSON のはずが渡されたパス ——
+はすべて「全設定源が有効」に解決され、fail-closed になります。
+
+承認チャネルはその例外ではなく、許可リストとして表現します。`--strict-mcp-config` は `--mcp-config` が
+名指しした server しか通さないので、宣言せずに `--permission-prompt-tool` だけを配線すると、prompt tool の
+参照先が存在しない子ができあがります —— これは配線しない場合とまったく同じ「gate が静かに消える」失敗です。
+そのため adapter は prompt tool と承認 server を**両方揃えるか、両方持たないか**しか受け付けず、server は
+inline JSON 文字列でちょうど 1 つだけ宣言し（ファイルパスは作業ツリーから差し替えられます）、その server を
+指していない prompt tool を拒否します。宣言が運ぶのはコマンドと引数だけで、env ブロックは運びません。
+
+`readInitHealth` は `system/init` イベントを読み、prompt tool を配線したときに `AskUserQuestion` が
+存在するか、宣言した承認 server が接続したか、子が MCP / plugin のエラーを報告したかを返します。
+**これは二次的な検査であって、境界ではありません。** 設定ミスの検出には有効ですが、エラーを出さずに
+接続して応答するものは素通りしますし、起動時に走る hook はこのイベントが読める時点で既に走り終えています。
+実際の起動シーケンスへ配線するのは別の作業です。
+
 ### Antigravity は実装するが read-only に留める
 
 Antigravity は、承認できないツール呼び出しをソフト拒否するとき、終了コード 0・status `SUCCESS`・
@@ -398,9 +440,56 @@ Antigravity は、承認できないツール呼び出しをソフト拒否す�
 唯一持っている境界を外します。adapter はどちらも出さず、書き込みを伴う invocation の組み立てを拒否し、
 書き込み能力を `unenforceable` と宣言します。
 
+### 承認チャネルと書き込み可否が route を塞ぐ
+
+上の表の承認チャネルと書き込み可否は、最初から各 adapter が宣言していました。ところが routing の
+段階では長らく誰も読んでおらず、`chooseRoute` は可用性しか見ず、書き込みの軸は実行直前に 1 度だけ
+参照されるだけでした。そのため、人の判断が要る task が「承認を求められない provider」へ route されえて、
+そこではソフト拒否されるか素通しされるかのどちらかになり、いずれにせよ gate は失われていました。
+
+いまは両方の軸を route 段階で突き合わせます。値は実測された場所に置いたままです。adapter の宣言が
+唯一の写しで、`provider-capabilities.mjs` がそれを provider 名で引ける表に束ね、router がそれを読みます。
+`config.json` へは複製しません。同じ実測事実が 2 箇所にあると、`providers.mjs` が一方で `agy`、
+他方で `antigravity` を持つに至ったのと同じことが起きるからです。
+
+- `requiresApproval` の task は、チャネルが `external` の provider へしか route されません。
+  エージェント自身のレビューは人の gate ではないので、`agent-review` は要求を満たしません。
+- `requiresWrite` の task は、書き込み能力が `supported` の provider へしか route されません。
+- adapter が登録されていない provider、語彙外の宣言は、最弱の組（チャネル無し・封じ込め不能）に
+  解決されます。adapter の登録漏れは gate を開けるのではなく閉じる方向に倒れます。
+
+要求フラグ自体の既定は *false* で、`hasDeterministicOracle` とは逆向きです。これは意図的です。
+oracle の欠落を「oracle 無し」と読むのは reviewer を**足す**方向にしか振れません。一方、承認フラグの
+欠落を「承認が要る」と読むと、出荷 registry には外部チャネルを持つ executor が 1 つも無いため
+あらゆる route が escalation になり、軸そのものが使えなくなります。fail-closed は供給側が担います。
+
+**塞いだ route を黙って別の provider へ向け直すことはしません。** router が既に持っている fallback が
+あればそれを使います。書き込みを伴う browser task は Antigravity へ行けないので、frontend が利用不可の
+ときと同じ経路をたどって `executor.default` に着きます。fallback が無い場合 —— `executor.default` 自身が
+要求を満たさない場合 —— は escalation になり、provider は起動しません。軸を満たすために役割を跨ぐことも
+しません。チャネルを持っているからといって reviewer capability を writer に流用すれば、なぜその provider が
+走ったのかを後から説明する手立てが無くなります。
+
+reviewer も軸では塞ぎません。`semantic.judge` は書き込みも人の gate も担わないため、ここで拒否すると
+「reviewer を足す」が「escalation」に化けるだけで、安全性は何も買えません。
+
+escalation になった route は、rollout が何であれ provider を起動しません。これが無いと
+「塞いだ route は実行せず記録する」は「たまたま rollout が `shadow` だから」成り立っているだけで、
+昇格して実起動を配線した瞬間に、塞いだはずの route が provider へ届いてしまいます —— gate は
+route 段階では通っているのに実行段で漏れる、という形です。同じガードは、この軸より前から存在する
+risk による escalation にも効きます。`shadow` の間は rollout guard が既に executor を呼んで
+いないため、挙動は変わりません。
+
+塞いだ route はすべて記録されます。decision は遮断 1 件ごとに capability・provider・軸・要求値・宣言値を
+持ち、`fh run` はそれを task と route に紐付いた `route_block` evidence として、route を記録するのと同じ
+トランザクションの中で書きます。routes テーブルにはこの 5 つ組を入れる列が無く、足すのは migration に
+なるため、理由は evidence 側に置いています。risk による escalation はこの軸より前から存在し、kind と
+reason だけで説明が閉じるので、遮断の一覧は持ちません。
+
 ### adapter が実行前に検査すること
 
-router は provider 非依存の言葉で可用性を判断します。adapter は実行の直前に、同じ discovery 一覧に対して
+router は provider 非依存の言葉で可用性を判断し、上記 2 つの宣言軸は config の複製ではなく adapter
+registry から読みます。adapter は実行の直前に、同じ discovery 一覧に対して
 exact model ID を再検査します（route 決定から実行までの間に readiness キャッシュは失効しうるため）。
 そのうえで、router にはできない検査を足します。
 

@@ -382,6 +382,11 @@ fh clean --dry-run --json
 fh gaps --json
 ```
 
+A task declares what it needs: `requiresApproval` when a human has to decide something
+mid-run, `requiresWrite` when the run modifies files. Both default to false, and both are
+matched against what the chosen provider declares — see *The route is gated on approval
+channel and write access* below.
+
 In shadow mode `run`, `verify`, and `review` persist a normalized plan without
 starting a provider or arbitrary shell command. `clean` reports and removes
 expired raw records and expired aggregate telemetry on their own windows, and
@@ -397,6 +402,7 @@ provider gets its own adapter rather than one parameterised launcher:
 | launch | `-p` with `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
 | resume | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
 | sandbox | settings JSON via `--settings`; no `--sandbox` flag exists | `--sandbox` on launch, `-c sandbox_mode="…"` on resume | not expressible: `--sandbox` does not stop file writes |
+| working-tree config | blocked by `--setting-sources user` and `--strict-mcp-config` | no flag adds a source; configuration comes from `$CODEX_HOME` | no flag adds a source (implicit discovery unmeasured) |
 | approval channel | external round trip | agent review | none |
 | success | `result` event, `is_error`, `permission_denials[]` | `turn.completed` and `error` events | **cannot be determined** from exit code and status alone |
 
@@ -437,6 +443,48 @@ the harness does not claim it is: Claude renders a strict allowlist in its setti
 leaves `workspace-write` networking off by default, both measured, but Antigravity's network default
 was never established and the adapter emits nothing that controls it.
 
+### The working tree cannot configure the child
+
+A child session runs inside a worktree with an issue's branch checked out, so
+`.claude/settings.json`, `.claude/settings.local.json`, and `.mcp.json` reach it from outside the
+trust boundary. The interactive CLI asks before it trusts a folder; `-p` does not. It also ignores a
+settings file that fails validation without saying so, and a session's first hooks run before any
+structured event is available to read. Detecting the problem from the output is late by
+construction, so the blocking belongs in the launch flags.
+
+Every Claude invocation carries `--setting-sources user` and `--strict-mcp-config`, and
+`sealInvocation` reads that back the way it reads the sandbox back: `readEffectiveConfigIsolation`
+is a required argument with no default, and an invocation whose reader does not return `true` is
+never returned. Leaving the flags off is not a mistake somebody can make quietly — it has no
+representation. There is no exception list and no ledger of trusted worktrees: a ledger would become
+a trust boundary of its own, needing its own tamper detection. Work that genuinely needs a
+worktree's hooks or skills belongs in an interactive session.
+
+The check and the claim come from one derivation, so they cannot drift apart. `configSourcesFor`
+turns an argv into the set of configuration files the child would consult — the user, project, and
+local settings files that `--setting-sources` selects, plus the project `.mcp.json` that
+`--strict-mcp-config` suppresses — and the isolation reader asserts that none of them sit inside the
+working tree. A test writes real hostile files into a temporary worktree and asserts the derivation
+excludes them; a negative control strips the two flags and asserts the same three files come back,
+which is what keeps the first test from being a restatement of itself. Anything the argv walk cannot
+parse — an unknown flag, a duplicated `--setting-sources`, a settings path where an inline blob was
+expected — resolves to "every source is live", and so fails closed.
+
+The approval channel is an allowlist rather than an exception to that. `--strict-mcp-config` admits
+only the servers `--mcp-config` names, so wiring `--permission-prompt-tool` without declaring one
+leaves the prompt tool pointing at nothing — the same silent loss of the gate as never wiring it.
+The adapter therefore takes the prompt tool and the approval server together or not at all, declares
+exactly one server as an inline JSON string (a file path could be swapped from the working tree),
+and refuses a prompt tool that does not name that server. The declaration carries a command and its
+arguments, never an env block.
+
+`readInitHealth` reads a `system/init` event and reports whether `AskUserQuestion` is present when a
+prompt tool was wired, whether the declared approval server connected, and whether the child
+reported MCP or plugin errors. **This is a secondary check and not the boundary.** It catches
+misconfiguration, but anything that connects and answers without error passes it, and a hook that
+runs at startup has already run by the time the event can be read. Wiring it into a launch sequence
+is separate work.
+
 ### Antigravity is implemented but stays read-only
 
 When Antigravity soft-denies a tool it cannot approve, it exits 0 with a `SUCCESS` status and an
@@ -450,10 +498,63 @@ Its `--sandbox` flag does not stop file writes; it only breaks shell execution. 
 `--dangerously-skip-permissions` removes the one boundary it does have. The adapter emits neither,
 refuses to build a write-capable invocation, and declares its write access `unenforceable`.
 
+### The route is gated on approval channel and write access
+
+The approval channel and write access in the table above were declared by each adapter from
+the start, but for a while nothing read them at the routing stage: `chooseRoute` looked only at
+availability, and the write axis was consulted just once, immediately before a run. So a task
+that needed a human decision could still be routed to a provider that cannot ask for one — where
+it would be soft-denied or waved through, and either way the gate was gone.
+
+Both axes are now matched at the route stage. The values stay where they were measured: the
+adapter declarations are the only copy, and `provider-capabilities.mjs` folds them into a
+provider-keyed table the router reads. Nothing is duplicated into `config.json`, because the same
+measured fact living in two places is how `providers.mjs` ended up with `agy` in one file and
+`antigravity` in the other.
+
+- A task marked `requiresApproval` routes only to a provider whose channel is `external`. An
+  agent's own review is not a human gate, so `agent-review` does not qualify.
+- A task marked `requiresWrite` routes only to a provider whose write access is `supported`.
+- A provider with no registered adapter, or a declaration outside the vocabulary, resolves to
+  the weakest pair — no channel, unenforceable writes — so forgetting to register an adapter
+  closes the gate rather than opening it.
+
+The requirement flags themselves default to *false*, the opposite direction from
+`hasDeterministicOracle`, and deliberately so. Treating a missing oracle as "no oracle" only ever
+*adds* a reviewer. Treating a missing approval flag as "needs approval" would escalate every
+route, since the shipped registry has no executor with an external channel at all, and the axis
+would be unusable. The fail-closed posture lives on the supply side instead.
+
+**A blocked route is not silently re-pointed.** Where the router already has a fallback it uses
+that one: a browser task that needs writes cannot go to Antigravity, so it takes the same path a
+browser task takes when the frontend is unavailable and lands on `executor.default`. Where there
+is no fallback — `executor.default` itself failing the requirement — the route escalates and no
+provider starts. Roles are never crossed to satisfy an axis: the reviewer capability is not
+drafted as a writer because it happens to have a channel, which would leave no way to explain
+afterwards why a given provider ran.
+
+The reviewer is not gated either. `semantic.judge` neither writes nor holds the human gate, so
+refusing it on these axes would turn "add a reviewer" into "escalate" without buying any safety.
+
+An escalated route also withholds the provider outright, whatever the rollout says. Without that,
+"blocked routes are recorded, not run" would hold only because the rollout happens to be `shadow`,
+and promoting it while wiring a real runner would let a blocked route reach a provider after all —
+the gate passing at the routing stage and leaking at the execution one. The same guard covers the
+risk-based escalation that predates these axes, and under `shadow` nothing changes, since the
+rollout guard was already refusing to call the executor.
+
+Every block is recorded. A decision carries the capability, provider, axis, required value and
+declared value for each one, and `fh run` writes them as a `route_block` evidence row tied to the
+task and route, inside the same transaction that records the route. The routes table has no
+columns for that five-part tuple and adding them would be a migration, so the reason lives in
+evidence — the risk-based escalation predates these axes and still explains itself with its kind
+and reason alone, so it carries no block list.
+
 ### What an adapter checks before it runs
 
-The router decides availability in provider-independent terms. The adapter re-checks the exact model
-ID against the same discovery list immediately before running — the readiness cache can expire
+The router decides availability in provider-independent terms, and reads the two declared axes
+above from the adapter registry rather than from a second copy in the config. The adapter re-checks
+the exact model ID against the same discovery list immediately before running — the readiness cache can expire
 between routing and execution — and adds the checks the router cannot make:
 
 - `model` and `effort` must be safe tokens. Codex embeds both inside `-c key=value`, so a value

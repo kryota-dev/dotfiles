@@ -2497,20 +2497,23 @@ _gate_decision() {
 }
 
 # ---------------------------------------------------------------------------
-# PR-F: CLV2 instinct→skill flow wiring (statusline renderer +
-# retrospective-codify input mode).
+# PR-F: CLV2 instinct→skill flow wiring (retrospective-codify input mode).
 #
-# The SessionStart producer (clv2-session-notify.sh) that used to refresh the
-# cache these read was removed in #496 (#473 AC-027) along with its tests; the
-# renderer and the skill's input mode are unchanged and still covered here.
+# The SessionStart producer (clv2-session-notify.sh) that refreshed the
+# instinct-cluster cache was removed in #496 (#473 AC-027) along with its tests,
+# which left the statusline renderer reading a cache nobody writes. #523 removed
+# that renderer too; the skill's input mode is unchanged and still covered here.
 # ---------------------------------------------------------------------------
 
-@test "statusline renders the instinct-cluster segment from the cache" {
+@test "statusline no longer reads the writer-less instinct-cluster cache" {
   local sl="${HOME_DIR}/dot_claude/executable_statusline.sh"
-  grep -q 'I_INSTINCT=' "$sl"
-  grep -q 'clv2_cluster_count' "$sl"
-  grep -q '.review-ready-clusters' "$sl"
-  grep -qF '${I_INSTINCT} ${icc}' "$sl"
+  # #523: the producer is gone, so the reader must be gone with it. Asserting on
+  # every name the segment owned keeps a partial revert (glyph left behind, or a
+  # function nothing calls) from passing as a removal.
+  ! grep -q 'I_INSTINCT' "$sl"
+  ! grep -q 'clv2_cluster_count' "$sl"
+  ! grep -q 'review-ready-clusters' "$sl"
+  ! grep -q 'icc=' "$sl"
 }
 
 @test "retrospective-codify documents the instinct-cluster input mode" {
