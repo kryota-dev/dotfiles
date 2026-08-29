@@ -377,6 +377,44 @@ _assert_lifecycle_scripts_documented() {
   done
 }
 
+@test "docs_facts: every <!-- FACT:fh-check-* / fh-candidate-* / fh-review-* --> marker matches its constant" {
+  # #495 が足した実行経路の load-bearing な数値。チェックを打ち切るまでの時間、同時に抱える
+  # candidate worktree の上限、finding 1 行の長さ上限は、いずれも「何が起きるか」を決める値なので、
+  # 定数を変えたのに散文が置き去りになる drift を機械で止める。
+  local triple marker constant source actual count f val
+  for triple in "fh-check-timeout-ms:DEFAULT_CHECK_TIMEOUT_MS:check-runner.mjs" \
+    "fh-candidate-max-live:CANDIDATE_MAX_LIVE_ENTRIES:candidate-store.mjs" \
+    "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs"; do
+    marker="${triple%%:*}"
+    constant="$(echo "$triple" | cut -d: -f2)"
+    source="${HOME_DIR}/dot_local/lib/frontier-harness/$(echo "$triple" | cut -d: -f3)"
+    [ -f "$source" ] || {
+      echo "missing ${source#"${REPO_ROOT}/"} — the module moved"
+      false
+    }
+    # 桁区切りの `_` を許す（900_000 のように書かれた定数も同じ値として読む）。
+    actual="$(grep -oE "export const ${constant} = [0-9_]+" "$source" | grep -oE '[0-9_]+$' | tr -d '_')"
+    [ -n "$actual" ] || {
+      echo "sanity: could not read ${constant} from ${source#"${REPO_ROOT}/"} — the extractor likely broke"
+      false
+    }
+    # EN と JA の両方にちょうど 1 件ずつあることを要求する（片方から消えても検出できるように）。
+    for f in "${DOCS_DIR}/agents/frontier-harness.md" "${DOCS_DIR}/agents/frontier-harness.ja.md"; do
+      count="$(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -c . || true)"
+      [ "$count" = 1 ] || {
+        echo "${f#"${REPO_ROOT}/"}: expected exactly 1 FACT:${marker} marker, found ${count}"
+        false
+      }
+      while IFS= read -r val; do
+        [ "$val" = "$actual" ] || {
+          echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ${constant} is $actual"
+          false
+        }
+      done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+    done
+  done
+}
+
 @test "docs_facts: the <!-- FACT:fh-onboard-request-ttl-ms --> marker matches the onboard request TTL" {
   # 承認儀式の review request が生きている時間。長すぎると「いつ何を見たのか」が承認と
   # 結びつかなくなるので load-bearing な値であり、docs の記述を定数へ固定する。

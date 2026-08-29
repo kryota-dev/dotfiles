@@ -7,11 +7,13 @@
 `frontier-harness`（`fh`）は、進化中の `pr-workflow` の背後で task を capability へ route し、
 evidence を記録するモデル非依存の実行レイヤーです。model の自己申告よりも決定論的な検証を上位に置きます。
 
-rollout は **pilot** で、その影響範囲は意図的に狭く取っています。`run` / `verify` / `review` は
-今も route、verification、review の計画だけを保存します —— runner を注入しないので、rollout が
-何であれ provider には到達しません。実プロセスを起こす唯一のコマンドは `fh session` で、
-wave orchestrator が駆動する子セッションを起動します。rollout を `shadow` に戻せばその経路が
-止まるので、この設定値はラベルではなく非常停止レバーです。
+rollout は **pilot** で、その影響範囲は意図的に狭く取っています。`run` は今も route を記録するだけで、
+runner を注入しないので rollout が何であれ provider には到達しません。実プロセスを起こすコマンドは
+4 つあり、いずれも起こす前に gate を通ります。`fh session` は wave orchestrator が駆動する子セッションを
+起動し、`fh verify` は承認済みの決定的チェックを走らせ、`fh candidate` は使い捨ての子ワークツリーを
+作って取り込み、`fh review packet` は git から差分を読みます。すべてが `runWithRolloutGuard` を通るので、
+rollout を `shadow` に戻せばそのすべてが止まります —— この設定値がラベルではなく非常停止レバーである
+理由がここにあります。
 
 ## 導入と readiness
 
@@ -73,8 +75,8 @@ SQLite state は schema version 2 です。各レコード種別は正規化さ�
 | `route_decisions` | 選択した capability、provider、**model、effort**、reviewer | 保持 |
 | `evidence` | raw payload への参照、内容フィールドに対する SHA-256 の `content_hash`、所属する task / route | raw |
 | `adapter_runs` | adapter 実行 1 回分: capability、provider、model、effort、状態、開始/終了、exit code | raw |
-| `verification_results` | 決定的チェック 1 件: 種別、状態、command、exit code、evidence 参照 | raw |
-| `review_findings` | 所見 1 件: severity、uncertainty、要約、discriminating experiment、evidence 参照 | raw |
+| `verification_results` | 実際に走った決定的チェック 1 件: 種別、状態、承認済み command、exit code、evidence 参照 | raw |
+| `review_findings` | 所見 1 件: severity、uncertainty、1 行の要約、discriminating experiment、evidence 参照 | raw |
 | `approvals` | 承認された内容: 種別、subject hash、scope、承認者、承認/失効時刻 | **削除しない** |
 | `telemetry_events` | 内容を含まない集約値（category、risk、provider/model/effort、所要時間、token 数、結果） | 集約 |
 
@@ -96,6 +98,9 @@ route する実行のたびに `.harness/policy.json` から同じ hash を導�
 両者は別のストアにあり、policy は checkout に付いてきますが台帳は付いてきません。したがって承認後に
 policy を書き換えると、同梱の hash を辻褄が合うよう再計算しても照合は通りません。この検知が
 描く境界と描かない境界は [repository onboarding](#onboarding-と-shadow-command) を参照してください。
+
+使い捨ての candidate worktree は意図的にこのテーブル群に**含めていません**。retention の窓が
+その寿命として不適切である理由は [candidate worktree](#candidate-worktree) を参照してください。
 
 `telemetry_events` には自由記述の列が 1 つもありません。TEXT 列はすべて閉じた enum か短い小文字
 token であり、「集約テレメトリは内容を含まない」を規約ではなく schema で強制しています。
@@ -243,7 +248,7 @@ deny に化けず、そのまま尊重される。
 エスカレートする baseline ルールは多層防御であって、境界ではない —— これもコマンド文字列に対する
 照合なので上記の限界をそのまま引き継ぎ、それを避けるように書かれたコマンドには当たらない。
 
-## onboarding と shadow command
+## onboarding と route の記録
 
 task ごとの permission prompt を避けるため、repository の command/domain/capability manifest を一度だけ
 承認します。承認は **2 回の実行**に分かれ、2 回目は 1 回目が発行した request を名指しする必要があります。
@@ -252,8 +257,6 @@ task ごとの permission prompt を避けるため、repository の command/dom
 fh onboard --manifest candidate.json                       # レビュー。request id を出力する
 fh onboard --manifest candidate.json --approve --request <id> --json
 fh run --task task.json --json
-fh verify --command "npm run test" --json
-fh review --task task_example --json
 fh status --json
 fh clean --dry-run --json
 fh gaps --json
@@ -336,8 +339,10 @@ checkout は policy を運びますが、state root は運ばないからです�
   ないため、`fh run` と `fh verify` は domain 文字列の一致しか見ません。承認時点では無害なアドレスへ
   解決する名前が、後から内部アドレスを指すようになりえます。実際に接続を開く層がその時点で
   再確認する必要があり、その層は rollout 昇格とともに入ります。
-- **`fh review`**。manifest を参照せずレビュー計画を記録します。この経路は deterministic verifier と
-  review registry が所有しており、gate もそちらと一緒に入れるのが適切です。
+- **`fh review`**。どちらのサブコマンドも capability manifest を参照しません。`record` は正規化した
+  finding を registry へ書くだけ、`packet` は読むだけで、provider も repository の command も起動しません。
+  ただし `packet` が読むのは**承認済み**の manifest なので、承認の無い repository では reviewer に渡るのは
+  生の `.harness/policy.json` ではなく空の制約リストになります。
 
 enforcement 以前に書かれた policy は有効な承認の裏付けが無いため、既存 repository の移行には儀式の
 やり直しが必要です。
@@ -346,10 +351,92 @@ task は必要なものを自分で宣言します。実行の途中で人が判
 `requiresApproval`、ファイルを書き換える task には `requiresWrite` を付けます。どちらも既定は false で、
 選ばれた provider の宣言と突き合わされます（後述の「承認チャネルと書き込み可否が route を塞ぐ」）。
 
-`run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を記録するだけです。
-これは `shadow` のときだけでなく**どの rollout でも**成り立ちます —— `runWithRolloutGuard` に runner を
-渡さないからです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
+`run` は provider を起動せず、正規化した route を記録するだけです。これは `shadow` のときだけでなく
+**どの rollout でも**成り立ちます —— `runWithRolloutGuard` に runner を渡さないからです。route の記録は
+書き込みトランザクションの中で行い、guard を通すのはそこを出てからです。こうしておかないと、将来
+executor を配線した時点で `BEGIN IMMEDIATE` を provider 呼び出しの長さだけ握り続け、同じリポジトリの
+他の `fh` が全部詰まります。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
 approvals には手を触れません。`--dry-run` で影響を確認できます。
+
+## 決定的な検証
+
+```bash
+fh verify --task <task id> --command "npm run test" --json
+fh verify --task <task id> --command "npm run lint" --kind lint --json
+fh verify --task <task id> --candidate <candidate id> --command "npm run test" --json
+```
+
+`fh verify` はチェックを実際に走らせ、その結果を記録します。以前は `verification_plan` を 1 行書いて
+終わりで、完了の主張が「model がテストは通ったと言った」以上の根拠を持ちませんでした。
+
+その主張より結果を重くしているのは、次の 4 点です。
+
+- **コマンドは事前に承認済みでなければならない。** 何かを起こす前に repository capability manifest と
+  照合し、外れれば `fh gaps` に積んで終了コード 2 で止まります。承認可能な文法はプロジェクトの
+  タスクランナーと狭い字集合の引数に限られ、`check-runner.mjs` は実行の直前に同じ文法をもう一度
+  検査します —— 照合と実行の間で文字列が別のものへ組み立て直される余地を残しません。
+- **シェルを介さない。** 承認済み文字列は argv へ分割され、バイナリは PATH 上の絶対パスへ解決され、
+  `spawn` へは配列のまま渡ります。`;` や `&&`、`$(…)`、glob が再解釈される段階が存在しません。
+- **harness はチェックの出力を受け取らない。** 子の stdout / stderr は端末へ継承され、pipe しません。
+  harness が知るのは終了コードだけなので、「自由文が state DB に入らない」は書き方の規約ではなく
+  **そもそも受け取っていない**という性質になります。
+- **終了コードが判定である。** 0 は `passed`、それ以外は `failed` を記録します。
+  <!-- FACT:fh-check-timeout-ms -->900000<!-- /FACT --> ms（`--timeout-ms` で変更可）を超えたチェックは
+  SIGTERM、猶予の後に SIGKILL で終了させ、終了コード 124 の `errored` として記録します。
+  `fh verify` 自身が 0 を返すのは、チェックが通ったときだけです。
+
+チェックは `--worktree`（既定は作業ディレクトリ）で走り、state・manifest・gap queue もすべて同じツリー
+から解決します。`fh session` が `--worktree` に対して置いた規則と同じ理由です —— 呼び出し元の
+ディレクトリから解決すると、承認済みリポジトリの中から別のツリーを指すだけで承認を持ち回れます。
+
+candidate の中で検証するときは、`--worktree` でそのディレクトリを指すのではなく `--candidate` を使います。
+candidate は base commit の detached checkout なので、`.harness/policy.json` が未コミットならそのツリーには
+存在せず、`--worktree` で指すと承認境界は「このリポジトリは何も承認していない」と正しく判定します
+—— fail-closed としては正しい一方、隔離 → 検証 → 取り込みが通らなくなります。`--candidate` は
+**登記簿を経由**してツリーを解決します。そのツリーがこのリポジトリの持ち物であることを保証するのが
+登記簿であり、承認は所有元リポジトリのものを使い、candidate のツリーで走るのはチェックだけです。
+呼び出し側が渡した path を信用するわけではないので、`--worktree` の境界は弱まりません。
+
+kill が届くのは harness が起こしたプロセスまでで、その子孫には届きません。自分で孫プロセスを起こし
+SIGTERM を無視するテストランナーは、それらを残しうります。process group ごと落とせば直りますが、
+今度は harness より長く timeout 分だけ生き残る孤児という、より悪い失敗を作ります。時間切れは
+保証ではなく安全弁です。
+
+## review registry
+
+```bash
+fh review packet --task <task id> --out <abs path> [--base <rev>] --json
+fh review record --task <task id> --findings <abs path> --json
+```
+
+レビューは散文ではなく正規化された finding として扱います。`packet` は reviewer が受け取ってよいものを
+組み立て、`record` は返ってきた finding を受け取って verdict を返します。2 つを分けているのは権能が
+違うからで、`packet` は git を読むだけで何も起こさず、`record` は state を書くだけで repository に触れません。
+どちらも provider を起こしません —— それは `fh session` の仕事であり、provider への 2 本目の経路こそ
+#537 が作らないと決めたものです。
+
+**packet が運ぶのは task・制約・差分・検証結果の 4 つだけです。** writer の会話履歴はそこに含まれず、
+その保証は規約ではなく構造です: `buildReviewPacket` が受け取るのは task id・ワークツリー・base revision
+だけで、prompt も transcript も adapter の出力も**渡す口が存在しません**。4 つの出所も writer が
+自由に書ける場所ではありません —— 正規化済みの task 行、承認済み manifest、`verification_results`、git です。
+
+差分は追跡済みの変更と未追跡の新規ファイルの両方を含み、base commit から流し込んだ使い捨ての
+`GIT_INDEX_FILE` を通して作ります。対象ワークツリーの index は決して触りません。ステージング状態は
+`pr-workflow` の持ち物だからです。その使い捨て index はワークツリーの git ディレクトリ配下に置くので、
+`git add -A` が拾うことはありません。1 MiB を超える packet は `truncated: true` を立てて切り詰めます
+——「差分を全部見た」と reviewer に思わせないためです。packet は `--out` へ書き出し、印字しません。
+差分が stdout を経由してログへ流れないようにするためです。
+
+finding のドキュメントは version・reviewer capability・finding 群を宣言し、各 finding は severity・
+uncertainty・1 行の要約・任意の反証実験を持ちます。未知キーは黙って捨てず拒否するので、`transcript` や
+`rationale` を足せば静かに通るのではなく loud に落ちます。要約は
+<!-- FACT:fh-review-text-max-length -->300<!-- /FACT --> 文字を上限とし、印字可能な 1 行でなければなりません。
+この上限が、その列をレビュー本文の貼り付け先にしないための境界です。task id は `--task` が決め、
+ドキュメント側からは指定できません —— reviewer が他人の task に finding を紐付けられないようにするためです。
+
+evidence に載るのは件数と verdict だけで、finding そのものは載りません。`must` が 1 件でもあれば verdict は
+`blocked` になり `fh review record` は非 0 で終了します。呼び出し側スクリプトが未解決の `must` を
+成功として読めないようにするためです。
 
 ## 子セッション
 
@@ -578,19 +665,59 @@ exact model ID を再検査します（route 決定から実行までの間に r
 executor の生成時に固定され、「実行直前に再検査する」が規約頼みになるためです。
 この層は capability registry の schema を変更しません。
 
-## worktree と rollout
+## candidate worktree
 
-primary worktree と PR branch は `pr-workflow` が所有します。将来の writable diversified route だけが
-`wtp` を使って disposable child worktree を作ります。read-only 調査は worktree を増やしません。
-verified かつ clean apply 可能な candidate は primary へ反映できますが、merge と不可逆な外部操作は
-常に user が行います。
+```bash
+fh candidate create --task <task id> [--base <rev>] [--label <l>] --json
+fh candidate list --json
+fh candidate adopt --candidate <id> --json
+fh candidate discard --candidate <id> --json
+```
+
+書き込みを伴う多様化ルートには、レビュー対象のブランチではないどこかに書く場所が要ります。
+`fh candidate` はそれに使い捨ての子ワークツリーを与え、そこで生まれたものを外へ出してよいかを
+evidence で判定します。
+
+**primary worktree と PR ブランチは `pr-workflow` が所有したままです。** candidate は自分のブランチを
+持たない detached checkout なので PR ブランチの代わりにはなれず、取り込みは patch を当てて終わりです
+—— commit も push もしません。merge をはじめ不可逆な外部操作は常に user が行います。
+
+**candidate は `wtp` で作りません。** 本リポジトリの `.wtp.yml` は post-create hook で `.env` を新しい
+ワークツリーへ symlink します。人が作業するワークツリーには正しい挙動ですが、自律ルートが書き込む
+ツリーには不適切です。そのため candidate は hook を持たない `git worktree add --detach` を使います。
+ツリーは state root 配下（git common directory の内側）に置くので、primary worktree の `git status` には
+現れません。
+
+**取り込みの根拠は主張ではなく実測です。** チェックは `fh verify --candidate <id>` で走らせます。
+candidate を取り込むのは、その task の `verification_results` が 1 件以上あり、そのすべてが passed の
+ときだけです。しかも数えるのは **candidate 作成以降**に記録された
+チェックに限ります —— 作成前の緑は、そのツリーの中身について何も言っていないからです。未検証あるいは
+赤の candidate は終了コード 2 で断り、ツリーには手を触れません。
+
+**衝突したら作業を残します。** patch が対象ワークツリーへ clean に当たらなければ、candidate を
+`conflicted` にし、**ツリーは保持**して終了コード 2 で戻します。承認境界と同じコードなのは、どちらも
+「人が見るまで進めない」を意味するからです。rebase も自動解決も行いません —— どちらも、検証済みだった
+中身を黙って検証していないものへ変えてしまいます。user が衝突を解消すれば、保持された candidate は
+そのまま取り込めます。clean に当たった candidate は取り込んだうえでツリーを撤去します。中身は
+対象ワークツリーへ移っているからです。
+
+登記簿はテーブルではなく state root 配下のファイルです。candidate は「ディスク上のディレクトリが今
+どうなっているか」という事実なので、retention の窓に入れるといずれ行だけが消えてツリーが残ります
+—— 登記簿は「無い」と言うのに `git worktree add` は path 衝突で失敗し続ける、という状態です。同時に
+抱えられる candidate は最大
+<!-- FACT:fh-candidate-max-live -->8<!-- /FACT --> 件です。1 件がフルチェックアウト 1 本なので、
+gap queue のような桁は取れません。
+
+## rollout
 
 promotion は shadow → pilot → default です。rollout は現在 `pilot` で、CLI 側が
 （provider adapter が未実装であることに依存せず）明示的なガードとしてこれを強制します。
-route と provider の間に立っているのはこのガードだけであり、`pilot` が開けている経路は
-ちょうど 1 つ —— 子セッションの起動役である `fh session` —— です。他のコマンドは今も runner を
-渡さないので、昇格が広げたのは設定値ではなく「意図して足した 1 コマンド」の分だけです。
+harness と、それが起こすプロセスの間に立っているのはこのガードだけです。`pilot` が開けている経路は
+ちょうど 4 つ —— `fh session`（子 provider）、`fh verify`（承認済みチェック）、`fh candidate`
+（使い捨てワークツリーとその取り込み）、`fh review packet` の背後の git 呼び出し —— です。`fh run` は
+今も runner を渡しません。surface が広がるのは設定値によってではなく、意図して足した 1 コマンドずつです。
 
 rollback は `rollout` を `shadow` へ書き戻すことです。ガードはプロセスが起きる前に
-`executed: false` を返します。`default` への昇格、`--legacy` による rollback flag、次の昇格を
-正当化するテレメトリの定義は、いずれも未着手です。
+`executed: false` を返します —— チェックは spawn されず、ワークツリーも作られず、走ったかのような記録も
+残りません。`default` への昇格、`--legacy` による rollback flag、次の昇格を正当化するテレメトリの定義は、
+いずれも未着手です。
