@@ -45,6 +45,10 @@ import { createStateStore } from "./state-store.mjs";
 // **会話内容を記録しない。** prompt はファイルからのみ読み（`fh` の argv に本文を載せない）、
 // `tasks.goal` は呼び出し側の文字列ではなく導出値にし、evidence の claim は固定語彙に限る。
 
+// 子を起こしてよい account。`cli.mjs` の `resolveAccountScope` が返す語彙のうち、
+// 実際にパスへ解決できるものだけを並べる（`unknown` は含めない）。
+const KNOWN_ACCOUNT_SCOPES = new Set(["personal", "r06"]);
+
 export const DEFAULT_SESSION_CAPABILITY = "session.child";
 // 子は自分のワークツリーへ書く。read-only では pr-workflow が走らない。
 export const DEFAULT_SESSION_SANDBOX = "workspace-write";
@@ -186,6 +190,29 @@ export async function runSessionCommand({
     throw new TypeError(
       `fh session requires launch or resume, not ${action ?? "(nothing)"}`,
     );
+  }
+
+  // account が読めないまま子を起こさない。
+  //
+  // `CLAUDE_CONFIG_DIR` はランチャーが呼び出しごとに設定するもので、シェルには export されない。
+  // 素の tmux ペイン（skill が起動場所として指示している場所）にはこの変数が無く、
+  // `resolveAccountScope` は `unknown` を返す。それでも子は起動できてしまい、
+  //
+  //   - account に紐づくパス（codex home 等）が解決できず、その機能だけが静かに落ちる
+  //   - `accountScope` を宣言した capability は拒否される
+  //   - readiness キャッシュが `unknown` キーで書かれる
+  //
+  // という劣化が、**外形上は正常な起動と見分けられないまま**続く（実際に wave 1 本分を
+  // この状態で走らせた）。起動時に落として原因を読めるようにするほうがよい。
+  if (!KNOWN_ACCOUNT_SCOPES.has(accountScope)) {
+    emit({
+      action,
+      executed: false,
+      executionReason:
+        "the account scope could not be resolved; launch with CLAUDE_CONFIG_DIR set so the child inherits an account",
+      accountScope: accountScope ?? null,
+    });
+    return BLOCKED_PENDING_APPROVAL;
   }
 
   const capabilityName =

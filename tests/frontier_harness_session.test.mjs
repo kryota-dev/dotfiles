@@ -12,6 +12,7 @@ import {
   probeApprovalServer,
   resolveApprovalServerCommand,
 } from "../home/dot_local/lib/frontier-harness/approval-channel.mjs";
+import { BLOCKED_PENDING_APPROVAL } from "../home/dot_local/lib/frontier-harness/exit-codes.mjs";
 import { createChildRunner } from "../home/dot_local/lib/frontier-harness/child-runner.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
@@ -237,6 +238,7 @@ async function launch({
   worktree: worktreeOverride,
   sessionIdFlag = SESSION_ID,
   promptBody = PROMPT_BODY,
+  accountScope = "personal",
 }) {
   const worktree = worktreeOverride ?? path.join(directory, "worktree");
   mkdirSync(worktree, { recursive: true });
@@ -267,7 +269,7 @@ async function launch({
       "--json",
     ],
     {
-      accountScope: "personal",
+      accountScope,
       commandPaths: COMMAND_PATHS,
       config: sessionConfig,
       verifiedModels: VERIFIED_MODELS,
@@ -537,6 +539,31 @@ test("the child is told what the sandbox denies before it hits the wall", async 
   assert.match(prompt, /secure-transport/);
   // 呼び出し側の prompt は落とさない。
   assert.ok(prompt.includes(PROMPT_BODY));
+});
+
+test("an unresolved account scope starts no child at all", async (context) => {
+  // `CLAUDE_CONFIG_DIR` はランチャーが呼び出しごとに設定するもので、シェルには export されない。
+  // 素の tmux ペイン（skill が起動場所として指示している場所）にはこの変数が無く、
+  // accountScope は `unknown` になる。それでも子が起動できると、account に紐づくパスが
+  // 解決できないまま **外形上は正常な起動**として走り続ける（実際に wave 1 本分をこの状態で
+  // 走らせ、codex が動かない理由が argv を見るまで分からなかった）。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code, report } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    accountScope: "unknown",
+  });
+
+  assert.equal(code, BLOCKED_PENDING_APPROVAL);
+  // プロセスを 1 つも起こしていないこと（起動してから気づくのでは遅い）。
+  assert.equal(spawnFake.calls.length, 0);
+  assert.equal(report.executed, false);
+  // 直し方が出力から読めること。
+  assert.match(report.executionReason, /CLAUDE_CONFIG_DIR/);
 });
 
 test("the child git uses a TLS backend that works inside the sandbox", async (context) => {
