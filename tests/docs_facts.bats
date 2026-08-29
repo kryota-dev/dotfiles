@@ -336,3 +336,43 @@ _assert_lifecycle_scripts_documented() {
     }
   done
 }
+
+@test "docs_facts: every <!-- FACT:fh-approval-* --> marker matches the approval channel constants" {
+  # The approval channel blocks a child session while it waits, so these three numbers are
+  # load-bearing: they decide how long a wave child can be held, and the clamp is what keeps
+  # the wait under the MCP tool timeout. Pin the docs to the named constants so a policy
+  # change cannot land with the prose left behind.
+  local source="${HOME_DIR}/dot_local/lib/frontier-harness/approval-server.mjs"
+  [ -f "$source" ] || {
+    echo "missing ${source#"${REPO_ROOT}/"} — the approval server moved"
+    false
+  }
+
+  local pair marker constant actual count f val
+  for pair in "fh-approval-timeout-ms:DEFAULT_ESCALATION_TIMEOUT_MS" \
+    "fh-approval-max-timeout-ms:MAX_ESCALATION_TIMEOUT_MS" \
+    "fh-approval-progress-interval-ms:DEFAULT_PROGRESS_INTERVAL_MS"; do
+    marker="${pair%%:*}"
+    constant="${pair##*:}"
+    actual="$(grep -oE "export const ${constant} = [0-9]+" "$source" | grep -oE '[0-9]+$')"
+    [ -n "$actual" ] || {
+      echo "sanity: could not read ${constant} from ${source#"${REPO_ROOT}/"} — the extractor likely broke"
+      false
+    }
+    # 「docs のどこか 1 箇所にあれば通る」だと、片方のミラーからマーカーが消えても
+    # 検出できない。EN と JA の両方にちょうど 1 件ずつあることを要求する。
+    for f in "${DOCS_DIR}/agents/frontier-harness.md" "${DOCS_DIR}/agents/frontier-harness.ja.md"; do
+      count="$(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -c . || true)"
+      [ "$count" = 1 ] || {
+        echo "${f#"${REPO_ROOT}/"}: expected exactly 1 FACT:${marker} marker, found ${count}"
+        false
+      }
+      while IFS= read -r val; do
+        [ "$val" = "$actual" ] || {
+          echo "${f#"${REPO_ROOT}/"}: FACT:${marker} is $val but ${constant} is $actual"
+          false
+        }
+      done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
+    done
+  done
+}

@@ -112,6 +112,124 @@ state を開くコマンドはすべて migration を行います。`fh clean --
 dry-run が意味するのは「何も削除しない」であって「何も開かない」ではありません。そうしないと、
 v1 の DB に対する dry-run は v2 で追加されたレコード種別を数えられないからです。
 
+## 承認チャネル
+
+`claude -p` は `--permission-prompt-tool` を配線したときだけ `AskUserQuestion` を持ち、承認要求も
+問いかけも**同期的な MCP ツール呼び出し**として届く。`fh` はその受け口を提供する。wave の子は端末を
+持たなくても user に到達でき、画面を読むことも、キーを送ることも、「今まさに未回答か」を推定することも
+なくなる —— 呼ばれた時点が問いであり、返り値が回答である。
+
+子セッションには専用の MCP server として配線する。承認チャネルは新しい信頼境界なので、それを
+「お願い」ではなく境界にする 2 つのフラグを必ず併せる。
+
+```bash
+MCP='{"mcpServers":{"fh-approve":{"command":"fh","args":["approve-server","--session","<session-id>"]}}}'
+claude -p --mcp-config "$MCP" --strict-mcp-config --setting-sources user \
+  --permission-prompt-tool mcp__fh-approve__approve ...
+```
+
+`--strict-mcp-config` はチェックアウト先のリポジトリが approver の横に別の MCP server を注入することを
+防ぎ、`--setting-sources user`（または `--bare`）はその `.claude/settings.json` の hooks が走ることを防ぐ。
+子の起動そのものは wave orchestrator の仕事であり、このコマンドの範囲ではない。
+
+### escalation ルール
+
+escalation ルールは **repository capability manifest とは別のファイル**に置く。両者は失敗の方向が
+逆だからである。manifest の漏れは fail-closed —— 何かが動かず、こちらは気づく。escalation ルールの
+漏れは fail-open —— 誰にも聞かずに何かが実行され、こちらは気づかない。同じファイルに置くと、この
+非対称が見えなくなる。
+
+その帰結として、設計は意図的に非対称になっている。
+
+- **baseline ルールは `approval-rules.mjs` の定数**であってデータではない。マージ、強制 push、
+  履歴書き換え、作業ツリーの巻き戻し、リリース、外部への書き込み、資格情報へのアクセス、デプロイ、
+  データベースマイグレーション、そして承認 queue 自身への書き込みを対象とする。どのファイルからも
+  削除・無効化できない。
+- 任意の `$HOME/.config/frontier-harness/approval-rules.json`（または絶対パスの
+  `FH_APPROVAL_RULES_PATH`）は、`additionalRules` による**追加しかできない**。一致しなかった場合の
+  既定も `defaultDecision: "escalate"` によって厳しくする方向にしか動かせない。差し引くキーは存在しない。
+- パスを作業ディレクトリから導かないのは `config.json` と同じ理由である。チェックアウトされた
+  リポジトリが自分用の escalation 方針を持ち込めてはならない。
+- 壊れたルールファイルは、静かに baseline へ縮退せず**起動を拒否する**。user が意図して足したルールを
+  黙って落とすことこそ、この仕組み全体が防ごうとしている fail-open の退行である。
+
+ルールを照合する前に、コマンド文字列はトークン化され、**binary ごとの arity 表を使って
+global option が読み飛ばされる**。したがって `git -C <path> merge` は `git merge` と同じに
+認識される。難しい 2 例が正しく出るのはこの表のおかげである。`git -C merge status` では
+`merge` は `-C` の**値**であり実際の subcommand は良性の `status`、一方 `git -p merge` では
+`-p` が値を取らないので `merge` が本物である。バックスラッシュによる単語分断と `${IFS}` 置換は
+正規化して取り除く。コマンド名や subcommand が動的に組み立てられているもの、`sudo` のような
+ラッパーや別のシェルを介して実行するものは、そもそも解釈できない —— これらは一致しなかった
+場合の既定へ落とさず、エスカレートする。
+
+ルールに一致しても**拒否はしない**。エスカレートする —— user に同期的に問い合わせる。
+`AskUserQuestion` はルールに関わらずエスカレートし、approver がそれに自分で答えることはない。
+一次ソースでの裏取りができない以上、答える権能そのものを与えない。
+
+どのルールにも一致しなかった呼び出しは allow になる。この方向は構造上 fail-open であり、境界は
+2 つある。read-only 相当の呼び出しは prompt tool に届く前に auto-approve されるのでチャネルはそもそも
+それらを見ないこと、そして baseline を縮められないことである。shell コマンド文字列に対する照合は
+**速度制限であって境界ではない** —— 正規化で安価な小細工は塞がり、解釈できないものはエスカレート
+するが、ルールを避けようとして書かれたコマンドは、静的な照合では依然として捕まえられない。
+
+`fh approve-server` は `--session` / `--approvals-dir` / `--rules` / `--timeout-ms` /
+`--progress-interval-ms` を受ける。パスを取る 2 つのフラグは絶対パスでなければならない
+（ルールファイルを作業ディレクトリから解決しないのと同じ理由である）。
+
+### user への到達経路
+
+escalation は state root へ 1 要求 1 ファイルで書かれる。複数の子が同時に止まっても競合しない。
+
+| ファイル | writer | 内容 |
+|---|---|---|
+| `<state root>/frontier-harness/approvals/<id>.request.json` | `approve-server` | tool call、一致したルール、決着後の outcome |
+| `<state root>/frontier-harness/approvals/<id>.answer.json` | responder | user の判断 |
+
+各ファイルの writer はちょうど 1 つなので、同時更新で何かが失われることがない。answer は rename では
+なく `O_EXCL` + `link(2)` で公開するため、1 要求は 1 度だけ答えられ、2 番目の writer は先着を黙って
+上書きするのではなく失敗する。
+
+responder は 2 系統が交換可能で、queue はどちらが使われているかを前提にしない。
+
+```bash
+fh approvals --json                                    # 何が待っていて、なぜ待っているか
+fh approve --request <id> --allow                      # 通す
+fh approve --request <id> --deny --message "..."       # 理由を model へ返して拒否する
+fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUserQuestion
+```
+
+通常は wave orchestrator が仲介する（queue を読み、user に問い、回答を書き戻す）が、user が同じ
+コマンドで直接答えることもできる。これは重要で、orchestrator が落ちても pending な承認は決着できる。
+`AskUserQuestion` への回答は提示された選択肢に対して**両側**で検証されるため、打ち間違いや手編集した
+ファイル経由で「user が表明していない判断」が model に届くことはない。
+
+### 待機の時間
+
+permission prompt tool は呼び出し元をブロックするので、escalation の窓は両側から限られる。
+
+| 値 | 意味 |
+|---|---|
+| <!-- FACT:fh-approval-timeout-ms -->28800000<!-- /FACT --> ms（8 時間） | escalation が自動 deny するまでの待機上限（`--timeout-ms`。<!-- FACT:fh-approval-max-timeout-ms -->86400000<!-- /FACT --> ms でクランプし、`MCP_TOOL_TIMEOUT` の既定を必ず下回る） |
+| <!-- FACT:fh-approval-progress-interval-ms -->60000<!-- /FACT --> ms | 待機中に `notifications/progress` を送る間隔（`--progress-interval-ms`） |
+
+progress 通知は `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`（stdio では 30 分）をリセットするために送る。
+これが無いと、寝ている user が答えるよりはるかに早く呼び出しが打ち切られる。idle timeout 以上の
+間隔は、受け付けたうえで静かに無意味になるのではなく、起動時に拒否する。
+
+窓が閉じると要求は自動 deny になり、記録には tool 入力・セッション・tool use id が残る。子は
+きれいに終わり、その escalation は後から辿れる。stdin のクローズやシグナルも、status を変えて同じ
+ことをする。**user が既に記録した判断はそれらすべてに優先する** —— shutdown と入れ違いに届いた回答は
+deny に化けず、そのまま尊重される。
+
+### これが守らないもの
+
+同じ user で動くプロセスはすべて承認 queue に書き込める。要求を出して待っている子自身も例外ではない。
+自己承認しようとする子はそれができるし、ファイル権限をどう並べても変わらない —— responder を別の uid で
+動かす以外にない。これは state schema の `approvals.granted_by` に付いている但し書きと同じものである。
+記録は「誰が承認したか」を述べるが、それを証明はしない。承認ディレクトリを参照するコマンドを
+エスカレートする baseline ルールは多層防御であって、境界ではない —— これもコマンド文字列に対する
+照合なので上記の限界をそのまま引き継ぎ、それを避けるように書かれたコマンドには当たらない。
+
 ## onboarding と shadow command
 
 task ごとの permission prompt を避けるため、repository の command/domain/capability manifest を一度だけ
