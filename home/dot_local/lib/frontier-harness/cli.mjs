@@ -446,6 +446,14 @@ export function runCli(argumentsList, options = {}) {
       : runApproveCommand({ queue, emit, flags });
   }
 
+  // gap queue も state root だけを読む。承認境界が実行を止めた記録を確認するのに
+  // capability registry は要らないので、config.json の有無に巻き込まない
+  // （config を未デプロイの環境で `fh gaps` が落ちると、なぜ止まったのかを調べる手段が消える）。
+  if (command === "gaps") {
+    emit({ gaps: manifestGapQueueFor(options, cwd).list() });
+    return 0;
+  }
+
   // 設定パスの解決は遅延させる。設定そのものを注入された呼び出しで、
   // 一度も読まないパスの解決を理由に停止しないため。
   const config =
@@ -477,13 +485,6 @@ export function runCli(argumentsList, options = {}) {
         verifiedModels: verifiedModels ?? {},
       }),
     );
-    return 0;
-  }
-
-  if (command === "gaps") {
-    emit({
-      gaps: manifestGapQueueFor(options, cwd).list(),
-    });
     return 0;
   }
 

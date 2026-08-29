@@ -3290,6 +3290,10 @@ test("fh gaps lists what the manifest refused", (context) => {
   assert.equal(
     runCli(["gaps", "--json"], {
       stateDirectory: directory,
+      // gap queue の確認に capability registry は要らない。解決できない config を
+      // 明示的に渡し、`fh gaps` が config.json を読まないことを機械的に固定する
+      // （開発機には config が配備されているので、これが無いと CI でしか検出できない）。
+      configPath: path.join(directory, "does-not-exist", "config.json"),
       write: (line) => output.push(line),
     }),
     0,
