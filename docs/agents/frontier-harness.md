@@ -311,6 +311,7 @@ provider gets its own adapter rather than one parameterised launcher:
 | launch | `-p` with `--output-format stream-json` | `codex exec --sandbox <mode> --json` | `-p --output-format json` |
 | resume | `--resume <session id>` | `codex exec resume <thread id>` | `--conversation <id>` |
 | sandbox | settings JSON via `--settings`; no `--sandbox` flag exists | `--sandbox` on launch, `-c sandbox_mode="…"` on resume | not expressible: `--sandbox` does not stop file writes |
+| working-tree config | blocked by `--setting-sources user` and `--strict-mcp-config` | no flag adds a source; configuration comes from `$CODEX_HOME` | no flag adds a source (implicit discovery unmeasured) |
 | approval channel | external round trip | agent review | none |
 | success | `result` event, `is_error`, `permission_denials[]` | `turn.completed` and `error` events | **cannot be determined** from exit code and status alone |
 
@@ -350,6 +351,48 @@ allowlist syntax has never been measured. Network containment is *not* uniform a
 the harness does not claim it is: Claude renders a strict allowlist in its settings blob and Codex
 leaves `workspace-write` networking off by default, both measured, but Antigravity's network default
 was never established and the adapter emits nothing that controls it.
+
+### The working tree cannot configure the child
+
+A child session runs inside a worktree with an issue's branch checked out, so
+`.claude/settings.json`, `.claude/settings.local.json`, and `.mcp.json` reach it from outside the
+trust boundary. The interactive CLI asks before it trusts a folder; `-p` does not. It also ignores a
+settings file that fails validation without saying so, and a session's first hooks run before any
+structured event is available to read. Detecting the problem from the output is late by
+construction, so the blocking belongs in the launch flags.
+
+Every Claude invocation carries `--setting-sources user` and `--strict-mcp-config`, and
+`sealInvocation` reads that back the way it reads the sandbox back: `readEffectiveConfigIsolation`
+is a required argument with no default, and an invocation whose reader does not return `true` is
+never returned. Leaving the flags off is not a mistake somebody can make quietly — it has no
+representation. There is no exception list and no ledger of trusted worktrees: a ledger would become
+a trust boundary of its own, needing its own tamper detection. Work that genuinely needs a
+worktree's hooks or skills belongs in an interactive session.
+
+The check and the claim come from one derivation, so they cannot drift apart. `configSourcesFor`
+turns an argv into the set of configuration files the child would consult — the user, project, and
+local settings files that `--setting-sources` selects, plus the project `.mcp.json` that
+`--strict-mcp-config` suppresses — and the isolation reader asserts that none of them sit inside the
+working tree. A test writes real hostile files into a temporary worktree and asserts the derivation
+excludes them; a negative control strips the two flags and asserts the same three files come back,
+which is what keeps the first test from being a restatement of itself. Anything the argv walk cannot
+parse — an unknown flag, a duplicated `--setting-sources`, a settings path where an inline blob was
+expected — resolves to "every source is live", and so fails closed.
+
+The approval channel is an allowlist rather than an exception to that. `--strict-mcp-config` admits
+only the servers `--mcp-config` names, so wiring `--permission-prompt-tool` without declaring one
+leaves the prompt tool pointing at nothing — the same silent loss of the gate as never wiring it.
+The adapter therefore takes the prompt tool and the approval server together or not at all, declares
+exactly one server as an inline JSON string (a file path could be swapped from the working tree),
+and refuses a prompt tool that does not name that server. The declaration carries a command and its
+arguments, never an env block.
+
+`readInitHealth` reads a `system/init` event and reports whether `AskUserQuestion` is present when a
+prompt tool was wired, whether the declared approval server connected, and whether the child
+reported MCP or plugin errors. **This is a secondary check and not the boundary.** It catches
+misconfiguration, but anything that connects and answers without error passes it, and a hook that
+runs at startup has already run by the time the event can be read. Wiring it into a launch sequence
+is separate work.
 
 ### Antigravity is implemented but stays read-only
 
