@@ -22,6 +22,7 @@ import {
   INIT_PROBLEM_PLUGIN_ERRORS,
   SANDBOX_ALLOWED_DOMAINS,
   claudeAdapter,
+  codexHomeFor,
   configSourcesFor,
   readInitHealth,
 } from "../home/dot_local/lib/frontier-harness/adapter-claude.mjs";
@@ -393,6 +394,40 @@ test("claude pairs stream-json with --verbose in both phases", () => {
     assert.ok(invocation.argv.includes("--output-format"));
     assert.ok(invocation.argv.includes("--verbose"));
   }
+});
+
+test("the codex home follows the account, and an unknown account gets none", () => {
+  // ランチャーは CLAUDE_CONFIG_DIR から CODEX_HOME を決める（`*.claude-r06` なら
+  // `~/.codex-r06`）。子は親の CLAUDE_CONFIG_DIR を継承するので、子の codex home も account で
+  // 決まる。**両方を開けると personal の子が work account の codex 状態へ書ける**ため、
+  // scope に対応する 1 つだけを返す。
+  assert.equal(codexHomeFor("personal", "/home/u"), "/home/u/.codex");
+  assert.equal(codexHomeFor("r06", "/home/u"), "/home/u/.codex-r06");
+  // scope が読めないときに既定へ倒さない。倒すと、開いた先が間違っていても codex は動いて
+  // しまい、どちらの account を汚したかが分からなくなる。
+  assert.equal(codexHomeFor("unknown", "/home/u"), null);
+  assert.equal(codexHomeFor(undefined, "/home/u"), null);
+  assert.equal(codexHomeFor("personal", ""), null);
+  // prototype 由来のキーを scope として拾わない。
+  assert.equal(codexHomeFor("constructor", "/home/u"), null);
+});
+
+test("claude opens the codex home for writes but never its credential file", () => {
+  // ［実測］codex は `~/.codex` 直下の sqlite を更新する。書けないと
+  // `failed to initialize in-process app-server client: Operation not permitted` で落ちる
+  // ——IPC ではなくファイル書き込みの拒否。同じディレクトリに auth.json が同居するので、
+  // そこだけ denyWrite で守る（この状態で codex が完走することを実測で確認した）。
+  const launch = claudeAdapter.launch(
+    requestFor(claudeAdapter, "workspace-write", { codexHome: "/home/u/.codex" }),
+  );
+  const settings = JSON.parse(launch.argv[launch.argv.indexOf("--settings") + 1]);
+  assert.deepEqual(settings.sandbox.filesystem.allowWrite, ["/home/u/.codex"]);
+  assert.deepEqual(settings.sandbox.filesystem.denyWrite, ["/home/u/.codex/auth.json"]);
+
+  // codexHome を渡さない呼び出しでは、書き込みの許可そのものを出さない。
+  const without = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
+  const bare = JSON.parse(without.argv[without.argv.indexOf("--settings") + 1]);
+  assert.ok(!Object.hasOwn(bare.sandbox, "filesystem"));
 });
 
 test("claude pre-allows domains without opening a hole", () => {

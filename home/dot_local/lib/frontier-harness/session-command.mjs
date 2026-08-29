@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
+import { codexHomeFor } from "./adapter-claude.mjs";
 import { requireSafeArgumentValue } from "./adapter-contract.mjs";
 import { createAdapterExecutor } from "./adapters.mjs";
 import {
@@ -370,6 +371,10 @@ export async function runSessionCommand({
         executable,
         prompt,
         sandbox,
+        // 子は親の CLAUDE_CONFIG_DIR を継承し、codex ランチャーがそこから CODEX_HOME を
+        // 決める。したがって子の codex home は account で決まる。両 account 分を開けると
+        // profile 分離が崩れるので、scope に対応する 1 つだけを渡す（未知なら null）。
+        codexHome: codexHomeFor(accountScope, environment.HOME),
         // launch と resume で adapter が読むキーが違う。両方を同時に渡さない
         // （resumeKey が非 null だと adapters.mjs は resume 経路を選ぶ）。
         ...(action === "resume" ? { resumeKey } : { sessionId }),
