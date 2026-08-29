@@ -3,6 +3,7 @@ import {
   closeSync,
   constants,
   fchmodSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -209,4 +210,40 @@ export function writeJsonAtomic(targetPath, value, label) {
     if (!renamed) rmSync(temporaryPath, { force: true });
   }
   return targetPath;
+}
+
+// 「まだ無ければ作る、あれば触らない」を競合なく行う。既存なら false を返す。
+//
+// `writeJsonAtomic` の rename は宛先を無条件に置き換えるため、複数の writer が同じ論理項目を
+// 書く用途（manifest gap queue）には使えない —— 先に読んでから書く形にすると read-modify-write の
+// lost update になる。`linkSync` は宛先が存在すれば（symlink であっても）EEXIST で失敗し、
+// 追従もしないので、「作成のみ」を 1 回のシステムコールで表現できる。
+export function writeJsonExclusive(targetPath, value, label) {
+  ensureDirectory(path.dirname(targetPath), `${label} directory`);
+  assertNotSymlink(targetPath, label);
+  const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
+  const payload = `${JSON.stringify(value, null, 2)}\n`;
+  const descriptor = openSync(
+    temporaryPath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+    STATE_FILE_MODE,
+  );
+  try {
+    try {
+      fchmodSync(descriptor, STATE_FILE_MODE);
+      writeFileSync(descriptor, payload, { encoding: "utf8" });
+    } finally {
+      closeSync(descriptor);
+    }
+    try {
+      linkSync(temporaryPath, targetPath);
+    } catch (error) {
+      if (error?.code === "EEXIST") return false;
+      throw error;
+    }
+    return true;
+  } finally {
+    // link は元の名前を残すため、成功・失敗どちらでも一時ファイルを消す。
+    rmSync(temporaryPath, { force: true });
+  }
 }
