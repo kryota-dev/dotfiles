@@ -305,3 +305,39 @@ export function findManifestGaps({ manifest, commands = [], domains = [], capabi
   }
   return gaps;
 }
+
+// ---------------------------------------------------------------------------
+// gap からの候補 manifest 組み立て
+// ---------------------------------------------------------------------------
+
+export const GAP_KIND_TO_MANIFEST_KEY = Object.freeze({
+  command: "commands",
+  domain: "domains",
+  capability: "capabilities",
+});
+
+// `fh onboard --from-gaps` の候補 manifest。承認済み manifest に、queue に溜まった gap のうち
+// manifest へ載せられるものを足す。載せられないもの（`curl …` のように承認対象外の形、
+// 内部アドレスを指す domain など）は落として理由と一緒に報告する。1 件の不正で一括承認全体が
+// 止まると、wave 境界でまとめて承認するという目的が果たせない。落とした側は未承認のまま残る
+// ので、fail-closed は維持される。
+export function candidateFromGaps(approvedManifest, gaps) {
+  const candidate = {
+    commands: [...approvedManifest.commands],
+    domains: [...approvedManifest.domains],
+    capabilities: [...approvedManifest.capabilities],
+  };
+  const included = [];
+  const rejected = [];
+  for (const gap of gaps) {
+    const key = GAP_KIND_TO_MANIFEST_KEY[gap.kind];
+    const rejection = manifestEntryRejection(key, gap.value);
+    if (rejection) {
+      rejected.push({ kind: gap.kind, value: gap.value, reason: rejection });
+      continue;
+    }
+    if (!candidate[key].includes(gap.value)) candidate[key].push(gap.value);
+    included.push(gap);
+  }
+  return { candidate, included, rejected };
+}
