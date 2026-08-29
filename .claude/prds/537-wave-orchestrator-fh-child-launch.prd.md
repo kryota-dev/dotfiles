@@ -130,7 +130,7 @@ wave の Leader として、複数 issue を並列に走らせる子セッショ
 | 4 | `createAdapterExecutor` を全面的に async 化する | 既存の同期 runner を前提としたテスト（`tests/frontier_harness_adapters.test.mjs`）の契約を壊す。runner が Promise を返したときだけ Promise を返す 1 箇所の分岐に留め、同期経路を無改変にした。 |
 | 5 | 子の stdout を transcript ファイルへ保存して後から読む | 会話内容がディスクに残る。「質問文・選択肢などの会話内容は記録に載せない」に反する。解釈はメモリ内で完結させ、stderr へはイベント型名だけを出す。 |
 | 6 | `session.child` の effort を `high` にする | tier ごとに model/effort を変えるのは `model-fitness-check` の contract だが、floor を割る方向の誤りだけが gate を静かに弱める（過剰は quota を食うだけ）。round-up default に従い `xhigh` に寄せ、tier 別 capability は `--capability` で後から足せる形にした。 |
-| 7 | tmux 経路（`wave-events.sh` / `send-to-pane.sh`）を本 PR で撤去する | #539 が縮退方針と撤去条件を決める。調査文書 §6 ガード 21（人が覗いて介入できる窓）の代替が `--resume` で成立することの実運用確認が済むまで、消さない。 |
+| 7 | tmux 経路（`wave-events.sh` / `send-to-pane.sh`）を本 PR で撤去する | #539 が縮退方針と撤去条件を決める。調査文書 §6 ガード 21（人が覗いて介入できる窓）の代替が `--resume` で成立することの実運用確認が済むまで、消さない。**［#539 で決着］** 結論は「2 本とも撤去する」で、ここで名指しした実運用確認は撤去の前提条件 G4 として明文化された（`.claude/prds/539-tmux-path-retirement-criteria.prd.md`）。撤去の実施はさらに別 issue。 |
 | 8 | PRD 段階で council + santa-method による多面検証を回す | 同じ観点を PRD と実 diff の 2 回に分けて当てることになる。検証は Phase 6 の `/multi-review --tier=large --arch` + cross-model adversarial verify に集約し、実際に動くコードへ当てる。 |
 | 9 | ambiguous な shell コマンド（パイプ・コマンド置換）を escalate しないよう approval-rules を緩める | `classifyToolCall` の「解釈できなかったコマンドを allow に倒さない」は #533 の中核の fail-closed。承認キューの流量は増えるが、緩めれば承認境界そのものが穴になる。運用注記に留める。 |
 
@@ -150,7 +150,7 @@ wave の Leader として、複数 issue を並列に走らせる子セッショ
 
 ## Out of Scope
 
-- `wave-events.sh` / `send-to-pane.sh` の**撤去**（#539 が縮退方針と撤去条件を決める）
+- `wave-events.sh` / `send-to-pane.sh` の**撤去**（#539 が縮退方針と撤去条件を決める → 決着済み: `.claude/prds/539-tmux-path-retirement-criteria.prd.md`。撤去の**実施**は G1〜G6 を満たした時点の別 issue）
 - #502 の残余（default 昇格・rollback 経路・昇格基準のテレメトリ）
 - #495（deterministic verifier / review registry / candidate worktree）
 - Antigravity 系（#536 / #535 / #509）

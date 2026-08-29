@@ -523,6 +523,13 @@ Remote Control は「非対話実行の手段」ではなく「**人が別デバ
 - **移行しない**: tmux そのもの。**人が覗く窓としての価値は残る**（ガード 21）。実行を headless にしても、
   ペインで子プロセスを走らせて stream をそのまま流せば、可視性は保てる。
   「tmux を捨てる」ことは本調査の目的ではない。
+- **［#539 で更新］検知・送信スクリプトの帰趨**: 本書は「代理応答経路のみ移行する」までを決め、
+  `wave-events.sh` / `send-to-pane.sh` の縮退方針は C4 として据え置いた。#539 がそれを確定し、
+  **2 本とも撤去する**と決めた（`.claude/prds/539-tmux-path-retirement-criteria.prd.md`）。
+  **本書の代替案 2（tmux を撤去し headless のみにする）の却下は覆っていない** —— #539 が撤去するのは
+  スクリプト（機械が画面を読んでキーを送る導線）であって、ガード 21 を担う tmux ペインと
+  `claude --resume` ではない。ガード 21 の代替が実運用で成立することは #539 の G4 として撤去の
+  前提条件に置かれている。
 - **前提条件（満たさないなら移行しない）**:
   1. prompt tool の配線を必須化し、起動時に `AskUserQuestion` の存在検査を行うこと（R1）。この検査が無い移行は、
      gate を静かに失う退行になる。
@@ -583,12 +590,12 @@ adapter が満たすべき最小要件（#493 の設計入力）:
 
 ## 8. 後続 issue 候補（列挙のみ / issue 化は user 承認後）
 
-| # | 候補 | 依存 |
-| --- | --- | --- |
+| # | 候補 | 依存 | 決着 |
+| --- | --- | --- | --- |
 | C1 | 承認 MCP server（permission prompt tool）の実装 ── `allow` / `deny` / `answers` の返却、無条件エスカレート集合の deny ルール、progress 通知による idle timeout 対策、**idle timeout 到達時の安全な fallback（自動 deny ＋ 子セッション状態の保存）**、`--strict-mcp-config` 前提の接続要件 | 本書 |
 | C2 | `wave-orchestrator` の子起動を `claude -p --permission-prompt-tool` へ切り替え、起動時に `AskUserQuestion` 存在検査を入れる | C1 |
 | C3 | 子起動フラグの固定（`--setting-sources user` / `--strict-mcp-config` の allowlist 方式）＋ 起動時ヘルスチェック（`AskUserQuestion` 存在・`mcp_server_errors` / `plugin_errors`・sandbox 実効性）を子起動シーケンスに追加 | C2 |
-| C4 | `scripts/executable_wave-events.sh` / `scripts/executable_send-to-pane.sh` の縮退方針決定（tmux 併用時のみ残す / 撤去する）と、`wave-orchestrator-hook-based-detection.prd.md` への forward pointer 追記 | C2 |
+| C4 | `scripts/executable_wave-events.sh` / `scripts/executable_send-to-pane.sh` の縮退方針決定（tmux 併用時のみ残す / 撤去する）と、`wave-orchestrator-hook-based-detection.prd.md` への forward pointer 追記 | C2 | **決着済み（#539）**: `.claude/prds/539-tmux-path-retirement-criteria.prd.md`。結論は「2 本とも撤去する（tmux 併用時のみ残す、は採らない）」。tmux 自体は残すので、下記の代替案 2 の却下は覆っていない |
 | C5 | `frontier-harness` の provider adapter 実装（#493）に §7.2 の 4 要件を反映 | 本書 |
 | C6 | capability registry に承認チャネル軸を追加し、`risk.alwaysEscalate` の route を塞ぐ | C5 |
 | C7 | サンドボックス実効性の回帰テスト（Claude / Codex の 4 ケースを bats 化） | C5 |

@@ -60,6 +60,18 @@ AskUserQuestion で停止した瞬間に 2 つの hook が同時発火する。
 | フォールバック | しない。報告して停止する | 沈黙する失敗を新たに作らない |
 | ENDED 判定 | `ps` の PID 生存確認 | hook では検知できない |
 
+## 後続の決定（forward pointer）
+
+本書は `status: finalized` のまま残すが、**決定の一部は後続文書で置き換わっている**。
+どこまでが生きているかを取り違えないよう、順に記す。
+
+| 本書の決定 | 現況 | 置き換えた文書 |
+| --- | --- | --- |
+| **検知**は hook payload を根拠にする（画面テキストを読まない） | **原則は生きている。実装は不要化した。** 承認チャネル経路では子が承認を同期的に呼んでくるため、そもそも「今止まっているか」を推定する対象が無い。「画面テキストから状態を推定しない」は a fortiori で保たれる | `.claude/prds/526-noninteractive-mode-research.prd.md` §7.1 |
+| **応答**は payload の options index + 1 を数字キーで送る | **置き換わった。** `fh approve --request <id>` が回答であり、画面参照もキー送出も無い | 同上（§7.1 が覆したのはこの 1 点だけ） |
+| 却下 2: SDK へ移行する（理由: 独立した対話型セッションを立て、人が覗いて介入できるという skill の中核と衝突する） | **却下は維持。** 却下理由（人が覗ける導線）も維持され、#526 §6 のガード 21 として正面から扱われている | `.claude/prds/526-noninteractive-mode-research.prd.md` 代替案 3 |
+| hook 配線（`wave-session-event` 系）と記録スクリプト | **撤去が決まっている（未実施）。** 撤去は「実運用データ → 走行中の wave が無いことの確認 → スクリプト撤去 → hook 配線を外す」の順で行う。**配線を先に外してはならない** —— 記録が空だと `wave-events.sh` が `UNKNOWN` を返し続け、「検知器が壊れた」と「誰も停止していない」が区別できなくなる | `.claude/prds/539-tmux-path-retirement-criteria.prd.md` |
+
 ## Considered Alternatives / Rejection Rationale
 
 ### 却下 1: セッション jsonl を読む (当初の提案)
