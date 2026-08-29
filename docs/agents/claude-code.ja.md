@@ -136,6 +136,16 @@ Renovate の `github-tags` datasource への接続は別途追跡します。
 
 **#496 で縮小しました**（#473 の sub-issue）。従来は 37 エントリが同一イベント面に安全防御・品質自動化・観測・監査・通知・学習を重ねていました。19 エントリを除去し 18 エントリになりました。外したもの: Edit ごと・Stop ごとの品質助言（`$code-change-verification` と CI と重複）、判断に結び付かない観測・監査、セッション要約の自動保存と SessionStart の文脈注入、CLV2 の SessionStart 通知。残したもの: 安全境界（コミット検証の迂回禁止・破壊的コマンドの事実確認・開発サーバーの起動・`pre:config-protection`）、CLV2 のツール呼び出しオブザーバー、MCP 失敗時の recovery、ntfy 通知、そして wave-orchestrator のセッションイベント全件。
 
+**`wave-session-event` 系 7 エントリは撤去予定であり、外すのは最後です。** これらは `wave-orchestrator` の
+legacy tmux 検知経路に供給しており、子セッションが承認チャネル経由で起動するようになった今
+（#537、#539）、その 2 本のスクリプト（`wave-events.sh`、`send-to-pane.sh`）は撤去対象です。
+撤去の順序は固定されています: 実運用データを取る → 走行中の wave が無いことを確認する →
+スクリプトを撤去する → その後にこの hook 配線を外す。配線を先に外すとイベント記録が空のままになり、
+`wave-events.sh --state` は空の記録に対して `UNKNOWN` を返します —— これは「検知器が壊れた」と
+「誰も停止していない」を区別しません。それまで配線を残すコストはゼロです: `WAVE_ORCHESTRATOR_SESSION`
+による opt-in であり、通常セッションでは何も記録しません。決定記録と撤去の前提条件:
+`.claude/prds/539-tmux-path-retirement-criteria.prd.md`。
+
 ```mermaid
 flowchart TD
     SS[SessionStart] --> SS1[ECC session-start-bootstrap\n文脈注入 off\nCLV2 observer lease 登録]

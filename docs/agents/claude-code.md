@@ -138,6 +138,16 @@ The hooks are wired in `settings.json` and dispatched through either the ECC lau
 
 **Reduced in #496** (sub-issue of #473). The surface used to carry 37 entries and layered safety, quality automation, observation, auditing, notification and learning onto the same events. Nineteen entries were removed, leaving 18. What went: the per-edit and per-Stop quality advisories (they duplicate `$code-change-verification` and CI), the observation and auditing that fed no decision loop, the automatic session-summary persistence and SessionStart context injection, and the CLV2 SessionStart notifier. What stayed: the safety boundary (commit-verification bypass block, destructive-command fact-forcing, dev-server launch, `pre:config-protection`), the CLV2 per-tool-call observer, the MCP failure recovery, the ntfy notifications, and every wave-orchestrator session event.
 
+**The seven `wave-session-event` entries are on a retirement path, and they come off LAST.** They feed
+the legacy tmux detection path in `wave-orchestrator`, whose two scripts (`wave-events.sh`,
+`send-to-pane.sh`) are slated for removal now that child sessions launch through the approval channel
+(#537, #539). The removal order is fixed: collect real-run data, confirm no wave is still in flight,
+delete the scripts, and only then unwire these hook entries. Unwiring first leaves the event record
+empty, and `wave-events.sh --state` answers `UNKNOWN` on an empty record — which does not distinguish
+"the detector broke" from "nobody stopped". Leaving them wired in the meantime costs nothing: they are
+opt-in on `WAVE_ORCHESTRATOR_SESSION` and record nothing in an ordinary session. Decision record and
+the removal preconditions: `.claude/prds/539-tmux-path-retirement-criteria.prd.md`.
+
 ```mermaid
 flowchart TD
     SS[SessionStart] --> SS1[ECC session-start-bootstrap\ncontext injection off\nregisters CLV2 observer lease]
