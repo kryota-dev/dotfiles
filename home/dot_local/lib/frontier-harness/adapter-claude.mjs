@@ -26,6 +26,11 @@ const STRICT_MCP_CONFIG_FLAG = "--strict-mcp-config";
 const MCP_CONFIG_FLAG = "--mcp-config";
 const PERMISSION_PROMPT_TOOL_FLAG = "--permission-prompt-tool";
 const SETTINGS_FLAG = "--settings";
+// ［実測 claude 2.1.251］`-p` と `--output-format stream-json` の組合せは `--verbose` を
+// 要求する（"When using --print, --output-format=stream-json requires --verbose"）。
+// 無いと CLI は NDJSON を 1 行も出さずに exit 1 するので、起動時検査からは
+// 「init イベントが無かった」としか見えない。ストリーム形式と対で出す。
+const VERBOSE_FLAG = "--verbose";
 // #526 §1.6［原文］: `--bare` を付けない `-p` は、信頼していないフォルダでも repository の
 // `.mcp.json` の server に接続する。
 const PROJECT_MCP_FILE = ".mcp.json";
@@ -48,6 +53,7 @@ const CLAUDE_FLAGS = Object.freeze({
   [SETTINGS_FLAG]: true,
   [MCP_CONFIG_FLAG]: true,
   [PERMISSION_PROMPT_TOOL_FLAG]: true,
+  [VERBOSE_FLAG]: false,
 });
 
 // docs/en/settings の scope 表［原文］に対応する。managed settings は --setting-sources の語彙に
@@ -357,6 +363,7 @@ function buildArgv({
     // #526 §1.4: system/init・assistant・最終 result が NDJSON で流れる。
     "--output-format",
     "stream-json",
+    VERBOSE_FLAG,
     "--model",
     model,
     "--effort",

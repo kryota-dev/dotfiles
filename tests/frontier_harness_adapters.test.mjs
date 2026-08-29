@@ -371,6 +371,23 @@ test("claude carries the identical sandbox settings into a resumed run", () => {
   assert.ok(!resume.argv.includes("--session-id"));
 });
 
+test("claude pairs stream-json with --verbose in both phases", () => {
+  // 実測（claude 2.1.251）: `-p` と `--output-format stream-json` の組合せは `--verbose` を
+  // 要求し、無いと "When using --print, --output-format=stream-json requires --verbose" で
+  // 即座に exit 1 する。init イベントが 1 件も出ないため、起動時検査は「init ではなかった」と
+  // 報告するだけで、原因（フラグ不足）は argv からしか分からない。
+  const launch = claudeAdapter.launch(
+    requestFor(claudeAdapter, "workspace-write", { sessionId: "session-1" }),
+  );
+  const resume = claudeAdapter.resume(
+    requestFor(claudeAdapter, "workspace-write", { resumeKey: "session-1" }),
+  );
+  for (const invocation of [launch, resume]) {
+    assert.ok(invocation.argv.includes("--output-format"));
+    assert.ok(invocation.argv.includes("--verbose"));
+  }
+});
+
 test("claude never emits a sandbox flag that does not exist", () => {
   // #526 §1.1［実測］: `claude -p --sandbox` は unknown option になる。
   // 存在しないフラグを出す adapter は、設定 JSON 側が効いていると誤認している。
