@@ -94,6 +94,12 @@ function walkArgv(argv) {
 
 // ファイルパスか inline JSON かを見分ける。`--settings` も `--mcp-config` も［原文］
 // 「ファイルまたは文字列」を受けるので、値の形でしか区別できない。
+//
+// **未実測**: 値が inline JSON としてもファイル名としても解釈しうるとき、CLI がどちらを先に
+// 採るかは一次ソースに記載がない。仮に「同名のファイルがあれば優先」であれば、この adapter が
+// 出す固定の inline JSON 文字列と同名のファイルを作業ツリーへ置く shadowing が理論上成立する
+// （多くの CLI は先頭が `{` かで先に判定するため成立しない公算が大きいが、確認できていない）。
+// 実起動を扱う #537 で実測する。ここでは JSON として読める値を inline とみなす。
 function parseInlineJsonObject(value) {
   try {
     const parsed = JSON.parse(value);
@@ -174,24 +180,26 @@ function isInsideWorktreeProbe(candidate) {
 }
 
 // ツール名は `mcp__<server>__<tool>`。server key は requireToken（`_` を含まない）で縛るので、
-// `__` での 3 分割は一意になる。
-function promptToolTargets(tool, serverKey) {
+// `__` での 3 分割は一意になる。形が違うものからは key を取り出さない（fail-closed）。
+function approvalServerKeyOf(tool) {
+  if (typeof tool !== "string") return null;
   const parts = tool.split("__");
-  return (
-    parts.length === 3 &&
-    parts[0] === "mcp" &&
-    parts[1] === serverKey &&
-    parts[2].length > 0
-  );
+  return parts.length === 3 && parts[0] === "mcp" && parts[1].length > 0 && parts[2].length > 0
+    ? parts[1]
+    : null;
 }
 
-// 宣言された MCP server の key。ファイルパス指定は作業ツリーから差し替えられうるので、
+function promptToolTargets(tool, serverKey) {
+  return approvalServerKeyOf(tool) === serverKey;
+}
+
+// 宣言された MCP server。ファイルパス指定は作業ツリーから差し替えられうるので、
 // 許可リストとしては inline JSON だけを認める。
-function declaredServerKey(value) {
+function declaredApprovalServer(value) {
   const servers = parseInlineJsonObject(value)?.mcpServers;
   if (!servers || typeof servers !== "object" || Array.isArray(servers)) return null;
   const keys = Object.keys(servers);
-  return keys.length === 1 ? keys[0] : null;
+  return keys.length === 1 ? { key: keys[0], server: servers[keys[0]] } : null;
 }
 
 // 外部ツール接続の許可リスト。
@@ -206,8 +214,12 @@ function approvalChannelIsAllowlisted(values) {
   const configs = values.get(MCP_CONFIG_FLAG) ?? [];
   if (tools.length === 0) return configs.length === 0;
   if (tools.length !== 1 || configs.length !== 1) return false;
-  const key = declaredServerKey(configs[0]);
-  return key !== null && promptToolTargets(tools[0], key);
+  const declared = declaredApprovalServer(configs[0]);
+  if (declared === null) return false;
+  // 宣言の**中身**も読み戻す。組み立て側だけが制約を持つと、そちらが緩む退行を seal が
+  // 捕まえられない（sandbox / 設定源と同じく、封印は読み戻しで成立させる）。
+  if (approvalServerViolation(declared.key, declared.server) !== null) return false;
+  return promptToolTargets(tools[0], declared.key);
 }
 
 // argv から「作業ツリーが子セッションを設定できるか」を読み戻す。sealInvocation はこれが true を
@@ -262,50 +274,72 @@ function readEffectiveSandbox(invocation) {
 const APPROVAL_SERVER_ARGUMENT_MAX_LENGTH = 256;
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F]/;
 
-function requireApprovalServerArgument(value, label) {
-  requireNonEmptyString(value, label);
+// 宣言が運んでよいキー。`env` を名指しで禁じるのではなく、運んでよいものを列挙する
+// （新しいキーが増えたとき、禁止リストの追随漏れが素通りにならない）。
+const ALLOWED_APPROVAL_SERVER_KEYS = new Set(["command", "args"]);
+
+function approvalArgumentViolation(value, index) {
+  if (typeof value !== "string" || value.length === 0) {
+    return `args[${index}] must be a non-empty string`;
+  }
   if (value.length > APPROVAL_SERVER_ARGUMENT_MAX_LENGTH) {
-    throw new TypeError(
-      `${label} must be at most ${APPROVAL_SERVER_ARGUMENT_MAX_LENGTH} characters`,
-    );
+    return `args[${index}] must be at most ${APPROVAL_SERVER_ARGUMENT_MAX_LENGTH} characters`;
   }
   if (CONTROL_CHARACTERS.test(value)) {
-    throw new TypeError(`${label} must not contain control characters`);
+    return `args[${index}] must not contain control characters`;
   }
-  return value;
+  return null;
+}
+
+// 承認 server 宣言が満たすべき制約。**組み立て（approvalServerConfig）と読み戻し
+// （approvalChannelIsAllowlisted）が同じこの 1 つの検証器を通る**ので、片方だけが緩む退行を
+// seal が構築時に捕まえられる。違反があればその内容を、無ければ null を返す。
+function approvalServerViolation(key, server) {
+  try {
+    // 同じ形の正規表現を 2 つ持つと必ず drift するので、build 時と同じ検証器をそのまま通す。
+    requireToken(key, "key");
+  } catch (error) {
+    return error.message;
+  }
+  if (server === null || typeof server !== "object" || Array.isArray(server)) {
+    return "must declare the server as an object";
+  }
+  const unexpected = Object.keys(server).find(
+    (name) => !ALLOWED_APPROVAL_SERVER_KEYS.has(name),
+  );
+  if (unexpected !== undefined) {
+    // `env` はここに落ちる。invocation が環境変数・credential のチャネルを持たないという
+    // 既存の不変条件と揃える（認証は各 CLI のランチャーと keychain が持つ）。
+    return `must not carry ${unexpected}`;
+  }
+  if (typeof server.command !== "string" || server.command.length === 0) {
+    return "command must be a non-empty string";
+  }
+  // sealInvocation が executable に課すのと同じ理由。相対パスは子の CWD（＝作業ツリー）基準で
+  // 解決され、untrusted repository が同梱した実行ファイルを承認 server に据えられる。
+  if (!path.isAbsolute(server.command)) return "command must be an absolute path";
+  if (!Array.isArray(server.args)) return "args must be an array";
+  for (const [index, value] of server.args.entries()) {
+    const violation = approvalArgumentViolation(value, index);
+    if (violation !== null) return violation;
+  }
+  return null;
 }
 
 function approvalServerConfig(input, promptTool) {
   requireObject(input, `${PROVIDER} approvalServer`);
-  const key = requireToken(input.key, `${PROVIDER} approvalServer key`);
-  const command = requireNonEmptyString(input.command, `${PROVIDER} approvalServer command`);
-  // sealInvocation が executable に課すのと同じ理由。相対パスは子の CWD（＝作業ツリー）基準で
-  // 解決され、untrusted repository が同梱した実行ファイルを承認 server に据えられる。
-  if (!path.isAbsolute(command)) {
-    throw new TypeError(`${PROVIDER} approvalServer command must be an absolute path`);
-  }
-  if (input.env !== undefined) {
-    throw new TypeError(`${PROVIDER} approvalServer must not carry an env block`);
-  }
-  const args = input.args ?? [];
-  if (!Array.isArray(args)) {
-    throw new TypeError(`${PROVIDER} approvalServer args must be an array`);
+  const { key, ...server } = input;
+  if (server.args === undefined) server.args = [];
+  const violation = approvalServerViolation(key, server);
+  if (violation !== null) {
+    throw new TypeError(`${PROVIDER} approvalServer ${violation}`);
   }
   if (!promptToolTargets(promptTool, key)) {
     throw new TypeError(
       `${PROVIDER} permissionPromptTool must name the declared approval server (mcp__${key}__<tool>)`,
     );
   }
-  return {
-    mcpServers: {
-      [key]: {
-        command,
-        args: args.map((value, index) =>
-          requireApprovalServerArgument(value, `${PROVIDER} approvalServer args[${index}]`),
-        ),
-      },
-    },
-  };
+  return { mcpServers: { [key]: server } };
 }
 
 function buildArgv({
@@ -455,8 +489,10 @@ function hasEntries(value) {
 }
 
 function approvalServerConnected(event, permissionPromptTool) {
-  const key = permissionPromptTool.split("__")[1];
-  if (!key) return false;
+  // 形式は buildArgv 側で検証済みだが、この関数は起動シーケンス（配線は #537）から任意の
+  // 文字列を渡されうる。許可リストと同じ導出を通し、形が違うものを健全と判定しない。
+  const key = approvalServerKeyOf(permissionPromptTool);
+  if (key === null) return false;
   const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers : [];
   return servers.some(
     (server) => server?.name === key && server?.status === CONNECTED_STATUS,

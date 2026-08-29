@@ -1244,7 +1244,7 @@ test("negative control: without the pre-blocking flags the same working tree is 
   }
 });
 
-test("no adapter can build an invocation the working tree could configure", () => {
+test("every adapter seals an invocation its config-isolation reader approves", () => {
   for (const adapter of ADAPTERS) {
     for (const mode of supportedModes(adapter)) {
       for (const invocation of [
@@ -1392,7 +1392,7 @@ test("claude refuses an approval channel that could go missing or widen", () => 
       claudeAdapter.launch(
         approvalRequest({ approvalServer: { ...APPROVAL_SERVER, env: { TOKEN: "x" } } }),
       ),
-    /env block/,
+    /must not carry env/,
   );
 });
 
@@ -1489,4 +1489,97 @@ test("the init health check stays fail-closed and carries no provider output", (
     { permissionPromptTool: APPROVAL_TOOL },
   );
   for (const problem of noisy.problems) assert.ok(known.has(problem), problem);
+});
+
+test("configSourcesFor falls back to every source when it cannot read the argv", () => {
+  // readEffectiveConfigIsolation は walkArgv の失敗で即 false を返すため、この分岐には
+  // 到達しない。導出そのものを直接固定しないと、fail-closed が空集合へ退行しても気づけない。
+  const tree = makeHostileWorktree();
+  try {
+    const argv = claudeAdapter.launch(requestFor(claudeAdapter, "read-only")).argv;
+    const everySource = [tree.userSettings, ...tree.files].sort();
+    const unreadable = {
+      "an unknown flag": [...argv, "--add-dir", "/tmp"],
+      "a flag whose value is missing": [...argv, "--model"],
+      "a token where a flag belongs": ["not-a-flag", ...argv],
+    };
+    for (const [label, candidate] of Object.entries(unreadable)) {
+      const sources = configSourcesFor(
+        { argv: candidate },
+        { worktree: tree.worktree, home: tree.home },
+      );
+      assert.deepEqual([...sources].sort(), everySource, label);
+    }
+  } finally {
+    tree.cleanup();
+  }
+});
+
+test("the other adapters read back no isolation when their argv is widened", () => {
+  // 正常 argv が true になることだけを固定すると、reader を `() => true` へ弱めても通る。
+  const codexArgv = codexAdapter.launch(requestFor(codexAdapter, "read-only")).argv;
+  const beforePrompt = (extra) => [...codexArgv.slice(0, -1), ...extra, codexArgv.at(-1)];
+  const widened = {
+    // フラグ allowlist は通るが、設定そのものを差し替えうる override。
+    "a config override outside the adapter's own keys": beforePrompt(["-c", "mcp_servers={}"]),
+    "a config override with no value": beforePrompt(["-c", "sandbox_mode"]),
+    // `$CODEX_HOME/<name>.config.toml` を重ねるフラグ。allowlist に無い。
+    "a profile that layers another config file": beforePrompt(["--profile", "other"]),
+  };
+  for (const [label, argv] of Object.entries(widened)) {
+    assert.equal(codexAdapter.readEffectiveConfigIsolation({ argv }), false, label);
+  }
+
+  for (const adapter of [antigravityAdapter, createFakeAdapter()]) {
+    const argv = adapter.launch(requestFor(adapter, "read-only")).argv;
+    assert.equal(
+      adapter.readEffectiveConfigIsolation({ argv: [...argv, "--add-dir", "/tmp"] }),
+      false,
+      adapter.provider,
+    );
+  }
+});
+
+test("claude reads back no isolation when the approval declaration is weakened", () => {
+  // 組み立て側だけが制約を持つと、そちらが緩む退行を seal が捕まえられない。読み戻しも
+  // 同じ検証器を通すことを固定する（sandbox / 設定源と同じ封印の形）。
+  const argv = claudeAdapter.launch(approvalRequest()).argv;
+  const command = APPROVAL_SERVER.command;
+  const declare = (server) => JSON.stringify({ mcpServers: { fh: server } });
+  const weakened = {
+    "a relative command": declare({ command: "./pwned", args: [] }),
+    "an env block": declare({ command, args: [], env: { TOKEN: "x" } }),
+    "a key the declaration may not carry": declare({ command, args: [], cwd: "/tmp" }),
+    "args that are not an array": declare({ command, args: "approve-server" }),
+    "an argument carrying a control character": declare({
+      command,
+      args: ["approve\u0000server"],
+    }),
+    "a server key that is not a token": JSON.stringify({
+      mcpServers: { "fh evil": { command, args: [] } },
+    }),
+  };
+  for (const [label, config] of Object.entries(weakened)) {
+    assert.equal(
+      claudeAdapter.readEffectiveConfigIsolation({
+        argv: replaceFlagValue(argv, "--mcp-config", config),
+      }),
+      false,
+      label,
+    );
+  }
+  // 上の判定が常に false を返しているのではないことを固定する。
+  assert.equal(claudeAdapter.readEffectiveConfigIsolation({ argv }), true);
+});
+
+test("the init health check refuses a prompt tool whose shape it cannot read", () => {
+  // readInitHealth は起動シーケンス（#537）から任意の文字列を渡されうる。承認 server の
+  // 特定に使う key は、許可リストと同じ導出を通す。
+  for (const tool of ["approve", "mcp__fh", "mcp____approve", "mcp__fh__approve__extra"]) {
+    assert.deepEqual(
+      readInitHealth(initEvent(), { permissionPromptTool: tool }).problems,
+      [INIT_PROBLEM_APPROVAL_SERVER_UNAVAILABLE],
+      tool,
+    );
+  }
 });
