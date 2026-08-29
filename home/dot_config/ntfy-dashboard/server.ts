@@ -637,6 +637,7 @@ function createHandler(config: Config) {
       }
       // Do not echo internal error detail (stack traces, file paths) to a
       // tailnet-wide, unauthenticated client; log it server-side instead.
+      // deno-lint-ignore no-console -- this *is* that server-side log, not debug output
       console.error(err);
       const message = err instanceof Error ? err.message : String(err);
       return jsonResponse({ error: message }, 502);

@@ -4,7 +4,7 @@
 
 ← [Docs index](../README.md)
 
-CI is a mirror of the local `make` commands. There is no separate CI lint logic — `make lint`, `make lint-node`, `make test-node`, and `make test-bats` are the contract, and CI just calls them. Together they cover everything `make test` runs locally.
+CI is a mirror of the local `make` commands. There is no separate CI lint logic — `make lint`, `make lint-node`, `make lint-console`, `make test-node`, and `make test-bats` are the contract, and CI just calls them. Together they cover everything `make test` runs locally.
 
 ---
 
@@ -14,13 +14,13 @@ The `ci.yml` workflow runs three jobs:
 
 | Job | Command | Runner |
 |---|---|---|
-| `lint` | `make lint`, then `make lint-node` | `ubuntu-latest` |
+| `lint` | `make lint`, `make lint-node`, then `make lint-console` | `ubuntu-latest` |
 | `test` | `make test-node`, then `make test-bats` | `ubuntu-latest` (needs: lint) |
 | `sync-ghq-completion` | `make sync-ghq-completion` (+ auto-commit if the vendored `_ghq` changed) | `ubuntu-latest`, same-repo PRs only |
 
-Both jobs resolve their shell tooling from the mise pin: a `run` step reads the version out of `home/dot_config/mise/config.toml`, the install step fetches that exact GitHub release, and it then asserts the installed binary reports the pinned version. The lint job does this for shellcheck and shfmt; the test job does it for shellcheck, which `tests/shellcheck.bats` and `tests/brew_launcher.bats` invoke directly. `zsh` still comes from `apt-get` in both jobs, as do `bats` and `jq` in the test job. Node.js follows the same read-the-pin pattern and is fed to `actions/setup-node`. The mise pin is therefore the only place any of these versions is declared. Until #475 the lint job installed no shellcheck at all and silently linted with the runner image's build, so a local `make lint` could pass while CI failed on the same diff; `tests/files.bats` now guards against a version literal coming back into the workflow. No other CI-specific logic exists; the `Makefile` is the single source of truth.
+Both jobs resolve their shell tooling from the mise pin: a `run` step reads the version out of `home/dot_config/mise/config.toml`, the install step fetches that exact GitHub release, and it then asserts the installed binary reports the pinned version. The lint job does this for shellcheck and shfmt; the test job does it for shellcheck, which `tests/shellcheck.bats` and `tests/brew_launcher.bats` invoke directly. Both jobs do it for deno: the lint job runs `make lint-console`, and the test job runs `tests/console_lint.bats`, which drives that target itself. Deno is installed here purely as the linter behind the console guard — `make lint-deno` and `make test-deno` remain opt-in and are still not run in CI. `zsh` still comes from `apt-get` in both jobs, as do `bats` and `jq` in the test job. Node.js follows the same read-the-pin pattern and is fed to `actions/setup-node`. The mise pin is therefore the only place any of these versions is declared. Until #475 the lint job installed no shellcheck at all and silently linted with the runner image's build, so a local `make lint` could pass while CI failed on the same diff; `tests/files.bats` now guards against a version literal coming back into the workflow. No other CI-specific logic exists; the `Makefile` is the single source of truth.
 
-Contributors should run `make test` locally before pushing — it chains the same four targets CI runs.
+Contributors should run `make test` locally before pushing — it chains the same five targets CI runs.
 
 ### Triggers
 
@@ -57,6 +57,12 @@ Asserts that chezmoi source files exist in `home/`. Key categories:
 ### `tests/zsh_syntax.bats`
 
 Runs `zsh -n` on each zsh module individually. Covered modules: `aliases.zsh.tmpl` (after `sed '/{{/d'`), `git.zsh`, `docker.zsh`, `claude.zsh`, `codex.zsh`, `functions.zsh`, `completions.zsh`, `wtp.zsh`, `ghq.zsh`.
+
+### `tests/console_lint.bats`
+
+Behavioural tests for `make lint-console`, the guard that replaced the `stop:check-console-log` hook retired in #520 (#522). The target's `CONSOLE_LINT_ROOTS` variable is overridden to point the scan at a fixture tree in `BATS_TEST_TMPDIR`, so the failing cases can be asserted without planting a violation in the repo. Covered: a bare `console.log` fails; `console.error` / `console.warn` fail too (the rule is `console.*`, not `console.log` alone); a `// deno-lint-ignore no-console` comment exempts its own line but not a second call in the same file; a directive that outlives its console call is reported as `ban-unused-ignore`; a whole-file `// deno-lint-ignore-file no-console` — and a bare one — is rejected, while one naming only unrelated rules is left alone; `process.stdout.write` passes; `console.log` inside a string literal passes (the check is AST-based, not textual); each of the eight declared extensions is individually confirmed to be scanned, at any depth; an empty tree fails rather than silently passing; the default roots really do cover both `home/` and `tests/` (driven against a throwaway copy of the `Makefile`, since every other case overrides the roots); a missing deno is fatal rather than a skip; the repository itself passes; the `server.ts` exemption does not break `make lint-deno`; the target is wired into `make test`; and both CI jobs resolve deno from the mise pin without repeating the version, with the target itself bound to the lint job.
+
+These drive the target rather than asserting on its text: a guard that still exists but no longer detects anything passes every textual assertion, which is the failure mode the issue was filed about. Nothing here skips when deno is absent, for the same reason.
 
 ### `tests/statusline.bats`
 

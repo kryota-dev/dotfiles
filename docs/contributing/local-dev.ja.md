@@ -17,9 +17,10 @@
 | `help`（デフォルト） | `## ` ドキュメントコメント行を `awk` でパースしてターゲット一覧を表示 |
 | `lint` | shellcheck + shfmt diff チェック + `zsh -n` 構文チェック（後述） |
 | `fmt` | `.sh` ファイルを `shfmt -w -i 2 -ci` でインプレース整形；`.sh.tmpl` は差分表示のみ |
-| `test` | `lint`、`lint-node`、`test-node`、`test-bats` の順 |
+| `test` | `lint`、`lint-node`、`lint-console`、`test-node`、`test-bats` の順 |
 | `test-bats` | `bats tests/*.bats` |
 | `lint-node` | frontier-harness module/test に対する `node --check` |
+| `lint-console` | `home/` と `tests/` 配下の全 JS/TS ソースに対し、`no-console` だけを有効にした `deno lint`（後述） |
 | `test-node` | live provider credential を使わない `node --test tests/frontier_harness.test.mjs` |
 | `benchmark` | `scripts/benchmark.sh`（コールドスタート + 10 回平均） |
 | `sync-ghq-completion` | mise でピンした ghq バージョンに対応する `_ghq` をアップストリームから取得してベンダリング |
@@ -74,6 +75,93 @@ shfmt -d -i 2 -ci
 - `home/dot_config/zsh/*.zsh` ファイル（すべて直接）
 - `home/dot_config/zsh/*.zsh.tmpl` ファイル（テンプレート行を除去した後）
 - `home/dot_config/zsh/completions/_ghq`
+
+---
+
+## console ガード
+
+`make lint-console` は「debug 出力を残さない」というハウスルールを機械的に担保するチェックです。
+#520 で退役した `stop:check-console-log` hook の移送先であり、その除去によってルールを強制する
+仕組みが失われていました（#522）。
+
+```
+deno lint --no-config --rules-tags= --rules-include=no-console
+```
+
+- **検査対象**: `home/` と `tests/` 配下の、任意の深さにある `.mjs`・`.cjs`・`.js`・`.mts`・
+  `.cts`・`.ts`・`.jsx`・`.tsx` すべて。glob が深さ 1 段で `.js` を含まない `lint-node` より
+  意図的に広く取っています。
+- **`grep` ではなく `deno lint` である理由**: ルールが AST ベースのため、文字列リテラルや
+  コメント中に書かれた `console.log` を違反として報告しません。
+  `tests/agent_improvement.test.mjs` は実行可能なソースを文字列として埋め込んでおり、
+  テキスト走査ではこれを誤検出します。
+- **1 ルールだけにしている理由**: `--rules-tags=` がタグ由来の既定ルールをすべて落とすため、
+  ポリシーとして強制されるのは `no-console` だけになります。対象の多くは deno が本来所有しない
+  Node モジュールであり、推奨ルールセットの残りはそれらに対して発火してしまいます。なお deno は
+  `ban-unused-ignore` も報告します（**有効なルール**に属する ignore ディレクティブを評価するため）。
+  これが、除外マーカーがそれを正当化した呼び出しより長生きするのを防いでいます。`--no-config` は、
+  チェックアウトより上位にある `deno.json` が強制内容を変えるのを防ぎます。
+- **deno 不在を致命的にしている理由**: `lint-deno` と異なり、このターゲットはツールが無いときに
+  自分をスキップしません（`mise install deno`）。ツールが無いと自らを無効化するガードは、
+  そもそもこの検査が失われた経緯そのものです。検査対象が 0 件の場合も同じ理由で失敗させます —
+  何にもマッチしない glob が「違反なし」と読めてはなりません。
+
+### 行単位で除外する
+
+意図的な出力（CLI の利用者向け出力、サーバー側ログなど）は、`--` の後ろに理由を書いて
+行単位で除外します。
+
+```js
+// deno-lint-ignore no-console -- user-facing CLI output, not a debug leftover
+console.log(banner);
+```
+
+除外が行スコープなのは意図的で、同じファイル内の 2 つ目の `console.*` 呼び出しは依然として
+失敗します。呼び出しを消したらコメントも消してください — 何も抑止しなくなったディレクティブは
+`ban-unused-ignore` として報告されます。
+
+ファイル単位の除外は「非推奨」ではなく**拒否**します。deno は
+`// deno-lint-ignore-file no-console`（および全ルールを無効化する裸の
+`// deno-lint-ignore-file`）を honor するため、どちらもファイル全体を黙って除外できてしまい、
+しかも deno には ignore ディレクティブを無効化するフラグがありません。そこでターゲットが
+ソースを自ら検査し、lint の前に失敗させます。
+
+```
+lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
+home/dot_local/lib/example/cli.mjs:1
+```
+
+この検査は **fail-closed** です。行中のどこかにある `deno-lint-ignore-file` を見つけ、残りが
+「ASCII のルール名の羅列であり、少なくとも 1 つ存在し、`no-console` を含まない」と**証明できた
+ときだけ**通します。したがって他のルールだけを指定したディレクティブ
+（`// deno-lint-ignore-file no-explicit-any`）はそのまま通り — このガードを弱めることはなく、
+その下にある console 呼び出しは依然として報告されます。安全と証明できない入力はすべて拒否します。
+
+こうしているのは、deno の字句解析を模した検査が漏れ続けたためです。次のいずれも
+`^[[:space:]]*//` にアンカーした検査を通過する一方、deno はディレクティブを honor して
+ファイル全体を除外していました。
+
+| 入力 | アンカー付き検査が見逃した理由 |
+|---|---|
+| `//` の前に BOM (U+FEFF) | POSIX の `[[:space:]]` ではないが ECMAScript の空白 |
+| `//` の前やルール名の区切りに U+00A0 / U+3000（Unicode `Zs` 全般） | 同上 |
+| ディレクティブ直後に U+2028 / U+2029 | ECMAScript では行コメントを終端するが、awk のレコードは終端しない |
+
+この集合は POSIX ではなく ECMAScript のものなので、awk で列挙し続ける限りリストは終わらず、
+隙間はすべてサイレントな穴になります。判定を反転させることでこの追いかけっこを終わらせています。
+
+代償は誤検出です。走査対象ファイル内であれば、テンプレートリテラル・ブロックコメント・散文の
+中にある同一文字列も拒否されます（deno はそれらを無視するにもかかわらず）。誤る方向としては
+こちらを選びます。一致した行の内容も、パスに含まれる制御文字も診断には出さないため、
+ファイルの内容もファイル名も端末や CI ログへ制御シーケンスを持ち込めません。
+
+ツリーの大半はそもそも除外を必要としません。`home/dot_local/lib/` 配下の CLI モジュールは
+既に `process.stdout.write` / `process.stderr.write` 経由で出力しています。ガードを有効化した
+時点でリポジトリに存在した除外は、ntfy dashboard のサーバー側エラーログ 1 件のみでした。
+
+`tests/console_lint.bats` は、テキストへのアサーションではなく、上書き可能な
+`CONSOLE_LINT_ROOTS` を使って fixture ツリーに対してターゲットを実行します。存在はするが
+何も検出しなくなったガードは、テキスト的なアサーションをすべて通過してしまうためです。
 
 ---
 

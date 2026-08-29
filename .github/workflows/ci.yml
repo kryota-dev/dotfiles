@@ -76,8 +76,10 @@ jobs:
           chmod +x /usr/local/bin/shfmt
           shfmt --version | grep -qxF "v${VERSION}"
 
-      - name: Install zsh
-        run: sudo apt-get install -y zsh
+      # unzip is only needed to unpack the pinned Deno release below. The runner image
+      # ships it, but declaring it keeps this job from depending on the image's contents.
+      - name: Install zsh and unzip
+        run: sudo apt-get install -y zsh unzip
 
       # Single source of truth: the same `make lint` developers run locally
       # (shellcheck + shfmt + zsh syntax for .zsh, .zsh.tmpl, and _ghq).
@@ -103,6 +105,31 @@ jobs:
       - name: Run Node harness lint
         run: make lint-node
 
+      # Same read-the-pin discipline as shellcheck, shfmt and Node above. Deno is used here
+      # only as the linter behind `make lint-console`; the ntfy dashboard's own deno targets
+      # stay opt-in and are still not run in CI.
+      - name: Resolve the pinned Deno version
+        id: deno-version
+        run: |
+          version=$(sed -n 's/^deno = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$version" ] || { echo "deno pin not found in mise config" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Install Deno
+        env:
+          VERSION: ${{ steps.deno-version.outputs.version }}
+        run: |
+          curl -fsSL "https://github.com/denoland/deno/releases/download/v${VERSION}/deno-x86_64-unknown-linux-gnu.zip" -o "$RUNNER_TEMP/deno.zip"
+          unzip -q -o "$RUNNER_TEMP/deno.zip" -d "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/deno" /usr/local/bin/deno
+          # Fail here rather than run the console guard with an unexpected build.
+          deno --version | head -n1 | grep -q "^deno ${VERSION} "
+
+      # The machine guard that replaced the stop:check-console-log hook retired in #520
+      # (#522). Locally it is part of `make test`; here it sits with the other linters.
+      - name: Run console guard
+        run: make lint-console
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -120,10 +147,10 @@ jobs:
         # image happens to ship it, but declaring it here keeps the suite from
         # silently depending on the image's contents. shellcheck is deliberately not
         # in this list: the apt build is unpinned, and the step below installs the
-        # same pinned build the Lint job uses.
+        # same pinned build the Lint job uses. unzip unpacks the pinned Deno release.
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats zsh jq
+          sudo apt-get install -y bats zsh jq unzip
 
       # tests/shellcheck.bats runs shellcheck unconditionally and tests/brew_launcher.bats
       # runs it when present, both with the exact flags `make lint` uses. Without the pin
@@ -170,6 +197,25 @@ jobs:
       # Without this step the frontier-harness suite would only ever run locally.
       - name: Run Node harness tests
         run: make test-node
+
+      # tests/console_lint.bats drives `make lint-console` directly (a textual assertion
+      # cannot tell a working guard from one that has quietly stopped detecting anything),
+      # so this job needs deno as well -- the same reason shellcheck is installed twice.
+      - name: Resolve the pinned Deno version
+        id: deno-version
+        run: |
+          version=$(sed -n 's/^deno = "\(.*\)"$/\1/p' home/dot_config/mise/config.toml)
+          [ -n "$version" ] || { echo "deno pin not found in mise config" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Install Deno
+        env:
+          VERSION: ${{ steps.deno-version.outputs.version }}
+        run: |
+          curl -fsSL "https://github.com/denoland/deno/releases/download/v${VERSION}/deno-x86_64-unknown-linux-gnu.zip" -o "$RUNNER_TEMP/deno.zip"
+          unzip -q -o "$RUNNER_TEMP/deno.zip" -d "$RUNNER_TEMP"
+          install -m 0755 "$RUNNER_TEMP/deno" /usr/local/bin/deno
+          deno --version | head -n1 | grep -q "^deno ${VERSION} "
 
       - name: Run Bats tests
         run: make test-bats

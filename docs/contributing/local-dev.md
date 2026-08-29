@@ -17,9 +17,10 @@ The `Makefile` is the single source of truth for all local dev commands. The def
 | `help` (default) | Prints the target list via `awk` on `## ` doc-comment lines |
 | `lint` | shellcheck + shfmt diff-check + `zsh -n` syntax (see below) |
 | `fmt` | `shfmt -w -i 2 -ci` on `.sh` files in place; `.sh.tmpl` files are diff-reported only |
-| `test` | `lint`, `lint-node`, `test-node`, then `test-bats` |
+| `test` | `lint`, `lint-node`, `lint-console`, `test-node`, then `test-bats` |
 | `test-bats` | `bats tests/*.bats` |
 | `lint-node` | `node --check` for frontier-harness modules and tests |
+| `lint-console` | `deno lint` with only `no-console` enabled, over every JS/TS source under `home/` and `tests/` (see below) |
 | `test-node` | `node --test tests/frontier_harness.test.mjs` without live provider credentials |
 | `benchmark` | `scripts/benchmark.sh` (cold start + 10-iteration average) |
 | `sync-ghq-completion` | Fetches the vendored `_ghq` from upstream at the mise-pinned ghq version |
@@ -74,6 +75,93 @@ Flags: 2-space indent (`-i 2`), case-indent (`-ci`), diff mode (`-d`). The `fmt`
 - All `home/dot_config/zsh/*.zsh` files directly
 - All `home/dot_config/zsh/*.zsh.tmpl` files after template-line stripping
 - `home/dot_config/zsh/completions/_ghq`
+
+---
+
+## The console guard
+
+`make lint-console` is the machine check behind the house rule that no debug output ships. It
+replaced the `stop:check-console-log` hook retired in #520, whose removal left that rule with
+nothing enforcing it (#522).
+
+```
+deno lint --no-config --rules-tags= --rules-include=no-console
+```
+
+- **What it scans.** Every `.mjs`, `.cjs`, `.js`, `.mts`, `.cts`, `.ts`, `.jsx` and `.tsx` file
+  under `home/` and `tests/`, at any depth. This is deliberately wider than `lint-node`, whose
+  glob is one level deep and skips `.js` entirely.
+- **Why `deno lint` and not `grep`.** The rule is AST-based, so `console.log` written inside a
+  string literal or a comment is not a violation. `tests/agent_improvement.test.mjs` plants
+  executable source as a string; a textual scan would report it.
+- **Why only one rule.** `--rules-tags=` clears the tag-driven defaults, so `no-console` is
+  the only policy rule enforced — these are mostly Node modules deno does not otherwise own,
+  and the rest of its recommended set would fire on them. deno still reports
+  `ban-unused-ignore`, because it evaluates ignore directives belonging to *enabled* rules;
+  that is what stops an exemption from outliving the call it excused. `--no-config` stops a
+  `deno.json` above the checkout from changing what gets enforced.
+- **Why it is fatal without deno.** Unlike `lint-deno`, this target does not skip itself when
+  the tool is missing (`mise install deno`). A guard that opts itself out when its tool is
+  absent is how the check went missing in the first place. An empty file list is fatal for the
+  same reason: a glob that matches nothing must not read as "no violations found".
+
+### Opting a line out
+
+Intentional output — a CLI writing to its user, a server-side log — opts out per line, with a
+reason after `--`:
+
+```js
+// deno-lint-ignore no-console -- user-facing CLI output, not a debug leftover
+console.log(banner);
+```
+
+The exemption is line-scoped on purpose: a second `console.*` call in the same file still
+fails. Delete the comment when the call goes: a directive that no longer suppresses anything
+is reported as `ban-unused-ignore`.
+
+File-level opt-out is not merely discouraged, it is rejected. deno honours
+`// deno-lint-ignore-file no-console` (and a bare `// deno-lint-ignore-file`, which disables
+every rule), either of which would silently exempt an entire file, and deno offers no flag to
+turn ignore directives off — so the target inspects sources itself and fails before it lints:
+
+```
+lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:
+home/dot_local/lib/example/cli.mjs:1
+```
+
+The check is **fail-closed**. It finds `deno-lint-ignore-file` anywhere in a line and then
+allows it only when the remainder provably names other rules: ASCII rule names, at least one
+of them, none of them `no-console`. A directive naming only other rules
+(`// deno-lint-ignore-file no-explicit-any`) is therefore left alone — it does not weaken this
+guard, and the console call underneath it is still reported. Anything the check cannot prove
+safe is rejected.
+
+It is written that way because checks shaped like deno's lexer kept leaking. Each of these
+passed a check anchored on `^[[:space:]]*//` while deno honoured the directive and exempted
+the whole file:
+
+| input | why the anchored check missed it |
+|---|---|
+| a BOM (U+FEFF) before the `//` | not POSIX `[[:space:]]`, but ECMAScript whitespace |
+| U+00A0 / U+3000 (any Unicode `Zs`) before the `//` or between rule names | same |
+| U+2028 / U+2029 after the directive | ends a line comment for ECMAScript, but not a record for `awk` |
+
+That set is ECMAScript's, not POSIX's, so matching it in `awk` is a list that is never
+finished, and every gap is a silent hole. Inverting the test ends the chase.
+
+The cost is false positives: the literal text is rejected wherever it appears in a scanned
+file, including inside a template literal, a block comment, or prose, where deno would ignore
+it. That is the side to err on. Both the matched text and control characters in the path are
+kept out of the diagnostic, so neither a file's contents nor its name can carry terminal
+escapes into a console or a CI log.
+
+Most of the tree needs no exemption at all — the CLI modules under `home/dot_local/lib/`
+already write through `process.stdout.write` / `process.stderr.write`. At the time the guard
+was enabled the only exemption in the repo was the ntfy dashboard's server-side error log.
+
+`tests/console_lint.bats` drives the target against fixture trees (via the overridable
+`CONSOLE_LINT_ROOTS`) rather than asserting on its text, because a guard that still exists but
+no longer detects anything passes every textual assertion.
 
 ---
 

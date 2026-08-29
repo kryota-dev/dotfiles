@@ -1,4 +1,4 @@
-.PHONY: all help lint fmt test test-bats lint-node test-node lint-deno test-deno benchmark sync-ghq-completion
+.PHONY: all help lint fmt test test-bats lint-node lint-console test-node lint-deno test-deno benchmark sync-ghq-completion
 
 # Default target — show help (avoid accidental mutation of $HOME via apply)
 all: help
@@ -43,19 +43,112 @@ fmt:
 # ========================================
 
 ## Run all checks (lint + Bats tests)
-test: lint lint-node test-node test-bats
+test: lint lint-node lint-console test-node test-bats
 
 ## Run Bats tests
 test-bats:
 	@bats tests/*.bats
 
-## Syntax-check Node.js modules and tests
 # Globbed rather than enumerated: a new home/dot_local/lib/<tool>/ or tests/<tool>.test.mjs
 # must not need a Makefile edit to be linted (the literal list silently skipped new files).
+#
+# The `## ` line has to sit directly above the target: the help target's awk clears the
+# pending description on any line that is not a `## ` comment, so a prose block between the
+# two silently drops the target from `make help` (which is where lint-node had gone).
+## Syntax-check Node.js modules and tests
 lint-node:
 	@for f in home/dot_local/lib/*/*.mjs tests/*.test.mjs; do \
 		node --check "$$f" || exit 1; \
 	done
+
+# Scan roots for lint-console. Overridable so tests/console_lint.bats can aim the target at a
+# fixture tree and assert the failing cases without planting a violation in the repo.
+CONSOLE_LINT_ROOTS ?= home tests
+
+# The extensions lint-console scans, as a find expression. Kept in one variable because the
+# recipe walks the tree three times (emptiness probe, file-level opt-out check, lint) and the
+# three must never drift apart.
+CONSOLE_LINT_NAMES = -name '*.mjs' -o -name '*.cjs' -o -name '*.js' -o -name '*.mts' -o -name '*.cts' -o -name '*.ts' -o -name '*.jsx' -o -name '*.tsx'
+
+# Replaces the stop:check-console-log hook retired in #520, which left the house standard
+# ("no leftover debug output") with no machine guard at all (#522).
+#
+# deno lint, not a grep: the rule is AST-based, so `console.log` inside a string literal or a
+# comment is not a violation (tests/agent_improvement.test.mjs plants executable source as a
+# string). `--rules-tags=` clears the tag-driven defaults, so the only policy rule enforced
+# here is no-console -- these are mostly Node modules deno does not otherwise own, and the
+# rest of its recommended set would fire on them. deno still reports ban-unused-ignore for a
+# stale `deno-lint-ignore no-console` (it evaluates directives of enabled rules), which is
+# what keeps exemptions from outliving the call they excused. `--no-config` keeps a deno.json
+# above the checkout from changing what gets enforced.
+#
+# Globbed like lint-node, but at any depth and including .js: lint-node's depth-1 glob
+# silently misses the two .js files outside home/dot_local/lib/*/.
+#
+# A file-level opt-out (`// deno-lint-ignore-file no-console`, or a bare one, which disables
+# every rule) would exempt a whole file, so a preflight rejects those before deno runs. deno
+# offers no flag to disable ignore directives, so this has to be done by inspecting sources.
+#
+# The preflight is fail-closed: it finds `deno-lint-ignore-file` anywhere in a line and then
+# *allows* it only when the remainder provably names other rules -- ASCII rule names, at least
+# one of them, none of them no-console. Anything it cannot prove safe is rejected.
+#
+# It is written that way because the earlier attempts, which tried to recognise the directive
+# the way deno's lexer does, kept leaking. Each of these passed a check anchored on
+# `^[[:space:]]*//` while deno honoured the directive and silently exempted the file: a BOM
+# (U+FEFF) before the `//`; a non-ASCII space (U+00A0, U+3000, any Unicode Zs) before it or
+# between the rule names; U+2028/U+2029 after it, which end a line comment for ECMAScript but
+# not a record for awk. The set of such code points is ECMAScript's, not POSIX's, so matching
+# it in awk is a list that is never finished -- and every gap is a silent hole, which is the
+# failure mode this guard exists to prevent. Inverting the test ends that chase: unfamiliar
+# input fails loudly instead of passing quietly.
+#
+# LC_ALL=C is load-bearing, not tidiness. Character classes are locale-dependent: under a
+# UTF-8 locale glibc classifies U+2028 as [[:space:]], so `<U+2028>x` reads to the allow-list
+# as "a space and an ASCII rule name" and passes -- the same gap, reintroduced by the
+# environment. That slipped through a macOS run (byte-oriented awk) and failed on CI. Pinning
+# the locale keeps the match byte-oriented, which is the only way the allow-list means the
+# same thing on both platforms.
+#
+# The cost is false positives -- the literal text in a template literal, a block comment, or
+# prose inside a scanned file is rejected even where deno would ignore it. That is the side
+# to err on, and it is pinned by tests/console_lint.bats.
+#
+# awk reads each file itself (FILENAME/FNR) rather than re-parsing `grep -H` output: a path
+# containing `:<digits>:` makes a `<path>:<line>:` strip match in the wrong place, and a bare
+# directive then slips through. Both the matched text and control characters in the path are
+# kept out of the diagnostic, so neither a file's contents nor its name can smuggle terminal
+# escapes into a developer's console or a CI log.
+#
+# Unlike lint-deno this is deliberately not best-effort. It is part of `test`, and a guard
+# that skips itself when its tool is missing is the failure mode #522 was filed about, so an
+# absent deno and an empty file list are both fatal.
+## Reject console.* calls in Node and Deno sources (opt out per line, never per file)
+lint-console:
+	@command -v deno >/dev/null 2>&1 || { echo "lint-console: deno not found; run 'mise install deno'. This guard does not skip itself." >&2; exit 1; }
+	@[ -n "$$(find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) -print -quit)" ] || { \
+		echo "lint-console: no JS/TS sources under '$(CONSOLE_LINT_ROOTS)' -- the glob regressed." >&2; \
+		exit 1; \
+	}
+	@bad=$$(LC_ALL=C find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+		-exec awk 'match($$0, /deno-lint-ignore-file/) { \
+			rest = substr($$0, RSTART + RLENGTH); \
+			sub(/--.*$$/, "", rest); gsub(/,/, " ", rest); \
+			allow = 0; \
+			if (rest ~ /^[[:space:]a-z0-9-]+$$/ && rest ~ /[a-z]/ && \
+			    rest !~ /(^|[[:space:]])no-console([[:space:]]|$$)/) allow = 1; \
+			if (allow == 0) { \
+				name = FILENAME; gsub(/[[:cntrl:]]/, "?", name); \
+				printf "%s:%d\n", name, FNR; \
+			} \
+		}' {} +); \
+	if [ -n "$$bad" ]; then \
+		echo "lint-console: file-level opt-out is not allowed; use a per-line '// deno-lint-ignore no-console -- <reason>' instead:" >&2; \
+		printf '%s\n' "$$bad" >&2; \
+		exit 1; \
+	fi
+	@find $(CONSOLE_LINT_ROOTS) -type f \( $(CONSOLE_LINT_NAMES) \) \
+		-exec deno lint --no-config --rules-tags= --rules-include=no-console {} +
 
 ## Run Node.js tests without invoking live provider credentials
 test-node:
