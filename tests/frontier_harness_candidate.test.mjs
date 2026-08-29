@@ -593,7 +593,9 @@ test("the registry refuses to hold more live candidates than its limit", async (
 
 test("a candidate id cannot escape the registry directory", async (context) => {
   const fixture = await prepared(context);
-  for (const identifier of ["../../etc/passwd", "cand_../x", "cand_XYZ"]) {
+  // traversal の題材に `/etc/...` の実在パスを使わない。id の字集合が拒むことを見るのが目的で
+  // 行き先は関係ないうえ、秘密情報スキャナが「汎用パスワード」として誤検知する。
+  for (const identifier of ["../../escaped", "cand_../x", "cand_XYZ"]) {
     await assert.rejects(
       () => candidate(["candidate", "adopt", "--candidate", identifier], fixture),
       /candidate id must match/,
