@@ -34,7 +34,7 @@ launcher はこれらを global には export しないため、素の shell か
 | 場所 | 内容 | 管理 |
 |---|---|---|
 | `$HOME/.config/frontier-harness/config.json`、または絶対パスの `FH_CONFIG_PATH` | capability registry、rollout、retention | chezmoi |
-| `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込む。参照して強制するのは onboarding step から） | repository policy |
+| `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込み、route する実行のたびに照合する） | repository policy |
 | 検証済みの `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
 
 `fh` は untrusted な checkout の上で動くことを前提とするため、いずれの置き場所も
@@ -86,10 +86,13 @@ hash の入力に含まれるのは artifact の**パス**であってバイト�
 あります。
 
 `approvals.granted_by` は記録されたラベルであって、承認の出所の証明ではありません。harness 内の
-どのコードも `granted_by = 'user'` を書けますし、列の制約が縛るのは語彙だけです。したがって
-承認 1 行を根拠に escalation を免除する実装は、出所を自分で確立しなければなりません。schema は
-それを運びません。承認をどう証明し検証するかは、これらの行を書く onboarding 側の設計であって、
-行を保存する schema 側の設計ではありません。
+どのコードも `granted_by = 'user'` を書けますし、列の制約が縛るのは語彙だけです。そのため
+repository onboarding はこの列に依存しません。承認と manifest の結びつけは、正規化した manifest の
+SHA-256 を `subject_hash`、解決済み state root を `scope` に持つ `repository_manifest` 行を記録し、
+route する実行のたびに `.harness/policy.json` から同じ hash を導き直して突き合わせることで行います。
+両者は別のストアにあり、policy は checkout に付いてきますが台帳は付いてきません。したがって承認後に
+policy を書き換えると、同梱の hash を辻褄が合うよう再計算しても照合は通りません。この検知が
+描く境界と描かない境界は [repository onboarding](#onboarding-と-shadow-command) を参照してください。
 
 `telemetry_events` には自由記述の列が 1 つもありません。TEXT 列はすべて閉じた enum か短い小文字
 token であり、「集約テレメトリは内容を含まない」を規約ではなく schema で強制しています。
@@ -233,22 +236,70 @@ deny に化けず、そのまま尊重される。
 ## onboarding と shadow command
 
 task ごとの permission prompt を避けるため、repository の command/domain/capability manifest を一度だけ
-承認します。
+承認します。承認は **2 回の実行**に分かれ、2 回目は 1 回目が発行した request を名指しする必要があります。
 
 ```bash
-fh onboard --manifest candidate.json
-fh onboard --manifest candidate.json --approve --json
+fh onboard --manifest candidate.json                       # レビュー。request id を出力する
+fh onboard --manifest candidate.json --approve --request <id> --json
 fh run --task task.json --json
 fh verify --command "npm run test" --json
 fh review --task task_example --json
 fh status --json
 fh clean --dry-run --json
+fh gaps --json
 ```
 
-未知の command/domain は実行しません。wave boundary での一括承認のために queue へ残す仕組みは
-onboarding step で実装予定であり、この shadow foundation には含まれません（現時点の `fh onboard` は
-承認済み manifest を記録するだけで、それを参照する command はまだありません）。credential、migration、
-external contract、deploy、force push、release、merge は常に明示的な escalation です。
+`--request` を伴わない `--approve` は拒否します。request id は推測不能で state root に置かれるため、
+1 回の呼び出しが manifest の提案と承認を兼ねることはできません —— id は、レビュー実行が manifest を
+人間に読ませるかたちで出力して初めて存在します。request は単回使用で、
+<!-- FACT:fh-onboard-request-ttl-ms -->86400000<!-- /FACT --> ms（24 時間）で期限切れになり、
+発行したプロセス自身による承認を拒否し、manifest が下で書き換われば通らなくなります。
+
+### 照合が実際に見るもの
+
+`fh run` と `fh verify` は `.harness/policy.json` を読み、その manifest hash を導き直し、この
+state root に対する `repository_manifest` 行が承認台帳にあることを要求します。policy を持たない
+repository は**空 manifest** として扱われ、すべてが未承認になります。既定は fail-open ではなく
+fail-closed です。そのうえで:
+
+- **command** は承認チャネルと同じ解析器でトークン化し、正規化したセグメントとして照合します。
+  `npm run test; curl …` は 2 セグメントに割れ、2 本目に一致する承認が無いので拒否されます。
+  静的に解釈できないコマンド（動的構築、シェルやラッパー越しの実行）は、推測せず拒否します。
+- **domain** は承認済みリストとの完全一致で照合し、manifest 側は内部アドレス・メタデータ用
+  アドレスでない domain しか承認できません。`inet_aton` のあらゆる表記を先に解いてから判定するため、
+  `169.254.169.254` / `2852039166` / `0251.0376.0251.0376` / `0xA9FEA9FE` / `169.254.43518` は
+  すべて同じ 1 つのアドレスとして拒否されます。private、carrier-grade NAT、link-local、multicast、
+  reserved、unspecified、IPv4-mapped、NAT64 埋め込みの各レンジも同様です。`localhost` /
+  `127.0.0.1` / `::1` は**リテラルとしては**承認できます（ローカル dev サーバは正当な対象だからです）。
+  一方、loopback へ*解決する*名前は承認できません。承認は各名前を解決し、答えのいずれかが拒否対象の
+  レンジに入れば承認せず、そもそも解決できない名前も承認しません。
+- **capability** は router が選んだ capability と照合します。`executor.default` を列挙していない
+  manifest は、その route を止めます。
+
+未承認のものは実行しません。route は `escalation` として記録され、要求は state root 内の gap queue へ
+書かれ（1 項目 1 ファイル・作成のみなので、並行する wave の子が互いを上書きしません）、コマンドは
+終了コード 2 を返します。queue は wave の境界で確認し、同じ 2 段階儀式で一括承認します。
+
+```bash
+fh gaps --json
+fh onboard --from-gaps                                     # レビュー。request id を出力する
+fh onboard --from-gaps --approve --request <id> --json
+```
+
+`--from-gaps` は「承認済み manifest ＋ manifest に載せられる queue 項目」を候補として提案し、
+残りはバッチ全体を失敗させる代わりに `gapsRejected` として報告します。落ちた項目は未承認のまま
+残ります。credential、migration、external contract、deploy、force push、release、merge は常に
+明示的な escalation です。
+
+### この検知が描かない境界
+
+policy を台帳に結びつけることで、承認後に書き換えられた policy、差し替えられた policy、別の
+repository から持ち込まれた policy を検知できます。checkout は policy を運びますが、台帳は運ばない
+からです。一方これは、**すでに同一 uid で動いている攻撃者に対する境界ではありません** —— その攻撃者は
+policy と同じ手軽さで台帳も書き換えられます。`approvals.granted_by` と承認ディレクトリに付いている
+但し書きと同じで、記録は「何が承認されたか」を述べるが、「誰が承認したか」を証明しません。
+enforcement 以前に書かれた policy は台帳に裏付けが無いため、既存 repository の移行には儀式の
+やり直しが必要です。
 
 shadow mode の `run`、`verify`、`review` は provider や任意 command を起動せず、正規化した計画を
 記録するだけです。`clean` は期限切れの raw レコードと集約テレメトリをそれぞれの窓で処理し、
