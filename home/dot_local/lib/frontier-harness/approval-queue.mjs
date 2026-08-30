@@ -1,4 +1,11 @@
-import { linkSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  readFileSync,
+  readdirSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -305,12 +312,24 @@ export function createApprovalQueue({ directory }) {
     //
     // **pending は消さない。** そして「読めなかった要求」も消さない: pending でないことを
     // 確認できていないものを消すのは、答えを待っている子を黙って捨てることになる。
+    //
+    // ただし **status だけを見ると決着済みを取り逃す**。status を進めるのは approve-server
+    // だけなので、子（と server）が answer を consume する前に死ぬと、回答は書かれているのに
+    // status は `pending` のまま残る。その要求は purge に飛ばされ、`approve` にも
+    // 「already has an answer」で拒否され、**どちらの経路でも動かせなくなる**。wave ごとに
+    // 1 件ずつ溜まり、`fh approvals` の pending 表示を見た側が「子が待っている」と誤読する。
+    //
+    // 回答ファイルの存在は「その問いは決着した」ことの十分な証拠なので、status と or で見る。
+    // 「答えを待っている子を捨てない」という上の性質は壊れない —— 回答がある要求は、
+    // 定義上もう待っていない。
     purgeDecided() {
       const { requests, skipped } = listRequests();
       let purged = 0;
       let pending = 0;
       for (const request of requests) {
-        if (request.status === "pending") {
+        // 壊れた回答ファイルでも「決着した」と読む。ここで readAnswer を使うと、壊れた 1 件で
+        // 掃除全体が例外になり、消せないゴミが増えるだけになる。
+        if (request.status === "pending" && !existsSync(answerPath(request.id))) {
           pending += 1;
           continue;
         }

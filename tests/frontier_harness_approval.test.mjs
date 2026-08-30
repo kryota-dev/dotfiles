@@ -1381,6 +1381,28 @@ test("purging drops decided requests and their answers but keeps pending ones", 
   assert.equal(queue.listRequests().requests.length, 1);
 });
 
+test("purging drops an answered request whose status never advanced", (context) => {
+  // status を pending から動かすのは approve-server だけである。子（と server）が answer を
+  // consume する前に死ぬと、**回答は書かれているのに status は pending のまま**残る。
+  // その状態では purge が status を見て飛ばし、`approve` は hasAnswer で拒否するため、
+  // 要求が永久に居座る。実運用で wave 1 本ごとに 1 件溜まり、orchestrator の監視が
+  // 「子が回答を待っている」と誤読する原因にもなった。
+  const { queue } = createQueueFixture(context);
+  const answered = createPendingRequest(queue);
+  const untouched = createPendingRequest(queue, { toolUseId: "toolu_02" });
+
+  // recordOutcome を呼ばない ＝ server が死んだ状況。
+  queue.writeAnswer(answered.id, answerRecord(answered.id));
+  assert.equal(queue.readRequest(answered.id).status, "pending");
+
+  const result = queue.purgeDecided();
+  assert.equal(result.purged, 1);
+  // 本当に答えを待っている要求は残す（この skill が守ってきた性質）。
+  assert.equal(result.pending, 1);
+  assert.throws(() => queue.readRequest(answered.id), /does not exist/);
+  assert.equal(queue.readRequest(untouched.id).status, "pending");
+});
+
 test("purging leaves a request it could not read", (context) => {
   const { directory, queue } = createQueueFixture(context);
   const decided = createPendingRequest(queue);

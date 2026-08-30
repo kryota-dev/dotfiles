@@ -81,8 +81,14 @@ export function runApproveCommand({ queue, emit, flags }) {
     throw new TypeError(`approval request is already ${request.status}`);
   }
   if (queue.hasAnswer(requestId)) {
+    // ここへ来る要求は status が `pending`（手前の分岐を通っている）なのに回答がある。
+    // `fh approvals` は pending と表示するので、出口を書かないと矛盾して見える
+    // ——実際に「purge も再回答もできない」と報告された。status を進めるのは
+    // approve-server だけなので、子が answer を consume する前に死ぬとこの形になる。
     throw new TypeError(
-      "approval request already has an answer; a request is answered once",
+      "approval request already has an answer; a request is answered once. " +
+        "Its status is still pending because the session that asked it never consumed " +
+        "the answer, so clear it with `fh approvals --purge`",
     );
   }
   const rawAnswers = optionalFlagValue(flags, "--answers");
