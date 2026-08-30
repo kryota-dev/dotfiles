@@ -124,7 +124,8 @@ The `permissions.allow` list pre-approves common read-only and safe-write operat
 The `permissions.deny` list blocks:
 
 - `sudo`, `rm -rf`, `git reset`, `git push --force` / `-f`
-- Reads of credential files (`.env*`, private keys, PEM files, the concrete home paths
+- Reads of credential files (real `.env` variants — but not `.env.example` and the other
+  committed templates — private keys, PEM files, the concrete home paths
   `~/.aws/credentials` / `~/.config/gcloud/credentials.db` / `~/.docker/config.json`, and
   `*credentials*` / `*secret*` / `secrets/**` gated to data extensions: `.json`, `.yaml`,
   `.yml`, `.env`)
@@ -161,6 +162,18 @@ is what makes this safe: repository checkouts live under `~/ghq`, so a pattern s
 nothing. `secrets/**` takes the same data-extension gate as the substring rules. **Do not
 reintroduce a bare directory name under a `//**/` anchor** — that anchor spans the entire
 filesystem, and dependency trees are full of ordinary directories with security-sounding names.
+
+`.env*` was narrowed for the same reason, one layer up. As a bare prefix it matched
+`.env.example`, `.env.sample` and `.env.template` — the committed, secret-free files whose
+whole purpose is to be what you commit *instead of* `.env`. `git status` reported `Operation
+not permitted` on a tracked file. The deny list now enumerates the variants that really carry
+secrets (`.env`, `.envrc`, `.env.local`, `.env.*.local`, the per-environment names, and
+dotenv-vault's `.env.keys` / `.env.vault`). The trade-off is explicit: an unrecognized
+`.env.<name>` now falls outside the net, because the official docs rule out every alternative —
+rules are "evaluated in order: deny, then ask, then allow", "the first match in that order
+determines the outcome", and "a deny rule can't carry allowlist exceptions". Enumeration is the
+only mechanism available. `Edit(//**/.env*)` is left broad on purpose: the harm reported was
+read-side, and a stray write into a real `.env` is the destructive direction.
 
 ---
 

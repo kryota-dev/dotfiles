@@ -122,7 +122,8 @@ Renovate の `github-tags` datasource への接続は別途追跡します。
 `permissions.deny` リストでブロックされるもの：
 
 - `sudo`、`rm -rf`、`git reset`、`git push --force` / `-f`
-- クレデンシャルファイルの読み取り (`.env*`、秘密鍵、PEM ファイル、具体パスの
+- クレデンシャルファイルの読み取り (実体を持つ `.env` 系 —— ただし `.env.example` 等の
+  コミット済みテンプレートは除く —— 秘密鍵、PEM ファイル、具体パスの
   `~/.aws/credentials` / `~/.config/gcloud/credentials.db` / `~/.docker/config.json`、
   およびデータ拡張子に限定した `*credentials*` / `*secret*` / `secrets/**`:
   `.json`、`.yaml`、`.yml`、`.env`)
@@ -158,6 +159,18 @@ AWS 認証は SSO（`~/.aws/sso/`）であり、`~/.config` / `~/.aws` / `~/.doc
 `secrets/**` は部分一致ルールと同じデータ拡張子ゲートに揃えました。**`//**/` アンカーの下に裸の
 ディレクトリ名を再導入しないこと** —— このアンカーはファイルシステム全体に及び、依存ツリーには
 セキュリティを思わせる名前のごく普通のディレクトリが溢れています。
+
+`.env*` も同じ理由で、一段上のレイヤーで絞りました。裸の前置詞として `.env.example` /
+`.env.sample` / `.env.template` —— `.env` の**代わりに**コミットするための、秘密を含まない
+ファイル —— に一致しており、`git status` が追跡対象ファイルに対して `Operation not permitted`
+を吐いていました。deny リストは実際に秘密を持つ変種（`.env`、`.envrc`、`.env.local`、
+`.env.*.local`、環境ごとの名前、dotenv-vault の `.env.keys` / `.env.vault`）を列挙する形に
+しました。トレードオフは明示しておきます —— 未知の `.env.<name>` は網から漏れます。公式
+ドキュメントが代替手段をすべて否定しているためです: 規則は "evaluated in order: deny, then ask,
+then allow"、"the first match in that order determines the outcome"、そして "a deny rule can't
+carry allowlist exceptions"。列挙が唯一の機構です。`Edit(//**/.env*)` は意図的に広いまま
+残しました —— 報告された実害は read 側であり、実体を持つ `.env` への不用意な書き込みこそが
+破壊的な方向だからです。
 
 ---
 
