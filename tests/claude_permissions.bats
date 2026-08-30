@@ -199,7 +199,18 @@ _claude_permission_rules() {
 # anchor — the anchor spans the whole filesystem, and dependency trees are full of ordinary
 # directories with security-sounding names.
 _CLAUDE_REQUIRED_FILE_DENY_RULES=(
-  'Read(//**/.env*)'
+  'Read(//**/.env)'
+  'Read(//**/.envrc)'
+  'Read(//**/.env.local)'
+  'Read(//**/.env.*.local)'
+  'Read(//**/.env.development)'
+  'Read(//**/.env.test)'
+  'Read(//**/.env.staging)'
+  'Read(//**/.env.production)'
+  'Read(//**/.env.dev)'
+  'Read(//**/.env.prod)'
+  'Read(//**/.env.keys)'
+  'Read(//**/.env.vault)'
   'Read(//**/id_rsa)'
   'Read(//**/id_ed25519)'
   'Read(//**/*.pem)'
@@ -277,11 +288,22 @@ _CLAUDE_REQUIRED_FILE_DENY_RULES=(
 #                                                   `src/core/credentials/` DIRECTORY
 #   Read(//**/secrets/**) / Edit(//**/secrets/**)   matched firebase-tools'
 #                                                   `lib/apphosting/secrets/` DIRECTORY
+#   Read(//**/.env*)                                matched `.env.example` — the committed,
+#                                                   secret-free TEMPLATE whose entire purpose
+#                                                   is to be the file you commit instead of
+#                                                   `.env`. `git status` reported "Operation
+#                                                   not permitted" on a tracked file.
+#
+# `Edit(//**/.env*)` is deliberately NOT on this list. The reported harm was read-side, and a
+# stray write into a real `.env` is the destructive direction, so the write rule stays broad.
+# Reading a template you may not edit is a defensible asymmetry; revisit it only if editing
+# `.env.example` turns out to be work someone actually needs to do.
 #
 # None of them protected a file that existed on this machine. All of them broke `pnpm install`
 # outright. Replacements live in _CLAUDE_REQUIRED_FILE_DENY_RULES above; if one of these needs
 # to come back, the burden is to show what it protects that the replacement does not.
 _CLAUDE_FORBIDDEN_FILE_DENY_RULES=(
+  'Read(//**/.env*)'
   'Read(//**/*credentials*)'
   'Read(//**/*secret*)'
   'Read(//**/credentials)'
