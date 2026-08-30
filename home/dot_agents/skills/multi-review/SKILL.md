@@ -249,7 +249,7 @@ Phase 4 の重複除外で使用する。3 種類の API レスポンスと、�
 |--------|---------|---------|
 | cc-code-review（Claude 汎用, **small のみ**） | Agent ツール `subagent_type: cc-code-review`, `run_in_background: true` | プロンプト = 「PR #<番号>（owner/repo）のレビュー依頼 + 差分取得コマンド（`gh pr diff --repo <owner/repo> <番号>`）+ 作業ディレクトリ絶対パス」。**差分はエージェント自身が取得**するため埋め込まない。`--repo` を含めないと cwd 依存で cross-repo バッチが誤解決される。観点・出力形式はエージェント定義に内蔵のため再掲しない。**small tier の多様性フロア anchor**（standard 以上では spawn せず、フロアは cc-security-review が担う） |
 | cc-security-review（Claude security, **standard/large**） | Agent ツール `subagent_type: cc-security-review`, `run_in_background: true` | 同上（セキュリティ観点。差分取得コマンドにも `--repo <owner/repo>` を明示）。差分はエージェント自身が取得。OWASP チェックリストはエージェント定義に内蔵。**standard/large の多様性フロア anchor**（generalist を Codex 単独にした際の Claude 側の目） |
-| codex generalist（Codex, **全 tier**） | バックグラウンド Bash `run_in_background: true` | **primary（base をローカルに取得できる通常ケース）**: 先に `git fetch origin <base_branch>` してから `codex exec --profile shared --sandbox read-only --cd <dir> --color never --json -c model_reasoning_effort=<xhigh: standard/large / high: trivial/small> -o <RESULT_FILE> review --base origin/<base_branch> > <STREAM_FILE> 2>&1`（first-class `review` サブコマンド。exec 側フラグを `review` より前に置く — codex/SKILL.md 参照。差分の heredoc 埋め込みが不要）。`--json`=イベント JSONL を `<STREAM_FILE>` へ（観測用）、`-o`=最終結果を `<RESULT_FILE>` へ（親が読む）。effort は tier gating table に従い `-c` で上書き。**`origin/` を付ける理由**: `--base` はローカル ref を基準にするため、ローカル `main` が古いと既に main へマージ済みの他 PR のコミットまで差分に混入し、codex leg だけ他 reviewer と異なるスコープを見ることになる。**fallback**（fetch できない / base ref を解決できない）は従来の codex skill「PR 差分のレビュー」heredoc 方式（`-o <RESULT_FILE>`、差分は事前変数 `${DIFF}` 埋め込み）。**cross-repo 注意**: `--cd <dir>` は cwd のリポジトリを見るため、`<dir>` が対象 PR のリポジトリと一致しない場合（`review-fleet` 等からの cross-repo 委譲）は primary を使わず fallback を選ぶ。**`codex` はラッパー経由（`~/.local/launchers/codex`、#345）で account/`--profile shared` が自動注入されるため前置不要**（非対話 Bash でも PATH 上のラッパーが効く） |
+| codex generalist（Codex, **全 tier**） | バックグラウンド Bash `run_in_background: true` | **primary（base をローカルに取得できる通常ケース）**: 先に `git fetch origin <base_branch>` してから `codex exec --profile shared --sandbox <SANDBOX_MODE> --cd <dir> --color never --json -c model_reasoning_effort=<xhigh: standard/large / high: trivial/small> -o <RESULT_FILE> review --base origin/<base_branch> > <STREAM_FILE> 2>&1`（first-class `review` サブコマンド。exec 側フラグを `review` より前に置く — codex/SKILL.md 参照。差分の heredoc 埋め込みが不要）。`--json`=イベント JSONL を `<STREAM_FILE>` へ（観測用）、`-o`=最終結果を `<RESULT_FILE>` へ（親が読む）。effort は tier gating table に従い `-c` で上書き。**`origin/` を付ける理由**: `--base` はローカル ref を基準にするため、ローカル `main` が古いと既に main へマージ済みの他 PR のコミットまで差分に混入し、codex leg だけ他 reviewer と異なるスコープを見ることになる。**fallback**（fetch できない / base ref を解決できない）は従来の codex skill「PR 差分のレビュー」heredoc 方式（`-o <RESULT_FILE>`、差分は事前変数 `${DIFF}` 埋め込み）。**cross-repo 注意**: `--cd <dir>` は cwd のリポジトリを見るため、`<dir>` が対象 PR のリポジトリと一致しない場合（`review-fleet` 等からの cross-repo 委譲）は primary を使わず fallback を選ぶ。**`<SANDBOX_MODE>` の決め方は「Codex leg 実行・並列・観測・resume」節を見る**（`fh session` の子の中では `danger-full-access`、それ以外は `read-only`。誤ると Codex leg がシェルを実行できず「レビュー不能」しか返さない）。**`codex` はラッパー経由（`~/.local/launchers/codex`、#345）で account/`--profile shared` が自動注入されるため前置不要**（非対話 Bash でも PATH 上のラッパーが効く） |
 | 動的 specialist（言語 + 横断観点、マッチ分のみ, **standard/large**） | **バックグラウンド Bash（Codex）** `run_in_background: true` | **agent 定義本文を heredoc 注入して起動する**（Claude subagent ではなく Codex 実行）。プロンプト = 「`~/.claude/agents/<lang>-reviewer.md`（`{performance,test,ux}-reviewer.md`）の本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ `--spec-context` 指定時は spec パスと整合チェック指示）」。起動形は codex/SKILL.md の heredoc 方式に `--json -c model_reasoning_effort=high -o <RESULT> ... > <STREAM> 2>&1` を付す（「Codex leg 実行・並列・観測・resume」節）。**差分の渡し方（重要）**: Codex sandbox では `gh pr diff` の認証が届かないため specialist に gh を実行させない。generalist と同様、`--cd` が対象 PR の worktree なら heredoc で `git diff origin/<base>...HEAD` を指示し、cross-repo 等で不可なら事前確保した `${DIFF}` を埋め込む（差分取得失敗で空レビューが紛れ込むのを防ぐ）。観点・出力形式は agent 本文が SSOT のため multi-review 側で再掲しない |
 | architecture-reviewer（**`--arch` / large tier のときのみ**） | Agent ツール `subagent_type: architecture-reviewer`, `run_in_background: true` | cc-code-review と同形のプロンプト（「対象 PR 説明 + 差分取得コマンド（`--repo <owner/repo>` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳」）。**差分は起点として自身が取得し、そこから repo 全体へ探索を広げる**。観点・出力形式・`model: sonnet` はエージェント定義に内蔵。diff 言語では spawn 判定せず、フラグ/tier で判定する（「aggregate-view reviewer」節参照） |
 
@@ -519,11 +519,36 @@ Codex leg（generalist + specialists）の起動形・並列制御・ライブ�
 ### 実行形（generalist / specialist 共通）
 
 ```bash
-codex exec --profile shared --sandbox read-only --cd "$WT" --color never --json \
+codex exec --profile shared --sandbox <SANDBOX_MODE> --cd "$WT" --color never --json \
   -c model_reasoning_effort=<high|xhigh> \
   -o "$RESULT_leg" <REVIEW_OR_HEREDOC> \
   > "$STREAM_leg" 2>&1   # run_in_background
 ```
+
+#### `<SANDBOX_MODE>` は「外側に sandbox があるか」で決まる
+
+| 実行環境 | 指定 | 理由 |
+|---|---|---|
+| 通常のセッション（外側に sandbox 無し） | **`read-only`** | codex 自身の sandbox が唯一の封じ込め。外せない |
+| `fh session` の子の中（外側に sandbox 有り） | **`danger-full-access`** | codex に自分の sandbox を張らせない。封じ込めは外側が担う |
+
+**`fh session` の中で `read-only` を指定すると Codex leg はシェルを一切実行できない。** macOS の Seatbelt は
+入れ子にできないため、codex の `sandbox_apply` が `Operation not permitted` で落ちる。その状態でも codex は
+起動して応答するので、**差分を渡さない限り「レビュー不能」としか返らない**（実測）。
+
+**フラグ名に反して封じ込めは弱まらない。** 外側の sandbox が残ることを実測で確認済み:
+
+| 検査 | `fh session` の子の中で `-s danger-full-access` |
+|---|---|
+| `git log` | 成功（シェルが使える） |
+| 許可外ホストへの `curl` | `CONNECT tunnel failed, 403`（外側の allowlist が有効） |
+| ワークツリー外への `touch` | `Operation not permitted`（外側の書き込み隔離が有効） |
+
+codex 自身の flag 説明も同じ前提に立つ —— `--dangerously-bypass-approvals-and-sandbox` は
+*"Intended solely for running in environments that are **externally sandboxed**"*。
+
+**外側に sandbox が無い環境でこれを指定しない。** そこでは封じ込めがゼロになる。判定は
+「今このプロセスは `fh session` の子か」であって、「codex を速く動かしたいか」ではない。
 
 - **generalist**: `review --base origin/<base>`（primary）。base 取得不可なら `${DIFF}` 埋め込み heredoc（fallback）。effort=xhigh（standard/large）/ high（trivial/small）。
 - **specialist**: heredoc = 「agent `.md` 本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ spec-context）」。effort=high。
