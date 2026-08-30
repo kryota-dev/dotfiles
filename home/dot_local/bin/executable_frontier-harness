@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Node 本体は mise の pin を使い、PATH 上の別 version を実行しない。
+#
+# **環境変数による差し替え口を置かない。** 以前は FH_NODE_BIN が優先されており、pin という
+# この launcher の目的そのものを、環境変数 1 つで無効化できた。fh は承認境界・state・子セッションの
+# 起動を担うので、その interpreter を呼び出し側の環境が選べてよい理由が無い。
+# 別の node で動かす必要があるなら、mise の pin（mise use node@<version>）を変える。
 set -euo pipefail
 
-node_bin="${FH_NODE_BIN:-$(mise which node 2>/dev/null || true)}"
+node_bin="$(mise which node 2>/dev/null || true)"
 if [ ! -x "$node_bin" ]; then
   echo "frontier-harness: mise-managed node を解決できません。mise install node を実行してください。" >&2
   exit 127
