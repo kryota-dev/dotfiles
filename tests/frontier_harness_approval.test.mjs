@@ -1010,6 +1010,104 @@ test("an approval request cannot be answered twice", (context) => {
   );
 });
 
+test("fh approve refuses a message it cannot deliver on allow", (context) => {
+  // ［実測 2026-08-30］allow の応答へ `message` を足しても、子には届かない。
+  // 承認サーバーを patch して `{behavior:"allow", updatedInput, message:"MARKER-7Q4X"}`
+  // を返し、実際の子セッションで AskUserQuestion に答えたところ、子が受け取ったのは
+  //   Your questions have been answered: "続行しますか"="はい". ...
+  // の 1 行だけで、MARKER-7Q4X は届かなかった（選択肢の description と、選ばれなかった
+  // ラベルも同様に配送されない）。Claude Code は allow 応答の余分なフィールドを捨てる。
+  //
+  // したがって allow には自由文の配送経路が無い。#533 のプロトコルもそう規定している
+  // （`{"behavior":"allow","updatedInput":{...}}` / `{"behavior":"deny","message":"..."}`）。
+  //
+  // **黙って捨てるのが害である。** orchestrator は訂正や文脈を添えたつもりで allow し、
+  // 届いた前提で監視を続けてしまう（実際に起きた）。ここで落とせば、その場で分かる。
+  const stateDirectory = temporaryDirectory(context);
+  const directory = approvalsDirectory(stateDirectory);
+  const queue = createApprovalQueue({ directory });
+  const emit = () => {};
+  const request = createPendingRequest(queue, {
+    toolName: "AskUserQuestion",
+    input: { questions: [COLOUR_QUESTION] },
+    escalation: {
+      ruleId: "ask-user-question",
+      risk: "user-question",
+      reason: "user が答える",
+    },
+  });
+
+  assert.throws(
+    () =>
+      runApproveCommand({
+        queue,
+        emit,
+        flags: [
+          "--request",
+          request.id,
+          "--allow",
+          "--answers",
+          '{"Which colour?":"Red"}',
+          "--message",
+          "この注記は子へ届かない",
+        ],
+      }),
+    /--message cannot be delivered with --allow/,
+  );
+
+  // 落ちたのだから、回答も書かれていない。半端に決着した要求を残さない。
+  assert.equal(queue.hasAnswer(request.id), false);
+  assert.equal(queue.readRequest(request.id).status, "pending");
+
+  // --message を外せば通る。
+  assert.equal(
+    runApproveCommand({
+      queue,
+      emit,
+      flags: [
+        "--request",
+        request.id,
+        "--allow",
+        "--answers",
+        '{"Which colour?":"Red"}',
+      ],
+    }),
+    0,
+  );
+  assert.equal(queue.hasAnswer(request.id), true);
+});
+
+test("fh approve still carries a message on deny", (context) => {
+  // deny だけが自由文を運べる。allow を塞いだあとの唯一の経路なので、
+  // ここが動き続けることを固定する。
+  const stateDirectory = temporaryDirectory(context);
+  const directory = approvalsDirectory(stateDirectory);
+  const queue = createApprovalQueue({ directory });
+  const emit = () => {};
+  const request = createPendingRequest(queue, {
+    toolName: "AskUserQuestion",
+    input: { questions: [COLOUR_QUESTION] },
+    escalation: {
+      ruleId: "ask-user-question",
+      risk: "user-question",
+      reason: "user が答える",
+    },
+  });
+
+  assert.equal(
+    runApproveCommand({
+      queue,
+      emit,
+      flags: ["--request", request.id, "--deny", "--message", "本文を直してから出して"],
+    }),
+    0,
+  );
+  assert.equal(
+    queue.readAnswer(request.id, queue.readRequest(request.id)).message,
+    "本文を直してから出して",
+  );
+});
+
 test("fh approve validates answers before writing them", (context) => {
   const stateDirectory = temporaryDirectory(context);
   const directory = approvalsDirectory(stateDirectory);

@@ -91,6 +91,27 @@ export function runApproveCommand({ queue, emit, flags }) {
         "the answer, so clear it with `fh approvals --purge`",
     );
   }
+  // ［実測 2026-08-30］allow の応答へ `message` を足しても子には届かない。承認サーバーを
+  // patch して `{behavior:"allow", updatedInput, message:"MARKER-7Q4X"}` を返し、実際の
+  // 子セッションで AskUserQuestion に答えたところ、子が受け取ったのは
+  //   Your questions have been answered: "続行しますか"="はい". ...
+  // の 1 行だけだった。選択肢の description も、選ばれなかったラベルも配送されない。
+  // Claude Code は allow 応答の余分なフィールドを捨てる。
+  //
+  // #533 のプロトコルも同じ形を規定している —— allow は `updatedInput`、deny は `message`。
+  // つまり allow に自由文の経路は無く、**受理して捨てるとその事実が隠れる**。
+  // orchestrator は訂正を添えたつもりで allow し、届いた前提で監視を続けてしまう
+  // （実際に起きた。子が「ラベルしか来ていない」と言わなければ気づけなかった）。
+  //
+  // 配送できないものを黙って捨てない。落として、その場で分かるようにする。
+  const message = optionalFlagValue(flags, "--message");
+  if (allow && message !== undefined) {
+    throw new TypeError(
+      "--message cannot be delivered with --allow; the permission protocol carries " +
+        "free text only on deny, so an allowed request returns just the answer label. " +
+        "Send it back with `--deny --message` (say why in the message), or drop the flag",
+    );
+  }
   const rawAnswers = optionalFlagValue(flags, "--answers");
   let answers = null;
   if (rawAnswers !== undefined) {
@@ -107,7 +128,7 @@ export function runApproveCommand({ queue, emit, flags }) {
       version: APPROVAL_ANSWER_VERSION,
       requestId,
       behavior: allow ? "allow" : "deny",
-      message: optionalFlagValue(flags, "--message") ?? null,
+      message: message ?? null,
       answers,
       answeredAt: nowIso(),
     },
