@@ -7,12 +7,15 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+
+import { HarnessError } from "./errors.mjs";
 
 // symlink ガードと atomic write の唯一の SSOT。
 // 以前は cli.mjs / readiness.mjs / state-store.mjs が個別に実装しており、
@@ -45,7 +48,7 @@ export function requireAbsolutePath(value, label) {
 // 対象パス自身が symlink なら拒否する。存在しない場合は許可（これから作る）。
 export function assertNotSymlink(target, label) {
   if (lstatOrNull(target)?.isSymbolicLink()) {
-    throw new Error(`${label} must not be a symbolic link`);
+    throw new HarnessError(`${label} must not be a symbolic link`);
   }
 }
 
@@ -68,13 +71,13 @@ function assertTrustedParent(directory, label) {
   const parent = path.dirname(directory);
   const stats = lstatOrNull(parent);
   if (!stats) {
-    throw new Error(`${label} parent directory ${parent} does not exist`);
+    throw new HarnessError(`${label} parent directory ${parent} does not exist`);
   }
   if (stats.isSymbolicLink()) {
-    throw new Error(`${label} must not be created through a symbolic link`);
+    throw new HarnessError(`${label} must not be created through a symbolic link`);
   }
   if (!stats.isDirectory()) {
-    throw new Error(`${label} parent directory ${parent} is not a directory`);
+    throw new HarnessError(`${label} parent directory ${parent} is not a directory`);
   }
 }
 
@@ -88,7 +91,7 @@ function openNoFollow(target, flags, label, message) {
     return openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | flags);
   } catch (error) {
     if (error?.code === "ELOOP" || error?.code === "ENOTDIR") {
-      throw new Error(`${label} ${message}`);
+      throw new HarnessError(`${label} ${message}`);
     }
     throw error;
   }
@@ -127,7 +130,7 @@ export function ensureDirectory(directory, label) {
     // 「symlink である」旨のメッセージになり、単なる同名ファイルの診断を誤誘導する。
     const existing = lstatOrNull(directory);
     if (existing && !existing.isSymbolicLink() && !existing.isDirectory()) {
-      throw new Error(`${label} exists and is not a directory`);
+      throw new HarnessError(`${label} exists and is not a directory`);
     }
   }
   // mkdir と open の間に生えた symlink も素通りさせない（多層防御）。
@@ -280,5 +283,18 @@ export function writeJsonExclusive(targetPath, value, label) {
   } finally {
     // link は元の名前を残すため、成功・失敗どちらでも一時ファイルを消す。
     rmSync(temporaryPath, { force: true });
+  }
+}
+
+// 利用者が指し示した JSON ファイルを読む。`JSON.parse` の SyntaxError は「どのファイルが
+// 壊れていたか」を含まないため、境界でパスを添えて投げ直す —— 原因の読めないエラーを出さない
+// のは #508 が直している問題そのもの。読み出し自体の失敗（ENOENT 等）は Node の system error が
+// 既にパスを含むので、そのまま通す。
+export function readJsonFile(target, label) {
+  const raw = readFileSync(target, "utf8");
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new SyntaxError(`${label} ${target} is not valid JSON: ${error.message}`);
   }
 }

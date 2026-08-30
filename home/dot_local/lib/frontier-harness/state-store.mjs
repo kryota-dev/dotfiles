@@ -2,12 +2,28 @@ import { lstatSync, unlinkSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
+import { HarnessError } from "./errors.mjs";
 import { migrate, schemaVersion } from "./migrations.mjs";
 import { assertNotSymlink, ensureStateFile } from "./paths.mjs";
 import { newId } from "./record-validation.mjs";
 import { evidenceContentHash, normalizeEvidence } from "./records.mjs";
 import { createRecordAccessors } from "./state-records.mjs";
 import { normalizeTask } from "./task.mjs";
+
+function toRoute(row) {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    kind: row.kind,
+    capability: row.capability,
+    provider: row.provider,
+    model: row.model,
+    effort: row.effort,
+    reviewerCapability: row.reviewer_capability,
+    reason: row.reason,
+    createdAt: row.created_at,
+  };
+}
 
 function toEvidence(row) {
   return {
@@ -88,6 +104,27 @@ export function createStateStore(databasePath) {
     FROM route_decisions
     ORDER BY created_at, id
   `);
+  // route 履歴は state root に溜まり続けるので、一覧は SQL 側で切る。
+  // 新しい順に返すのは、上限を設ける以上「直近の n 件」でなければ意味がないため。
+  const selectRoutePage = database.prepare(`
+    SELECT id, task_id, kind, capability, provider, reason, created_at,
+           model, effort, reviewer_capability
+    FROM route_decisions
+    ORDER BY created_at DESC, id DESC
+    LIMIT ? OFFSET ?
+  `);
+  const countRoutes = database.prepare(
+    "SELECT COUNT(*) AS total FROM route_decisions",
+  );
+  // 削除対象の下見。件数（countExpired）だけでは「何が消えるのか」が分からない。
+  // **会話内容は載せない。** 出すのは id・作成時刻・種別・artifact のパスに限る。
+  const selectExpiredEvidence = database.prepare(`
+    SELECT id, kind, producer, created_at, artifact_path
+    FROM evidence
+    WHERE created_at < ?
+    ORDER BY created_at, id
+    LIMIT ?
+  `);
 
   // 期限切れ evidence の artifact を、evidence root の中に限って削除する。
   // FS 操作は DB transaction の外で行い、書き込みロックの保持を最小化する。
@@ -132,7 +169,17 @@ export function createStateStore(databasePath) {
       database.exec("COMMIT");
       return result;
     } catch (error) {
-      database.exec("ROLLBACK");
+      try {
+        database.exec("ROLLBACK");
+      } catch (rollbackError) {
+        // **元の例外を隠さない。** ROLLBACK 自体の失敗（database が閉じている、接続が落ちた等）を
+        // そのまま投げると、呼び出し側に届くのは "database is not open" だけになり、
+        // 巻き戻しを必要にした本来の失敗が消える。両方を 1 つの例外に載せ、原因は `cause` に残す。
+        throw new HarnessError(
+          `${error?.message ?? error} (the rollback that followed also failed: ${rollbackError.message})`,
+          { cause: error },
+        );
+      }
       throw error;
     } finally {
       transactionDepth = 0;
@@ -218,18 +265,41 @@ export function createStateStore(databasePath) {
       return stored;
     },
     listRoutes() {
-      return selectRoutes.all().map((route) => ({
-        id: route.id,
-        taskId: route.task_id,
-        kind: route.kind,
-        capability: route.capability,
-        provider: route.provider,
-        model: route.model,
-        effort: route.effort,
-        reviewerCapability: route.reviewer_capability,
-        reason: route.reason,
-        createdAt: route.created_at,
-      }));
+      return selectRoutes.all().map(toRoute);
+    },
+    // 上限付きの route 履歴。`total` を添えるのは、切り詰めたことを呼び出し側が
+    // 「これで全部だった」と読み違えないようにするため。
+    listRoutePage({ limit, offset = 0 }) {
+      return {
+        routes: selectRoutePage.all(limit, offset).map(toRoute),
+        total: Number(countRoutes.get().total),
+      };
+    },
+    // 期限切れレコードの下見。`limit` はクラスごとに効き、超過したかどうかを `truncated` で返す。
+    listExpired({ rawCutoff, telemetryCutoff, limit }) {
+      const evidence = selectExpiredEvidence.all(rawCutoff, limit + 1);
+      const expiredRecords = records.listExpiredRecords(rawCutoff, limit + 1);
+      const telemetry = records.listExpiredTelemetry(telemetryCutoff, limit + 1);
+      const classes = [evidence, ...Object.values(expiredRecords), telemetry];
+      return {
+        raw: {
+          evidence: evidence.slice(0, limit).map((row) => ({
+            id: row.id,
+            kind: row.kind,
+            producer: row.producer,
+            createdAt: row.created_at,
+            artifactPath: row.artifact_path,
+          })),
+          ...Object.fromEntries(
+            Object.entries(expiredRecords).map(([name, rows]) => [
+              name,
+              rows.slice(0, limit),
+            ]),
+          ),
+        },
+        telemetry: telemetry.slice(0, limit),
+        truncated: classes.some((rows) => rows.length > limit),
+      };
     },
     putEvidence(input) {
       const content = normalizeEvidence(input);

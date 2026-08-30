@@ -25,3 +25,14 @@ export function positiveIntegerFlag(flags, name) {
   }
   return value;
 }
+
+// ページングの offset は 0 が正当な値なので、positiveIntegerFlag では表せない。
+export function nonNegativeIntegerFlag(flags, name) {
+  const raw = optionalFlagValue(flags, name);
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative integer`);
+  }
+  return value;
+}

@@ -23,3 +23,11 @@ Temporary Items
 
 # Environment variables
 .env
+
+# frontier-harness
+# `fh onboard` writes the approved repository capability manifest to <repo>/.harness/.
+# It is per-worktree runtime state bound to an approval recorded in the state root, not
+# something a checkout should carry: a committed policy would arrive in every clone with no
+# approval behind it. Until now this was only excluded per-clone via .git/info/exclude, so a
+# fresh clone offered it for commit.
+.harness/

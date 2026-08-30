@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,13 +14,20 @@ import { runCandidateCommand } from "./candidate-command.mjs";
 import { defaultCommandPaths, providerAvailability } from "./command-paths.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
-import { BLOCKED_PENDING_APPROVAL, INTERNAL_ERROR, USAGE } from "./exit-codes.mjs";
-import { flagValue } from "./flags.mjs";
+import { describeCliFailure } from "./errors.mjs";
+import { BLOCKED_PENDING_APPROVAL, USAGE } from "./exit-codes.mjs";
+import { assertKnownFlags } from "./flag-registry.mjs";
+import {
+  flagValue,
+  nonNegativeIntegerFlag,
+  positiveIntegerFlag,
+} from "./flags.mjs";
 import {
   findManifestGaps,
   loadVerifiedManifest,
 } from "./manifest-policy.mjs";
 import { runOnboardCommand } from "./onboard-commands.mjs";
+import { readJsonFile } from "./paths.mjs";
 import { retentionCutoffs } from "./retention.mjs";
 import { runReviewCommand } from "./review-command.mjs";
 import { runWithRolloutGuard } from "./rollout.mjs";
@@ -54,6 +60,13 @@ const EMPTY_RAW_PRUNE_COUNTS = Object.freeze({
   verificationResults: 0,
   reviewFindings: 0,
 });
+// `fh status` が既定で返す route 件数と、`--limit` で要求できる上限。
+// state は Git の共通ディレクトリに蓄積し続ける設計なので、既定を「全件」にはしない。
+export const DEFAULT_STATUS_LIMIT = 50;
+export const MAX_STATUS_LIMIT = 500;
+// `fh clean --dry-run` が挙げる削除対象の、クラスごとの上限。
+// 一覧は「何が消えるか」を読むためのもので、全件の書き出しではない。
+export const CLEAN_TARGET_PREVIEW_LIMIT = 20;
 const UNKNOWN_ACCOUNT_SCOPE = "unknown";
 // account scope は readiness キャッシュのファイル名に入るため、
 // パス区切りや相対参照が混ざらないことを保証する。
@@ -81,7 +94,7 @@ function resolveAccountScope(environment) {
 }
 
 function loadConfig(configPath) {
-  return normalizeConfig(JSON.parse(readFileSync(configPath, "utf8")));
+  return normalizeConfig(readJsonFile(configPath, "frontier-harness config"));
 }
 
 // 設定ファイルの置き場所を作業ディレクトリの内容から解決しない。
@@ -102,6 +115,8 @@ function usage() {
   return [
     "Usage: frontier-harness <command> [--json]",
     "",
+    "Every command refuses a flag it does not know, by name.",
+    "",
     "Commands:",
     "  approvals      List pending approval requests (--all, or --purge to drop decided ones)",
     "  approve        Answer one approval request (--request <id> --allow|--deny)",
@@ -110,6 +125,7 @@ function usage() {
     "                  --progress-interval-ms; path flags must be absolute)",
     "  doctor  Report adapter and capability readiness",
     "  clean   Prune expired raw evidence and aggregate telemetry",
+    "          --dry-run prunes nothing and lists what it would delete",
     "  gaps    List command/domain/capability requests the manifest did not approve",
     "  onboard Review and approve the repository capability manifest, in two steps:",
     "            fh onboard --manifest <path>            review; prints a request id",
@@ -123,7 +139,8 @@ function usage() {
     "          Optional: --capability (default session.child), --session-id, --label,",
     "          --sandbox, --approvals-dir, --approval-server-command, --timeout-ms,",
     "          --progress-interval-ms. Path flags must be absolute.",
-    "  status  Show recorded route decisions",
+    "  status  Show recorded route decisions, newest first",
+    `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset`,
     "  verify  Run an approved deterministic check and record its result:",
     "            fh verify --task <task id> --command <approved command>",
     "          Optional: --kind (default test), --worktree <abs>, --timeout-ms,",
@@ -153,6 +170,10 @@ export function runCli(argumentsList, options = {}) {
   const environment = options.environment ?? process.env;
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
   const [command, ...flags] = argumentsList;
+  // 打ち間違えたフラグを黙って捨てない。ここは副作用の手前（state root の解決も
+  // config の読み出しもまだ）なので、拒否だけが起きて何も変わらない。
+  // 未知の**コマンド**はこの層の担当ではなく、下の usage が扱う。
+  assertKnownFlags(command, flags);
   const asJson = flags.includes("--json");
   const emit = (value) =>
     write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
@@ -180,15 +201,9 @@ export function runCli(argumentsList, options = {}) {
       });
       // stdin を読んでいるあいだ event loop は生きている。終了コードは
       // stdio が閉じた時点で確定させる。
-      finished.then(
-        (code) => {
-          process.exitCode = code;
-        },
-        (error) => {
-          process.stderr.write(`frontier-harness: ${error.message}\n`);
-          process.exitCode = INTERNAL_ERROR;
-        },
-      );
+      finished.then((code) => {
+        process.exitCode = code;
+      }, reportFailure);
       return 0;
     }
     const queue = createApprovalQueue({ directory });
@@ -291,7 +306,7 @@ export function runCli(argumentsList, options = {}) {
     if (command === "run") {
       const taskPath = flagValue(flags, "--task");
       // task JSON は未検証の外部入力として境界で正規化する。
-      const task = normalizeTask(JSON.parse(readFileSync(taskPath, "utf8")));
+      const task = normalizeTask(readJsonFile(taskPath, "task file"));
       const policyPath = resolvePolicyPath(options, cwd);
       const approved = loadVerifiedManifest({
         policyPath,
@@ -400,7 +415,26 @@ export function runCli(argumentsList, options = {}) {
     }
 
     if (command === "status") {
-      emit({ routes: store.listRoutes() });
+      // route 履歴は state root に溜まり続け、長期利用で線形に増える。既定で全件を吐くと、
+      // 「直近に何が起きたか」を見たいだけの呼び出しが数千件の JSON を返す。
+      const limit = Math.min(
+        positiveIntegerFlag(flags, "--limit") ?? DEFAULT_STATUS_LIMIT,
+        MAX_STATUS_LIMIT,
+      );
+      const offset = nonNegativeIntegerFlag(flags, "--offset") ?? 0;
+      const page = store.listRoutePage({ limit, offset });
+      emit({
+        routes: page.routes,
+        // 切り詰めたことを呼び出し側が「これで全部だった」と読み違えないよう、
+        // 総数と続きの有無を必ず添える。
+        page: {
+          limit,
+          offset,
+          total: page.total,
+          returned: page.routes.length,
+          hasMore: offset + page.routes.length < page.total,
+        },
+      });
       return 0;
     }
 
@@ -420,6 +454,16 @@ export function runCli(argumentsList, options = {}) {
       );
       const dryRun = flags.includes("--dry-run");
       const expired = store.countExpired({ rawCutoff, telemetryCutoff });
+      // 事前確認では「何件」ではなく「何が」消えるかを出す。消えたものは戻らないので、
+      // 件数だけを見て実行に進めるようにはしない。実行時に一覧を出さないのは、
+      // 「対象一覧が出た ＝ まだ消えていない」を読み手の側で取り違えさせないため。
+      const targets = dryRun
+        ? store.listExpired({
+            rawCutoff,
+            telemetryCutoff,
+            limit: CLEAN_TARGET_PREVIEW_LIMIT,
+          })
+        : null;
       const pruned = dryRun
         ? { raw: EMPTY_RAW_PRUNE_COUNTS, telemetry: 0, skippedArtifacts: [] }
         : store.pruneExpired({
@@ -440,6 +484,10 @@ export function runCli(argumentsList, options = {}) {
         expiredTelemetry: expired.telemetry,
         prunedTelemetry: pruned.telemetry,
         skippedArtifacts: pruned.skippedArtifacts,
+        targets: targets
+          ? { raw: targets.raw, telemetry: targets.telemetry }
+          : null,
+        targetsTruncated: targets?.truncated ?? false,
       });
       return 0;
     }
@@ -452,31 +500,36 @@ export function runCli(argumentsList, options = {}) {
   return USAGE;
 }
 
+// 失敗の見せ方を 1 か所に集める。想定内の失敗（打ち間違えたフラグ、読めないファイル、
+// working tree の外での実行）は stack trace を出さず、原因が読めるメッセージだけを返す。
+// 分類は errors.mjs が持ち、ここは書き出すだけにする。
+function reportFailure(error) {
+  const { message, exitCode } = describeCliFailure(error);
+  process.stderr.write(`frontier-harness: ${message}\n`);
+  process.exitCode = exitCode;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // `onboard` は domain のアドレス解決を伴うため Promise を返す。他のコマンドは同期の
   // ままなので、Promise でないときは従来どおりその場で exitCode を確定させる
   // （同期経路の挙動をマイクロタスク 1 つ分でも変えない）。
-  const result = runCli(process.argv.slice(2));
-  if (result instanceof Promise) {
-    // **rejection を握る。** `.then` だけで受けると未処理の rejection になり、Node は
-    // スタックトレースを出して落ちる —— `emit()` の JSON も、設計した終了コード契約
-    // （2 = 承認待ち / 1 = 実行失敗）も一切経由しない。子が既に走ったあとで記録の書き込みが
-    // 失敗した場合、それは「何が起きたか」を再構成する手段が丸ごと消えることを意味する。
-    result.then(
-      (code) => {
+  try {
+    const result = runCli(process.argv.slice(2));
+    if (result instanceof Promise) {
+      // **rejection を握る。** `.then` だけで受けると未処理の rejection になり、Node は
+      // スタックトレースを出して落ちる —— `emit()` の JSON も、設計した終了コード契約
+      // （2 = 承認待ち / 1 = 実行失敗）も一切経由しない。子が既に走ったあとで記録の書き込みが
+      // 失敗した場合、それは「何が起きたか」を再構成する手段が丸ごと消えることを意味する。
+      result.then((code) => {
         process.exitCode = code;
-      },
-      (error) => {
-        // 引数の検証はすべて TypeError で落ちる。使い方の誤りを内部エラーと同じコードで
-        // 返すと、呼び出し側スクリプトが「直せる誤り」と「直せない不整合」を区別できない。
-        const usageError = error instanceof TypeError;
-        process.stderr.write(
-          `frontier-harness: ${usageError ? error.message : (error?.stack ?? error)}\n`,
-        );
-        process.exitCode = usageError ? USAGE : INTERNAL_ERROR;
-      },
-    );
-  } else {
-    process.exitCode = result;
+      }, reportFailure);
+    } else {
+      process.exitCode = result;
+    }
+  } catch (error) {
+    // **同期経路も握る。** ここが無いと、`fh clean --now bogus` のような引数の誤りが
+    // 未処理の例外として Node の stack trace で表示され、終了コードも 1 になっていた
+    // ——「64 = 使い方の誤り」という契約が非同期コマンドにしか効いていなかった。
+    reportFailure(error);
   }
 }

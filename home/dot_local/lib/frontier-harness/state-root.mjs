@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+import { HarnessError } from "./errors.mjs";
 import { assertNotSymlink } from "./paths.mjs";
 
 // state root（SQLite state と raw artifacts の置き場所）を決める唯一の場所。
@@ -14,7 +15,9 @@ import { assertNotSymlink } from "./paths.mjs";
 // 「信頼できない state root を検出した」ことは区別する。
 // 前者だけが握り潰してよい失敗であり、後者を握り潰すと doctor 経路だけ
 // ガードが無効化される。
-export class GitWorktreeUnavailableError extends Error {}
+// HarnessError を継承する: 「repository の外で実行した」は想定内の失敗であり、
+// stack trace ではなく原因の読めるメッセージで返す（#508）。
+export class GitWorktreeUnavailableError extends HarnessError {}
 
 // 1 回の起動で common dir / git dir / working tree の 3 つを得る。
 // `--path-format=absolute` を付けないと common dir は cwd 相対で返り、
@@ -166,7 +169,7 @@ export function resolveGitCommonDirectory(cwd, runGit = runGitSync) {
     ["git working tree", topology.topLevel],
   ]) {
     if (!path.isAbsolute(value)) {
-      throw new Error(`${label} must be an absolute path`);
+      throw new HarnessError(`${label} must be an absolute path`);
     }
   }
   // symlink 検査は paths.mjs の SSOT を再利用する。
@@ -175,14 +178,14 @@ export function resolveGitCommonDirectory(cwd, runGit = runGitSync) {
   assertNotSymlink(topology.commonDirectory, "git common directory");
   // 真正な git metadata ディレクトリでなければ state root にしない。
   if (!existsSync(path.join(topology.commonDirectory, "HEAD"))) {
-    throw new Error("git common directory is not a git metadata directory");
+    throw new HarnessError("git common directory is not a git metadata directory");
   }
   if (
     !isOwnedByWorkingTree(topology, () =>
       superprojectCommonDirectory(cwd, runGit),
     )
   ) {
-    throw new Error(
+    throw new HarnessError(
       "git common directory is not owned by the current working tree",
     );
   }

@@ -100,6 +100,10 @@ function toTelemetryEvent(row) {
   };
 }
 
+function toExpiredRow(row) {
+  return { id: row.id, createdAt: row.created_at };
+}
+
 export function createRecordAccessors(database) {
   const insertAdapterRun = database.prepare(`
     INSERT INTO adapter_runs (
@@ -231,6 +235,23 @@ export function createRecordAccessors(database) {
   );
   const countReviewFindingsBefore = database.prepare(
     "SELECT COUNT(*) AS expired FROM review_findings WHERE created_at < ?",
+  );
+  // 削除対象の下見。件数だけでは「何が消えるのか」が分からないが、一覧に内容を載せると
+  // retention の確認が会話内容の再掲になる。出すのは id と作成時刻だけに閉じる。
+  // このファイルの他の statement と同じく、SQL は組み立てずそのまま書く。
+  const listExpiredBefore = {
+    adapterRuns: database.prepare(
+      "SELECT id, created_at FROM adapter_runs WHERE created_at < ? ORDER BY created_at, id LIMIT ?",
+    ),
+    verificationResults: database.prepare(
+      "SELECT id, created_at FROM verification_results WHERE created_at < ? ORDER BY created_at, id LIMIT ?",
+    ),
+    reviewFindings: database.prepare(
+      "SELECT id, created_at FROM review_findings WHERE created_at < ? ORDER BY created_at, id LIMIT ?",
+    ),
+  };
+  const listExpiredTelemetryBefore = database.prepare(
+    "SELECT id, created_at FROM telemetry_events WHERE created_at < ? ORDER BY created_at, id LIMIT ?",
   );
   const deleteAdapterRunsBefore = database.prepare(
     "DELETE FROM adapter_runs WHERE created_at < ?",
@@ -394,6 +415,17 @@ export function createRecordAccessors(database) {
       );
       const adapterRuns = Number(deleteAdapterRunsBefore.run(cutoff).changes);
       return { adapterRuns, verificationResults, reviewFindings };
+    },
+    listExpiredRecords(cutoff, limit) {
+      return Object.fromEntries(
+        Object.entries(listExpiredBefore).map(([name, statement]) => [
+          name,
+          statement.all(cutoff, limit).map(toExpiredRow),
+        ]),
+      );
+    },
+    listExpiredTelemetry(cutoff, limit) {
+      return listExpiredTelemetryBefore.all(cutoff, limit).map(toExpiredRow);
     },
     countExpiredTelemetry(cutoff) {
       return Number(countTelemetryBefore.get(cutoff).expired);
