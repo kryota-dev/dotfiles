@@ -25,6 +25,12 @@ global safety settings are deployed to `~/.gemini/antigravity-cli/settings.json`
 The user must start `agy` interactively once to complete keychain-backed login;
 the harness never stores an API key or copies a credential.
 
+The `fh` launcher runs the interpreter that mise has pinned and offers no environment
+variable to substitute another one. `fh` starts child sessions and owns the approval
+boundary, so which interpreter runs it is not a decision the calling environment gets to
+make; change the pin (`mise use node@<version>`) instead. It exits 127 when mise cannot
+resolve node, rather than falling back to whatever `node` is on `PATH`.
+
 Run the readiness check from a repository:
 
 ```bash
@@ -45,6 +51,64 @@ globally, so `fh doctor` run from a plain shell reports
 `accountScope: "unknown"`. That is the intended fail-closed default rather than
 a misconfiguration.
 
+## The command line surface
+
+Every command validates its flags before it touches anything — no state root resolved, no
+config read, nothing pruned — and refuses one it does not know, by name:
+
+```
+$ fh clean --dryrun
+frontier-harness: unknown flag --dryrun for `fh clean`
+$ echo $?
+64
+```
+
+This matters most for `clean`. A misspelled `--dry-run` used to be dropped silently, so the run
+meant as a preview pruned for real, and raw evidence at 30 days and aggregate telemetry at 180
+do not come back. Flags were the one fail-open surface in a CLI that is otherwise fail-closed:
+`fh session` refuses an argv it cannot assemble, `fh onboard` exits 2 on an unapproved manifest,
+and `fh bogus` has always exited 64.
+
+The known set is a table in `flag-registry.mjs` with one entry per command and per subcommand,
+so `--resume-key` is accepted by `fh session resume` and refused by `fh session launch`. A test
+reads the flag literals back out of every command module and fails if the table does not cover
+one, so the table cannot fall behind the implementation quietly. `--flag=value` is not
+supported; that error names the separate-argument form rather than calling the whole token
+unknown. Positional arguments are still the command's own business — `fh review` names the
+subcommands it takes.
+
+### A failure the caller can act on carries no stack trace
+
+| Failure | Output | Exit |
+|---|---|---|
+| a wrong argument, a refused path, a file that cannot be read, invalid JSON, running outside a git working tree | one line saying what went wrong | 64 |
+| anything else | the stack, because reproducing it needs one | 70 |
+
+The split lives in `errors.mjs`: commands raise `TypeError` for an argument error and
+`HarnessError` for a refused invariant, and Node's own system errors already name their path.
+Both the synchronous and the asynchronous command paths go through it. The synchronous one
+previously had no handler at all, so `fh clean --now bogus` printed a Node stack trace and
+exited 1 instead of 64 — the exit-code contract only held for the commands that returned a
+promise.
+
+### Route history is paged, and a deletion is previewed
+
+`fh status` returns the newest <!-- FACT:fh-status-default-limit -->50<!-- /FACT --> routes and
+says what it left out; route history accumulates in the state root for the life of the
+repository, so the default is not "all of it". `--limit` (capped at
+<!-- FACT:fh-status-max-limit -->500<!-- /FACT -->) and `--offset` page through the rest.
+
+```json
+{"routes": ["..."], "page": {"limit": 50, "offset": 0, "total": 812, "returned": 50, "hasMore": true}}
+```
+
+`fh clean --dry-run` lists what it would delete, up to
+<!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> entries per record class with
+`targetsTruncated` set when there are more. An entry carries an id, a timestamp, and for
+evidence its kind and artifact path — never the recorded content, because a retention preview
+is not a place to re-read review findings. A real prune reports `targets: null`, so a target
+list never means a deletion has already happened.
+
 ## State and evidence
 
 Configuration, policy, and mutable state have different owners:
@@ -52,7 +116,7 @@ Configuration, policy, and mutable state have different owners:
 | Location | Contents | Git state |
 |---|---|---|
 | `$HOME/.config/frontier-harness/config.json`, or an absolute `FH_CONFIG_PATH` | capability registry, rollout, retention | chezmoi-managed |
-| `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`, checked before every routed run) | repository policy |
+| `<repo>/.harness/policy.json` | approved repository capability manifest (written by `fh onboard`, checked before every routed run) | untracked; `.gitignore` covers `.harness/` |
 | the verified `git rev-parse --git-common-dir` + `frontier-harness/` | SQLite state and raw artifacts | runtime-only, shared by worktrees |
 
 `fh` is meant to run on untrusted checkouts, so neither location is taken at
@@ -76,6 +140,12 @@ face value. The two are resolved differently:
   metadata.
 - **Readiness cache — partitioned per account scope** as `readiness.<scope>.json`,
   so a result verified under one profile is never reused by another.
+
+`.harness/` is ignored by the repository's own `.gitignore`, not by a per-clone
+`.git/info/exclude`. The policy is per-worktree state bound to an approval recorded in the
+state root, and the pointer that says which approval is in force is keyed by the policy
+file's path — so a committed policy would arrive in every clone with no approval behind it,
+which is precisely the state onboarding refuses to route on.
 
 Evidence contains diffs, command results, logs, traces, screenshots, browser
 recordings, and accepted decisions. It never uses a model transcript or hidden

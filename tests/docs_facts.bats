@@ -377,7 +377,7 @@ _assert_lifecycle_scripts_documented() {
   done
 }
 
-@test "docs_facts: every <!-- FACT:fh-check-* / fh-candidate-* / fh-review-* --> marker matches its constant" {
+@test "docs_facts: every <!-- FACT:fh-check-* / fh-candidate-* / fh-review-* / fh-status-* / fh-clean-* --> marker matches its constant" {
   # #495 が足した実行経路の load-bearing な数値。チェックを打ち切るまでの時間、同時に抱える
   # candidate worktree の上限、finding 1 行の長さ上限は、いずれも「何が起きるか」を決める値なので、
   # 定数を変えたのに散文が置き去りになる drift を機械で止める。
@@ -386,7 +386,10 @@ _assert_lifecycle_scripts_documented() {
     "fh-candidate-max-live:CANDIDATE_MAX_LIVE_ENTRIES:candidate-store.mjs" \
     "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs" \
     "fh-review-diff-max-bytes:MAX_DIFF_BYTES:git-worktree.mjs" \
-    "fh-check-max-timeout-ms:MAX_CHECK_TIMEOUT_MS:verify-command.mjs"; do
+    "fh-check-max-timeout-ms:MAX_CHECK_TIMEOUT_MS:verify-command.mjs" \
+    "fh-status-default-limit:DEFAULT_STATUS_LIMIT:cli.mjs" \
+    "fh-status-max-limit:MAX_STATUS_LIMIT:cli.mjs" \
+    "fh-clean-target-preview-limit:CLEAN_TARGET_PREVIEW_LIMIT:cli.mjs"; do
     marker="${triple%%:*}"
     constant="$(echo "$triple" | cut -d: -f2)"
     source="${HOME_DIR}/dot_local/lib/frontier-harness/$(echo "$triple" | cut -d: -f3)"

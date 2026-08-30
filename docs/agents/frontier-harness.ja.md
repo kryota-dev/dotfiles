@@ -21,6 +21,11 @@ Antigravity CLI は Homebrew の `antigravity-cli` cask で導入し、global sa
 `~/.gemini/antigravity-cli/settings.json` に配置します。keychain を使う対話 login は user が
 一度だけ `agy` を起動して行います。harness が API key を保存・複製することはありません。
 
+`fh` launcher は mise が pin した interpreter を実行し、環境変数による差し替え口を持ちません。
+`fh` は子セッションの起動と承認境界そのものを担うため、どの interpreter で動くかを呼び出し側の環境に
+選ばせません。別の版で動かす必要があるなら pin（`mise use node@<version>`）を変えます。mise が node を
+解決できないときは `PATH` 上の `node` へ fallback せず、127 で終了します。
+
 ```bash
 fh doctor --json
 ```
@@ -34,12 +39,65 @@ account scope は `cld` / `codex` launcher が呼び出しごとに設定する 
 launcher はこれらを global には export しないため、素の shell から `fh doctor` を実行すると
 `accountScope: "unknown"` になります。これは設定漏れではなく意図した fail closed の既定です。
 
+## コマンドラインの表面
+
+各コマンドはフラグの検証を最初に行います。state root の解決も config の読み出しもまだ起きていない
+段階で、知らないフラグを名指しで拒否します。
+
+```
+$ fh clean --dryrun
+frontier-harness: unknown flag --dryrun for `fh clean`
+$ echo $?
+64
+```
+
+これが最も効くのは `clean` です。`--dry-run` の打ち間違いは以前は黙って捨てられ、確認のつもりの実行が
+そのまま実プルーンになっていました。raw evidence 30 日・集約テレメトリ 180 日で、消えたものは戻りません。
+`fh session` は組み立てられない argv を拒み、`fh onboard` は未承認の manifest で exit 2 に落ち、
+`fh bogus` は以前から 64 で落ちる——fail-closed を柱にした CLI の中で、フラグ面だけが fail-open でした。
+
+既知フラグの集合は `flag-registry.mjs` の表で、コマンドごと・サブコマンドごとに 1 エントリを持ちます
+（`--resume-key` は `fh session resume` では通り、`fh session launch` では拒否されます）。テストが各
+コマンド module からフラグ literal を読み戻し、表が覆えていなければ落ちるので、表が実装から静かに
+遅れることはありません。`--flag=value` の形は受け付けず、そのエラーはトークン全体を未知と呼ばずに
+「値は別引数で渡す」形を名指しします。位置引数は各コマンドの担当のままです（`fh review` は取りうる
+サブコマンドを名指しします）。
+
+### 呼び出し側が直せる失敗に stack trace を出さない
+
+| 失敗 | 出力 | 終了コード |
+|---|---|---|
+| 引数の誤り、拒否したパス、読めないファイル、壊れた JSON、git working tree の外での実行 | 何が起きたかの 1 行 | 64 |
+| それ以外 | 再現に必要なので stack ごと | 70 |
+
+分類は `errors.mjs` にあります。引数の誤りは `TypeError`、不変条件の拒否は `HarnessError` で、
+Node の system error は元からパスを含みます。同期・非同期どちらのコマンド経路もここを通ります。
+同期経路にはハンドラが 1 つも無く、`fh clean --now bogus` は Node の stack trace を出して 64 ではなく
+1 で終了していました——終了コードの契約は promise を返すコマンドにしか効いていませんでした。
+
+### route 履歴はページングし、削除は事前に一覧する
+
+`fh status` は新しい順に <!-- FACT:fh-status-default-limit -->50<!-- /FACT --> 件を返し、
+出さなかった分を明示します。route 履歴は repository の寿命のあいだ state root に溜まり続けるため、
+既定を「全件」にはしません。残りは `--limit`（上限 <!-- FACT:fh-status-max-limit -->500<!-- /FACT -->）と
+`--offset` で辿ります。
+
+```json
+{"routes": ["..."], "page": {"limit": 50, "offset": 0, "total": 812, "returned": 50, "hasMore": true}}
+```
+
+`fh clean --dry-run` は削除対象を一覧します。レコードのクラスごとに
+<!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> 件までで、超えた場合は
+`targetsTruncated` が立ちます。1 件が持つのは id と時刻、evidence では kind と artifact のパスだけで、
+記録された内容は載せません（retention の下見は review finding を読み返す場所ではありません）。
+実プルーンでは `targets` は `null` になるので、対象一覧が出ていることが「もう消えた」を意味しません。
+
 ## state と evidence
 
 | 場所 | 内容 | 管理 |
 |---|---|---|
 | `$HOME/.config/frontier-harness/config.json`、または絶対パスの `FH_CONFIG_PATH` | capability registry、rollout、retention | chezmoi |
-| `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込み、route する実行のたびに照合する） | repository policy |
+| `<repo>/.harness/policy.json` | 承認済み repository capability manifest（`fh onboard` が書き込み、route する実行のたびに照合する） | 版管理外（`.gitignore` が `.harness/` を覆う） |
 | 検証済みの `git rev-parse --git-common-dir` 配下の `frontier-harness/` | SQLite state と raw artifact | runtime、全 worktree で共有 |
 
 `fh` は untrusted な checkout の上で動くことを前提とするため、いずれの置き場所も
@@ -60,6 +118,12 @@ launcher はこれらを global には export しないため、素の shell か
   向け直した repository と区別できないためです。
 - **readiness キャッシュ —— account scope ごとに分割**し、`readiness.<scope>.json` として保存します。
   あるプロファイルで確定した結果を別プロファイルが流用しません。
+
+`.harness/` は clone ごとの `.git/info/exclude` ではなく、repository 自身の `.gitignore` で
+版管理から外します。policy は state root に記録した承認に紐づく worktree ごとの state であり、
+どの承認が有効かを指すポインタは policy ファイルの**パス**で引きます。commit してしまうと、
+承認の裏付けが無い policy が全 clone に配られることになり、それは onboarding が route を
+拒む状態そのものです。
 
 Evidence Bus には diff、command result、log、trace、screenshot、browser recording、accepted decision
 を入れます。全文 transcript や hidden reasoning は保存・受け渡ししません。
