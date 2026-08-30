@@ -143,7 +143,14 @@ _claude_permission_rules() {
     false
   }
 
-  offenders="$(printf '%s\n' "$file_rules" | grep -vE '^(Read|Edit)\(//' || true)"
+  # A `~/` anchor is exempt ONLY when the rule names one concrete path with no glob
+  # metacharacter. That is the whole point of such a rule: `~/.aws/credentials` is a single
+  # named file that lives in the home directory, so the anchor is exactly its subject and
+  # there is nothing outside home for it to miss. A `~/` anchor plus a wildcard is the
+  # dangerous shape this guard exists for — `~/**/secrets/**` reads as "the user's secrets"
+  # but spans every node_modules tree under `~/ghq` while still missing /opt and /var — so it
+  # stays an offender. See the deny-list rationale below for the measurement that forced this.
+  offenders="$(printf '%s\n' "$file_rules" | grep -vE '^(Read|Edit)\(//' | grep -vE '^(Read|Edit)\(~/[^*?\[]+\)$' || true)"
   [ -z "$offenders" ] || {
     echo "settings.json declares file deny rules whose anchor is narrower than it looks:"
     echo "$offenders"
@@ -174,9 +181,23 @@ _claude_permission_rules() {
 # OS-level denial that stops pnpm, tsc and node — a whole repository's tests, not one read.
 #
 # A secret is a data file, not a source file, so the substring match now requires a data
-# extension. Bare `credentials` (for ~/.aws/credentials) and the `secrets/**` directory are
-# kept as separate literal rules. Gitignore pattern syntax here has no negation, so
-# exempting node_modules directly is not available.
+# extension. Gitignore pattern syntax here has no negation, so exempting node_modules
+# directly is not available.
+#
+# The same defect then repeated in the two rules that were kept as bare literals, because a
+# DIRECTORY name collides just as a filename does. Measured 2026-08-30 in a Firebase app:
+# `//**/credentials` matched @firebase/auth's `src/core/credentials/` (144 .ts files, one
+# copy per dist target) and `//**/secrets/**` matched firebase-tools'
+# `lib/apphosting/secrets/`. Both blocked `pnpm install` in a sandboxed child, permanently,
+# for any repository that depends on Firebase. Neither rule protected a file that actually
+# existed: this machine authenticates AWS through SSO (`~/.aws/sso/`), and a home-wide scan
+# found no file or directory named `credentials` or `secrets` outside node_modules.
+#
+# So `credentials` is now pinned to the concrete home paths it was written for (a `~/`
+# anchor cannot reach a repository checkout), and `secrets/**` takes the same data-extension
+# gate as the substring rules. Do NOT reintroduce a bare directory name under a `//**/`
+# anchor — the anchor spans the whole filesystem, and dependency trees are full of ordinary
+# directories with security-sounding names.
 _CLAUDE_REQUIRED_FILE_DENY_RULES=(
   'Read(//**/.env*)'
   'Read(//**/id_rsa)'
@@ -189,10 +210,18 @@ _CLAUDE_REQUIRED_FILE_DENY_RULES=(
   'Read(//**/*secret*.json)'
   'Read(//**/*secret*.yaml)'
   'Read(//**/*secret*.yml)'
-  'Read(//**/credentials)'
-  'Read(//**/secrets/**)'
+  'Read(~/.aws/credentials)'
+  'Read(~/.config/gcloud/credentials.db)'
+  'Read(~/.docker/config.json)'
+  'Read(//**/secrets/**/*.json)'
+  'Read(//**/secrets/**/*.yaml)'
+  'Read(//**/secrets/**/*.yml)'
+  'Read(//**/secrets/**/*.env)'
   'Edit(//**/.env*)'
-  'Edit(//**/secrets/**)'
+  'Edit(//**/secrets/**/*.json)'
+  'Edit(//**/secrets/**/*.yaml)'
+  'Edit(//**/secrets/**/*.yml)'
+  'Edit(//**/secrets/**/*.env)'
 )
 
 @test "claude permissions: every credential file deny rule is still declared" {
@@ -232,6 +261,54 @@ _CLAUDE_REQUIRED_FILE_DENY_RULES=(
   done < <(grep -rlF -- '--allowedTools' "${HOME_DIR}")
   [ "$found" = 1 ] || {
     echo "no script under ${HOME_DIR} declares --allowedTools — this guard lost its subject"
+    false
+  }
+}
+
+# The subset check above lets rules be ADDED freely, which is right for a guard whose job is
+# to stop rules disappearing — but it means a pattern retired for causing damage can be
+# reinstated with every test still green. These five were each measured to block real work
+# inside a sandboxed child, where a Read/Edit deny rule is merged into the OS-level sandbox
+# boundary rather than staying a tool-level filter:
+#
+#   Read(//**/*credentials*) / Read(//**/*secret*)  matched dependency SOURCE files by name
+#                                                   (@grpc/grpc-js `call-credentials.ts`)
+#   Read(//**/credentials)                          matched @firebase/auth's
+#                                                   `src/core/credentials/` DIRECTORY
+#   Read(//**/secrets/**) / Edit(//**/secrets/**)   matched firebase-tools'
+#                                                   `lib/apphosting/secrets/` DIRECTORY
+#
+# None of them protected a file that existed on this machine. All of them broke `pnpm install`
+# outright. Replacements live in _CLAUDE_REQUIRED_FILE_DENY_RULES above; if one of these needs
+# to come back, the burden is to show what it protects that the replacement does not.
+_CLAUDE_FORBIDDEN_FILE_DENY_RULES=(
+  'Read(//**/*credentials*)'
+  'Read(//**/*secret*)'
+  'Read(//**/credentials)'
+  'Read(//**/secrets/**)'
+  'Edit(//**/secrets/**)'
+)
+
+@test "claude permissions: retired deny patterns are not reinstated" {
+  [ -f "${HOME_DIR}/dot_claude/settings.json" ]
+
+  local deny_rules rule
+  local reinstated=()
+  deny_rules="$(_claude_permission_rules deny)"
+
+  # -x -F for the same reason as the subset check: these patterns are full of regex
+  # metacharacters, so anything but a literal whole-line match compares the wrong thing.
+  for rule in "${_CLAUDE_FORBIDDEN_FILE_DENY_RULES[@]}"; do
+    if printf '%s\n' "$deny_rules" | grep -qxF -- "$rule"; then
+      reinstated+=("$rule")
+    fi
+  done
+
+  [ "${#reinstated[@]}" -eq 0 ] || {
+    echo "settings.json reinstates deny patterns that were retired for breaking sandboxed work:"
+    printf '  %s\n' "${reinstated[@]}"
+    echo "each of these matched dependency files or directories by name and blocked pnpm/tsc/node"
+    echo "in a sandboxed child. See the rationale above _CLAUDE_FORBIDDEN_FILE_DENY_RULES."
     false
   }
 }

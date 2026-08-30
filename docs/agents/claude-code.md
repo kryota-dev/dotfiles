@@ -124,9 +124,11 @@ The `permissions.allow` list pre-approves common read-only and safe-write operat
 The `permissions.deny` list blocks:
 
 - `sudo`, `rm -rf`, `git reset`, `git push --force` / `-f`
-- Reads of credential files (`.env*`, private keys, PEM files, `credentials`, `secrets/**`, and
-  `*credentials*` / `*secret*` gated to data extensions: `.json`, `.yaml`, `.yml`)
-- Writes to `.env*` and `secrets/` paths
+- Reads of credential files (`.env*`, private keys, PEM files, the concrete home paths
+  `~/.aws/credentials` / `~/.config/gcloud/credentials.db` / `~/.docker/config.json`, and
+  `*credentials*` / `*secret*` / `secrets/**` gated to data extensions: `.json`, `.yaml`,
+  `.yml`, `.env`)
+- Writes to `.env*` and to data files under `secrets/`
 - `env` and `printenv` (prevent env-dump of secrets)
 - Gmail MCP credential files
 - `mcp__supabase__execute_sql`
@@ -143,6 +145,22 @@ denial that stops `pnpm`, `tsc` and `node` outright — losing a repository's wh
 not a single read. A secret is a data file, not a source file, so the substring match now
 requires a data extension. Gitignore pattern syntax has no negation here, so exempting
 `node_modules` directly is not an option.
+
+**A directory name collides exactly as a filename does**, and the first pass missed it. The two
+rules kept as bare literals — `//**/credentials` and `//**/secrets/**` — were measured against a
+Firebase application on 2026-08-30: the first matched `@firebase/auth`'s `src/core/credentials/`
+(144 `.ts` files, replicated once per dist target), the second matched `firebase-tools`'
+`lib/apphosting/secrets/`. Both blocked `pnpm install` inside a sandboxed child, permanently,
+for any repository that depends on Firebase. Neither rule was protecting a file that existed:
+this machine authenticates AWS through SSO (`~/.aws/sso/`), and no file or directory named
+`credentials` or `secrets` was found in `~/.config`, `~/.aws`, `~/.docker` or `~/.kube`.
+
+`credentials` is therefore pinned to the concrete home paths it was written for. A `~/` anchor
+is what makes this safe: repository checkouts live under `~/ghq`, so a pattern such as
+`~/**/credentials` would still span every `node_modules` tree in the home directory and change
+nothing. `secrets/**` takes the same data-extension gate as the substring rules. **Do not
+reintroduce a bare directory name under a `//**/` anchor** — that anchor spans the entire
+filesystem, and dependency trees are full of ordinary directories with security-sounding names.
 
 ---
 

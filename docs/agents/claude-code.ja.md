@@ -122,9 +122,11 @@ Renovate の `github-tags` datasource への接続は別途追跡します。
 `permissions.deny` リストでブロックされるもの：
 
 - `sudo`、`rm -rf`、`git reset`、`git push --force` / `-f`
-- クレデンシャルファイルの読み取り (`.env*`、秘密鍵、PEM ファイル、`credentials`、`secrets/**`、
-  およびデータ拡張子に限定した `*credentials*` / `*secret*`: `.json`、`.yaml`、`.yml`)
-- `.env*` と `secrets/` パスへの書き込み
+- クレデンシャルファイルの読み取り (`.env*`、秘密鍵、PEM ファイル、具体パスの
+  `~/.aws/credentials` / `~/.config/gcloud/credentials.db` / `~/.docker/config.json`、
+  およびデータ拡張子に限定した `*credentials*` / `*secret*` / `secrets/**`:
+  `.json`、`.yaml`、`.yml`、`.env`)
+- `.env*` と `secrets/` 配下のデータファイルへの書き込み
 - `env` と `printenv` (シークレットの環境変数ダンプ防止)
 - Gmail MCP クレデンシャルファイル
 - `mcp__supabase__execute_sql`
@@ -140,6 +142,22 @@ deny rules; both are merged into the final sandbox boundary" と規定されて�
 ではなくリポジトリの検証経路まるごとが失われます。secret はデータファイルであってソースファイルでは
 ないので、部分一致にデータ拡張子を要求する形にしました。ここで使える gitignore パターン構文には否定が
 無いため、`node_modules` だけを除外する手は取れません。
+
+**ディレクトリ名もファイル名とまったく同じように衝突します。**最初の修正はここを取りこぼしました。
+裸のリテラルとして残した 2 本 —— `//**/credentials` と `//**/secrets/**` —— を 2026-08-30 に Firebase
+アプリで実測したところ、前者は `@firebase/auth` の `src/core/credentials/`（`.ts` 144 ファイル、dist
+ターゲットごとに複製される）に、後者は `firebase-tools` の `lib/apphosting/secrets/` に一致していました。
+どちらも sandbox 下の子セッションで `pnpm install` を止めており、Firebase に依存するリポジトリでは
+恒久的に再発します。しかも**どちらのルールも実在するファイルを守っていませんでした** —— このマシンの
+AWS 認証は SSO（`~/.aws/sso/`）であり、`~/.config` / `~/.aws` / `~/.docker` / `~/.kube` を走査しても
+`credentials` や `secrets` という名前のファイル・ディレクトリは 1 件も見つかりません。
+
+そこで `credentials` は、元々守ろうとしていた具体的な home のパスへ固定しました。**安全にしているのは
+`~/` アンカーではなく具体パスの側です** —— リポジトリのチェックアウトは `~/ghq` 配下にあるので、
+`~/**/credentials` のようなパターンでは home 配下の全 `node_modules` を巻き込んだままで何も変わりません。
+`secrets/**` は部分一致ルールと同じデータ拡張子ゲートに揃えました。**`//**/` アンカーの下に裸の
+ディレクトリ名を再導入しないこと** —— このアンカーはファイルシステム全体に及び、依存ツリーには
+セキュリティを思わせる名前のごく普通のディレクトリが溢れています。
 
 ---
 
