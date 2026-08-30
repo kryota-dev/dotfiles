@@ -75,6 +75,13 @@ export const SANDBOX_ALLOWED_DOMAINS = Object.freeze([
   "*.chatgpt.com",
 ]);
 
+// 子の invocation に閉じた許可。**ここに足してよいのは「外側の sandbox があるから安全」と
+// 言える形だけ**で、sandbox を迂回する許可（`dangerouslyDisableSandbox` 等）は入れない。
+// 形は prefix なので、末尾に何が続いても一致する点に注意して短くしすぎないこと。
+export const SANDBOX_ALLOWED_COMMANDS = Object.freeze([
+  "Bash(codex exec --profile shared --sandbox danger-full-access:*)",
+]);
+
 // codex の状態ディレクトリ。**account ごとに分かれる。**
 //
 // ランチャー（`home/dot_local/launchers/codex`）が `CLAUDE_CONFIG_DIR` から `CODEX_HOME` を
@@ -156,6 +163,18 @@ function sandboxSettings(codexHome) {
       }
     : {};
   return {
+    // `multi-review` の Codex leg は、外側に sandbox がある環境では codex 自身の sandbox を
+    // 張らない（macOS の Seatbelt は入れ子にできず、張ろうとすると `sandbox_apply` が
+    // `Operation not permitted` で落ちてシェルを一切使えなくなる。multi-review の SKILL.md 参照）。
+    //
+    // その形の呼び出しは、文面に `danger-full-access` を含むために permission classifier が
+    // 拒否しうる。拒否されると Codex leg は差分すら読めず「レビュー不能」を返し、**多様性フロアが
+    // 静かに失われる**（#561 の 1 巡目で、4 leg すべて Claude になった結果、相関した盲点が実際に出た）。
+    //
+    // **この許可を子の invocation に閉じ込める。** 利用者のグローバル設定へ置くと、外側に sandbox が
+    // 無い場所でも同じ形が通ってしまう。ここに置けば、許可とそれを安全にしている sandbox が
+    // 同じ設定 blob で必ず一緒に効く。
+    permissions: { allow: [...SANDBOX_ALLOWED_COMMANDS] },
     sandbox: {
       ...filesystem,
       enabled: true,
@@ -371,6 +390,17 @@ function readEffectiveSandbox(invocation) {
     !Array.isArray(domains) ||
     domains.length !== SANDBOX_ALLOWED_DOMAINS.length ||
     !SANDBOX_ALLOWED_DOMAINS.every((domain, index) => domains[index] === domain)
+  ) {
+    return null;
+  }
+  // 許可コマンドも同じ理由で読み戻す。ここを見ないと、`Bash(:*)` のような広い allow を
+  // 忍ばせた argv が「sandbox は宣言どおり」として封印を通り、sandbox の内側で任意の
+  // コマンドが無確認で走る。
+  const commands = settings?.permissions?.allow;
+  if (
+    !Array.isArray(commands) ||
+    commands.length !== SANDBOX_ALLOWED_COMMANDS.length ||
+    !SANDBOX_ALLOWED_COMMANDS.every((command, index) => commands[index] === command)
   ) {
     return null;
   }

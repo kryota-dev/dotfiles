@@ -20,6 +20,7 @@ import {
   INIT_PROBLEM_MCP_SERVER_ERRORS,
   INIT_PROBLEM_NOT_AN_INIT_EVENT,
   INIT_PROBLEM_PLUGIN_ERRORS,
+  SANDBOX_ALLOWED_COMMANDS,
   SANDBOX_ALLOWED_DOMAINS,
   claudeAdapter,
   codexHomeFor,
@@ -428,6 +429,48 @@ test("claude opens the codex home for writes but never its credential file", () 
   const without = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
   const bare = JSON.parse(without.argv[without.argv.indexOf("--settings") + 1]);
   assert.ok(!Object.hasOwn(bare.sandbox, "filesystem"));
+});
+
+test("claude scopes the codex allow rule to the child invocation", () => {
+  // `multi-review` の Codex leg は外側に sandbox がある環境では codex 自身の sandbox を張らない。
+  // その形は文面に `danger-full-access` を含むため classifier に拒否されうるので、許可を
+  // **子の invocation に閉じて**渡す。利用者のグローバル設定へ置くと、外側に sandbox が無い
+  // 場所でも同じ形が通ってしまう。
+  const launch = claudeAdapter.launch(requestFor(claudeAdapter, "workspace-write"));
+  const settings = JSON.parse(launch.argv[launch.argv.indexOf("--settings") + 1]);
+  assert.deepEqual(settings.permissions.allow, [...SANDBOX_ALLOWED_COMMANDS]);
+  // sandbox を迂回させる許可を混ぜない。許可の前提は「外側の sandbox が効いている」ことなので、
+  // それを外せる形を同じ blob に置くと前提が自分で壊れる。
+  for (const rule of settings.permissions.allow) {
+    assert.ok(!/dangerouslyDisableSandbox/.test(rule));
+    assert.notEqual(rule, "Bash(:*)");
+  }
+  // deny 側は載せない（この blob は許可を足すためのもので、利用者の deny を上書きしない）。
+  assert.ok(!Object.hasOwn(settings.permissions, "deny"));
+});
+
+test("claude reads back no sandbox when the allow rules are widened", () => {
+  // 宣言どおりの許可リストであることまで読み戻さないと、`Bash(:*)` のような広い allow を
+  // 忍ばせた argv が「sandbox は宣言どおり」として封印を通り、sandbox の内側で任意のコマンドが
+  // 無確認で走る。
+  const widened = JSON.stringify({
+    permissions: { allow: ["Bash(:*)"] },
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      autoAllowBashIfSandboxed: true,
+      allowUnsandboxedCommands: false,
+      enableWeakerNetworkIsolation: true,
+      network: {
+        strictAllowlist: true,
+        allowedDomains: [...SANDBOX_ALLOWED_DOMAINS],
+      },
+    },
+  });
+  assert.equal(
+    claudeAdapter.readEffectiveSandbox({ argv: ["-p", "go", "--settings", widened] }),
+    null,
+  );
 });
 
 test("claude pre-allows domains without opening a hole", () => {
