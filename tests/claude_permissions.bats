@@ -162,14 +162,35 @@ _claude_permission_rules() {
 # either: the file currently holds 59 allow + 20 deny = 79 rules, so removing all nine still
 # leaves 70. Losing a credential rule is exactly the silent-guardrail failure this suite
 # exists to catch, so name them. This is a subset check — adding rules is always fine.
+#
+# The `*credentials*` / `*secret*` bare substring rules were deliberately replaced with
+# extension-gated ones. They matched dependency SOURCE files by name — `call-credentials.ts`
+# in @grpc/grpc-js, `credentials.js` in google-auth-library — and inside a sandbox that is
+# not a cosmetic false positive: the official docs state that Read deny rules "apply to
+# Claude's built-in file tools and to file commands Claude Code recognizes in Bash" but
+# "don't apply to arbitrary subprocesses", *except* that sandbox filesystem restrictions
+# "combine the sandbox.filesystem settings with Read and Edit deny rules; both are merged
+# into the final sandbox boundary". So in a sandboxed child the same rule becomes an
+# OS-level denial that stops pnpm, tsc and node — a whole repository's tests, not one read.
+#
+# A secret is a data file, not a source file, so the substring match now requires a data
+# extension. Bare `credentials` (for ~/.aws/credentials) and the `secrets/**` directory are
+# kept as separate literal rules. Gitignore pattern syntax here has no negation, so
+# exempting node_modules directly is not available.
 _CLAUDE_REQUIRED_FILE_DENY_RULES=(
   'Read(//**/.env*)'
   'Read(//**/id_rsa)'
   'Read(//**/id_ed25519)'
   'Read(//**/*.pem)'
   'Read(//**/*.key)'
-  'Read(//**/*credentials*)'
-  'Read(//**/*secret*)'
+  'Read(//**/*credentials*.json)'
+  'Read(//**/*credentials*.yaml)'
+  'Read(//**/*credentials*.yml)'
+  'Read(//**/*secret*.json)'
+  'Read(//**/*secret*.yaml)'
+  'Read(//**/*secret*.yml)'
+  'Read(//**/credentials)'
+  'Read(//**/secrets/**)'
   'Edit(//**/.env*)'
   'Edit(//**/secrets/**)'
 )

@@ -122,11 +122,24 @@ Renovate の `github-tags` datasource への接続は別途追跡します。
 `permissions.deny` リストでブロックされるもの：
 
 - `sudo`、`rm -rf`、`git reset`、`git push --force` / `-f`
-- クレデンシャルファイルの読み取り (`.env*`、秘密鍵、PEM ファイル、`*credentials*`、`*secret*`)
+- クレデンシャルファイルの読み取り (`.env*`、秘密鍵、PEM ファイル、`credentials`、`secrets/**`、
+  およびデータ拡張子に限定した `*credentials*` / `*secret*`: `.json`、`.yaml`、`.yml`)
 - `.env*` と `secrets/` パスへの書き込み
 - `env` と `printenv` (シークレットの環境変数ダンプ防止)
 - Gmail MCP クレデンシャルファイル
 - `mcp__supabase__execute_sql`
+
+`*credentials*` と `*secret*` の読み取りをデータ拡張子に限定しているのは意図的です。裸の部分一致だと
+依存パッケージの**ソース**ファイルに名前で一致してしまい (`@grpc/grpc-js` の `call-credentials.ts`、
+`google-auth-library` の `credentials.js`)、しかも sandbox の内側ではそれが見た目だけの誤検出では
+済みません。Read の deny ルールは通常 Claude 自身のファイルツールと、Claude Code が認識する Bash の
+ファイルコマンドにしか届かず、[任意のサブプロセスには適用されません](https://code.claude.com/docs/en/permissions)。
+しかし sandbox のファイルシステム制限は "combine the `sandbox.filesystem` settings with Read and Edit
+deny rules; both are merged into the final sandbox boundary" と規定されています。つまり sandbox 下の子
+セッションでは、同じルールが `pnpm` / `tsc` / `node` ごと止める OS レベルの拒否に変わり、1 回の読み取り
+ではなくリポジトリの検証経路まるごとが失われます。secret はデータファイルであってソースファイルでは
+ないので、部分一致にデータ拡張子を要求する形にしました。ここで使える gitignore パターン構文には否定が
+無いため、`node_modules` だけを除外する手は取れません。
 
 ---
 

@@ -124,11 +124,25 @@ The `permissions.allow` list pre-approves common read-only and safe-write operat
 The `permissions.deny` list blocks:
 
 - `sudo`, `rm -rf`, `git reset`, `git push --force` / `-f`
-- Reads of credential files (`.env*`, private keys, PEM files, `*credentials*`, `*secret*`)
+- Reads of credential files (`.env*`, private keys, PEM files, `credentials`, `secrets/**`, and
+  `*credentials*` / `*secret*` gated to data extensions: `.json`, `.yaml`, `.yml`)
 - Writes to `.env*` and `secrets/` paths
 - `env` and `printenv` (prevent env-dump of secrets)
 - Gmail MCP credential files
 - `mcp__supabase__execute_sql`
+
+The `*credentials*` and `*secret*` reads are gated to data extensions on purpose. As bare
+substrings they matched dependency **source** files by name — `call-credentials.ts` in
+`@grpc/grpc-js`, `credentials.js` in `google-auth-library` — and that is not a cosmetic false
+positive inside a sandbox. Read deny rules normally reach only Claude's own file tools and the
+file commands Claude Code recognizes in Bash, and [don't apply to arbitrary
+subprocesses](https://code.claude.com/docs/en/permissions); but sandbox filesystem restrictions
+"combine the `sandbox.filesystem` settings with Read and Edit deny rules; both are merged into
+the final sandbox boundary". In a sandboxed child the same rule therefore becomes an OS-level
+denial that stops `pnpm`, `tsc` and `node` outright — losing a repository's whole test path,
+not a single read. A secret is a data file, not a source file, so the substring match now
+requires a data extension. Gitignore pattern syntax has no negation here, so exempting
+`node_modules` directly is not an option.
 
 ---
 
