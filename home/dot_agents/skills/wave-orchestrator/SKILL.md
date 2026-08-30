@@ -244,8 +244,15 @@ quota は profile ごとに独立プールなので「空いている方へ流�
 `fh` が採番するが、その場合でも起動直後に stderr へ出るので必ず控える）。同じ値が承認 server の
 `--session` にも渡るため、`fh approvals` の各要求からどの子の問いかを引ける。
 
+**`CLAUDE_CONFIG_DIR` を明示する。** この変数はランチャー（`cld` 等）が**呼び出しごとに**設定する
+もので、シェルには export されない。素のペインには存在しないため、明示しないと `fh` は account を
+解決できず `unknown` になる。その状態では account に紐づくパス（codex home 等）が解決されず、
+`accountScope` を宣言した capability は拒否され、readiness キャッシュも `unknown` キーで書かれる
+—— **外形上は正常な起動と見分けがつかないまま劣化する**。`fh session` は `unknown` を拒否するので
+起動時に落ちるが、落ちる前に付けること。値は親の profile（`CLAUDE_CONFIG_DIR` の basename）に合わせる。
+
 ```sh
-fh session launch \
+CLAUDE_CONFIG_DIR="$HOME/<親の profile ディレクトリ>" fh session launch \
   --label "<識別子>" \
   --session-id "$(uuidgen | tr 'A-Z' 'a-z')" \
   --worktree "<ワークツリーの絶対パス>" \
@@ -821,7 +828,8 @@ quota が閾値帯に達したら止めて次のウィンドウで再開する�
   完走時の JSON にも `sessionId` / `resumeKey` として載せる。**この 1 点だけは state file に持つ**
   （識別子とワークツリーの対応は `gh` とワークツリーから引けるので持たない）。
 - **再開は `fh session resume --resume-key <id>` で行う。** 起動時検査・承認チャネルの配線・
-  sandbox policy は launch と同じ順序・同じ形で適用される（弱まらない）。
+  sandbox policy は launch と同じ順序・同じ形で適用される（弱まらない）。**`CLAUDE_CONFIG_DIR` は
+  launch と同じく明示する**（「起動する」節を参照。付け忘れると `fh` が account を解決できず落ちる）。
 - **中断そのものは承認チャネルでも起きる。** 承認要求は既定 8 時間で自動 deny になるので、
   長く放置した wave は「通った」ではなく「拒否されて止まった」状態になっている。再開前に
   `fh approvals --all --json` で決着を確認する。
