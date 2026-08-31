@@ -362,6 +362,13 @@ skill 側で再定義しない**（`fh session` は `--timeout-ms` / `--progress
 `fh approvals` に pending も無いなら、それは判定不能の信号であって「稼働中」の証拠ではない。
 ペインを覗くか、`claude --resume <session-id>` で開き直して確かめる。
 
+**終わった子の結末は `fh runs` で引く。** `fh status` は route 決定（何を選んだか）しか持たず、
+結末（どう終わったか）は別コマンドである。`fh runs --json` が新しい順に status / exitCode /
+failureReason / 時刻を返し、`--run <adapterRunId>` で 1 件を引ける。**起動時 JSON を流した
+スクロールバックを失っても結末は残る** —— 並列で回すほどこれが効く。ただし `resumeKey` /
+`denials` は記録されないので、**session id は従来どおり起動時に控える**（Phase 2 の
+「例外は session id 1 点」はこの追加後も変わらない）。
+
 ---
 
 ### legacy: 検知（tmux 経路）
