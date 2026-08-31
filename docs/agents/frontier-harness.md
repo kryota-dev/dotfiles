@@ -102,6 +102,27 @@ repository, so the default is not "all of it". `--limit` (capped at
 {"routes": ["..."], "page": {"limit": 50, "offset": 0, "total": 812, "returned": 50, "hasMore": true}}
 ```
 
+`fh runs` answers the other half of the question. `fh status` records *what was chosen* — the
+route decision — and never *how it ended*. The outcome was already persisted in `adapter_runs`
+with a status, an exit code, a failure reason, and both timestamps, but nothing read it back, so
+losing the terminal scrollback that carried the launch JSON meant losing the only account of
+whether a child succeeded. That is worst exactly where it matters most: running children in
+parallel, where no single scrollback holds all of them.
+
+```
+fh runs --json                       # newest first, same default and cap as `fh status`
+fh runs --json --run <adapter run id>
+```
+
+An unknown id is an argument error, not an empty list — returning nothing would be
+indistinguishable from "no run has happened yet". `--run` refuses `--limit` and `--offset`
+rather than silently ignoring one of them.
+
+**It does not return the whole launch JSON.** `resumeKey`, `denials`, `initHealth`, and
+`evidenceId` are emitted by `fh session` but have no column in `adapter_runs`, so they are not
+listed at all rather than shown as empty fields that would read as "recorded, and there was
+nothing". The session id in particular still has to be kept by the caller at launch time.
+
 `fh clean --dry-run` lists what it would delete, up to
 <!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> entries per record class with
 `targetsTruncated` set when there are more. An entry carries an id, a timestamp, and for

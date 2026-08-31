@@ -212,6 +212,8 @@ test("every documented flag of every command stays accepted", () => {
     ["review", ["packet", "--task", "task_1", "--out", "/abs/out.json", "--base", "HEAD"]],
     ["review", ["record", "--task", "task_1", "--findings", "/abs/f.json"]],
     ["run", ["--task", "/abs/task.json", "--json"]],
+    ["runs", ["--json", "--limit", "10", "--offset", "20"]],
+    ["runs", ["--run", "arun_1", "--json"]],
     [
       "session",
       [
@@ -406,6 +408,139 @@ test("fh status shows the newest routes first", async (context) => {
     write: (line) => output.push(line),
   });
   assert.equal(emitted(output).routes[0].id, ordered[ordered.length - 1]);
+});
+
+// ---------------------------------------------------------------------------
+// 3b. run の結末を後から引ける（`fh status` は route 決定しか持たない）
+// ---------------------------------------------------------------------------
+
+// createdAt を明示して並び順を決める。実時刻に頼ると同一ミリ秒へ潰れて、
+// 「新しい順」の検証が偶然通ったり落ちたりする。
+function seedAdapterRuns(statePath, count) {
+  const store = createStateStore(statePath);
+  const task = store.createTask({ goal: "adapter runs" });
+  const route = store.recordRoute(task.id, {
+    kind: "escalation",
+    capability: null,
+    provider: null,
+    reason: "seed",
+  });
+  const ids = [];
+  for (let index = 0; index < count; index += 1) {
+    const at = new Date(Date.parse(NOW) + index * 1000).toISOString();
+    const failed = index % 2 === 1;
+    ids.push(
+      store.recordAdapterRun({
+        taskId: task.id,
+        routeId: route.id,
+        capability: "session.child",
+        provider: "claude",
+        model: "claude-opus-5",
+        effort: "xhigh",
+        status: failed ? "failed" : "succeeded",
+        startedAt: at,
+        finishedAt: at,
+        exitCode: failed ? 1 : 0,
+        failureReason: failed ? `run ${index} failed` : undefined,
+        createdAt: at,
+      }).id,
+    );
+  }
+  store.close();
+  return ids;
+}
+
+test("fh runs reports how each recorded run ended, newest first", (context) => {
+  const statePath = isolatedState(context);
+  const ids = seedAdapterRuns(statePath, 3);
+
+  const output = [];
+  assert.equal(
+    runCli(["runs", "--json"], { config, statePath, write: (line) => output.push(line) }),
+    0,
+  );
+  const listed = emitted(output);
+  assert.deepEqual(
+    listed.runs.map((run) => run.id),
+    [...ids].reverse(),
+  );
+  // 「どう終わったか」がここで読めることが、このコマンドの存在理由そのもの。
+  const newest = listed.runs[0];
+  assert.equal(newest.status, "succeeded");
+  assert.equal(newest.exitCode, 0);
+  assert.equal(listed.runs[1].status, "failed");
+  assert.equal(listed.runs[1].failureReason, "run 1 failed");
+});
+
+test("fh runs bounds the history the same way fh status does", (context) => {
+  const statePath = isolatedState(context);
+  const total = DEFAULT_STATUS_LIMIT + 2;
+  seedAdapterRuns(statePath, total);
+
+  const output = [];
+  runCli(["runs", "--json"], { config, statePath, write: (line) => output.push(line) });
+  const first = emitted(output);
+  assert.deepEqual(first.page, {
+    limit: DEFAULT_STATUS_LIMIT,
+    offset: 0,
+    total,
+    returned: DEFAULT_STATUS_LIMIT,
+    hasMore: true,
+  });
+
+  runCli(["runs", "--json", "--offset", String(DEFAULT_STATUS_LIMIT)], {
+    config,
+    statePath,
+    write: (line) => output.push(line),
+  });
+  const second = emitted(output);
+  assert.equal(second.page.hasMore, false);
+  const seen = new Set([...first.runs, ...second.runs].map((run) => run.id));
+  assert.equal(seen.size, total);
+
+  runCli(["runs", "--json", "--limit", String(MAX_STATUS_LIMIT + 1000)], {
+    config,
+    statePath,
+    write: (line) => output.push(line),
+  });
+  assert.equal(emitted(output).page.limit, MAX_STATUS_LIMIT);
+});
+
+test("fh runs --run looks up one record and refuses to invent one", (context) => {
+  const statePath = isolatedState(context);
+  const ids = seedAdapterRuns(statePath, 2);
+
+  const output = [];
+  assert.equal(
+    runCli(["runs", "--json", "--run", ids[0]], {
+      config,
+      statePath,
+      write: (line) => output.push(line),
+    }),
+    0,
+  );
+  assert.equal(emitted(output).run.id, ids[0]);
+
+  // 未知の id を空の一覧として返すと「まだ何も走っていない」と区別が付かない。
+  assert.throws(
+    () =>
+      runCli(["runs", "--json", "--run", "arun_missing"], {
+        config,
+        statePath,
+        write: () => {},
+      }),
+    /arun_missing/,
+  );
+  // 単一照会にページングを重ねる呼び出しは、どちらかが黙って無視されることになる。
+  assert.throws(
+    () =>
+      runCli(["runs", "--json", "--run", ids[0], "--limit", "1"], {
+        config,
+        statePath,
+        write: () => {},
+      }),
+    /--limit/,
+  );
 });
 
 // ---------------------------------------------------------------------------

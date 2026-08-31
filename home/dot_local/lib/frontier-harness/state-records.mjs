@@ -117,6 +117,25 @@ export function createRecordAccessors(database) {
     FROM adapter_runs
     ORDER BY created_at, id
   `);
+  // 一覧は route と同じく SQL 側で切り、新しい順に返す。run 記録も state root に
+  // 溜まり続けるので、既定で全件を吐くと「直近どう終わったか」を見たいだけの呼び出しが
+  // 数千件の JSON を返す。
+  const selectAdapterRunPage = database.prepare(`
+    SELECT id, task_id, route_id, capability, provider, model, effort,
+           status, started_at, finished_at, exit_code, failure_reason, created_at
+    FROM adapter_runs
+    ORDER BY created_at DESC, id DESC
+    LIMIT ? OFFSET ?
+  `);
+  const countAdapterRuns = database.prepare(
+    "SELECT COUNT(*) AS total FROM adapter_runs",
+  );
+  const selectAdapterRunById = database.prepare(`
+    SELECT id, task_id, route_id, capability, provider, model, effort,
+           status, started_at, finished_at, exit_code, failure_reason, created_at
+    FROM adapter_runs
+    WHERE id = ?
+  `);
 
   const insertVerificationResult = database.prepare(`
     INSERT INTO verification_results (
@@ -295,6 +314,18 @@ export function createRecordAccessors(database) {
     },
     listAdapterRuns() {
       return selectAdapterRuns.all().map(toAdapterRun);
+    },
+    listAdapterRunPage({ limit, offset = 0 }) {
+      return {
+        runs: selectAdapterRunPage.all(limit, offset).map(toAdapterRun),
+        total: Number(countAdapterRuns.get().total),
+      };
+    },
+    // 見つからないときは null を返す。存在しない id を空の一覧として返すと、
+    // 呼び出し側から「まだ何も走っていない」と区別が付かない。
+    readAdapterRun(id) {
+      const row = selectAdapterRunById.get(id);
+      return row === undefined ? null : toAdapterRun(row);
     },
 
     recordVerificationResult(input) {
