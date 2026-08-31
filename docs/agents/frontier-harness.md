@@ -123,6 +123,14 @@ rather than silently ignoring one of them.
 listed at all rather than shown as empty fields that would read as "recorded, and there was
 nothing". The session id in particular still has to be kept by the caller at launch time.
 
+The `failureReason` names *which* signal decided the failure, because the two do not always
+agree. An envelope that reports an error is described by its own subtype (`run reported
+error_max_turns`); a run whose envelope claimed no error but whose process exited non-zero is
+described by the exit code, keeping what the child claimed alongside it (`run exited with code 1
+after reporting success`). Explaining the second case with the subtype alone used to produce
+`run reported success` on a failed run — a reason that contradicts its own status and leaves the
+caller unable to decide whether to retry.
+
 `fh clean --dry-run` lists what it would delete, up to
 <!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> entries per record class with
 `targetsTruncated` set when there are more. An entry carries an id, a timestamp, and for

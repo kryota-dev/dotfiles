@@ -689,6 +689,25 @@ function denialNames(event) {
     .filter((name) => typeof name === "string" && name.length > 0);
 }
 
+// 失敗の出どころは 2 つあり、混ぜると読み手を誤らせる。result envelope 自身が error だと
+// 言っている場合と、envelope は error を主張していないのにプロセスが非 0 で終わった場合である。
+// 後者を subtype でそのまま説明すると `run reported success` という自己矛盾した理由文になり、
+// **呼び出し側が失敗を検知して再試行すべきかを機械的に判断できなくなる**（実測 2026-08-31:
+// `fh session resume` が status failed / exitCode 1 / failureReason "run reported success" を返した）。
+// codex / antigravity は最初から exitCode 分岐を独立に持っている。ここも同じ倒れ方に揃える。
+function failureReasonOf(result, exitCode) {
+  const reported =
+    typeof result.subtype === "string" && result.subtype.length > 0 ? result.subtype : null;
+  if (result.is_error === true) {
+    return reported === null ? "run reported an error result" : `run reported ${reported}`;
+  }
+  // envelope 側は error と言っていない。理由はプロセスの終了コードの側にある。子が何を
+  // 主張したかも残す —— 「子は完了したつもりで、非 0 は別の出どころ」が診断の出発点になる。
+  return reported === null
+    ? `run exited with code ${exitCode}`
+    : `run exited with code ${exitCode} after reporting ${reported}`;
+}
+
 function interpret(processResult) {
   const { events, malformed } = parseJsonLines(processResult?.stdout);
   const exitCode = processResult?.exitCode ?? null;
@@ -714,11 +733,7 @@ function interpret(processResult) {
     exitCode,
     resumeKey: typeof result.session_id === "string" ? result.session_id : null,
     denials,
-    failureReason: failed
-      ? (typeof result.subtype === "string" && result.subtype.length > 0
-          ? `run reported ${result.subtype}`
-          : "run reported an error result")
-      : null,
+    failureReason: failed ? failureReasonOf(result, exitCode) : null,
   };
 }
 

@@ -106,6 +106,14 @@ fh runs --json --run <adapter run id>
 載せません**（空欄は「記録されていて中身が空だった」に読めてしまいます）。とくに session id は
 従来どおり起動時に呼び出し側が控える必要があります。
 
+`failureReason` は**どちらの信号が失敗を決めたか**を名指しします。2 つは常に一致するとは
+限らないからです。envelope 自身が error だと言っているなら、その subtype で説明します
+（`run reported error_max_turns`）。envelope は error を主張していないのにプロセスが非 0 で
+終わったなら、終了コードで説明し、子が何を主張したかを併記します（`run exited with code 1
+after reporting success`）。後者を subtype だけで説明すると、失敗した run に対して
+`run reported success` という**自分の status と矛盾する理由文**が出て、呼び出し側が
+再試行すべきかを判断できなくなっていました。
+
 `fh clean --dry-run` は削除対象を一覧します。レコードのクラスごとに
 <!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> 件までで、超えた場合は
 `targetsTruncated` が立ちます。1 件が持つのは id と時刻、evidence では kind と artifact のパスだけで、
