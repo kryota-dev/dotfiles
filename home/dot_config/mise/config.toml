@@ -45,7 +45,7 @@ zoxide = "0.10.0"
 # npm-backed CLIs (no registry entry). agent-browser ships its specialized skills
 # (electron/slack/dogfood/...) via `agent-browser skills get`, so they are loaded at
 # runtime instead of being vendored; only the discovery stub is chezmoi-managed.
-"npm:agent-browser" = "0.35.1"
+"npm:agent-browser" = "0.35.2"
 # agent-browser の `-p ios` プロバイダが実 Mobile Safari を駆動するのに使う。xcrun simctl には
 # tap/swipe/type が無く、入力には WebDriverAgent が要る（`appium driver install xcuitest` が
 # その WDA のビルドと導入を肩代わりする）。`npm i -g` ではなく mise 管理にするのは、mise の
