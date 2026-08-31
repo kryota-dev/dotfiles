@@ -94,6 +94,7 @@ export const COMMAND_FLAGS = Object.freeze({
       resume: { value: ["--resume-key"] },
     },
   }),
+  runs: spec({ value: ["--limit", "--offset", "--run"] }),
   status: spec({ value: ["--limit", "--offset"] }),
   verify: spec({
     value: [

@@ -20,6 +20,7 @@ import { assertKnownFlags } from "./flag-registry.mjs";
 import {
   flagValue,
   nonNegativeIntegerFlag,
+  optionalFlagValue,
   positiveIntegerFlag,
 } from "./flags.mjs";
 import {
@@ -133,6 +134,9 @@ function usage() {
     "          --from-gaps builds the candidate from the approved manifest plus",
     "          everything queued by `fh gaps`",
     "  run     Record a shadow route for a task JSON file",
+    "  runs    Show how recorded adapter runs ended, newest first",
+    `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset,`,
+    "          --run <adapter run id> for a single record",
     "  session Launch or resume a child session through the approval channel:",
     "            fh session launch --worktree <abs> --prompt-file <abs>",
     "            fh session resume --worktree <abs> --prompt-file <abs> --resume-key <id>",
@@ -433,6 +437,48 @@ export function runCli(argumentsList, options = {}) {
           total: page.total,
           returned: page.routes.length,
           hasMore: offset + page.routes.length < page.total,
+        },
+      });
+      return 0;
+    }
+
+    // run の結末を後から引く。`fh status` は route 決定（何を選んだか）しか持たず、
+    // 結末（どう終わったか）は adapter_runs に記録済みなのに読み手が無かった。そのため
+    // 起動時 JSON を流したターミナルのスクロールバックを失うと、子が成功したのか
+    // 失敗したのかを確認する手段が消えていた —— 子を並列で回すほど効く欠落である。
+    //
+    // **起動時 JSON の全項目は返らない。** `resumeKey` / `denials` / `initHealth` /
+    // `evidenceId` は adapter_runs の列に無い（session-command.mjs が emit するだけ）。
+    // ここで空欄として並べると「記録されているが空だった」に見えるので、持っている列だけを返す。
+    if (command === "runs") {
+      const runId = optionalFlagValue(flags, "--run");
+      if (runId !== undefined) {
+        if (flags.includes("--limit") || flags.includes("--offset")) {
+          throw new TypeError(
+            "--run looks up a single record, so it cannot be combined with --limit or --offset",
+          );
+        }
+        const run = store.readAdapterRun(runId);
+        if (run === null) {
+          throw new TypeError(`no adapter run is recorded with id ${runId}`);
+        }
+        emit({ run });
+        return 0;
+      }
+      const limit = Math.min(
+        positiveIntegerFlag(flags, "--limit") ?? DEFAULT_STATUS_LIMIT,
+        MAX_STATUS_LIMIT,
+      );
+      const offset = nonNegativeIntegerFlag(flags, "--offset") ?? 0;
+      const page = store.listAdapterRunPage({ limit, offset });
+      emit({
+        runs: page.runs,
+        page: {
+          limit,
+          offset,
+          total: page.total,
+          returned: page.runs.length,
+          hasMore: offset + page.runs.length < page.total,
         },
       });
       return 0;

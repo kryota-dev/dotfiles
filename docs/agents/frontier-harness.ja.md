@@ -86,6 +86,26 @@ Node の system error は元からパスを含みます。同期・非同期ど�
 {"routes": ["..."], "page": {"limit": 50, "offset": 0, "total": 812, "returned": 50, "hasMore": true}}
 ```
 
+`fh runs` はもう半分の問い —— 「どう終わったか」に答えます。`fh status` が持つのは
+**何を選んだか**（route 決定）だけで、結末は持ちません。結末そのものは status・exit code・
+failure reason・開始/終了時刻として `adapter_runs` に記録済みでしたが、読み手が無かったため、
+起動時 JSON を流したターミナルのスクロールバックを失うと「子が成功したのか失敗したのか」を
+確認する唯一の手段が消えていました。子を並列で回すほど効く欠落です —— どの 1 つの
+スクロールバックにも全部は載っていないので。
+
+```
+fh runs --json                       # 新しい順。既定値と上限は `fh status` と同じ
+fh runs --json --run <adapter run id>
+```
+
+未知の id は空の一覧ではなく引数エラーにします。何も返さないと「まだ 1 件も走っていない」と
+区別が付きません。`--run` は `--limit` / `--offset` を黙って無視せず拒否します。
+
+**起動時 JSON の全項目は返りません。** `resumeKey` / `denials` / `initHealth` / `evidenceId` は
+`fh session` が emit するだけで `adapter_runs` に列がないため、空欄として並べず**そもそも
+載せません**（空欄は「記録されていて中身が空だった」に読めてしまいます）。とくに session id は
+従来どおり起動時に呼び出し側が控える必要があります。
+
 `fh clean --dry-run` は削除対象を一覧します。レコードのクラスごとに
 <!-- FACT:fh-clean-target-preview-limit -->20<!-- /FACT --> 件までで、超えた場合は
 `targetsTruncated` が立ちます。1 件が持つのは id と時刻、evidence では kind と artifact のパスだけで、
