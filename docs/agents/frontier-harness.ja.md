@@ -303,6 +303,18 @@ fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUse
 fh approvals --purge --json                            # wave が終わったら決着済みを捨てる
 ```
 
+`fh approvals` が返すのは要求の配列ではなく envelope である。
+
+```json
+{"approvals": [{"id": "...", "status": "pending", "sessionId": "...", "toolName": "...", "...": "..."}], "skipped": []}
+```
+
+top-level を配列として読むと空の結果ではなく**型エラー**になる。そのエラーを握り潰す監視は、
+動いている間ずっと「待っているものは無い」と報告し続ける。`skipped` はファイルが読めなかった要求の
+隔離先で、1 件の破損が残りを隠さないようにするためのものである。**そこに入った要求は `approvals` に
+現れない**ので、`.approvals[]` だけを見る監視は静かに取りこぼす。`skipped` が非空なら、雑音ではなく
+警告として扱うこと。
+
 通常は wave orchestrator が仲介する（queue を読み、user に問い、回答を書き戻す）が、user が同じ
 コマンドで直接答えることもできる。これは重要で、orchestrator が落ちても pending な承認は決着できる。
 `AskUserQuestion` への回答は提示された選択肢に対して**両側**で検証されるため、打ち間違いや手編集した
