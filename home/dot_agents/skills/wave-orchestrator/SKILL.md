@@ -113,8 +113,10 @@ hook 配線を外す」。** 逆順にすると、記録が空のまま `wave-ev
    `session.child` に限らない —— Phase 1 の tier 割りが `session.child.standard` を要求するなら、
    それも確かめる（Phase 2「capability を tier で選ぶ」）。
    `unavailable` なら別 account へ切り替えたり model 名を推測したりせず、そこで止まる。
-2. **対象リポジトリの capability manifest が、使う capability を残らず承認済みであること。** 未承認なら
-   `fh session` は子を起こさず、gap を queue して exit 2 で終わる。承認は 2 段階の儀式で行う:
+2. **子を走らせる各ワークツリーで、使う capability が残らず承認済みであること。** 承認の単位は
+   リポジトリではなく**ワークツリー**である（main で 1 度通しても linked worktree には効かない。
+   理由と落とし穴は Phase 2「ワークツリーを作るたびに…」を見る）。未承認なら `fh session` は
+   子を起こさず、gap を queue して exit 2 で終わる。承認は 2 段階の儀式で行う:
 
    ```sh
    fh onboard --manifest <manifest.json>                      # レビュー。request id が出る
@@ -321,6 +323,31 @@ stderr はそのまま継承される**（人が覗く窓を保つための意�
 
 **この対応を state file に持たない**（識別子・ワークツリー・PR）。`gh` とワークツリーが真実を持つ。
 **例外は session id 1 点**で、これだけは環境が真実を失う（後述の「中断と再開」）。
+
+**ワークツリーを作るたびに、そのワークツリーで onboard の儀式を通す。** Phase 0 の承認は
+リポジトリ単位ではなく**ワークツリー単位**である。main で 1 度通しても linked worktree からの
+`fh session launch` は exit 2 で止まる（子は 1 本も起きない。fail-closed は正しく効いている）。
+
+```sh
+cd <ワークツリー> && fh onboard --manifest <manifest.json>                      # review。request id が出る
+cd <ワークツリー> && fh onboard --manifest <manifest.json> --approve --request <id>
+```
+
+**`.harness/policy.json` をコピーしても通らない。設計上そうなっている。** 有効な承認はポインタが
+持ち、それは **policy の絶対パスをキーに引かれる**（`session-command.mjs` が `repositoryRoot` を
+`--worktree` そのものに取り、policy は `<そのパス>/.harness/policy.json` に解決される）。
+コピーで通るようにすると、**過去に承認した内容へ policy を差し戻すだけで承認が復活する**——
+それを防ぐための形なので、近道は塞がっているのが正しい。台帳の scope 自体は
+`<gitCommonDir>/frontier-harness` で main と共有されており、**共有されないのはポインタだけ**である。
+
+**承認しても `fh gaps` は掃けない。** queue を消すのは `--from-gaps` の経路だけである
+（`onboard-commands.mjs` の `if (fromGaps) gapQueue.clear(...)`）。`--manifest` で承認しても gap は
+残るので、**「gap が残っている＝未承認」と読まない**。承認の有無は `fh session` が通るかで見る。
+
+**新しいワークツリーで `--from-gaps` を使わない。** 候補は
+`candidateFromGaps(approved.manifest, gaps)` で組まれるが、そのワークツリーの `approved.manifest` は
+（ポインタが無いので）**空**である。gap に載っているものだけの候補になり、**既存の承認済み
+capability が落ちる**。ワークツリーでは `--manifest` に完全な集合を渡す。
 
 **ワークツリーの依存は起動前に orchestrator 側で入れておく。** 子は sandbox 下で走るため、
 依存のインストールを完走できないことがある——[実測] `pnpm install` が、依存パッケージの同梱する
