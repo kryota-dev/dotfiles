@@ -109,9 +109,11 @@ hook 配線を外す」。** 逆順にすると、記録が空のまま `wave-ev
 これは「止まらなくなった」ではなく「**問えなくなった**」で、外形が同じなのに blocking gate が静かに
 消える —— 本リポジトリが最も嫌う沈黙する故障にあたる。よって次を起動前に確かめる。
 
-1. **`fh doctor --json` で `session.child` が `available` であること。** `unavailable` なら
-   別 account へ切り替えたり model 名を推測したりせず、そこで止まる。
-2. **対象リポジトリの capability manifest が `session.child` を承認済みであること。** 未承認なら
+1. **`fh doctor --json` で、この wave が使う capability が `available` であること。** 対象は
+   `session.child` に限らない —— Phase 1 の tier 割りが `session.child.standard` を要求するなら、
+   それも確かめる（Phase 2「capability を tier で選ぶ」）。
+   `unavailable` なら別 account へ切り替えたり model 名を推測したりせず、そこで止まる。
+2. **対象リポジトリの capability manifest が、使う capability を残らず承認済みであること。** 未承認なら
    `fh session` は子を起こさず、gap を queue して exit 2 で終わる。承認は 2 段階の儀式で行う:
 
    ```sh
@@ -185,6 +187,12 @@ quota は profile ごとに独立プールなので「空いている方へ流�
    **contract テーブルを本 skill に再掲しない**（SSOT が drift する）。floor を下回る model で
    起動する必要があるなら、user の明示承認を得たうえでプロンプトに事前承認ブロックを前置する。
    承認なしにこのブロックを付けない —— これは blocking gate を静かに無効化する仕組みだから。
+
+   **tier を決めたら、それに対応する capability 名を各セッションに割り当てる**（Phase 2 で
+   `--capability` に渡す）。`fh` は tier を推し量らない —— capability を名前で受け取り、その
+   `model` / `effort` をそのまま子の argv へ渡すだけなので、**tier に応じた選択は本 skill の責務**である。
+   既定の `session.child` を全 tier に使うと、trivial/small の子まで large 用の model / effort で
+   走り、quota を無駄に食う。対応は Phase 2「capability を tier で選ぶ」を参照。
 8. **プロンプトの用意** — 1 セッション 1 ファイル。プロンプトは**ファイルに書き出して渡す**
    （`fh session --prompt-file`）。argv に本文を載せると `ps` から同一ホストの他プロセスに読まれる。
    `--size` を pin する（tier 判定が session 内で揺れると floor 判定も揺れる）。本文には次を含める:
@@ -259,12 +267,41 @@ CLAUDE_CONFIG_DIR="$HOME/<親の profile ディレクトリ>" fh session launch 
   --prompt-file "<プロンプトの絶対パス>"
 ```
 
-- `--capability` は既定 `session.child`。floor を下回る capability を選ばない。
+- `--capability` は既定 `session.child`。**tier に応じて明示的に選ぶ**（下記）。floor を下回る
+  capability を選ばない。
 - `--sandbox` は既定 `workspace-write`（子は自分のワークツリーへ書く）。
 - `--worktree` は**承認境界そのもの**でもある。manifest・承認 scope・state はこのワークツリーから
   解決されるので、別リポジトリを指せば「そのリポジトリの承認」が問われる（呼び出し元の cwd の
   承認では通らない）。
 - 完走すると JSON が出る。`resumeKey` / `status` / `initHealth` / `denials` を控える。
+
+#### capability を tier で選ぶ
+
+**`fh` は tier を知らない。** `session-command.mjs` は capability を名前で引き（`selectCapability`）、
+その `model` / `effort` を `adapter-claude` がそのまま子の argv（`--model` / `--effort`）へ渡すだけである。
+コメントにも「`model-fitness-check` の contract が決めるものであって routing 判断ではないので、
+capability を名前で指定する」と明記されている。**したがって tier → capability の対応付けは
+呼び出し側＝本 skill の責務**であり、既定任せにすると全 tier が large 用の設定で走る。
+
+| Phase 1 で決めた tier | `--capability` |
+|---|---|
+| trivial / small / standard | `session.child.standard` |
+| large | `session.child`（既定） |
+
+**trivial/small を standard へ切り上げるのは、子が `pr-workflow` を全長走らせるからである。**
+レビューの統合・裁定を必ず通るので、tier に関わらず §4 の 1 行目 floor（Opus @ high）に掛かる。
+切り上げは `pr-workflow` の round-up default と同じ向きの扱いであって、tier 判定の放棄ではない。
+
+**具体的な model / effort をここに書かない。** 値の SSOT は `~/.config/frontier-harness/config.json`
+（capability registry）と `/model-fitness-check` の contract の 2 つで、本 skill はその対応名だけを持つ。
+再掲すると 3 箇所目の drift 源になる。
+
+**新しい capability 名は対象リポジトリの manifest 承認が要る**（Phase 0 の儀式と同じ）。未承認なら
+`fh session` は子を起こさず exit 2 で終わるので、**そこで気付ける**——静かに既定へ落ちることはない。
+
+**`--capability` は floor を下回る選択には使わない。** 上表は contract の各行が要求する水準を
+満たす対応であって、quota を節約するために 1 段下げてよいという意味ではない。tier の判定自体を
+軽く見積もって下の capability を選ぶのは、blocking gate の迂回にあたる。
 
 **`--profile` はこの経路では運べない。** 子は PATH から `claude` を解決し、そのランチャーは
 継承した `CLAUDE_CONFIG_DIR` を保持するので、**子は必ず親と同じ account で走る**。親と異なる

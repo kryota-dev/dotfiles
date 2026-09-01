@@ -50,7 +50,7 @@ shim の撤去は、その条件が満たされたことを確認したうえで
 |------|-------|--------|--------|
 | `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus | high（既定。ゲートは言及しない） | **floor**（blocking） |
 | large tier / PRD 審議 / adversarial verification / 横断設計 | Opus | xhigh | **floor**（blocking） |
-| trivial / small tier のみ | Sonnet | medium | **cost hint**（non-blocking FYI） |
+| trivial / small tier のみ | Sonnet | high | **cost hint**（non-blocking FYI） |
 | Fable-orchestrator セッション（`cldf` 系） | Fable | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
 
 ## capability 順序（monotonic）
@@ -109,7 +109,7 @@ shim の撤去は、その条件が満たされたことを確認したうえで
 
 ### trivial / small 行
 
-この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
 
 FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
