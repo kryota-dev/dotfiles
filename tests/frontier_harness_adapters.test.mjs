@@ -1104,6 +1104,31 @@ test("claude reports a failure even when a terminal result event is present", ()
   assert.equal(failed.resumeKey, "session-3");
 });
 
+test("claude does not explain a non-zero exit with the result subtype", () => {
+  // 実測 2026-08-31: `fh session resume` が status failed / exitCode 1 /
+  // failureReason "run reported success" を返した。理由文が result envelope の subtype を
+  // そのまま載せていたためで、**失敗したのか成功したのかを呼び出し側が判定できなくなる**。
+  // 失敗と判定した根拠（非 0 の終了コード）を理由文の主語に据える。
+  const result = claudeAdapter.interpret({
+    exitCode: 1,
+    stdout: JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      session_id: "session-4",
+    }),
+    stderr: "",
+  });
+  assert.equal(result.outcome, "failed");
+  assert.doesNotMatch(result.failureReason, /^run reported success$/);
+  assert.match(result.failureReason, /exited with code 1/);
+  // 子が何を主張したかも残す。「子は完了したつもりで、非 0 は別の出どころ」が診断の起点になる。
+  assert.match(result.failureReason, /success/);
+  // 結末が失敗でも resume の材料と拒否の記録は落とさない。
+  assert.equal(result.resumeKey, "session-4");
+  assert.deepEqual(result.denials, []);
+});
+
 test("codex reports a failure when the run completed but exited non-zero", () => {
   const result = codexAdapter.interpret({
     exitCode: 1,
