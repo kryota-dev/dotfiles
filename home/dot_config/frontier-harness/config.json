@@ -31,6 +31,16 @@
       "provider": "claude",
       "model": "claude-opus-5",
       "effort": "xhigh"
+    },
+    "session.child.standard": {
+      "provider": "claude",
+      "model": "claude-opus-5",
+      "effort": "high"
+    },
+    "session.child.small": {
+      "provider": "claude",
+      "model": "claude-sonnet-5",
+      "effort": "high"
     }
   },
   "risk": {

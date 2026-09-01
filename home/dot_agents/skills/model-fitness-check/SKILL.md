@@ -50,8 +50,21 @@ shim の撤去は、その条件が満たされたことを確認したうえで
 |------|-------|--------|--------|
 | `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus | high（既定。ゲートは言及しない） | **floor**（blocking） |
 | large tier / PRD 審議 / adversarial verification / 横断設計 | Opus | xhigh | **floor**（blocking） |
-| trivial / small tier のみ | Sonnet | medium | **cost hint**（non-blocking FYI） |
+| trivial / small tier のみ | Sonnet | high | **cost hint**（non-blocking FYI） |
 | Fable-orchestrator セッション（`cldf` 系） | Fable | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
+
+### 行の優先順位（tier が trivial/small のとき）
+
+**1 行目と 3 行目は同時に当たりうる。** `pr-workflow` セッションは tier に関係なく分類 / GATE / 統合を
+行うので 1 行目に該当し、その tier が trivial/small なら 3 行目にも該当する。**このときは 3 行目が勝つ**
+——そう読まないと 3 行目は `pr-workflow` セッションに対して永久に発火せず、行そのものが死ぬ。
+
+したがって 1 行目の floor が実際に効くのは、**tier が standard 以上のセッション**と、tier の概念を持たない
+`sdd` Phase 1–3 / `multi-review` の統合・裁定である。
+
+この優先順位は**機械的な tier →（model, effort）写像が成立するために必要**である。`wave-orchestrator` は
+これに基づいて子セッションの capability を選ぶ（`session.child.small` / `session.child.standard` /
+`session.child`）ので、ここが曖昧なままだと選択が実装者ごとにぶれる。
 
 ## capability 順序（monotonic）
 
@@ -109,7 +122,7 @@ shim の撤去は、その条件が満たされたことを確認したうえで
 
 ### trivial / small 行
 
-この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet @ medium で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
+この行は over-provision パスの本体（現在 tier > 要求 tier の過剰ケース）。**non-blocking の一行 FYI** に留める。「trivial/small tier は Sonnet で十分（現在より下げればコストが浮く）」程度の cost hint を出すだけで、**workflow を止めない**。trivial/small は分類が実行前に終わらないため、ここで停止させると軽い path の摩擦を最大化する。
 
 FYI を出すたびに over-provision カウンタを +1 する（「over-provision 閾値ゲート」参照）。毎回の FYI は non-blocking のまま維持し、blocking は閾値超過時の 1 回に限定する。
 
