@@ -342,6 +342,18 @@ fh approve --request <id> --allow --answers '{"Which colour?":"Red"}'   # AskUse
 fh approvals --purge --json                            # drop decided requests once a wave ends
 ```
 
+`fh approvals` returns an envelope, not an array of requests:
+
+```json
+{"approvals": [{"id": "...", "status": "pending", "sessionId": "...", "toolName": "...", "...": "..."}], "skipped": []}
+```
+
+Reading it as a top-level array is a type error, not an empty result — a monitor that swallows the
+error reports "nothing is waiting" for as long as it runs. `skipped` holds requests whose files
+could not be read, quarantined so that one corrupt file does not hide the rest; **those requests do
+not appear in `approvals`**, so anything polling `.approvals[]` alone misses them silently. Treat a
+non-empty `skipped` as a warning, not as noise.
+
 The wave orchestrator normally relays — it reads the queue, asks the user, and writes the answer
 back — but the user can answer directly with the same commands. That matters: if the
 orchestrator dies, the pending approvals stay decidable. Answers to `AskUserQuestion` are
