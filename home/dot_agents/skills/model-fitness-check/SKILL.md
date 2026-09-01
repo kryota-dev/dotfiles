@@ -53,19 +53,6 @@ shim の撤去は、その条件が満たされたことを確認したうえで
 | trivial / small tier のみ | Sonnet | high | **cost hint**（non-blocking FYI） |
 | Fable-orchestrator セッション（`cldf` 系） | Fable | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
 
-### 行の優先順位（tier が trivial/small のとき）
-
-**1 行目と 3 行目は同時に当たりうる。** `pr-workflow` セッションは tier に関係なく分類 / GATE / 統合を
-行うので 1 行目に該当し、その tier が trivial/small なら 3 行目にも該当する。**このときは 3 行目が勝つ**
-——そう読まないと 3 行目は `pr-workflow` セッションに対して永久に発火せず、行そのものが死ぬ。
-
-したがって 1 行目の floor が実際に効くのは、**tier が standard 以上のセッション**と、tier の概念を持たない
-`sdd` Phase 1–3 / `multi-review` の統合・裁定である。
-
-この優先順位は**機械的な tier →（model, effort）写像が成立するために必要**である。`wave-orchestrator` は
-これに基づいて子セッションの capability を選ぶ（`session.child.small` / `session.child.standard` /
-`session.child`）ので、ここが曖昧なままだと選択が実装者ごとにぶれる。
-
 ## capability 順序（monotonic）
 
 能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**。

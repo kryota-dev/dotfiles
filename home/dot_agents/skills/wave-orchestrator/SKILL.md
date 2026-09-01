@@ -110,8 +110,8 @@ hook 配線を外す」。** 逆順にすると、記録が空のまま `wave-ev
 消える —— 本リポジトリが最も嫌う沈黙する故障にあたる。よって次を起動前に確かめる。
 
 1. **`fh doctor --json` で、この wave が使う capability が `available` であること。** 対象は
-   `session.child` に限らない —— Phase 1 の tier 割りが `session.child.small` /
-   `session.child.standard` を要求するなら、それらも確かめる（Phase 2「capability を tier で選ぶ」）。
+   `session.child` に限らない —— Phase 1 の tier 割りが `session.child.standard` を要求するなら、
+   それも確かめる（Phase 2「capability を tier で選ぶ」）。
    `unavailable` なら別 account へ切り替えたり model 名を推測したりせず、そこで止まる。
 2. **対象リポジトリの capability manifest が、使う capability を残らず承認済みであること。** 未承認なら
    `fh session` は子を起こさず、gap を queue して exit 2 で終わる。承認は 2 段階の儀式で行う:
@@ -285,9 +285,12 @@ capability を名前で指定する」と明記されている。**したがっ�
 
 | Phase 1 で決めた tier | `--capability` |
 |---|---|
-| trivial / small | `session.child.small` |
-| standard | `session.child.standard` |
+| trivial / small / standard | `session.child.standard` |
 | large | `session.child`（既定） |
+
+**trivial/small を standard へ切り上げるのは、子が `pr-workflow` を全長走らせるからである。**
+レビューの統合・裁定を必ず通るので、tier に関わらず §4 の 1 行目 floor（Opus @ high）に掛かる。
+切り上げは `pr-workflow` の round-up default と同じ向きの扱いであって、tier 判定の放棄ではない。
 
 **具体的な model / effort をここに書かない。** 値の SSOT は `~/.config/frontier-harness/config.json`
 （capability registry）と `/model-fitness-check` の contract の 2 つで、本 skill はその対応名だけを持つ。
