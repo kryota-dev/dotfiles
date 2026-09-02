@@ -89,9 +89,50 @@ wtp remove --with-branch --force-branch <name> # 未マージでもブランチ�
 ```
 
 `--with-branch` はこの目玉機能で、ワークツリーと**そのブランチ**を1ステップで
-アトミックに削除し、孤立したブランチを残さない。ブランチは `--force-branch` を
+削除し、孤立したブランチを残さない。ブランチは `--force-branch` を
 付けない限りマージ済みの場合のみ削除される。対象はワークツリーの**ディレクトリ名**
 であり、ブランチパスではない（`wtp list` の出力を参照）。
+
+### squash merge のリポジトリでは `--with-branch` が単独で必ず失敗する
+
+［実測］マージ済みの判定は git の `git branch -d` に依存しており、**ブランチのコミットが
+main の祖先か**を見る。squash merge は新しい単一コミットを作るので祖先にならず、
+**内容が main に入っていても「未マージ」と判定される**。
+
+```console
+$ wtp remove --with-branch <name>
+Cause: Branch is not fully merged
+Original error: ... error: the branch '<name>' is not fully merged
+```
+
+GitHub の squash merge はごく一般的な設定なので、**squash 運用のリポジトリでは
+`--with-branch` が一度も成功しない**。`--force-branch` の併用が前提になる。
+
+### 「アトミック」ではない —— 失敗してもワークツリーは消えている
+
+`wtp remove --help` が動作順を明示している。
+
+> `--with-branch   Also remove the branch **after removing worktree**`
+
+したがってブランチ削除で失敗した時点で、**ワークツリーは既に消えている**。
+
+- ワークツリー: 削除済み
+- ブランチ: 残存
+
+**この状態で同じコマンドを `--force-branch` 付きで再実行しても失敗する**（ワークツリーが
+見つからない）。残ったブランチは `git branch -D <name>` で消すことになる。
+
+### force する前に PR の状態を確かめる
+
+git の merged 判定が使えない以上、**これが実質的な安全網**になる。
+
+```bash
+gh pr view <n> --json state,mergeCommit   # MERGED であることを確認してから
+wtp remove --with-branch --force-branch <name>
+```
+
+`--force-branch` は「マージ済みか」の検査を丸ごと外すので、**外した検査の代わりを置かずに
+使わない**。
 
 ## 移動 — `wtp cd`
 
