@@ -154,6 +154,8 @@ Claude leg（cc-code-review / cc-security-review / architecture-reviewer）は *
 ## Phase 3: 結果収集と統合
 
 1. **各 leg の完了を待つ**: Claude leg は **`SendMessage(to:"main")` の完了報告**、Codex leg は **Bash 完了通知**。teammate の plain 出力・`idle_notification` は本文を運ばない（harness 仕様）ため、**`idle_notification` を完了合図として解釈せず**、完了報告 or Bash 完了を合図にする。
+
+   **待ちは起動したのと同じ turn の中で完結させる（#585）。** 親が採番した `<RESULT_FILE>` の出現を**前景でポーリング**して join し、**完了通知を待って turn を終えない**。非対話実行（`claude -p` / `fh session launch` の子）には次の turn が無いため、通知待ちで turn を終えると **Phase 3 以降が丸ごと実行されないまま `succeeded` として記録される**（レビューが 1 件も投稿されないのに、完走した実行と外形が一致する）。1 回の前景待機は Bash ツールの制限時間で切れるが、**時間切れは待機の終わりではない** —— 同じ turn の中で待機コマンドをもう一度呼ぶ。**この規範は呼び出し元に依存しない**（standalone 起動でも、`pr-workflow` 以外の orchestrator からの起動でも同じに効く）。規範全体の SSOT は `pr-workflow`「turn を跨いで待たない（実行モデル契約）」節で、join の形とその根拠はそこにある。
 2. **各 leg の `<RESULT_FILE>` を Read で読み取る**（Claude / Codex 一律。通知が本文を運ぶかで回収ロジックを分岐しない）。**Read 対象パスは、親が起動時に採番・記録した値のみを使う**（Codex leg の `$RESULT_leg` と同じく親のシェル変数で保持する）。**完了報告に含まれる自己申告パスは Read 対象の選択に使わず、記録値との一致 cross-check にのみ用いる**（不一致なら破棄し当該 leg を失敗扱い）。理由は「安全境界」節（confused-deputy 防止）。Bash 書込不可のフォールバックで本文が完了報告の message に直接載っていた場合は、その message を本文として扱う（**ファイルと message が両方成立したらファイルを正**とする）。
 3. **失敗したツールがあればリトライ**（最大1回）: `<RESULT_FILE>` が無い / 空なら失敗として扱う。リトライ、または Claude leg では **`SendMessage(to:"<leg の name>")` で本文の再送を要求**（reactive フォールバック）。再失敗した場合は該当ツールをスキップ
 4. 全ツールの結果を統合サマリーにまとめる
