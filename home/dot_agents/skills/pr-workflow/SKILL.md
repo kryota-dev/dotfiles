@@ -30,7 +30,7 @@ user-invocable: true
 
 **実行形態で分岐しない。** 「非対話かどうか」で待ち方を変えない。判定に使える識別子はいずれも未文書で、黙って壊れたときに**壊れた側（turn を跨いで待つ側）へ倒れる**。上の不変条件は対話セッションでもそのまま正しい（GATE 1・GATE 3 は `AskUserQuestion` なので例外側に入る）。
 
-→ 根拠: [`references/single-turn.md`](references/single-turn.md)（#585 の実測、環境変数を採らない 3 つの理由、方向性 (a)(b)(c) の判断）
+→ 根拠: [`references/single-turn.md`](references/single-turn.md)（#585 の実測、環境変数を採らない理由と撤回した根拠、方向性 (a)(b)(c) の判断）
 
 ### turn 内で join する形
 
@@ -51,20 +51,26 @@ done
 echo "WAIT-DONE"
 ```
 
-**1 回の前景待機は Bash ツールの制限時間（`timeout` は最大 600000 ms）で切れる。時間切れは待機の終わりではない** —— **同じ turn の中で待機コマンドをもう一度呼ぶ**。総待機上限に達したときは、待機を諦めて次の Phase へ進むのではなく **failure として扱う**（Failure mode 表）。
+**1 回の前景待機は Bash ツールの制限時間（`timeout` は最大 600000 ms）で切れる。時間切れは待機の終わりではない** —— **同じ turn の中で待機コマンドをもう一度呼ぶ**。ただし**無制限に繰り返さない**: 待機コマンドの再呼び出しは **1 Phase あたり最大 6 回**（累計およそ 54 分）とする。この総上限に達したときは、待機を諦めて次の Phase へ進むのではなく **failure として扱う**（Failure mode 表）。
 
 ### 到達点は成果物の側から検査する
 
 **GATE 3 の直前に、どこまで届いたかを PR の外形から確かめる。** 自己申告（「レビューを実施しました」）を根拠にしない。
 
+**件数は投稿者で絞る。** `.reviews | length` は bot・人間・第三者の review をすべて数えるので、Phase 5 の最中に他者が 1 件でも投稿していれば、`/multi-review` 未実行でも 0 にならない（#585 が塞ごうとしている経路がそのまま残る）。数えるのは**自分名義の review** —— Phase 6 が投稿するのはそれだから。
+
 ```bash
-gh pr view <PR番号> --json reviews,statusCheckRollup \
-  --jq '{reviews: (.reviews | length),
-         ci: ([.statusCheckRollup[]? | select(.conclusion != null) | .conclusion] | unique)}'
+ME=$(gh api user --jq .login)
+gh pr view "<PR番号>" --json reviews,statusCheckRollup \
+  | jq --arg me "$ME" '{mine: ([.reviews[] | select(.author.login == $me)] | length),
+                        total: (.reviews | length),
+                        ci: ([.statusCheckRollup[]? | select(.conclusion != null) | .conclusion] | unique)}'
 ```
 
-- **`reviews == 0` なら Phase 6 は実行されていない。GATE 3 へ進まず Phase 6 からやり直す**（Phase 7 も同様に、対応・返信の痕跡が PR に無ければ完了と見なさない）。
-- 検査結果（レビュー件数と CI 結論）を**最終報告の必須項目**として出す。これを欠く報告は完了報告ではない。
+- **`mine == 0` なら Phase 6 は実行されていない。GATE 3 へ進まず Phase 6 からやり直す。**
+- **Phase 7 は「起動したうえで未処理項目が 0 件」を完了条件にする。** 返信・修正の痕跡の有無で判定しない —— 指摘ゼロで痕跡が残らないのは**正常な no-op** であり、痕跡を要求すると指摘の無い PR が GATE 3 へ到達できなくなる。
+- 検査結果（自分名義のレビュー件数と CI 結論）を**最終報告の必須項目**として出す。これを欠く報告は完了報告ではない。
+- `<PR番号>` は `gh pr create` / `gh pr view` から得た整数値だけを渡す（issue 本文などの自由記述から抽出しない。だから引用符も外さない）。
 
 **これは自己検査なので、規範ごと飛ばされたら一緒に飛ぶ。** `fh runs` の `succeeded` / `verification.total` が示すのも「ターンがエラー無く終わったか」「gate を何本通したか」までで、**どの Phase まで届いたかは PR の外形からしか読めない**（#573 の検出との接続点）。同じ検査を独立に当てる起動側の規範は #615 が持つ。
 
@@ -231,7 +237,7 @@ CI green 確認後、`/multi-review` を起動する。
 >
 > **standard/large tier では、`/sdd` が生成した spec ディレクトリを `--spec-context <dir>` として渡すこと（`<dir>` は必ず絶対パス。例 `$(pwd)/.spec-workflow/specs/<name>/`。`.spec-workflow/` は gitignore されるため、相対パスだと reviewer サブエージェントが cwd 依存で解決に失敗しうる）。これにより multi-review が spec-implementation 整合チェック（要件取りこぼし・設計逸脱・未完了タスク）を行い、single-pass 化（#347）で `/sdd` の廃止した内蔵 review から失われた spec 整合観点を補う。performance / test / ux の横断観点 specialist は diff 特性で自動 spawn されるが、`<dir>/requirements.md` に性能要件（NFR）が明示されている場合は `performance-reviewer` を明示要請すること。**
 
-> **バックグラウンドで起こした leg（Codex leg 等）は、起動したのと同じ turn の中で join すること。** leg の完了通知を待って turn を終えない（「turn を跨いで待たない」節の join の形に従う）。
+> **バックグラウンドで起こした leg は、起動したのと同じ turn の中で join すること**（`/multi-review` の `references/execution-protocol.md` Phase 3 が同じ規範を持つ。ここはその再確認であって、規範の SSOT ではない）。
 
 これにより `/multi-review` のレビュー結果（body サマリー + インラインコメント）が GitHub PR に投稿された状態で Phase 7 へ進む。
 
@@ -288,7 +294,7 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 | 3 | GATE 1（ready for review?） | pr-workflow GATE | **外向き操作の確認** | **常に user 承認**（外向きだが不可逆ではない） |
 | 4 | GATE 2（multi-review 完了後） | pr-workflow GATE | 進行チェックポイント | **auto-proceed**（`--strict` 時のみ承認待ち） |
 | 5 | 人間レビュアーへの返信内容承認 | `/review-resolve-loop` Phase 4-1b | **不可逆・外向きの最終確認** | **残す** |
-| 6 | GATE 3（Phase 7 完了後 = merge-ready handoff） | pr-workflow GATE | **不可逆操作の最終確認** | **残す**（merge は常に user） |
+| 6 | GATE 3（Phase 7 完了後 = merge-ready handoff。前提条件は GATE 表を参照） | pr-workflow GATE | **不可逆操作の最終確認** | **残す**（merge は常に user） |
 
 > `/multi-review` の投稿方法 3 択は、pr-workflow からの委譲プロンプトでオーバーライドするため承認点として発生しない。`/review-resolve-loop` の対応方針一括承認は、真の人間レビュアーがいるラウンドのみ発生する（Phase 7 オーバーライド指示）。`standard`/`large` では commit + PR 作成を `/sdd` が自律実行するため、それらの確認はこの path では発生しない。
 
@@ -311,8 +317,8 @@ pr-workflow は GATE を追加する一方で委譲先の確認を必要最小�
 | Phase 6 multi-review CRITICAL | Phase 7 の `/review-resolve-loop` で autonomous 修正 |
 | Phase 6 adversarial で重大反証（large） | 内部 Fix cycle、収束不能 → **user エスカレート**（対話 skill を自動起動しない） |
 | Phase 7 merge conflict | 解消（general-purpose 委任可）、解決不能 → user |
-| Phase 5〜7 の待機が総上限に達した | **turn を終えて通知を待たない**。打ち切りは failure として扱い、到達点検査の結果（レビュー件数・CI 結論）を添えて user へエスカレート |
-| 到達点検査で `reviews == 0` | GATE 3 へ進まず Phase 6 からやり直す。再実行しても 0 のままなら failure として user へ |
+| Phase 5〜7 の待機が総上限（1 Phase あたり 6 回）に達した | **turn を終えて通知を待たない**。打ち切りは failure として扱い、到達点検査の結果（自分名義のレビュー件数・CI 結論）を添えて user へエスカレート |
+| 到達点検査で `mine == 0` | **GATE 3 へ進まず Phase 6 からやり直す**。再実行しても 0 のままなら failure として user へ |
 | GATE 3 で user reject | pr-workflow 停止（merge しない） |
 
 ## 注意
