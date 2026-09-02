@@ -837,6 +837,22 @@ how the adapter was launched (conversation IDs among them), while `route_decisio
 the resolved capability, model and effort — so one correlation key is the whole addition. Copying
 the capability into a separate table would instead create two records that can disagree.
 
+The index is **partial and covering**. Since `route_decisions` is never pruned, its index would
+otherwise grow without bound — but the only rows that can ever be an inheritance source are those
+that have a `session_id` *and* a resolved `capability` (routes from anything other than
+`fh session`, and escalation routes stopped at the approval boundary, are neither). Measured:
+SQLite recognises that `session_id = ?` implies `session_id IS NOT NULL` and picks this index as
+`SEARCH ... USING COVERING INDEX`. If it ever stopped doing so the lookup would quietly degrade
+into a full scan, so the `EXPLAIN QUERY PLAN` itself is pinned by a test.
+
+**This migration raises the version of the shared state database.** The state lives in the Git
+common directory and every worktree shares one copy. Once the version is raised, an **older `fh`
+can no longer open it** (`state database schema version 4 is newer than supported version 3`) —
+the same intentional fail-closed behaviour as the v2 and v3 migrations. So do not run
+`chezmoi apply` while sessions built against the older deployment are still running. After the
+apply every `fh` invocation is on the new version, so the mixed window is the apply itself.
+
+
 ## Provider adapters
 
 The three CLIs are not interchangeable. Their non-interactive capabilities are asymmetric, so each

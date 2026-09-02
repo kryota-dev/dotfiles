@@ -120,6 +120,13 @@ export function createStateStore(databasePath) {
   // `capability IS NOT NULL` で escalation route を外す。承認境界に阻まれた route も
   // 同じ session id で残るが、そちらは capability を持たない（何で走るはずだったかは
   // 記録していない）ので、継承元にはならない。
+  //
+  // **同一 `created_at` での順序は時系列ではない。** `created_at` はミリ秒精度の ISO 文字列で、
+  // `id` は `newId()` が作るランダム UUID なので、同一ミリ秒に並んだ 2 行の `id DESC` は
+  // 決定的ではあっても「後に書いたほう」を意味しない。これを許容するのは、同じ session id に
+  // 対する route の書き込みが `fh session` の 1 プロセスにつき 1 回で、同一ミリ秒に 2 回並ぶには
+  // 同一セッションを同時に二重起動する必要があるためである（その時点で継承以前に壊れている）。
+  // 単調な列を足して厳密化するより、条件を明示して据え置くほうが schema を小さく保てる。
   const selectSessionCapability = database.prepare(`
     SELECT id, capability, created_at
     FROM route_decisions

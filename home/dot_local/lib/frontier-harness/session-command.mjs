@@ -373,6 +373,10 @@ export async function runSessionCommand({
       `${PRODUCER}: capability ${capabilityName} (${capabilitySource})\n`,
     );
 
+    // **このファイルで唯一、副作用の後ろで行う検証。** 検査したい provider は解決後の
+    // capability が決めるので、継承を引くために state を開いたあとでなければ確定しない。
+    // よって PATH 検査だけは state のオープン（必要なら migration の書き込み）より後になる。
+    // 意図的な例外であることをここに残す —— 他の検証を後ろへ動かしてよい根拠にはしない。
     const executable = commandPaths[capability.provider];
     if (!executable) {
       throw new Error(

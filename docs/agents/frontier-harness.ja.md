@@ -744,6 +744,21 @@ capability gate が誰も尋ねていない問いに答えることになりま�
 方針があり、`route_decisions` は既に解決後の capability / model / effort を持つので、足すのは相関キー
 1 本で済みます（capability の写しを別テーブルに作ると、2 つの記録が食い違いうる経路ができます）。
 
+索引は **partial かつ covering** にしています。`route_decisions` は prune されない以上、索引も
+消えずに増え続けますが、継承元になりうるのは「`session_id` を持ち、かつ `capability` が解決済み」の
+行だけです（`fh session` 以外の route も、承認境界で止まった escalation route も対象外）。
+［実測］SQLite は `session_id = ?` が `session_id IS NOT NULL` を含意すると認識し、この索引を
+`SEARCH ... USING COVERING INDEX` で選びます。索引が使われなくなれば lookup は静かに全走査へ
+退化するので、`EXPLAIN QUERY PLAN` そのものをテストで固定しています。
+
+**この migration は共有 state DB の版数を上げます。** state は Git common directory に置かれ、
+すべてのワークツリーが 1 つを共有します。版数が上がった DB は、`PRAGMA user_version` のガードに
+より**古い `fh` からは開けなくなります**（`state database schema version 4 is newer than
+supported version 3`）。これは v2・v3 のときと同じ、意図された fail-closed の挙動です。したがって
+**`chezmoi apply` を跨いで走っているセッションがある状態で適用しない**でください。適用後は
+すべての `fh` 呼び出しが新しい版になるため、混在するのは apply の瞬間だけです。
+
+
 ## provider adapter
 
 3 つの CLI は互換ではありません。非対話モードの能力が非対称なので、1 つの汎用ランチャーを

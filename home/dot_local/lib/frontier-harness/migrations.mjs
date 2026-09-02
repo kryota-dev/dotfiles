@@ -238,11 +238,21 @@ const VERIFICATION_PROVENANCE_DDL = `
 //
 // session id は会話内容ではない（`requireSafeArgumentValue` を通した識別子であり、
 // prompt 本文はここにも tasks にも流れない）。
+// index は **partial かつ covering** にする。`route_decisions` は prune されない（それが保存先に
+// 選んだ理由でもある）ので、index は消えずに増え続ける。一方、継承元になりうる行は
+// 「session_id を持ち、かつ capability が解決済み」のものだけで、`fh session` 以外の route
+// （session_id が NULL）も escalation route（capability が NULL）も対象外である。
+//
+// ［実測］`WHERE session_id = ? AND capability IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1`
+// に対し、SQLite はこの partial index の述語を含意と認識して `SEARCH ... USING COVERING INDEX`
+// を選ぶ（`session_id = ?` が `session_id IS NOT NULL` を含意し、`capability IS NOT NULL` は
+// 述語そのもの）。covering なので lookup でテーブル本体を引かない。
 const SESSION_ROUTE_DDL = `
   ALTER TABLE route_decisions ADD COLUMN session_id TEXT;
 
-  CREATE INDEX IF NOT EXISTS route_decisions_session_id_idx
-    ON route_decisions (session_id, created_at, id);
+  CREATE INDEX IF NOT EXISTS route_decisions_session_capability_latest_idx
+    ON route_decisions (session_id, created_at DESC, id DESC, capability)
+    WHERE session_id IS NOT NULL AND capability IS NOT NULL;
 `;
 
 // 配列の添字 + 1 がそのまま user_version になる。末尾に足すだけで版が上がるため、
