@@ -418,12 +418,29 @@ fh approvals --json | jq -r '.approvals[] | "\(.id) \(.sessionId) \(.toolName)"'
 tmux 経路の検知ガードを不要としたのは**状態の推定について**であって、**Leader 側のポーリングは
 依然として検知器であり、壊れる**。
 
-- **arm 直後に positive control を通す。** `--all` は決着済みも含むので、**既知の件数以上が
-  返ることを確かめる**。0 なら監視を始めず、その場でエラーにする。
+- **arm 直後に positive control を通す。測るのは「envelope を舐められるか」であって
+  「記録が何件あるか」ではない。**
   ```sh
-  n=$(fh approvals --all --json | jq -r '.approvals[].id' | wc -l)
-  [ "$n" -ge 1 ] || { echo "承認検知が自己診断に失敗した。監視を開始しない" >&2; exit 1; }
+  probe=$(fh approvals --all --json 2>&1) \
+    || { echo "SELFCHECK_FAIL: fh approvals が非 0 終了: $probe" >&2; exit 3; }
+  shape=$(printf '%s' "$probe" \
+    | jq -r 'if (.approvals|type)=="array" and (.skipped|type)=="array" then "OK" else "BAD" end' 2>&1) \
+    || { echo "SELFCHECK_FAIL: jq が envelope を舐められない: $shape" >&2; exit 3; }
+  [ "$shape" = "OK" ] || { echo "SELFCHECK_FAIL: envelope の形が違う: $probe" >&2; exit 3; }
   ```
+  **件数で測らない。** 件数ベースの検査（「`--all` が 1 件以上返ること」）は Phase 4 の
+  `fh approvals --purge` と正面から矛盾する —— [実測] **後始末を規定どおり行った直後の新しい wave
+  では `--all` が `{"approvals":[],"skipped":[]}` を返すので必ず落ちる**。しかも落ち方が検知器の
+  故障と同じ表示になるので、正常なのに「`fh` が壊れた」と誤診させる。
+  測りたいのは jq が envelope を舐められるかだけで、**台帳に記録があることは要件ではない**
+  （実際に起きた事故も、記録の不在ではなく型エラーだった）。
+  件数ベースが使えるのは **wave の途中で検知器を組み直すときのように、既知の件数を置ける場合**に
+  限られる。
+  **失敗の種類を別の出口に分ける。** 上の形が `||` を 3 段に割っているのは、
+  「`fh` が落ちた」「jq が舐められない」「形が違う」を別々のメッセージにするためである。
+  `[ "$n" -ge 1 ]` のような単一の判定は、`$n` が空文字（jq が落ちた場合）だと zsh で引数エラーになり、
+  **「壊れた」と「0 件」が同じ exit に落ちる** —— 直後に書いてある「検知器のエラーを握り潰さない」を
+  検査自身が破ることになる。
 - **検知器のエラーを握り潰さない。** `2>/dev/null` と `|| true` の併用は、**パース失敗を
   「イベント無し」に写像する**——安全原則 4（検知器が自己診断に失敗したら黙って進まない）の
   具体的な破り方である。抑止したいなら、**エラーと 0 件を別の値で表す**こと。
