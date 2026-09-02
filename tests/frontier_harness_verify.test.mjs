@@ -205,7 +205,7 @@ test("a command that a shell would reinterpret is refused at execution time", ()
   }
 });
 
-test("a make target becomes argv without a shell, but make options never do", () => {
+test("a permitted make target becomes argv, and every unapprovable make form is refused", () => {
   // Makefile 駆動のリポジトリで `--gate` を宣言できるようにした（#617）。実行側は承認側と
   // 同じ検査を通すので、承認できる形の変更に自動で追随する。
   assert.deepEqual(checkCommandArgv("make lint"), ["make", "lint"]);
