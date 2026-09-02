@@ -1686,14 +1686,15 @@ print(" ".join(bad))
 
 # ---------------------------------------------------------------------------
 # #610 回帰: 規範を SKILL.md に残し、根拠を references/ へ分離する
+#
+# 分割の失敗様式は「規範が消える」ことではなく「根拠へ辿れなくなる」こと。導線が切れると
+# 規範だけが残って理由が失われ、次の改訂で静かに緩められる。以下は multi-review / sdd の
+# 同型テスト（tests/files.bats）に揃えたうえで、grep -qF の単発検査では捕まえられない
+# 退行（節内導線の消失・条件の削除・legacy 本文の改変・根拠の部分削除・再肥大）を塞ぐ。
 # ---------------------------------------------------------------------------
 
 @test "#610 回帰: SKILL.md が規範のレジストリで、根拠が references から辿れる" {
-  # 分割の失敗様式は 2 つある。(a) reference ファイルが落ちる (b) SKILL.md が「読め」と
-  # 言わなくなる。どちらも規範だけが残って理由が失われ、次の改訂で静かに緩められる
-  # （#610 完了条件「根拠へ辿り着ける導線を残す」）。multi-review / sdd の同型テスト
-  # （tests/files.bats）に揃える。
-  grep -qF 'この SKILL.md の責務（規範のレジストリ）' "$SKILL_MD"
+  grep -qF 'この SKILL.md の責務（norm registry）' "$SKILL_MD"
 
   local ref
   for ref in routes-and-safety launch approval-channel liveness verification resume-and-teardown; do
@@ -1711,34 +1712,117 @@ print(" ".join(bad))
       false
     }
   done
+}
 
-  # 各 reference の代表的な根拠 1 件ずつ。存在検査とリンク検査だけでは、中身を空にしても
-  # 通ってしまう（根拠の消失は #610 が最も避けたい退行）。
-  grep -qF 'merge gate を経ずに無断マージした' "${REFS}/routes-and-safety.md"
-  grep -qF '.gitmodules' "${REFS}/launch.md"
-  grep -qF '27 分放置' "${REFS}/approval-channel.md"
-  grep -qF '43 件' "${REFS}/liveness.md"
-  grep -qF 'レビュー 6 件対応済み' "${REFS}/verification.md"
-  grep -qF '14 時間走り' "${REFS}/resume-and-teardown.md"
+@test "#610 回帰: 各規範の直後に根拠への導線がある（参照表だけでは満たせない）" {
+  # AC-003。責務宣言の参照表が 6 ファイルすべてを列挙するため、SKILL.md 全体への grep では
+  # 「各節の → 根拠: 導線をすべて消す」退行を検出できない（それでも参照表だけで通ってしまう）。
+  # 節見出しで区切り、規範がある節の中にその節の根拠へのリンクがあることを見る。
+  run python3 - "$SKILL_MD" <<'PY'
+import re, sys
+
+PAIRS = [
+    ("経路は 2 つある", "routes-and-safety"),
+    ("安全原則", "routes-and-safety"),
+    ("承認チャネルの前提", "launch"),
+    ("tmux セッションの用意", "launch"),
+    ("起動する", "launch"),
+    ("capability を tier で選ぶ", "launch"),
+    ("起動は、監視を arm するまでが 1 手順である", "launch"),
+    ("読む ——", "approval-channel"),
+    ("検知器が壊れていないことを", "approval-channel"),
+    ("答える", "approval-channel"),
+    ("沈黙ストールは別経路で見張る", "liveness"),
+    ("代理応答の判定", "verification"),
+    ("成果物の検証", "verification"),
+    ("中断と再開", "resume-and-teardown"),
+    ("Phase 4: 後始末", "resume-and-teardown"),
+]
+
+src = open(sys.argv[1], encoding="utf-8").read()
+parts = re.split(r"^(#{2,4} .*)$", src, flags=re.M)
+sections = [(parts[i], parts[i + 1]) for i in range(1, len(parts), 2)]
+
+for head_sub, ref in PAIRS:
+    bodies = [b for h, b in sections if head_sub in h]
+    if not bodies:
+        print("section not found: " + head_sub)
+    elif not any(("references/%s.md" % ref) in b for b in bodies):
+        print("%s の節に references/%s.md への導線が無い" % (head_sub, ref))
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "#610 回帰: references は条件付き必読で、再肥大の抑止が書かれている" {
   # 無条件必読にすると常時ロードが復活して分割の意味（wave ごとの約 3 万トークン）が消え、
-  # 逆に導線が「参考」止まりだと規範を疑ったときに根拠へ辿り着けない。条件を明示することで
-  # 両方を満たす。
+  # 逆に導線が「参考」止まりだと規範を疑ったときに根拠へ辿り着けない。4 条件を個別に見る
+  # ——1 条件だけの検査では残り 3 つを削除しても通ってしまう（AC-006）。
   grep -qF '平常運転では読まなくてよい' "$SKILL_MD"
   grep -qF '規範の妥当性を疑ったとき' "$SKILL_MD"
+  grep -qF '規範を書き換える・削るとき' "$SKILL_MD"
+  grep -qF '規範が想定していない状況に出たとき' "$SKILL_MD"
+  grep -qF '監視・生存判定・self-check のコマンド形を組み直すとき' "$SKILL_MD"
   grep -qF 'を Read すること' "$SKILL_MD"
   # 7 日で 4.8 倍に膨らんだ経緯への構造的対処。この 1 行が無いと、次の事故のたびに実測が
   # 本体へ書き足されて同じ肥大を繰り返す。
   grep -qF '新しい実測を書き足すときは' "$SKILL_MD"
+
+  # 「平常運転では読まなくてよい」を残したまま無条件の必読指示を前に足す退行を塞ぐ。
+  run python3 - "$SKILL_MD" <<'PY'
+import re, sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^## この SKILL\.md の責務.*?(?=^## )", src, re.S | re.M)
+if not m:
+    print("責務宣言節が見つからない")
+    raise SystemExit
+sec = m.group(0)
+anchor = sec.find("平常運転では読まなくてよい")
+if anchor < 0:
+    print("条件付き必読の前置きが節内に無い")
+else:
+    for hit in re.finditer(r"Read (?:すること|する)", sec):
+        if hit.start() < anchor:
+            print("無条件の必読指示が条件節より前にある（offset %d）" % hit.start())
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
-@test "#610 回帰: legacy 節は SKILL.md に残っている（#539 の撤去と衝突させない）" {
-  # 縮小の誘惑が最も大きいのは legacy 節だが、撤去条件を持つのは #539 である。references/ へ
-  # 移すと撤去 PR と全面衝突するので、本体に置いたままにする。
-  grep -qF '### legacy: 検知（tmux 経路）' "$SKILL_MD"
-  grep -qF '### legacy: 送信（tmux 経路）' "$SKILL_MD"
+@test "#610 回帰: legacy 節が base からバイト単位で無変更である" {
+  # AC-004。見出しの存在だけでは本文の削除・改変を検出できない（見出しを残して中身を
+  # 空にしても通る）。両節を境界見出しで抽出して SHA-256 を pin する。
+  # #539 が撤去するときはこのテストが落ちるのが正しい挙動で、撤去 PR が意図的に外す。
+  run python3 - "$SKILL_MD" <<'PY'
+import hashlib
+import sys
+
+EXPECTED = [
+    ("### legacy: 検知（tmux 経路）", "### 代理応答の判定（両経路に共通）",
+     "519b61cd3635d53fb084c9826e86ab2823b5207940b41d4746c968c1707831e2"),
+    ("### legacy: 送信（tmux 経路）", "### 成果物の検証",
+     "9e26209b9543b1d1e8f6a2700b6c4d3c797d21f46c05b442ff5ef6af0d00e649"),
+]
+
+src = open(sys.argv[1], encoding="utf-8").read()
+for start, stop, want in EXPECTED:
+    if start not in src:
+        print("legacy 節が無い: " + start)
+        continue
+    i = src.index(start)
+    j = src.find(stop, i)
+    if j < 0:
+        print("終端見出しが無い: " + stop)
+        continue
+    got = hashlib.sha256(src[i:j].encode()).hexdigest()
+    if got != want:
+        print("legacy 節が改変された: %s\n  expected %s\n  actual   %s" % (start, want, got))
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # references/ へ移すと #539 の撤去 PR と全面衝突する。漏れていないことを見る。
   local ref
   for ref in "${REFS}"/*.md; do
     run grep -cE '^### legacy: (検知|送信)' "$ref"
@@ -1749,6 +1833,49 @@ print(" ".join(bad))
   done
 }
 
+@test "#610 回帰: 移設した根拠が references から消えていない" {
+  # AC-002。代表 1 件/file の grep だけだと、その 1 行を残して他の根拠を削除・要約しても
+  # 通る。(a) 「実測」の出現数に下限を置き（行数ではなく occurrence なので、段落を組み直して
+  # 改行位置が変わっても揺れない）、(b) 言い換えても値が変わらない識別子・実測値を pin する。
+  run python3 - "$REFS" <<'PY'
+import os
+import sys
+
+FLOORS = {
+    "approval-channel": 6,
+    "launch": 5,
+    "liveness": 10,
+    "resume-and-teardown": 6,
+    "routes-and-safety": 3,
+    "verification": 6,
+}
+TOKENS = {
+    "routes-and-safety": ["merge gate を経ずに無断マージした", "question_ui_open"],
+    "launch": [".gitmodules", "selectCapability", "gapQueue.clear", "candidateFromGaps"],
+    "approval-channel": ["27 分放置", "2026-08-30"],
+    "liveness": ["43 件", "7 本に見えた", "wave 4 本のうち 3 本"],
+    "verification": ["レビュー 6 件対応済み", "committer date"],
+    "resume-and-teardown": ["14 時間走り", "2026-09-02", "#526 §1.3"],
+}
+
+refs = sys.argv[1]
+for name, floor in sorted(FLOORS.items()):
+    path = os.path.join(refs, name + ".md")
+    if not os.path.exists(path):
+        print("missing: " + path)
+        continue
+    text = open(path, encoding="utf-8").read()
+    found = text.count("実測")
+    if found < floor:
+        print("%s.md の実測が %d 件へ減った（下限 %d）" % (name, found, floor))
+    for token in TOKENS[name]:
+        if token not in text:
+            print("%s.md から根拠が消えた: %s" % (name, token))
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "#610 回帰: 2 信号検査が rebase による fail-open を警告している" {
   # committedDate は committer date であり、git rebase は replay した全コミットにこれを
   # 打ち直す。信号 2 が常に偽になって 2 信号の AND が崩れ、判定は「対応した」側
@@ -1756,8 +1883,48 @@ print(" ".join(bad))
   grep -qF 'rebase 済みの PR では信号 2 を根拠に使わない' "$SKILL_MD"
   grep -qF 'fail-open' "$SKILL_MD"
   grep -qF 'committer date' "${REFS}/verification.md"
-  # 代替判定（--gate / verification.total）は #615 の領分。#617 待ちでブロック中なので、
-  # ここで先回りして書かない（書くと 2 箇所目の SSOT になる）。
-  run grep -c 'verification\.total' "$SKILL_MD"
-  [ "$output" -eq 0 ]
+
+  # 判定不能なら user へ上げる（fail-closed 側の受け皿）が、同じ節の中にあること。
+  # 散文は行幅で折り返されるので、比較前に空白を畳む（改行位置の変更で落とさない）。
+  run python3 - "$SKILL_MD" <<'PY'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^### 成果物の検証$.*?(?=^#{2,3} )", src, re.S | re.M)
+if not m:
+    print("成果物の検証 節が見つからない")
+elif "判定不能としてuserへ上げる" not in re.sub(r"\s+", "", m.group(0)):
+    print("判定不能時の user への escalation が節内に無い")
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # 代替判定（--gate / verification.total）は #615 の領分。#617 待ちでブロック中なので
+  # 先回りして書かない（書くと 2 箇所目の SSOT になる）。references/ 側も含めて見る。
+  local f
+  for f in "$SKILL_MD" "${REFS}"/*.md; do
+    run grep -c -e '--gate' -e 'verification\.total' "$f"
+    [ "$output" -eq 0 ] || {
+      echo "#615 の領分の記述が $(basename "$f") にある"
+      false
+    }
+  done
+}
+
+@test "#610 回帰: SKILL.md が byte budget を超えていない" {
+  # AC-001。文字列 assertion だけでは、根拠が本体へ再流入しても既存の文言が残っていれば
+  # 通ってしまう。このファイルは 7 日で 4.8 倍に膨らんだ実績があり、再肥大が最も起きやすい
+  # 退行なので、上限だけを課す。
+  #
+  # 分割直後は 84,499 B。予算はそこに約 4% の余白を足した値で、規範の追加で超えたときは
+  # 「その記述は規範か、references/ へ移すべき根拠か」を確認したうえで意図的に更新する。
+  # #539 が legacy 節（32,778 B）を撤去すれば大きく下回るので、下限は課さない。
+  local size
+  size=$(wc -c < "$SKILL_MD")
+  [ "$size" -le 88000 ] || {
+    echo "SKILL.md が byte budget を超えた: ${size} B > 88000 B"
+    echo "増分が根拠なら references/ へ移す。規範なら予算を意図的に更新すること。"
+    false
+  }
 }
