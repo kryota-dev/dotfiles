@@ -21,8 +21,10 @@ import {
 } from "../home/dot_local/lib/frontier-harness/check-runner.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import {
+  GATE_ENVIRONMENT_ALLOWLIST,
   MAX_SESSION_GATES,
   combineOutcome,
+  gateEnvironment,
   gateTimeoutMs,
   gateVerdict,
   parseGateDeclaration,
@@ -1740,5 +1742,98 @@ test("resume declares and runs its gates the same way launch does", async (conte
   assert.deepEqual(
     store.listVerificationResultsForAdapterRun(run.id).map((result) => result.status),
     ["passed"],
+  );
+});
+
+test("the gate check does not inherit the caller's credentials", async (context) => {
+  // 呼び出し元 `fh` の環境には token 類が載りうる。gate は sandbox の外で走るので、
+  // それをそのまま渡すと「子は outbound を禁じられているのに、gate 経由で持ち出せる」
+  // 経路になる。許可リストに無い名前が 1 つも渡らないことを実際の spawn 引数で確かめる。
+  const gateSpawnFake = createGateSpawn([0]);
+  const prepared = await preparedDirectory(context, { commands: ["npm run test"] });
+  const bin = fakeBinDirectory(prepared.directory);
+  await launch({
+    ...prepared,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    gateSpawnFake,
+    extraFlags: ["--gate", "npm run test"],
+    environment: {
+      ...process.env,
+      PATH: bin,
+      GITHUB_TOKEN: PROMPT_BODY,
+      ANTHROPIC_API_KEY: PROMPT_BODY,
+      SOME_VENDOR_SECRET: PROMPT_BODY,
+    },
+  });
+
+  const passed = gateSpawnFake.calls[0].options.env;
+  assert.equal(passed.GITHUB_TOKEN, undefined);
+  assert.equal(passed.ANTHROPIC_API_KEY, undefined);
+  assert.equal(passed.SOME_VENDOR_SECRET, undefined);
+  // 値そのものが 1 つも漏れていないこと（名前だけを列挙して満足しない）。
+  assert.equal(Object.values(passed).includes(PROMPT_BODY), false);
+  // チェックを走らせるのに要るものは残る。
+  assert.equal(passed.PATH, bin);
+  assert.deepEqual(
+    Object.keys(passed).filter((name) => !GATE_ENVIRONMENT_ALLOWLIST.includes(name)),
+    [],
+  );
+});
+
+test("the allowlist keeps what a task runner needs to start at all", () => {
+  // PATH が落ちると `resolveCheckExecutable` が実行ファイルを解決できず、
+  // すべての gate が errored になる（機能が丸ごと死ぬ）。HOME はツールチェインの
+  // 既定パスの起点なので、両方が許可リストにあることを固定する。
+  for (const name of ["PATH", "HOME", "TMPDIR"]) {
+    assert.ok(GATE_ENVIRONMENT_ALLOWLIST.includes(name), `${name} must stay`);
+  }
+  const reduced = gateEnvironment({ PATH: "/bin", GITHUB_TOKEN: "t", HOME: "/h" });
+  assert.deepEqual({ ...reduced }, { PATH: "/bin", HOME: "/h" });
+});
+
+test("fh runs accounts for every verification status, including skipped", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateSpawnFake: createGateSpawn([0]),
+  });
+
+  // `skipped` を書く producer はまだ無いが、列としては存在する。内訳が `total` を
+  // 説明しなくなる状態（合計が合わないのに読み手が気づけない）を作らないため、
+  // 4 値すべてが数えられていることを、行を直接足して確かめる。
+  const store = createStateStore(statePath);
+  const [run] = store.listAdapterRuns();
+  store.recordVerificationResult({
+    taskId: run.taskId,
+    adapterRunId: run.id,
+    checkKind: "lint",
+    status: "skipped",
+    command: "npm run lint",
+  });
+  store.close();
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 2,
+    passed: 1,
+    failed: 0,
+    errored: 0,
+    skipped: 1,
+  });
+  // 内訳の合計が total を説明すること。これが崩れると読み手は差の存在に気づけない。
+  const { total, ...breakdown } = runs[0].verification;
+  assert.equal(
+    Object.values(breakdown).reduce((sum, count) => sum + count, 0),
+    total,
   );
 });

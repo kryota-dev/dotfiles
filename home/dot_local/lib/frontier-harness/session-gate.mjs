@@ -66,6 +66,56 @@ export function assertGateCount(gates) {
   return gates;
 }
 
+// gate チェックへ渡す環境変数の許可リスト。
+//
+// **なぜ gate だけ間引くのか。** チェックを sandbox 無しで走らせ、呼び出し元の環境をそのまま
+// 継承するのは `check-runner.mjs` が以前から持つ性質で、`fh verify` も同じである。しかし
+// `fh verify` は人が明示的に打つのに対し、gate は**子セッションが成功した直後に harness が
+// 無人で起こす**。承認済みの `npm run test` が実行するのはその時点の `package.json` であり、
+// それは直前まで子が書き込んでいたレビュー前のツリーの一部である（この不確かさ自体は
+// docs の「What "approved" actually authorizes」が既に述べている）。到達経路を新設した以上、
+// 少なくとも「呼び出し元の資格情報がそのまま渡る」半分はここで閉じる。
+//
+// **許可リストにするのは fail-closed のため。** 禁止リストは新しい名前の秘密を取りこぼす。
+// 足りない変数があればチェックは失敗する（`failed` / `errored` として記録される）ので、
+// 黙って通ることはない —— 気づける形で壊れるほうを選ぶ。
+//
+// `fh verify` の環境は変えていない。あちらの到達経路は本 PR が増やしたものではなく、
+// 同じ変更を混ぜると「レビューされた変更」と「ついでに変えた挙動」が分離できなくなる。
+export const GATE_ENVIRONMENT_ALLOWLIST = Object.freeze([
+  // 実行ファイルの解決（`resolveCheckExecutable` が読む）と、ツールチェインの既定パス。
+  "PATH",
+  "HOME",
+  // 一時ディレクトリ。テストランナーはほぼ例外なくここを使う。
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  // ロケールと時刻。ここが欠けると出力や日付比較が環境依存で揺れる。
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  // 一部のランナーは端末種別が無いと色付けの判定で落ちる。
+  "TERM",
+  // git は user.name/email をここから引く経路がある（HOME だけでは足りない構成がある）。
+  "USER",
+  "LOGNAME",
+  // XDG を設定している環境では、ツールのキャッシュ・設定がここに割れている。
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+]);
+
+export function gateEnvironment(environment) {
+  const reduced = Object.create(null);
+  for (const name of GATE_ENVIRONMENT_ALLOWLIST) {
+    const value = environment[name];
+    if (value !== undefined) reduced[name] = value;
+  }
+  return reduced;
+}
+
 // 宣言された gate を順に走らせる。
 //
 // **直列に走らせる。** 同じ作業ツリーで `npm run test` と `npm run lint` を同時に起こすと、
@@ -80,12 +130,15 @@ export async function runSessionGates({
   timeoutMs,
   terminationGraceMs,
 }) {
+  // 呼び出し元の環境をそのまま渡さない（`GATE_ENVIRONMENT_ALLOWLIST` 参照）。
+  // 間引きは 1 回だけ行い、全 gate が同じ環境を見ることを保証する。
+  const checkEnvironment = gateEnvironment(environment);
   const results = [];
   for (const gate of gates) {
     const outcome = await runDeterministicCheck({
       command: gate.command,
       cwd,
-      environment,
+      environment: checkEnvironment,
       spawn,
       timeoutMs,
       ...(terminationGraceMs === undefined ? {} : { terminationGraceMs }),

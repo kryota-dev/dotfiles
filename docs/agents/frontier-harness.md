@@ -749,9 +749,41 @@ A child that did not succeed runs no gate. The question a gate answers — "the 
 cleanly, but did it pass?" — only arises when the turn ended cleanly, and running checks against
 a tree that already failed would add red results that describe the earlier failure rather than a
 missed condition. Each check is bounded by `--gate-timeout-ms`, which is the check timeout
-described under deterministic verification, with the same default and the same ceiling. It is a
-separate flag from `--timeout-ms` because that one is how long the approval channel waits, and
-one name cannot carry two limits.
+described under deterministic verification, with the same default and the same ceiling, and is
+resolved before the child starts rather than just before the check runs — reading it late meant
+an invalid value raised *after* a child had already run, leaving no `adapter_runs` row at all,
+which is the one failure this command is built to avoid. It is a separate flag from
+`--timeout-ms` because that one is how long the approval channel waits, and one name cannot
+carry two limits. The number of gates is capped as well: each has a time limit, but without a
+limit on how many may be declared, "count × ceiling" reopens the window the time limit closed.
+
+### What a gate does not protect you from
+
+A gate does not run inside the sandbox the child ran in. `check-runner.mjs` spawns the approved
+command directly, with no network or filesystem confinement of its own — the property described
+under deterministic verification, unchanged, because a gate reuses that runner rather than
+building a second one. What *is* new here is the reachability: `fh verify` is a command a person
+types, while a gate is started by the harness, unattended, moments after an agent finished
+writing to that same tree. The approved string `npm run test` resolves to whatever `package.json`
+says at that moment, and that file is part of the diff nobody has read yet.
+
+Two things follow, and neither is closed by approving the command:
+
+- **The gate check does not inherit the caller's environment.** Only a fixed allowlist reaches
+  it — `PATH`, `HOME`, the temp and locale variables, and the XDG directories. Anything else,
+  including every token the harness itself was launched with, is dropped. This is an allowlist
+  rather than a denylist because a denylist misses the next secret's name, and a check that
+  needs a variable it cannot see fails loudly rather than passing quietly. `fh verify` is left
+  as it was: its reachability is not what this changed.
+- **The verdict is still only an exit code.** A gate says the approved command was run by the
+  harness and returned zero. It does not say the command tested anything. A child that rewrote
+  its own test script would produce `verification.total > 0` with everything `passed`, and the
+  record cannot tell that apart from a real pass. What it *can* do is leave the rewrite in the
+  diff — the review packet stages the whole worktree, so a neutered test script is visible to a
+  reviewer even though it is invisible to the gate. Treat a green gate as "the harness ran this
+  and it returned zero", which is strictly more than a model saying so, and strictly less than
+  "the change is verified". Unlike `fh verify --candidate`, a session gate records no tree hash,
+  so the result does not pin which tree it described; that stays a candidate-adoption mechanism.
 
 Declaring no gate leaves the outcome exactly as it was. Turning a missing gate into
 `indeterminate` would be the strictest reading of "do not call it a success if you cannot tell",
