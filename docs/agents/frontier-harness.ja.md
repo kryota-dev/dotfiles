@@ -709,6 +709,41 @@ manifest・承認 scope・state root・子の作業ディレクトリはすべ�
 呼び出し元の cwd から解決すると、承認済みリポジトリから未承認のリポジトリへ子を起動できてしまい、
 capability gate が誰も尋ねていない問いに答えることになります。
 
+### resume は launch の capability を継ぐ
+
+`fh session resume` は `--capability` を省いたとき、**その session id で最後に解決した capability**
+で走ります。継承元は `route_decisions` に刻んだ session id です。route は launch でも resume でも
+子を起こす**前**に書かれるので、子が異常終了したあとの再開でも引けます。
+
+継承するのは「解決後の」名前です。launch で明示だったか省略だったかは記録しません —— 省略なら
+記録値は当時の既定そのものなので、記録値を継ぐだけで両方が正しくなります。既定値が後から変わった
+場合も、「同じセッションの続き」としては新しい既定より当時の値のほうが正確です。
+
+`--capability` を明示すれば常にそちらが勝ちます。中断の理由が model 不足だったときに強い capability
+で起こし直す、という運用は壊れません。
+
+引けなかったときは既定へ落ちます。**`--capability` を要求はしません** —— 引けない以上「launch が
+明示だったのか」も分からないので、選んでいない呼び出し側にまで選択を強いることになります。それは
+この経路が直そうとしている故障（意図しない capability で走る）と同種の誤りです。代わりに
+**どこから来た capability かを必ず告げます**。JSON の `capabilitySource` と stderr の 1 行が
+`explicit` / `inherited` / `default` の 3 値を取り、`default` は「継承元の記録が引けなかった」を
+含みます。継承を当てにする呼び出し側は、この値で gate できます。
+
+記録された capability が registry から消えていた場合も既定へ落ちますが、そのことを stderr に名指しで
+出します。capability の改名で過去の子を再開不能にはしませんが、黙って別のものに差し替えもしません。
+
+**残るのはフォールバックの向きです。** 継承元が引けないときの既定は依然として
+`DEFAULT_SESSION_CAPABILITY` なので、既定が registry 中で最も強いという現構成の性質が崩れれば、
+その resume は弱いほうで走ります。消せるのは「静かであること」までで、上振れ／下振れそのものでは
+ありません。だからこそ `capabilitySource` があります。
+
+**保存先を `adapter_runs` にしていないのは、そこが retention の prune 対象だからです。**
+`fh clean` は adapter_runs を消すので、そちらに相関キーを持たせると「中断が長引くほど継承が効かなく
+なる」という最悪の壊れ方をします。`route_decisions` と `tasks` は prune されません。加えて
+`adapter_runs` には adapter の起動方式に属する列（conversation ID を含む）を置かない、という既存の
+方針があり、`route_decisions` は既に解決後の capability / model / effort を持つので、足すのは相関キー
+1 本で済みます（capability の写しを別テーブルに作ると、2 つの記録が食い違いうる経路ができます）。
+
 ## provider adapter
 
 3 つの CLI は互換ではありません。非対話モードの能力が非対称なので、1 つの汎用ランチャーを
