@@ -29,6 +29,9 @@ HOOK="${HOME_DIR}/dot_claude/executable_wave-session-event.sh"
 EVENTS="${HOME_DIR}/dot_agents/skills/wave-orchestrator/scripts/executable_wave-events.sh"
 SEND="${HOME_DIR}/dot_agents/skills/wave-orchestrator/scripts/executable_send-to-pane.sh"
 SKILL_MD="${HOME_DIR}/dot_agents/skills/wave-orchestrator/SKILL.md"
+# #610 split the rationale (実測 / 事故の経緯) out of SKILL.md. The norms stayed put, so the
+# assertions below keep grepping SKILL.md; REFS is for the checks that follow the rationale.
+REFS="${HOME_DIR}/dot_agents/skills/wave-orchestrator/references"
 SETTINGS="${HOME_DIR}/dot_claude/settings.json"
 
 SID="b7dffef5-1179-4362-b3d5-3bfd83a88b17"
@@ -795,16 +798,20 @@ stub_count() {
   # zsh は "$SESS:wave1" の :w :a を history modifier として解釈して target を壊す。
   # 散文中の「やってはいけない例」は対象外にし、**コピペ対象になるフェンス付き
   # コードブロックだけ**を検査する
+  #
+  # #610 で references/ にもコードブロックが置かれるようになったため、そちらも検査対象に
+  # 含める。SKILL.md だけを見ていると、コピペ対象が移った先で同じ zsh 事故が復活する。
   run python3 -c '
 import re, sys
-src = open(sys.argv[1], encoding="utf-8").read()
-blocks = re.findall(r"^```[^\n]*\n(.*?)^```", src, re.S | re.M)
 bad = []
-for b in blocks:
-    for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*:", b):
-        bad.append(m.group(0))
+for path in sys.argv[1:]:
+    src = open(path, encoding="utf-8").read()
+    blocks = re.findall(r"^```[^\n]*\n(.*?)^```", src, re.S | re.M)
+    for b in blocks:
+        for m in re.finditer(r"\$[A-Za-z_][A-Za-z0-9_]*:", b):
+            bad.append(path + ":" + m.group(0))
 print(" ".join(bad))
-' "$SKILL_MD"
+' "$SKILL_MD" "$REFS"/*.md
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
@@ -1675,4 +1682,82 @@ print(" ".join(bad))
 @test "#537 回帰: SKILL.md がワークツリーを承認境界として説明している" {
   # 承認済みリポジトリから別リポジトリの worktree を指すだけで gate を迂回できてはならない。
   grep -q '承認境界そのもの' "$SKILL_MD"
+}
+
+# ---------------------------------------------------------------------------
+# #610 回帰: 規範を SKILL.md に残し、根拠を references/ へ分離する
+# ---------------------------------------------------------------------------
+
+@test "#610 回帰: SKILL.md が規範のレジストリで、根拠が references から辿れる" {
+  # 分割の失敗様式は 2 つある。(a) reference ファイルが落ちる (b) SKILL.md が「読め」と
+  # 言わなくなる。どちらも規範だけが残って理由が失われ、次の改訂で静かに緩められる
+  # （#610 完了条件「根拠へ辿り着ける導線を残す」）。multi-review / sdd の同型テスト
+  # （tests/files.bats）に揃える。
+  grep -qF 'この SKILL.md の責務（規範のレジストリ）' "$SKILL_MD"
+
+  local ref
+  for ref in routes-and-safety launch approval-channel liveness verification resume-and-teardown; do
+    [ -f "${REFS}/${ref}.md" ] || {
+      echo "wave-orchestrator references/${ref}.md is missing"
+      false
+    }
+    grep -qF "references/${ref}.md" "$SKILL_MD" || {
+      echo "wave-orchestrator SKILL.md does not point at references/${ref}.md"
+      false
+    }
+    # 前置きが無いと、reference を単体で開いた読み手が規範と根拠を取り違える。
+    grep -qF '守るべきこと（規範）は' "${REFS}/${ref}.md" || {
+      echo "references/${ref}.md does not declare itself as rationale"
+      false
+    }
+  done
+
+  # 各 reference の代表的な根拠 1 件ずつ。存在検査とリンク検査だけでは、中身を空にしても
+  # 通ってしまう（根拠の消失は #610 が最も避けたい退行）。
+  grep -qF 'merge gate を経ずに無断マージした' "${REFS}/routes-and-safety.md"
+  grep -qF '.gitmodules' "${REFS}/launch.md"
+  grep -qF '27 分放置' "${REFS}/approval-channel.md"
+  grep -qF '43 件' "${REFS}/liveness.md"
+  grep -qF 'レビュー 6 件対応済み' "${REFS}/verification.md"
+  grep -qF '14 時間走り' "${REFS}/resume-and-teardown.md"
+}
+
+@test "#610 回帰: references は条件付き必読で、再肥大の抑止が書かれている" {
+  # 無条件必読にすると常時ロードが復活して分割の意味（wave ごとの約 3 万トークン）が消え、
+  # 逆に導線が「参考」止まりだと規範を疑ったときに根拠へ辿り着けない。条件を明示することで
+  # 両方を満たす。
+  grep -qF '平常運転では読まなくてよい' "$SKILL_MD"
+  grep -qF '規範の妥当性を疑ったとき' "$SKILL_MD"
+  grep -qF 'を Read すること' "$SKILL_MD"
+  # 7 日で 4.8 倍に膨らんだ経緯への構造的対処。この 1 行が無いと、次の事故のたびに実測が
+  # 本体へ書き足されて同じ肥大を繰り返す。
+  grep -qF '新しい実測を書き足すときは' "$SKILL_MD"
+}
+
+@test "#610 回帰: legacy 節は SKILL.md に残っている（#539 の撤去と衝突させない）" {
+  # 縮小の誘惑が最も大きいのは legacy 節だが、撤去条件を持つのは #539 である。references/ へ
+  # 移すと撤去 PR と全面衝突するので、本体に置いたままにする。
+  grep -qF '### legacy: 検知（tmux 経路）' "$SKILL_MD"
+  grep -qF '### legacy: 送信（tmux 経路）' "$SKILL_MD"
+  local ref
+  for ref in "${REFS}"/*.md; do
+    run grep -cE '^### legacy: (検知|送信)' "$ref"
+    [ "$output" -eq 0 ] || {
+      echo "legacy section leaked into $(basename "$ref")"
+      false
+    }
+  done
+}
+
+@test "#610 回帰: 2 信号検査が rebase による fail-open を警告している" {
+  # committedDate は committer date であり、git rebase は replay した全コミットにこれを
+  # 打ち直す。信号 2 が常に偽になって 2 信号の AND が崩れ、判定は「対応した」側
+  # （fail-open）へ倒れる。rebase したという理由だけで検査が無言で通る。
+  grep -qF 'rebase 済みの PR では信号 2 を根拠に使わない' "$SKILL_MD"
+  grep -qF 'fail-open' "$SKILL_MD"
+  grep -qF 'committer date' "${REFS}/verification.md"
+  # 代替判定（--gate / verification.total）は #615 の領分。#617 待ちでブロック中なので、
+  # ここで先回りして書かない（書くと 2 箇所目の SSOT になる）。
+  run grep -c 'verification\.total' "$SKILL_MD"
+  [ "$output" -eq 0 ]
 }
