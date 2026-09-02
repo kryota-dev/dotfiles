@@ -35,14 +35,25 @@ _ecc_skill_list() {
 #
 # Using this for *negative* assertions is strictly stronger than grepping SKILL.md alone --
 # a duplicated SSOT body hidden in references/ still gets caught.
+# Fails (rather than emitting nothing) when SKILL.md is missing: a silent empty result would
+# make every *negative* assertion pass, which is the exact failure this helper exists to prevent.
+# A trailing newline is emitted after each file so `^`-anchored patterns cannot be broken by a
+# file that happens to lack its final newline.
 _skill_text() {
   local dir="${HOME_DIR}/dot_agents/skills/$1"
-  cat "${dir}/SKILL.md" 2>/dev/null
+  local skill="${dir}/SKILL.md"
+  [ -f "$skill" ] || {
+    echo "_skill_text: no SKILL.md for skill '$1'" >&2
+    return 1
+  }
+  cat "$skill" || return 1
+  printf '\n'
   local ref
   for ref in "${dir}"/references/*.md; do
-    [ -f "$ref" ] && cat "$ref"
+    [ -f "$ref" ] || continue
+    cat "$ref" || return 1
+    printf '\n'
   done
-  return 0
 }
 
 # Render a chezmoi script template for a specific OS/arch into $out, so behavioural tests can

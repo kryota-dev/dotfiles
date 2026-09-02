@@ -758,14 +758,15 @@ SHIMEOF
   grep -q "^name: model-fitness-check$" "$floor"
 
   # 1. The shim is gone: model-fitness-check must not chain-invoke the readiness gate.
-  run grep -qF 'compatibility shim' "$floor"
+  #    Asserted on the *contract sentence*, not on the absence of the words "compatibility
+  #    shim" -- the file legitimately mentions the retired shim in its history note, and a
+  #    word-absence check would either fail on that or (worse) pass only by accident of where
+  #    the paragraph happens to wrap.
+  grep -qF '本 skill は readiness gate を呼ばない' "$floor"
+  # The retired behaviour itself, phrased whitespace-insensitively so a reflow cannot hide it.
+  run bash -c "tr -d '[:space:]' < '$floor' | grep -q '本skillが起動されたら'"
   [ "$status" -ne 0 ] || {
-    echo "model-fitness-check still describes itself as a compatibility shim"
-    false
-  }
-  run grep -qF 'も起動する' "$floor"
-  [ "$status" -ne 0 ] || {
-    echo "model-fitness-check still chain-invokes another gate (the shim contract)"
+    echo "model-fitness-check still chain-invokes the readiness gate (the shim contract)"
     false
   }
 
@@ -780,9 +781,22 @@ SHIMEOF
     echo "expected 2 blocking floor rows in the §4 contract, found ${floor_rows}"
     false
   }
-  # The floor must still stop the session rather than emit an FYI.
-  grep -qF 'blocking' "$floor"
-  grep -qF 'AskUserQuestion' "$floor"
+  # The floor must still STOP the session. Scoped to the floor-mismatch section: checking the
+  # whole file would pass on `AskUserQuestion` borrowed from the over-provision gate, so gutting
+  # the floor branch into a non-blocking FYI would go unnoticed (verified by mutation).
+  local floor_section
+  floor_section="$(awk '/^### floor 行/{f=1} f&&/^### trivial \/ small 行/{exit} f' "$floor")"
+  [ -n "$floor_section" ] || {
+    echo "the floor-mismatch section is gone from ${floor}"
+    false
+  }
+  local phrase
+  for phrase in 'blocking' 'AskUserQuestion' 'switch して再実行' 'abort'; do
+    printf '%s' "$floor_section" | grep -qF -- "$phrase" || {
+      echo "the floor-mismatch section no longer states: ${phrase}"
+      false
+    }
+  done
   # The over-provision gate is the downward half of the same contract; it is not shim material.
   grep -qF 'over-provision 閾値ゲート' "$floor"
 
@@ -791,18 +805,30 @@ SHIMEOF
   grep -qF 'model-fitness-check' "$readiness"
   grep -q '置き換えてはならない' "$floor"
 
-  # 4. Every orchestration path must invoke BOTH gates *itself*. With the shim gone this is the
+  # 4. With the shim gone, the readiness gate is only reachable if each caller invokes it. The
+  #    floor skill must therefore say so for *every* caller, not just the three listed ones --
+  #    the retired shim explicitly covered direct user invocation too, and nothing replaces it.
+  grep -q '各 caller は本 skill と' "$floor"
+  grep -q '直接起動' "$floor"
+
+  # 5. Every orchestration path must invoke BOTH gates *itself*. With the shim gone this is the
   #    only thing keeping the readiness gate reachable from these entries -- and the only thing
   #    keeping the floor reachable at all. Matched on the slash-invocation form so that merely
-  #    naming a gate in prose does not satisfy the check.
-  local caller gate
+  #    naming a gate in prose does not satisfy the check, and paired with the "invoke both"
+  #    contract so that turning either call optional is caught too.
+  local caller gate caller_file
   for caller in pr-workflow sdd multi-review; do
+    caller_file="${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md"
     for gate in execution-readiness-check model-fitness-check; do
-      grep -qF "/${gate}" "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+      grep -qF "/${gate}" "$caller_file" || {
         echo "${caller}/SKILL.md does not invoke /${gate}"
         false
       }
     done
+    grep -q '両方[を]*起動' "$caller_file" || {
+      echo "${caller}/SKILL.md no longer states that BOTH gates are invoked"
+      false
+    }
   done
 }
 
@@ -856,6 +882,11 @@ SHIMEOF
   grep -qF 'confused-deputy' "${refs}/execution-protocol.md"
   grep -qF 'APPROVE' "${refs}/posting.md"
   grep -qF 'fact-check-worker' "${refs}/fact-check.md"
+  # target-resolution owns the fail-open ban on an unknown --tier; operations owns the
+  # degrade-don't-abort policy for a failed leg. Without these two, either file could be
+  # emptied and the existence + link checks above would still pass.
+  grep -qF 'fail-open' "${refs}/target-resolution.md"
+  grep -qF 'スキップ' "${refs}/operations.md"
 }
 
 # #503 reduced sdd to a spec compiler: SKILL.md compiles requirements/design/tasks, and phases 4-6
@@ -1151,8 +1182,14 @@ SHIMEOF
   # pr-workflow's post-PR pipeline (monitor-ci -> multi-review -> review-resolve-loop).
   # Scanned across references/ too (#503 moved phases 4-6 there), so re-adding a review
   # phase in a reference file cannot slip past this.
-  run bash -c '_skill_text sdd | grep -q "^## Phase 5: レビュー"'
-  [ "$status" -ne 0 ] || { echo "sdd regained a built-in review phase"; return 1; }
+  # Called directly, NOT via `run bash -c`: a child shell does not inherit a function `load`ed
+  # into the bats process, so `_skill_text` would be "command not found" there and the non-zero
+  # exit would read as "the heading is absent" -- passing even after the heading came back
+  # (verified by mutation).
+  if _skill_text sdd | grep -q '^## Phase 5: レビュー'; then
+    echo "sdd regained a built-in review phase"
+    return 1
+  fi
   local banned
   for banned in shutdown_request 'Review Team'; do
     if _skill_text sdd | grep -qF -- "$banned"; then
@@ -1230,11 +1267,13 @@ SHIMEOF
   # pr-workflow Phase 6 explicitly forwards the determined tier to multi-review.
   grep -q -- '--tier' "$pw"
   # The stale "always-on 3 tools" framing must be gone from the tier-aware roster.
-  if printf '%s' "$text" | grep -q '3ツールレビュー'; then
-    echo "the always-on 3-tool framing came back"
-    return 1
-  fi
-  ! grep -q '常設 3 ツール' "$skill"
+  local stale
+  for stale in '3ツールレビュー' '常設 3 ツール'; do
+    if printf '%s' "$text" | grep -qF -- "$stale"; then
+      echo "the always-on 3-tool framing came back: ${stale}"
+      return 1
+    fi
+  done
 }
 
 @test "review-fleet reflects tier gating + Codex offload, not a fixed 3-tool roster (#407)" {
