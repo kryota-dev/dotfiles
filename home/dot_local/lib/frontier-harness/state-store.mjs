@@ -22,6 +22,8 @@ function toRoute(row) {
     reviewerCapability: row.reviewer_capability,
     reason: row.reason,
     createdAt: row.created_at,
+    // 子セッションの相関キー。`fh session` 以外の route では常に null（#604）。
+    sessionId: row.session_id,
   };
 }
 
@@ -95,12 +97,12 @@ export function createStateStore(databasePath) {
   const insertRoute = database.prepare(`
     INSERT INTO route_decisions (
       id, task_id, kind, capability, provider, reason, created_at,
-      model, effort, reviewer_capability
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      model, effort, reviewer_capability, session_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const selectRoutes = database.prepare(`
     SELECT id, task_id, kind, capability, provider, reason, created_at,
-           model, effort, reviewer_capability
+           model, effort, reviewer_capability, session_id
     FROM route_decisions
     ORDER BY created_at, id
   `);
@@ -108,10 +110,22 @@ export function createStateStore(databasePath) {
   // 新しい順に返すのは、上限を設ける以上「直近の n 件」でなければ意味がないため。
   const selectRoutePage = database.prepare(`
     SELECT id, task_id, kind, capability, provider, reason, created_at,
-           model, effort, reviewer_capability
+           model, effort, reviewer_capability, session_id
     FROM route_decisions
     ORDER BY created_at DESC, id DESC
     LIMIT ? OFFSET ?
+  `);
+  // ある session id で最後に「解決した」capability（#604）。
+  //
+  // `capability IS NOT NULL` で escalation route を外す。承認境界に阻まれた route も
+  // 同じ session id で残るが、そちらは capability を持たない（何で走るはずだったかは
+  // 記録していない）ので、継承元にはならない。
+  const selectSessionCapability = database.prepare(`
+    SELECT id, capability, created_at
+    FROM route_decisions
+    WHERE session_id = ? AND capability IS NOT NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
   `);
   const countRoutes = database.prepare(
     "SELECT COUNT(*) AS total FROM route_decisions",
@@ -249,6 +263,7 @@ export function createStateStore(databasePath) {
         reviewerCapability: route.reviewerCapability ?? null,
         reason: route.reason,
         createdAt: new Date().toISOString(),
+        sessionId: route.sessionId ?? null,
       };
       insertRoute.run(
         stored.id,
@@ -261,8 +276,24 @@ export function createStateStore(databasePath) {
         stored.model,
         stored.effort,
         stored.reviewerCapability,
+        stored.sessionId,
       );
       return stored;
+    },
+    // その session id で最後に解決した capability を引く（#604 の継承元）。
+    //
+    // 返すのは capability 名と、どの route から引いたかだけ。呼び出し側は名前を自分の
+    // registry で引き直すので、ここで model / effort まで持ち出さない（記録した当時の
+    // model と、いま registry が示す model が食い違ったとき、古いほうを実行に使わない）。
+    findSessionCapability(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const row = selectSessionCapability.get(sessionId);
+      if (row === undefined) return null;
+      return {
+        routeId: row.id,
+        capability: row.capability,
+        createdAt: row.created_at,
+      };
     },
     listRoutes() {
       return selectRoutes.all().map(toRoute);

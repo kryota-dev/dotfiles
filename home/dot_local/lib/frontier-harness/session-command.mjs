@@ -172,6 +172,29 @@ function selectCapability(config, capabilityName) {
   return capability;
 }
 
+// 記録された capability を継承してよいか（#604）。
+//
+// **継承は利便性であって承認境界ではない。** 記録が今の registry で使えなくなっていたら、
+// resume そのものを不能にせず既定へ落とす —— capability の改名や整理で、過去に起こした
+// 子を二度と再開できなくする理由は無い。承認境界は下の `findManifestGaps` が別に効くので、
+// ここで緩めても「未承認の capability で走る」経路は開かない。
+//
+// ただし**黙っては落とさない**。#604 の実害は取り消しそのものではなく、それが静かなことなので、
+// 記録があったのに使えなかったことは stderr に名指しで出す。
+function inheritedCapabilityName({ store, config, sessionId, stderr }) {
+  const recorded = store.findSessionCapability(sessionId);
+  if (recorded === null) return null;
+  try {
+    selectCapability(config, recorded.capability);
+  } catch (error) {
+    stderr.write(
+      `${PRODUCER}: the capability recorded for this session (${recorded.capability}) is no longer usable, so it was not inherited: ${error.message}\n`,
+    );
+    return null;
+  }
+  return recorded.capability;
+}
+
 // evidence に載せてよいのは固定語彙と、会話内容を含まない識別子だけ。
 function sessionClaims({ action, sandbox, health, outcome, gate }) {
   const claims = [
@@ -238,9 +261,13 @@ export async function runSessionCommand({
     return BLOCKED_PENDING_APPROVAL;
   }
 
-  const capabilityName =
-    optionalFlagValue(flags, "--capability") ?? DEFAULT_SESSION_CAPABILITY;
-  const capability = selectCapability(config, capabilityName);
+  // 明示された capability は今までどおり、他の何よりも先に registry で検証する。
+  // 解決そのものは state を開いたあと（継承を引けるようになってから）に行うが、
+  // 「registry に無い名前を渡したら副作用の前に落ちる」という性質はここで保つ。
+  const explicitCapabilityName = optionalFlagValue(flags, "--capability");
+  if (explicitCapabilityName !== undefined) {
+    selectCapability(config, explicitCapabilityName);
+  }
   const worktree = requireWorktree(flagValue(flags, "--worktree"));
   const gates = readGates(flags);
   // **副作用より前に解決する。** 以前はこの値を gate 実行の直前（子が成功したときにだけ
@@ -287,13 +314,6 @@ export async function runSessionCommand({
   // 台帳へ記録できるのがここしかない局面がある（wave の「中断と再開」）。
   stderr.write(`${PRODUCER}: child session ${sessionId}\n`);
 
-  const executable = commandPaths[capability.provider];
-  if (!executable) {
-    throw new Error(
-      `${providerCommand(capability.provider)} is not on PATH as an absolute entry; the child cannot be started`,
-    );
-  }
-
   // 承認境界・state・承認 queue はすべて**子が走るワークツリー**から解決する。
   //
   // 呼び出し元の cwd から解決すると、承認済みリポジトリの中から `--worktree` で別リポジトリを
@@ -324,6 +344,42 @@ export async function runSessionCommand({
     loadVerifiedModels(readinessPathFor(statePath, accountScope));
   const store = createStateStore(statePath);
   try {
+    // capability の解決（#604）。resume は launch 時の選択を継承する。
+    //
+    // 継承するのは**解決後の**名前である。launch で明示されたか省略されたかを記録して
+    // 区別する必要は無い —— 省略なら記録値は既定そのものなので、記録値を継承するだけで
+    // 両方が正しくなる。既定値が将来変わったときも、「同じセッションの続き」としては
+    // 新しい既定より当時の記録値のほうが正確である。
+    //
+    // 引けなかったときに `--capability` を要求はしない。引けない以上、launch が明示だったかも
+    // 分からないので、選択していない呼び出し側にまで選択を強いることになる —— それは
+    // #604 が直そうとしている故障（意図しない capability で走る）と同種の誤りである。
+    // 代わりに `capabilitySource` を必ず出して、**静かでなくす**。呼び出し側は
+    // 「継承を期待したのに default だった」を JSON で機械的に gate できる。
+    const inherited =
+      explicitCapabilityName === undefined && action === "resume"
+        ? inheritedCapabilityName({ store, config, sessionId: resumeKey, stderr })
+        : null;
+    const capabilityName =
+      explicitCapabilityName ?? inherited ?? DEFAULT_SESSION_CAPABILITY;
+    const capabilitySource =
+      explicitCapabilityName !== undefined
+        ? "explicit"
+        : inherited !== null
+          ? "inherited"
+          : "default";
+    const capability = selectCapability(config, capabilityName);
+    stderr.write(
+      `${PRODUCER}: capability ${capabilityName} (${capabilitySource})\n`,
+    );
+
+    const executable = commandPaths[capability.provider];
+    if (!executable) {
+      throw new Error(
+        `${providerCommand(capability.provider)} is not on PATH as an absolute entry; the child cannot be started`,
+      );
+    }
+
     const policyPath = resolvePolicyPath(options, repositoryRoot);
     const approved = loadVerifiedManifest({
       policyPath,
@@ -362,6 +418,7 @@ export async function runSessionCommand({
               capability: null,
               provider: null,
               reason: `${gaps.length} request(s) are not covered by the approved repository capability manifest: ${approved.integrity.reason ?? "see gaps"}`,
+              sessionId,
             }
           : {
               kind: ROUTE_KIND,
@@ -369,8 +426,13 @@ export async function runSessionCommand({
               provider: capability.provider,
               model: capability.model,
               effort: capability.effort,
-              reason:
-                "child session runs an explicitly selected capability; the router does not choose it",
+              // 「明示」とは限らなくなったので、どこから来たかを reason にも残す
+              // （`capabilitySource` は固定語彙の 3 値であり、自由文は混ざらない）。
+              reason: `child session runs a capability selected by name (${capabilitySource}); the router does not choose it`,
+              // **これが #604 の継承元。** ここに session id を刻むことで、あとの
+              // `fh session resume --resume-key <id>` が同じ capability を引ける。
+              // route は子を起こす前に書かれるので、子が落ちても継承できる。
+              sessionId,
             },
       );
       return { task: storedTask, route: storedRoute };
@@ -379,6 +441,10 @@ export async function runSessionCommand({
     const common = {
       action,
       capability: capabilityName,
+      // どこから来た capability かを、実行の成否に関わらず必ず出す（#604）。
+      // `inherited` は resume でのみ起こる。`default` は「継承元の記録が引けなかった」を
+      // 含むので、継承を期待する呼び出し側はこの値で gate できる。
+      capabilitySource,
       sessionId,
       taskId: recorded.task.id,
       routeId: recorded.route.id,

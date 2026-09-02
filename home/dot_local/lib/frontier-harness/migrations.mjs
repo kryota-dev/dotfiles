@@ -216,6 +216,35 @@ const VERIFICATION_PROVENANCE_DDL = `
     ON verification_results (candidate_id);
 `;
 
+// v4: 子セッションが走った capability を、その session id から引けるようにする（#604）。
+//
+// `fh session resume` は launch 時の capability を継承できず、`--capability` を省くたびに
+// 既定へ戻っていた（tier 別 capability を選んだ意図が resume のたびに静かに取り消される）。
+// 継承するには「この session id はどの capability で走ったか」を後から引ける必要がある。
+//
+// 置き場所を **route_decisions** にしたのは、次の 3 つが同時に効くため:
+//
+//   - **`adapter_runs` には置けない。** v2 の但し書きどおり、そちらには adapter の「起動方式」に
+//     属する列（conversation ID を含む）を置かない。加えて `adapter_runs` は retention の
+//     prune 対象なので、`rawArtifactsDays` を過ぎたセッションは継承できなくなる。
+//     `route_decisions` と `tasks` は prune の対象外である（state-records.mjs の
+//     `deleteExpiredRecords` が消すのは adapter_runs / verification_results /
+//     review_findings / telemetry_events と evidence だけ）
+//   - **capability の写しを作らずに済む。** `route_decisions` は既に「解決後の」
+//     capability / model / effort を持っているので、足すのは相関キー 1 本だけでよい。
+//     別テーブルへ capability を複製すると、2 つの記録が食い違いうる経路を新設することになる
+//   - **子を起こす前に書かれる。** したがって子が異常終了しても capability は残る。
+//     「落ちた子を resume する」という、この issue が扱う当のユースケースで引ける
+//
+// session id は会話内容ではない（`requireSafeArgumentValue` を通した識別子であり、
+// prompt 本文はここにも tasks にも流れない）。
+const SESSION_ROUTE_DDL = `
+  ALTER TABLE route_decisions ADD COLUMN session_id TEXT;
+
+  CREATE INDEX IF NOT EXISTS route_decisions_session_id_idx
+    ON route_decisions (session_id, created_at, id);
+`;
+
 // 配列の添字 + 1 がそのまま user_version になる。末尾に足すだけで版が上がるため、
 // 「定数を上げ忘れる / ステップを足し忘れる」という drift が起こらない。
 const MIGRATIONS = [
@@ -228,6 +257,9 @@ const MIGRATIONS = [
   },
   function applyVerificationProvenance(database) {
     database.exec(VERIFICATION_PROVENANCE_DDL);
+  },
+  function applySessionRouteCorrelation(database) {
+    database.exec(SESSION_ROUTE_DDL);
   },
 ];
 
