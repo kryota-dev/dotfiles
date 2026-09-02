@@ -586,6 +586,32 @@ SIGTERM を無視するテストランナーは、それらを残しうります
 今度は harness より長く timeout 分だけ生き残る孤児という、より悪い失敗を作ります。時間切れは
 保証ではなく安全弁です。
 
+### `make` はどの形なら承認できるか
+
+`make` も承認可能なランナーですが、通るのは `make <target>` の形だけです —— 1 つ以上のターゲット名で、
+各々が英数字か `_` で始まり、`[A-Za-z0-9_./-]` の範囲に収まるものに限ります。オプションと
+command-line variable assignment は承認できないので、`make -f /tmp/evil.mk all` /
+`make --file=… all` / `make -C /tmp/evil all` / `make SHELL=/tmp/evil test` はいずれも
+「承認できる形ではない」として拒否されます。`make` 単体も拒否します。他のランナーが引数を必須に
+しているのと同じ理由で、既定ターゲットに任せると承認した文字列が何を走らせるのか言わなくなるからです。
+
+ターゲットに `..` を含めることもできません。上の字集合が縛るのは各ターゲットの**先頭 1 文字だけ**
+なので、そうしないと `make a/../../etc/cron.d/evil` が通ってしまいます —— 「ターゲットは `.` で
+始められない」という規則は、途中から遡る形を止めません。この検査は `make` にだけ掛かります。
+`go test ./...` は既存の承認可能なコマンドで、その `..` は正当だからです。
+
+字集合を狭めているのは意図的で、`make` にだけ適用します。上の段落が既に認めているとおり、承認済み
+ランナーはリポジトリ側が握るものへ処理を委ねます —— `make test` が `Makefile` を読むのは
+`npm run test` が `package.json` を読むのと同じことで、この間接性自体は新しくありません。
+`-f` / `--file` / `-C` は種類が違います。これらは `make` を**リポジトリの外**の makefile へ向けるもので、
+上の段落が拠って立つ唯一の前提を外します。`SHELL=` のような変数上書きも recipe の展開先を変えるので
+同じ効き方をします。`npm run <script>` にはどちらに当たる引数も無いため、ここが `make` を
+「違う形で」ではなく「より狭く」持つべき唯一の箇所です。
+
+トークン化した完全一致はこれによって変わりません。`make lint` を承認するのはその文字列だけの承認で、
+`make test-node` は依然として一致せず、`make lint; curl …` は承認の無い 2 つ目のセグメントへ割れ、
+`/tmp/evil/make lint` は「承認できる形ではない」として拒否され続けます。
+
 ## review registry
 
 ```bash
@@ -766,6 +792,56 @@ gate を宣言しなければ outcome は従来のままです。宣言の無い
 manifest・承認 scope・state root・子の作業ディレクトリはすべて `--worktree` から解決します。
 呼び出し元の cwd から解決すると、承認済みリポジトリから未承認のリポジトリへ子を起動できてしまい、
 capability gate が誰も尋ねていない問いに答えることになります。
+
+### resume は launch の capability を継ぐ
+
+`fh session resume` は `--capability` を省いたとき、**その session id で最後に解決した capability**
+で走ります。継承元は `route_decisions` に刻んだ session id です。route は launch でも resume でも
+子を起こす**前**に書かれるので、子が異常終了したあとの再開でも引けます。
+
+継承するのは「解決後の」名前です。launch で明示だったか省略だったかは記録しません —— 省略なら
+記録値は当時の既定そのものなので、記録値を継ぐだけで両方が正しくなります。既定値が後から変わった
+場合も、「同じセッションの続き」としては新しい既定より当時の値のほうが正確です。
+
+`--capability` を明示すれば常にそちらが勝ちます。中断の理由が model 不足だったときに強い capability
+で起こし直す、という運用は壊れません。
+
+引けなかったときは既定へ落ちます。**`--capability` を要求はしません** —— 引けない以上「launch が
+明示だったのか」も分からないので、選んでいない呼び出し側にまで選択を強いることになります。それは
+この経路が直そうとしている故障（意図しない capability で走る）と同種の誤りです。代わりに
+**どこから来た capability かを必ず告げます**。JSON の `capabilitySource` と stderr の 1 行が
+`explicit` / `inherited` / `default` の 3 値を取り、`default` は「継承元の記録が引けなかった」を
+含みます。継承を当てにする呼び出し側は、この値で gate できます。
+
+記録された capability が registry から消えていた場合も既定へ落ちますが、そのことを stderr に名指しで
+出します。capability の改名で過去の子を再開不能にはしませんが、黙って別のものに差し替えもしません。
+
+**残るのはフォールバックの向きです。** 継承元が引けないときの既定は依然として
+`DEFAULT_SESSION_CAPABILITY` なので、既定が registry 中で最も強いという現構成の性質が崩れれば、
+その resume は弱いほうで走ります。消せるのは「静かであること」までで、上振れ／下振れそのものでは
+ありません。だからこそ `capabilitySource` があります。
+
+**保存先を `adapter_runs` にしていないのは、そこが retention の prune 対象だからです。**
+`fh clean` は adapter_runs を消すので、そちらに相関キーを持たせると「中断が長引くほど継承が効かなく
+なる」という最悪の壊れ方をします。`route_decisions` と `tasks` は prune されません。加えて
+`adapter_runs` には adapter の起動方式に属する列（conversation ID を含む）を置かない、という既存の
+方針があり、`route_decisions` は既に解決後の capability / model / effort を持つので、足すのは相関キー
+1 本で済みます（capability の写しを別テーブルに作ると、2 つの記録が食い違いうる経路ができます）。
+
+索引は **partial かつ covering** にしています。`route_decisions` は prune されない以上、索引も
+消えずに増え続けますが、継承元になりうるのは「`session_id` を持ち、かつ `capability` が解決済み」の
+行だけです（`fh session` 以外の route も、承認境界で止まった escalation route も対象外）。
+［実測］SQLite は `session_id = ?` が `session_id IS NOT NULL` を含意すると認識し、この索引を
+`SEARCH ... USING COVERING INDEX` で選びます。索引が使われなくなれば lookup は静かに全走査へ
+退化するので、`EXPLAIN QUERY PLAN` そのものをテストで固定しています。
+
+**この migration は共有 state DB の版数を上げます。** state は Git common directory に置かれ、
+すべてのワークツリーが 1 つを共有します。版数が上がった DB は、`PRAGMA user_version` のガードに
+より**古い `fh` からは開けなくなります**（`state database schema version 4 is newer than
+supported version 3`）。これは v2・v3 のときと同じ、意図された fail-closed の挙動です。したがって
+**`chezmoi apply` を跨いで走っているセッションがある状態で適用しない**でください。適用後は
+すべての `fh` 呼び出しが新しい版になるため、混在するのは apply の瞬間だけです。
+
 
 ## provider adapter
 

@@ -36,9 +36,67 @@ const POLICY_KEYS = new Set([
 // 承認できるコマンドの形。実行を許すのはプロジェクトのタスクランナーに限る。
 // これは「何を承認しうるか」の上限であって、照合そのものではない（照合は下の
 // `matchCommand` がトークン化した完全一致で行う）。
-const APPROVABLE_COMMAND =
+//
+// **引数の字集合はランナーごとに分ける。** 下の 2 本は「承認できる形」という同じ役目を持つが、
+// 通してよい引数の範囲が違う。1 本の alternation へ畳むと、片方のために広げた字集合が
+// もう片方にも効いてしまう。
+const APPROVABLE_RUNNER_COMMAND =
   /^(?:npm run|pnpm run|yarn run|bun run|uv run|pytest|go test|cargo test)(?: [A-Za-z0-9_./:@=-]+)+$/;
+
+// `make` の引数は**ターゲット名だけ**に絞る。上の字集合を流用してはならない。
+//
+// `make` の承認が意味するのは「このリポジトリの Makefile に定義された recipe を走らせてよい」で
+// あって、任意の makefile ではない。ところが上の字集合は `-` と `=` を含むので、そのまま流用すると
+// `make -f /tmp/evil.mk all` / `make --file=/tmp/evil.mk all` / `make -C /tmp/evil all` が承認できる形に
+// 入り、**リポジトリ外の makefile を読ませられる** —— 承認の意味そのものが外れる。
+// `make SHELL=/tmp/evil test` のような command-line variable override も同じで、recipe の展開先を
+// 変えるため、承認した文字列から実行内容が読めなくなる。`npm run <script>` にはこれに対応する引数が
+// 無い（引数は `package.json` の scripts へ渡るだけ）ので、ここだけを非対称に狭くする。
+//
+// 「Makefile の内容次第で任意のコマンドが走る」という懸念のほうは `make` 固有ではない。
+// `npm run test` が実行するのもその時点の `package.json` が書いてある内容で、docs の
+// 「What "approved" actually authorizes」が既にその前提を述べている。狭めるのは、そこに書かれた
+// 前提から**外れる**引数だけでよい。
+//
+// 先頭 1 文字を `[A-Za-z0-9_]` に固定すると、`-` 始まり（フラグ）と `.` 始まり（`./` や `../`）が
+// 閉じる。`:` を落とすのは `session-gate.mjs` の `parseGateDeclaration` が `<kind>:<command>` を
+// 最初の `:` で割るためでもある（`make` は check kind の閉じた語彙に無いので衝突は起きないが、
+// 字集合としても重ならないほうが安全側に倒れる）。
+//
+// 引数を必須にする（`+`）のは既存ランナーと同じ規律。`make` 単体は既定ターゲットを走らせるので、
+// 何が起きるかが承認文字列から読めなくなる。
+const APPROVABLE_MAKE_COMMAND = /^make(?: [A-Za-z0-9_][A-Za-z0-9_./-]*)+$/;
+
+// **上の文字クラスが縛るのは各ターゲットの先頭 1 文字だけである。** 2 文字目以降は `/` と `.` を
+// 許すので、`make a/../../etc/cron.d/evil` のように英数字で始まってから遡る形は素通りする。
+// 「先頭が `.` でなければ相対パス脱出を防げる」は成り立たないので、`..` はここで別に弾く。
+//
+// 承認の意味を「このリポジトリの Makefile に定義された recipe を走らせてよい」に保つための検査で
+// あり、`fh onboard` の承認画面に `make test/../../../tmp/evil.mk` のような一見無害な文字列が
+// 候補として出てくる経路を閉じる。
+//
+// **`make` の枝の中だけに掛ける。** 既存ランナー側には `go test ./...` という正当な `..` があり、
+// コマンド文字列全体へ一律に掛けるとそちらを巻き込んで後方互換を壊す。
+const MAKE_TARGET_TRAVERSAL = /\.\./;
+
 const CAPABILITY_NAME = /^[a-z][a-z0-9._-]*$/;
+
+function isApprovableCommand(command) {
+  if (APPROVABLE_RUNNER_COMMAND.test(command)) return true;
+  return APPROVABLE_MAKE_COMMAND.test(command) && !MAKE_TARGET_TRAVERSAL.test(command);
+}
+
+// 承認できる形でなかったときの理由。
+//
+// 単一の理由文（「タスクランナーに引数を付けた形だけが承認できる」）だと、`make -f x.mk all` を
+// 弾いたときに「`make` はそもそも対象外」と読める。#617 の診断が手間取ったのはまさにこの不透明さ
+// だったので、`make` で始まる入力には「どう書けば承認できるか」が分かる文を返す。
+function approvableRejectionReason(command) {
+  if (/^make(?:\s|$)/.test(command)) {
+    return "make can only be approved as `make <target>`; options, variable overrides, and `..` inside a target are not approvable";
+  }
+  return "only a project task runner command with arguments can be approved";
+}
 
 export const EMPTY_MANIFEST = Object.freeze({
   commands: Object.freeze([]),
@@ -54,8 +112,8 @@ export function manifestEntryRejection(kind, value) {
     return "entries must be non-empty strings";
   }
   if (kind === "commands") {
-    if (!APPROVABLE_COMMAND.test(value)) {
-      return "only a project task runner command with arguments can be approved";
+    if (!isApprovableCommand(value)) {
+      return approvableRejectionReason(value);
     }
     if (commandSegments(value) === null) {
       return "the command cannot be interpreted statically";

@@ -205,6 +205,39 @@ test("a command that a shell would reinterpret is refused at execution time", ()
   }
 });
 
+test("a permitted make target becomes argv, and every unapprovable make form is refused", () => {
+  // Makefile 駆動のリポジトリで `--gate` を宣言できるようにした（#617）。実行側は承認側と
+  // 同じ検査を通すので、承認できる形の変更に自動で追随する。
+  assert.deepEqual(checkCommandArgv("make lint"), ["make", "lint"]);
+  assert.deepEqual(checkCommandArgv("make lint test-node"), ["make", "lint", "test-node"]);
+  // 承認ゲートと同じ正規化を掛けるので、空白の揺れも同じ argv になる。
+  const approved = approvedCommandSegments(["make lint"]);
+  for (const command of ["make  lint", "  make lint  ", "make\tlint"]) {
+    assert.equal(matchCommand(command, approved).allowed, true, `gate: ${command}`);
+    assert.deepEqual(checkCommandArgv(command), ["make", "lint"], `argv: ${command}`);
+  }
+  // `-f` / `-C` はリポジトリ外の makefile を読ませ、`VAR=value` は recipe の展開先を変える。
+  // ターゲットに埋め込まれた `..` も同じくツリーの外を指す。承認側で閉じたものが実行側だけ通る、
+  // という抜けを作らない。
+  //
+  // 型まで固定するのは、これが**使い方の誤り**（呼び出し側の引数が違う）として投げられる
+  // TypeError であって、環境の問題として記録される `errored` とは別の扱いだからである。
+  for (const command of [
+    "make -f /tmp/evil.mk all",
+    "make --file=/tmp/evil.mk all",
+    "make -C /tmp/evil all",
+    "make SHELL=/tmp/evil test",
+    "make a/../../etc/cron.d/evil",
+    "make",
+  ]) {
+    assert.throws(
+      () => checkCommandArgv(command),
+      { name: "TypeError", message: /approvable form/ },
+      command,
+    );
+  }
+});
+
 test("a binary that is not on PATH is a recorded outcome, not an exception", async () => {
   // 相対要素は候補にしない（POSIX の zero-length prefix は CWD を指す）。
   const outcome = await runDeterministicCheck({

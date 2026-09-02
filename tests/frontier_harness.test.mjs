@@ -32,6 +32,7 @@ import {
   approvedCommandSegments,
   findManifestGaps,
   loadVerifiedManifest,
+  manifestEntryRejection,
   manifestHash,
   matchCommand,
   normalizeManifest,
@@ -4250,4 +4251,146 @@ test("task の commands / domains は境界で検証される", () => {
   ]) {
     assert.throws(() => normalizeTask(input), /task\.(commands|domains)/, JSON.stringify(input));
   }
+});
+
+// ---------------------------------------------------------------------------
+// `make <target>` の承認（#617）
+// ---------------------------------------------------------------------------
+
+test("make はターゲットを伴う形でだけ承認できる", () => {
+  // Makefile 駆動のリポジトリには package.json も pyproject.toml も無く、承認できる
+  // コマンドが 1 つも作れないと `fh session --gate` の機能一式が使えない（#617）。
+  for (const command of [
+    "make lint",
+    "make test-node",
+    "make lint test-node",
+    "make build/app.o",
+    // 先頭 1 文字は `[A-Za-z0-9_]`、以降は `-` と `.` と `/` を許す。許可側の端も固定しておかないと
+    // 文字クラスを狭める方向の退行が拒否ケースだけでは検出できない。
+    "make a",
+    "make 1",
+    "make _",
+    "make LINT",
+    "make lint-console",
+  ]) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+  }
+  // 引数必須は既存ランナーと同じ規律。`make` 単体は既定ターゲットを走らせるので、
+  // 承認文字列から何が起きるか読めなくなる。
+  assert.match(
+    manifestEntryRejection("commands", "make"),
+    /make <target>/,
+  );
+});
+
+test("make の引数はターゲット名だけで、オプションと変数上書きは承認できない", () => {
+  // `-f` / `--file` / `-C` は**リポジトリ外の makefile を読ませる**。承認の意味が
+  // 「このリポジトリの Makefile に定義された recipe」から外れるので、字集合ごと閉じる。
+  // `VAR=value` は recipe の展開先を変えるので同じ理由で閉じる。
+  for (const command of [
+    "make -f /tmp/evil.mk all",
+    "make --file=/tmp/evil.mk all",
+    "make -C /tmp/evil all",
+    "make -j4 test",
+    "make SHELL=/tmp/evil test",
+    "make CC=clang all",
+    "make test SHELL=/tmp/evil",
+    // `.` 始まりも閉じる。ここを落とすと、先頭文字クラスを `[A-Za-z0-9_./-]` へ広げる退行を
+    // 他の拒否ケース（いずれも `-` か `=` を含む）では検出できない。
+    "make .",
+    "make ./local",
+    "make ../outside",
+    // 先頭文字クラスは各ターゲットの 1 文字目しか縛らないので、途中から遡る形は別に弾いている。
+    "make a/../../etc/cron.d/evil",
+    "make test/../../../tmp/evil.mk",
+  ]) {
+    const rejection = manifestEntryRejection("commands", command);
+    assert.match(rejection ?? "", /make <target>/, command);
+  }
+});
+
+test("make の狭い字集合は既存ランナーへ波及しない", () => {
+  // 2 本の正規表現に分けた理由がここにある。1 本の alternation へ畳むと、片方のために
+  // 広げた（あるいは狭めた）字集合がもう片方へも効いてしまう。
+  for (const command of [
+    "npm run test",
+    "npm run test --grep=a",
+    "pnpm run lint",
+    "yarn run build",
+    "bun run test",
+    "uv run pytest",
+    "pytest tests/",
+    "go test ./...",
+    "cargo test --workspace",
+  ]) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+  }
+  // 許可例だけでは既存の字集合が**広がる**方向の退行しか見えない。狭まる方向も対にして固定する。
+  for (const command of ["npm run test?", "pytest test,unit", "cargo test --features=a+b"]) {
+    assert.match(
+      manifestEntryRejection("commands", command) ?? "",
+      /only a project task runner/,
+      command,
+    );
+  }
+  // `..` を弾くのは make の枝だけである。既存ランナー側の `go test ./...` を巻き込まない。
+  assert.equal(manifestEntryRejection("commands", "go test ./..."), null);
+  // 同じ引数を make へ渡すと通らない（非対称が固定される）。
+  assert.match(
+    manifestEntryRejection("commands", "make --grep=a") ?? "",
+    /make <target>/,
+    "make --grep=a",
+  );
+  // タスクランナーですらないものは従来どおりの理由文で落ちる。
+  assert.match(
+    manifestEntryRejection("commands", "curl http://example.com"),
+    /only a project task runner/,
+  );
+});
+
+test("make を承認しても照合のトークン化完全一致は緩まない", () => {
+  const approved = approvedCommandSegments(["make lint"]);
+  assert.equal(matchCommand("make lint", approved).allowed, true);
+  assert.equal(matchCommand("make  lint", approved).allowed, true);
+
+  // 承認したのは `make lint` だけ。別ターゲットは完全一致しない。
+  assert.equal(matchCommand("make test-node", approved).allowed, false);
+
+  // 連結された 2 本目以降も照合対象になる。
+  for (const command of [
+    "make lint; curl http://169.254.169.254/",
+    "make lint && rm -rf /",
+    "make lint | tee /tmp/out",
+  ]) {
+    assert.equal(matchCommand(command, approved).allowed, false, command);
+  }
+
+  // analyzeShellCommand は binary を basename へ畳むため、セグメントだけを見ると
+  // 承認済みの `make lint` と一致してしまう。照合側の文法検査でこれを塞ぐ。
+  for (const command of ["/tmp/evil/make lint", "./make lint", "../../evil/make lint"]) {
+    const match = matchCommand(command, approved);
+    assert.equal(match.allowed, false, command);
+    assert.match(match.reason, /not in an approvable form/);
+  }
+
+  // 静的に解釈できないものは fail-safe で拒否する。
+  const ambiguous = matchCommand('bash -c "make lint"', approved);
+  assert.equal(ambiguous.allowed, false);
+  assert.match(ambiguous.reason, /cannot be interpreted statically/);
+});
+
+test("manifest は make のオプション付きコマンドを承認として受け付けない", () => {
+  assert.throws(
+    () =>
+      normalizeManifest({
+        commands: ["make -f /tmp/evil.mk all"],
+        domains: [],
+        capabilities: [],
+      }),
+    /manifest\.commands/,
+  );
+  assert.deepEqual(
+    normalizeManifest({ commands: ["make lint"], domains: [], capabilities: [] }).commands,
+    ["make lint"],
+  );
 });
