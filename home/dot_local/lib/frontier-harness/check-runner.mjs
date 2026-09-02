@@ -13,7 +13,8 @@ import { collapseWhitespace, manifestEntryRejection } from "./manifest-policy.mj
 //
 // **シェルを介さない。** `shell: true` にすると、承認済み manifest の照合を通った文字列でも
 // 展開・連結の解釈が実行時に復活する。argv は承認可能な形（`manifest-policy.mjs` の
-// `APPROVABLE_COMMAND`）を再検査したうえで空白で分割して組み立て、`spawn` へそのまま渡す。
+// `manifestEntryRejection` が判定する。ランナーごとに引数の字集合が違い、`make` はターゲット名
+// だけに絞られる）を再検査したうえで空白で分割して組み立て、`spawn` へそのまま渡す。
 
 // チェックが終わらないまま harness を占有しない上限。テストスイートは分単位で走りうるので
 // 短くしすぎず、しかし無限には待たない。

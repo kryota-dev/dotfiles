@@ -205,6 +205,30 @@ test("a command that a shell would reinterpret is refused at execution time", ()
   }
 });
 
+test("a make target becomes argv without a shell, but make options never do", () => {
+  // Makefile 駆動のリポジトリで `--gate` を宣言できるようにした（#617）。実行側は承認側と
+  // 同じ検査を通すので、承認できる形の変更に自動で追随する。
+  assert.deepEqual(checkCommandArgv("make lint"), ["make", "lint"]);
+  assert.deepEqual(checkCommandArgv("make lint test-node"), ["make", "lint", "test-node"]);
+  // 承認ゲートと同じ正規化を掛けるので、空白の揺れも同じ argv になる。
+  const approved = approvedCommandSegments(["make lint"]);
+  for (const command of ["make  lint", "  make lint  ", "make\tlint"]) {
+    assert.equal(matchCommand(command, approved).allowed, true, `gate: ${command}`);
+    assert.deepEqual(checkCommandArgv(command), ["make", "lint"], `argv: ${command}`);
+  }
+  // `-f` / `-C` はリポジトリ外の makefile を読ませ、`VAR=value` は recipe の展開先を変える。
+  // 承認側で閉じたものが実行側だけ通る、という抜けを作らない。
+  for (const command of [
+    "make -f /tmp/evil.mk all",
+    "make --file=/tmp/evil.mk all",
+    "make -C /tmp/evil all",
+    "make SHELL=/tmp/evil test",
+    "make",
+  ]) {
+    assert.throws(() => checkCommandArgv(command), /approvable form/, command);
+  }
+});
+
 test("a binary that is not on PATH is a recorded outcome, not an exception", async () => {
   // 相対要素は候補にしない（POSIX の zero-length prefix は CWD を指す）。
   const outcome = await runDeterministicCheck({
