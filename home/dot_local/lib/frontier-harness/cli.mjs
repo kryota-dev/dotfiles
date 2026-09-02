@@ -134,15 +134,20 @@ function usage() {
     "          --from-gaps builds the candidate from the approved manifest plus",
     "          everything queued by `fh gaps`",
     "  run     Record a shadow route for a task JSON file",
-    "  runs    Show how recorded adapter runs ended, newest first",
+    "  runs    Show how recorded adapter runs ended, newest first, each with a count",
+    "          of the verification results linked to it (0 means no gate was passed)",
     `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset,`,
-    "          --run <adapter run id> for a single record",
+    "          --run <adapter run id> for a single record and its verifications",
     "  session Launch or resume a child session through the approval channel:",
     "            fh session launch --worktree <abs> --prompt-file <abs>",
     "            fh session resume --worktree <abs> --prompt-file <abs> --resume-key <id>",
     "          Optional: --capability (default session.child), --session-id, --label,",
     "          --sandbox, --approvals-dir, --approval-server-command, --timeout-ms,",
     "          --progress-interval-ms. Path flags must be absolute.",
+    "          --gate \"[<kind>:]<approved command>\" declares a completion condition;",
+    "          repeat it for more. Each is run after the child and linked to the run,",
+    "          so a gate that does not pass keeps the session out of `succeeded`.",
+    "          --gate-timeout-ms caps each gate check (not the approval channel).",
     "  status  Show recorded route decisions, newest first",
     `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset`,
     "  verify  Run an approved deterministic check and record its result:",
@@ -450,6 +455,12 @@ export function runCli(argumentsList, options = {}) {
     // **起動時 JSON の全項目は返らない。** `resumeKey` / `denials` / `initHealth` /
     // `evidenceId` は adapter_runs の列に無い（session-command.mjs が emit するだけ）。
     // ここで空欄として並べると「記録されているが空だった」に見えるので、持っている列だけを返す。
+    //
+    // **完了条件（gate）は返る。** `verification_results.adapter_run_id` は列として存在し、
+    // `fh session --gate` がそこへ書くようになったため（#573）、「この run が何本の検証を
+    // 通したか」は記録から読める。`verification.total` が 0 の run は、gate を 1 本も
+    // 通していない —— `status: "succeeded"` が意味するのは「ターンがエラーなく終わった」
+    // だけで、指示した gate を通ったことではない。
     if (command === "runs") {
       const runId = optionalFlagValue(flags, "--run");
       if (runId !== undefined) {
@@ -462,7 +473,9 @@ export function runCli(argumentsList, options = {}) {
         if (run === null) {
           throw new TypeError(`no adapter run is recorded with id ${runId}`);
         }
-        emit({ run });
+        // 1 件を引くときは件数だけでなく、連結された検証そのものを返す。「何を通したのか」は
+        // 一覧では要らないが、1 本の run を調べているときにはそれが知りたいことである。
+        emit({ run, verifications: store.listVerificationResultsForAdapterRun(runId) });
         return 0;
       }
       const limit = Math.min(

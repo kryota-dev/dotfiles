@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 
 import { codexHomeFor } from "./adapter-claude.mjs";
-import { requireSafeArgumentValue } from "./adapter-contract.mjs";
+import { adapterRunStatusFor, requireSafeArgumentValue } from "./adapter-contract.mjs";
 import { createAdapterExecutor } from "./adapters.mjs";
 import {
   APPROVAL_PROMPT_TOOL,
@@ -15,7 +15,12 @@ import { resolveApprovalsDirectory } from "./approval-commands.mjs";
 import { createChildRunner } from "./child-runner.mjs";
 import { providerAvailability } from "./command-paths.mjs";
 import { BLOCKED_PENDING_APPROVAL, CHILD_RUN_FAILED } from "./exit-codes.mjs";
-import { flagValue, optionalFlagValue, positiveIntegerFlag } from "./flags.mjs";
+import {
+  flagValue,
+  optionalFlagValue,
+  positiveIntegerFlag,
+  repeatedFlagValues,
+} from "./flags.mjs";
 import { findManifestGaps, loadVerifiedManifest } from "./manifest-policy.mjs";
 import { providerCommand } from "./providers.mjs";
 import { loadVerifiedModels } from "./readiness.mjs";
@@ -23,6 +28,15 @@ import { requireAbsolutePath } from "./paths.mjs";
 import { nowIso } from "./record-validation.mjs";
 import { isProviderExecutionAllowed, runWithRolloutGuard } from "./rollout.mjs";
 import { allowsWrite, normalizeSandboxPolicy } from "./sandbox.mjs";
+import {
+  assertGateCount,
+  gateBriefing,
+  gateClaims,
+  gateTimeoutMs,
+  parseGateDeclaration,
+  resolveGate,
+  runSessionGates,
+} from "./session-gate.mjs";
 import {
   approvedManifestStoreFor,
   defaultStatePath,
@@ -33,6 +47,10 @@ import {
   resolveStateDirectory,
 } from "./state-paths.mjs";
 import { createStateStore } from "./state-store.mjs";
+import {
+  VERIFICATION_EVIDENCE_KIND,
+  verificationClaims,
+} from "./verification-registry.mjs";
 
 // `fh session launch|resume` —— wave-orchestrator の子セッションを非対話で起こす（#537）。
 //
@@ -132,6 +150,15 @@ function readLabel(flags) {
   return label;
 }
 
+// 完了条件の宣言を読む。`--gate` は繰り返せる。
+//
+// **承認境界の内側にある。** ここで読んだコマンドは capability と同じ `findManifestGaps` に
+// 掛かるので、未承認の gate を宣言したセッションは子を起こす前に exit 2 で止まる。数時間
+// 走ったあとで「その gate は承認されていない」と分かる形にはしない。
+function readGates(flags) {
+  return assertGateCount(repeatedFlagValues(flags, "--gate").map(parseGateDeclaration));
+}
+
 function selectCapability(config, capabilityName) {
   // 設定由来のキーで引くので、Object.prototype の継承プロパティを capability として拾わない
   // （router.mjs / adapters.mjs と同じ扱い）。
@@ -146,10 +173,13 @@ function selectCapability(config, capabilityName) {
 }
 
 // evidence に載せてよいのは固定語彙と、会話内容を含まない識別子だけ。
-function sessionClaims({ action, sandbox, health, outcome }) {
+function sessionClaims({ action, sandbox, health, outcome, gate }) {
   const claims = [
     `child session ${action} ran under the ${sandbox.mode} sandbox`,
     `startup health check reported ${health?.healthy ? "healthy" : "unhealthy"}`,
+    // gate を宣言したか、通ったかは、この run の記録そのものに属する事実である。
+    // 一覧側（`fh runs`）は連結された verification_results の件数から同じことを読む。
+    ...gateClaims(gate),
   ];
   for (const problem of health?.problems ?? []) {
     claims.push(`startup health problem: ${problem}`);
@@ -212,8 +242,21 @@ export async function runSessionCommand({
     optionalFlagValue(flags, "--capability") ?? DEFAULT_SESSION_CAPABILITY;
   const capability = selectCapability(config, capabilityName);
   const worktree = requireWorktree(flagValue(flags, "--worktree"));
-  // 制約の説明を先に置く。呼び出し側の prompt はそのまま後ろに続く。
-  const prompt = `${SANDBOX_BRIEFING}${readPrompt(flags)}`;
+  const gates = readGates(flags);
+  // **副作用より前に解決する。** 以前はこの値を gate 実行の直前（子が成功したときにだけ
+  // 通る枝）で読んでいた。そのため:
+  //
+  //   - `--gate` 付きで無効値を渡すと、TypeError が**子の実行後**に投げられ、`adapter_runs` も
+  //     evidence も残らないまま runSessionCommand を抜けていた。これは下の `guarded.result` の
+  //     catch が「子は既に走ったかもしれないので、記録を残さずにクラッシュするのが最悪の
+  //     失敗になる」として塞いだ経路そのものである
+  //   - `--gate` 無しなら無効値がそのまま黙って捨てられていた（`flag-registry.mjs` の
+  //     「打ち間違えたフラグを黙って捨てない」方針に反する）
+  //
+  // `--gate` の有無にも子の成否にも依らず、ここで一度だけ検証・クランプする。
+  const gateTimeout = gateTimeoutMs(positiveIntegerFlag(flags, "--gate-timeout-ms"));
+  // 制約の説明と完了条件を先に置く。呼び出し側の prompt はそのまま後ろに続く。
+  const prompt = `${SANDBOX_BRIEFING}${gateBriefing(gates)}${readPrompt(flags)}`;
   const label = readLabel(flags);
   const sandbox = normalizeSandboxPolicy(
     { mode: optionalFlagValue(flags, "--sandbox") ?? DEFAULT_SESSION_SANDBOX },
@@ -291,9 +334,13 @@ export async function runSessionCommand({
     // 承認境界はここで効く。子は任意のコマンドを走らせるので command 単位では宣言できない
     // —— そちらは承認チャネル（approval-rules）が実行時に受け持つ。ここで問うのは
     // 「このリポジトリで自律的な子セッションを走らせてよいか」であり、その単位が capability である。
+    //
+    // 完了条件（`--gate`）は逆に command 単位で宣言されている。`fh` が終了後に自分で
+    // 起こすプロセスなので、`fh verify` と同じく承認済み manifest との照合を通す。
     const gaps = findManifestGaps({
       manifest: approved.manifest,
       capabilities: [capabilityName],
+      commands: gates.map((gate) => gate.command),
     });
     const blocked = gaps.length > 0;
 
@@ -347,8 +394,11 @@ export async function runSessionCommand({
       emit({
         ...common,
         executed: false,
-        executionReason:
-          "the repository capability manifest does not approve this capability",
+        // 何が承認されていないのかを名指しする。capability と完了条件では、承認の取り方も
+        // 直し方も違う（前者は onboard、後者は gate コマンドの承認）。
+        executionReason: gaps.every((gap) => gap.kind === "command")
+          ? "the repository capability manifest does not approve this completion gate command"
+          : "the repository capability manifest does not approve this capability",
         gaps,
       });
       return BLOCKED_PENDING_APPROVAL;
@@ -461,9 +511,71 @@ export async function runSessionCommand({
       return CHILD_RUN_FAILED;
     }
 
-    const status = unhealthy ? "failed" : outcome.status;
+    const childOutcome = unhealthy ? "failed" : outcome.outcome;
+
+    // 完了条件の検証。**子が成功したときにだけ走らせる。**
+    //
+    // 失敗した子のツリーで gate を走らせても、既に確定している failed を確認するだけで、
+    // 通らないチェックの結果が「gate が赤だった」として記録に増える。ここで問いたいのは
+    // 「ターンはエラーなく終わったが、指示した gate を通っているか」であって、その問いは
+    // 子が成功したときにしか立たない。
+    //
+    // **実行はトランザクションの外。** チェックは既定 15 分走りうるので、内側で走らせると
+    // 同じリポジトリの他の `fh` が全部詰まる（子の実行と同じ理由）。
+    let gateResults = [];
+    let gateNotRunReason = null;
+    if (gates.length > 0 && childOutcome === "succeeded") {
+      // rollout guard を通す。ここへ到達するのは子が実際に走ったとき（= shadow ではない）
+      // だけだが、プロセスを起こす経路はすべてこのガードの内側にある、という不変条件を
+      // 構造で保つ（`fh verify` が決定的チェックに対して置いているのと同じ形）。
+      const guardedGates = runWithRolloutGuard(
+        config,
+        "session completion gate checks",
+        () =>
+          runSessionGates({
+            gates,
+            cwd: worktree,
+            environment,
+            // 子の spawn（`options.spawn`）とは別の口にする。同じ口を共有すると、
+            // 子を fake で観測するテストが gate の終了コードまで肩代わりしてしまい、
+            // 「gate が赤でも緑に見える」という、この issue が直そうとしている失敗の
+            // ミニチュアをテスト側に作ることになる（`options.probeSpawn` と同じ形）。
+            spawn: options.gateSpawn,
+            timeoutMs: gateTimeout,
+            ...(options.terminationGraceMs === undefined
+              ? {}
+              : { terminationGraceMs: options.terminationGraceMs }),
+          }),
+      );
+      if (guardedGates.executed) {
+        gateResults = await guardedGates.result;
+      } else {
+        gateNotRunReason = guardedGates.reason;
+      }
+    } else if (gates.length > 0) {
+      gateNotRunReason = "the child session did not succeed, so no gate check was run";
+    }
+
+    // gate は結果を下方向にしか動かさない。`indeterminate` は `adapterRunStatusFor` が
+    // failed へ写すので、adapter_runs の status 語彙は増えない。
+    const resolved = resolveGate({
+      gates,
+      results: gateResults,
+      notRunReason: gateNotRunReason,
+      childOutcome,
+    });
+    const sessionOutcome = resolved.outcome;
+    const status = adapterRunStatusFor(sessionOutcome);
     const failureReason =
-      (unhealthy ? healthFailureReason(health) : null) ?? outcome.failureReason;
+      (unhealthy ? healthFailureReason(health) : null) ??
+      resolved.failureReason ??
+      outcome.failureReason;
+    const gate = {
+      gates,
+      verdict: resolved.verdict,
+      reason: gateNotRunReason,
+      results: gateResults,
+    };
     const stored = store.withTransaction(() => {
       const run = store.recordAdapterRun({
         taskId: recorded.task.id,
@@ -484,9 +596,37 @@ export async function runSessionCommand({
         taskId: recorded.task.id,
         routeId: recorded.route.id,
         exitCode: outcome.exitCode,
-        claimsSupported: sessionClaims({ action, sandbox, health, outcome }),
+        claimsSupported: sessionClaims({ action, sandbox, health, outcome, gate }),
       });
-      return { run, evidence };
+      // **ここが #573 の連結そのもの。** verification_results.adapter_run_id は最初から
+      // 列としてあったが、書く実装がどこにも無かった。この 1 本の紐付けによって、
+      // 「succeeded で終わった run」と「gate を通った run」が記録だけで区別できる。
+      const verifications = gateResults.map((result) => {
+        const checkEvidence = store.putEvidence({
+          kind: VERIFICATION_EVIDENCE_KIND,
+          producer: PRODUCER,
+          taskId: recorded.task.id,
+          routeId: recorded.route.id,
+          // 承認済み manifest と完全一致した文字列なので、自由文ではない。
+          command: result.command,
+          exitCode: result.exitCode,
+          claimsSupported: verificationClaims({
+            checkKind: result.kind,
+            status: result.status,
+            timedOut: result.timedOut,
+          }),
+        });
+        return store.recordVerificationResult({
+          taskId: recorded.task.id,
+          adapterRunId: run.id,
+          checkKind: result.kind,
+          status: result.status,
+          command: result.command,
+          exitCode: result.exitCode,
+          evidenceId: checkEvidence.id,
+        });
+      });
+      return { run, evidence, verifications };
     });
 
     emit({
@@ -497,7 +637,9 @@ export async function runSessionCommand({
       effort: capability.effort,
       sandbox: sandbox.mode,
       status,
-      outcome: outcome.outcome,
+      // 3 値のまま返す。「gate を通っていない」は outcome を潰さず、下の `gate` が語る。
+      outcome: sessionOutcome,
+      childOutcome,
       exitCode: outcome.exitCode,
       resumeKey: outcome.resumeKey,
       denials: outcome.denials,
@@ -505,6 +647,20 @@ export async function runSessionCommand({
       initHealth: {
         healthy: health === null ? null : health.healthy,
         problems: health?.problems ?? [],
+      },
+      gate: {
+        status: resolved.status,
+        reason: gateNotRunReason,
+        declared: gates.map((entry) => ({ kind: entry.kind, command: entry.command })),
+        results: gateResults.map((result, index) => ({
+          verificationResultId: stored.verifications[index].id,
+          kind: result.kind,
+          command: result.command,
+          status: result.status,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          failureReason: result.failureReason,
+        })),
       },
       adapterRunId: stored.run.id,
       evidenceId: stored.evidence.id,

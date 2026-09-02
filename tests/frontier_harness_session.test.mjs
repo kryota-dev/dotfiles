@@ -15,7 +15,21 @@ import {
 import { BLOCKED_PENDING_APPROVAL } from "../home/dot_local/lib/frontier-harness/exit-codes.mjs";
 import { createChildRunner } from "../home/dot_local/lib/frontier-harness/child-runner.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import {
+  DEFAULT_CHECK_TIMEOUT_MS,
+  MAX_CHECK_TIMEOUT_MS,
+} from "../home/dot_local/lib/frontier-harness/check-runner.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
+import {
+  GATE_ENVIRONMENT_ALLOWLIST,
+  MAX_SESSION_GATES,
+  combineOutcome,
+  gateEnvironment,
+  gateTimeoutMs,
+  gateVerdict,
+  parseGateDeclaration,
+  resolveGate,
+} from "../home/dot_local/lib/frontier-harness/session-gate.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 
 // `fh session launch|resume`（#537）専用のスイート。
@@ -84,11 +98,14 @@ async function approveCapabilities(
   // policy.json をどのツリーへ書くか。既定は `directory` だが、承認境界がワークツリーから
   // 解決されることを確かめるテストは、ここを子のワークツリーへ向ける。
   policyRoot = directory,
+  // 完了条件（`--gate`）は command として承認される。既定は空 —— gate を宣言しない
+  // セッションが今までどおり通ることも、このスイートが確かめる対象である。
+  commands = [],
 ) {
   const manifestPath = path.join(directory, "approved-manifest.json");
   writeFileSync(
     manifestPath,
-    JSON.stringify({ commands: [], domains: [], capabilities }),
+    JSON.stringify({ commands, domains: [], capabilities }),
   );
   const policyPath = path.join(policyRoot, ".harness", "policy.json");
   const base = {
@@ -239,6 +256,10 @@ async function launch({
   sessionIdFlag = SESSION_ID,
   promptBody = PROMPT_BODY,
   accountScope = "personal",
+  // gate のチェックは実プロセスとして走るので、PATH に何が見えるかがそのまま結果になる。
+  environment,
+  // 子の spawn とは別の口。gate ごとに違う終了コードを与えたいテストが使う。
+  gateSpawnFake,
 }) {
   const worktree = worktreeOverride ?? path.join(directory, "worktree");
   mkdirSync(worktree, { recursive: true });
@@ -270,6 +291,7 @@ async function launch({
     ],
     {
       accountScope,
+      ...(environment === undefined ? {} : { environment }),
       commandPaths: COMMAND_PATHS,
       config: sessionConfig,
       verifiedModels: VERIFIED_MODELS,
@@ -278,6 +300,7 @@ async function launch({
       policyPath,
       write: (line) => output.push(line),
       spawn: spawnFake?.spawn,
+      ...(gateSpawnFake === undefined ? {} : { gateSpawn: gateSpawnFake.spawn }),
       probeSpawn: probeFake.spawn,
       sessionIo: { stderr: { write: (line) => stderr.push(line) } },
     },
@@ -291,15 +314,59 @@ async function launch({
   };
 }
 
-async function preparedDirectory(context) {
+async function preparedDirectory(context, { commands = [] } = {}) {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const policyPath = await approveCapabilities(
     directory,
     [SESSION_CAPABILITY],
     statePath,
+    directory,
+    commands,
   );
   return { directory, statePath, policyPath };
+}
+
+// PATH 上に置く偽の `npm`。`findCommand` は実行ビットを見るので、実体が要る
+// （`frontier_harness_verify.test.mjs` と同じ形）。
+function fakeBinDirectory(directory, { exitCode = 0, name = "npm" } = {}) {
+  const bin = path.join(directory, `bin-${name}-${exitCode}`);
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(path.join(bin, name), `#!/bin/sh\nexit ${exitCode}\n`, {
+    mode: 0o755,
+  });
+  return bin;
+}
+
+// gate を宣言したセッションを 1 本起こす。gate のチェックは実プロセスとして走る。
+async function launchWithGates(
+  context,
+  {
+    gates,
+    commands,
+    gateExitCode = 0,
+    binOnPath = true,
+    spawnOverride,
+    gateSpawnFake,
+    extraFlags = [],
+    action = "launch",
+  },
+) {
+  const prepared = await preparedDirectory(context, { commands });
+  const bin = fakeBinDirectory(prepared.directory, { exitCode: gateExitCode });
+  const result = await launch({
+    ...prepared,
+    action,
+    spawnFake: spawnOverride ?? createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    ...(gateSpawnFake === undefined ? {} : { gateSpawnFake }),
+    extraFlags: [...gates.flatMap((gate) => ["--gate", gate]), ...extraFlags],
+    // PATH から `npm` を外すと、チェックは「起動できなかった」= errored になる。
+    environment: {
+      ...process.env,
+      PATH: binOnPath ? bin : path.join(prepared.directory, "empty-bin"),
+    },
+  });
+  return { ...prepared, ...result };
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,4 +1200,640 @@ test("the provider runs outside the write transaction", async (context) => {
 
   assert.equal(code, 0);
   assert.equal(writeDuringRun, true, "a concurrent write must not be blocked");
+});
+
+// ---------------------------------------------------------------------------
+// 完了条件（`--gate`）と session 結果への連結（#573）
+// ---------------------------------------------------------------------------
+
+test("a gate declaration reads its check kind only from the closed vocabulary", () => {
+  assert.deepEqual(parseGateDeclaration("npm run test"), {
+    kind: "test",
+    command: "npm run test",
+  });
+  assert.deepEqual(parseGateDeclaration("lint:npm run lint"), {
+    kind: "lint",
+    command: "npm run lint",
+  });
+  // 引数に `:` を含むコマンドを kind 付きと読み違えない。承認できるコマンドは必ず
+  // タスクランナー名で始まるので、手前が kind の語彙に一致することはありえない。
+  assert.deepEqual(parseGateDeclaration("npm run test -- --grep=a:b"), {
+    kind: "test",
+    command: "npm run test -- --grep=a:b",
+  });
+  // 承認ゲートと同じ正規化（空白の畳み込み）を通す。通さないと「承認は通ったのに
+  // 実行できない」宣言ができてしまう。
+  assert.deepEqual(parseGateDeclaration("npm  run   test"), {
+    kind: "test",
+    command: "npm run test",
+  });
+  assert.throws(() => parseGateDeclaration("lint:"), /no command/);
+  assert.throws(() => parseGateDeclaration("  "), /requires an approved command/);
+});
+
+test("the gate verdict never turns a red check into a pass", () => {
+  assert.equal(gateVerdict([]), null);
+  assert.equal(gateVerdict([{ status: "passed" }]), "passed");
+  assert.equal(gateVerdict([{ status: "passed" }, { status: "failed" }]), "failed");
+  assert.equal(gateVerdict([{ status: "errored" }]), "errored");
+  // 確定した赤は「起動できなかった」に薄まらない。次に取る行動は赤で決まる。
+  assert.equal(gateVerdict([{ status: "errored" }, { status: "failed" }]), "failed");
+});
+
+test("the gate moves the outcome downward only, and keeps the three-value contract", () => {
+  // 宣言が無ければ子の結果はそのまま。`--gate` を渡していない呼び出しを一律で
+  // 落とさない（gate 未通過は outcome ではなく連結件数から読む）。
+  assert.equal(combineOutcome("succeeded", null), "succeeded");
+  assert.equal(combineOutcome("succeeded", "passed"), "succeeded");
+  assert.equal(combineOutcome("succeeded", "failed"), "failed");
+  // 「判定できないなら成功と言わない」。起動できなかった gate は indeterminate。
+  assert.equal(combineOutcome("succeeded", "errored"), "indeterminate");
+  // gate は結果を良くしない。
+  assert.equal(combineOutcome("failed", "passed"), "failed");
+  assert.equal(combineOutcome("indeterminate", "passed"), "indeterminate");
+});
+
+test("a passing gate is linked to the adapter run it verified", async (context) => {
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test", "lint:npm run lint"],
+    commands: ["npm run test", "npm run lint"],
+  });
+
+  assert.equal(code, 0);
+  assert.equal(report.status, "succeeded");
+  assert.equal(report.outcome, "succeeded");
+  assert.equal(report.gate.status, "passed");
+  assert.deepEqual(
+    report.gate.results.map((result) => [result.kind, result.status, result.exitCode]),
+    [
+      ["test", "passed", 0],
+      ["lint", "passed", 0],
+    ],
+  );
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  const linked = store.listVerificationResultsForAdapterRun(run.id);
+  // **これが #573 の中身。** 列は前からあったが、書く実装が無かった。
+  assert.equal(linked.length, 2);
+  // 行の並びは主張しない。同一トランザクションで書くので created_at が同値になりえ、
+  // そのときの順序は id 依存（乱数）になる。宣言順は emit 側の `gate.results` が持つ。
+  assert.deepEqual(
+    linked.map((result) => `${result.checkKind}:${result.status}:${result.command}`).sort(),
+    ["lint:passed:npm run lint", "test:passed:npm run test"],
+  );
+  for (const result of linked) {
+    assert.equal(result.adapterRunId, run.id);
+    assert.equal(result.taskId, run.taskId);
+    assert.ok(result.evidenceId, "each check keeps its own evidence row");
+  }
+});
+
+test("a failing gate keeps a turn that ended cleanly out of succeeded", async (context) => {
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateExitCode: 1,
+  });
+
+  // 子はエラーなく終わっている。区別できるのは gate を走らせたからである。
+  assert.equal(report.childOutcome, "succeeded");
+  assert.equal(report.exitCode, 0);
+  assert.equal(report.outcome, "failed");
+  assert.equal(report.status, "failed");
+  assert.equal(code, 1);
+  assert.equal(report.gate.status, "failed");
+  assert.match(report.failureReason, /completion gate did not pass: 1 of 1/);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.equal(run.status, "failed");
+  assert.deepEqual(
+    store.listVerificationResultsForAdapterRun(run.id).map((result) => result.status),
+    ["failed"],
+  );
+});
+
+test("a gate that cannot be started is indeterminate, not a pass", async (context) => {
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    binOnPath: false,
+  });
+
+  assert.equal(report.childOutcome, "succeeded");
+  assert.equal(report.outcome, "indeterminate");
+  // adapter_runs の語彙は増やさない。indeterminate は failed として記録される。
+  assert.equal(report.status, "failed");
+  assert.equal(code, 1);
+  assert.equal(report.gate.status, "errored");
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(
+    store.listVerificationResultsForAdapterRun(run.id).map((result) => result.status),
+    ["errored"],
+  );
+});
+
+test("a gate the manifest does not approve starts no child at all", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code, report } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    extraFlags: ["--gate", "npm run deploy"],
+  });
+
+  assert.equal(code, BLOCKED_PENDING_APPROVAL);
+  assert.equal(report.executed, false);
+  assert.match(report.executionReason, /completion gate command/);
+  assert.deepEqual(
+    report.gaps.map((gap) => [gap.kind, gap.value]),
+    [["command", "npm run deploy"]],
+  );
+  // 数時間走ったあとで「その gate は承認されていない」と分かる形にしない。
+  assert.equal(spawnFake.calls.length, 0);
+});
+
+test("a child that failed runs no gate check and says so", async (context) => {
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    spawnOverride: createFakeSpawn({
+      lines: [initEvent(), resultEvent({ is_error: true, subtype: "error_max_turns" })],
+      exitCode: 1,
+    }),
+  });
+
+  assert.equal(code, 1);
+  assert.equal(report.outcome, "failed");
+  assert.equal(report.gate.status, "not-run");
+  assert.match(report.gate.reason, /did not succeed/);
+  assert.deepEqual(report.gate.results, []);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(store.listVerificationResultsForAdapterRun(run.id), []);
+});
+
+test("a session that declared no gate is not silently read as verified", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+
+  const { code, report } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+  });
+
+  // 既存の呼び出しは今までどおり 0 で終わる。区別できるのは gate 欄と連結件数からである。
+  assert.equal(code, 0);
+  assert.equal(report.outcome, "succeeded");
+  assert.equal(report.gate.status, "not-declared");
+  assert.deepEqual(report.gate.declared, []);
+
+  const output = [];
+  assert.equal(
+    runCli(["runs", "--json"], { config, statePath, cwd: directory, write: (line) => output.push(line) }),
+    0,
+  );
+  const { runs } = JSON.parse(output.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 0,
+    passed: 0,
+    failed: 0,
+    errored: 0,
+    skipped: 0,
+  });
+});
+
+test("fh runs reports how many checks each run is linked to", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+  });
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], { config, statePath, cwd: directory, write: (line) => listed.push(line) }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 1,
+    passed: 1,
+    failed: 0,
+    errored: 0,
+    skipped: 0,
+  });
+
+  // 1 件を引くときは、何を通したのかまで返る。
+  const single = [];
+  assert.equal(
+    runCli(["runs", "--run", runs[0].id, "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => single.push(line),
+    }),
+    0,
+  );
+  const detail = JSON.parse(single.at(-1));
+  assert.deepEqual(
+    detail.verifications.map((result) => [result.checkKind, result.status, result.command]),
+    [["test", "passed", "npm run test"]],
+  );
+});
+
+test("the child is told the completion condition it will be measured by", async (context) => {
+  const prepared = await preparedDirectory(context, { commands: ["npm run test"] });
+  const bin = fakeBinDirectory(prepared.directory);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  await launch({
+    ...prepared,
+    spawnFake,
+    extraFlags: ["--gate", "npm run test"],
+    environment: { ...process.env, PATH: bin },
+  });
+
+  const { argv } = spawnFake.calls[0];
+  const prompt = argv[argv.indexOf("-p") + 1];
+  assert.match(prompt, /<completion-gate>/);
+  assert.match(prompt, /npm run test/);
+  // 呼び出し側の prompt はそのまま後ろに続く（説明が本文を置き換えない）。
+  assert.match(prompt, new RegExp(PROMPT_BODY));
+});
+
+test("a gate leaves the command and the exit code in the record, and nothing else", async (context) => {
+  const { statePath } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateExitCode: 1,
+    spawnOverride: createFakeSpawn({
+      lines: [
+        initEvent(),
+        { type: "assistant", message: { content: PROMPT_BODY } },
+        resultEvent(),
+      ],
+    }),
+  });
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const persisted = JSON.stringify([
+    store.listEvidence(),
+    store.listAdapterRuns(),
+    store.listVerificationResults(),
+  ]);
+  assert.equal(persisted.includes(PROMPT_BODY), false);
+  // 承認済み manifest と完全一致した文字列と終了コードは残ってよい（残らないと
+  // 「何が赤だったのか」を後から引けない）。
+  assert.ok(persisted.includes("npm run test"));
+  assert.ok(
+    store
+      .listEvidence()
+      .some((row) =>
+        row.claimsSupported.some((claim) => claim === "the deterministic test check failed"),
+      ),
+    "each gate check keeps a verification_run evidence row of its own",
+  );
+});
+
+test("a gate that was declared but never measured is not a pass", () => {
+  // 条件を課したうえで測れなかったのだから、通ったとは言えない（rollout guard 等で
+  // チェックが 1 本も走らなかった経路）。宣言していない場合と扱いを分ける。
+  assert.equal(combineOutcome("succeeded", null, { declared: true }), "indeterminate");
+  assert.equal(combineOutcome("succeeded", null, { declared: false }), "succeeded");
+
+  assert.deepEqual(
+    resolveGate({
+      gates: [{ kind: "test", command: "npm run test" }],
+      results: [],
+      notRunReason: "shadow rollout records session completion gate checks without provider execution",
+      childOutcome: "succeeded",
+    }),
+    {
+      verdict: null,
+      status: "not-run",
+      outcome: "indeterminate",
+      failureReason:
+        "shadow rollout records session completion gate checks without provider execution",
+    },
+  );
+  // 子がそもそも失敗しているなら、gate が走らなかった理由は失敗の説明にならない。
+  assert.equal(
+    resolveGate({
+      gates: [{ kind: "test", command: "npm run test" }],
+      results: [],
+      notRunReason: "the child session did not succeed, so no gate check was run",
+      childOutcome: "failed",
+    }).failureReason,
+    null,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// レビュー指摘への回帰テスト（PR #613）
+// ---------------------------------------------------------------------------
+
+// gate ごとに違う終了コードを返す fake。`options.gateSpawn` の注入口を通る唯一の経路で、
+// 実プロセスに依存する `launchWithGates` では作れない「一方 pass・一方 fail」を作る。
+function createGateSpawn(exitCodes) {
+  const calls = [];
+  const spawn = (executable, argv, options) => {
+    const child = new EventEmitter();
+    child.kill = () => {};
+    calls.push({ executable, argv, options });
+    const code = exitCodes[calls.length - 1];
+    setImmediate(() => child.emit("close", code));
+    return child;
+  };
+  return { spawn, calls };
+}
+
+test("an invalid --gate-timeout-ms is refused before the child is started", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context, {
+    commands: ["npm run test"],
+  });
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  await assert.rejects(
+    launch({
+      directory,
+      statePath,
+      policyPath,
+      spawnFake,
+      extraFlags: ["--gate", "npm run test", "--gate-timeout-ms", "0"],
+    }),
+    /--gate-timeout-ms must be a positive integer/,
+  );
+
+  // **子を起こす前に落ちること。** 以前は gate 実行の直前で初めて評価していたため、
+  // 例外は子が走り終わったあとに投げられ、adapter_runs も evidence も残らないまま
+  // 抜けていた（記録を残さずにクラッシュする、この設計が最も嫌う失敗）。
+  assert.equal(spawnFake.calls.length, 0);
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  assert.deepEqual(store.listAdapterRuns(), []);
+});
+
+test("an invalid --gate-timeout-ms is refused even when no gate is declared", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+
+  // gate を宣言していないからといって、打ち間違えたフラグを黙って捨てない。
+  await assert.rejects(
+    launch({
+      directory,
+      statePath,
+      policyPath,
+      spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+      extraFlags: ["--gate-timeout-ms", "not-a-number"],
+    }),
+    /--gate-timeout-ms must be a positive integer/,
+  );
+});
+
+test("the gate timeout is clamped to the same ceiling as fh verify", () => {
+  assert.equal(gateTimeoutMs(undefined), DEFAULT_CHECK_TIMEOUT_MS);
+  assert.equal(gateTimeoutMs(1_000), 1_000);
+  // 上限を超える指定は黙って通さずクランプする。`fh verify --timeout-ms` と同じ値であること
+  // （`check-runner.mjs` が両方の唯一の出どころ）。
+  assert.equal(gateTimeoutMs(MAX_CHECK_TIMEOUT_MS * 10), MAX_CHECK_TIMEOUT_MS);
+});
+
+test("more gates than the cap are refused instead of occupying the harness", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context, {
+    commands: ["npm run test"],
+  });
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+  const tooMany = Array.from({ length: MAX_SESSION_GATES + 1 }, () => [
+    "--gate",
+    "npm run test",
+  ]).flat();
+
+  await assert.rejects(
+    launch({ directory, statePath, policyPath, spawnFake, extraFlags: tooMany }),
+    new RegExp(`--gate may be declared at most ${MAX_SESSION_GATES} times`),
+  );
+  assert.equal(spawnFake.calls.length, 0);
+});
+
+test("gates run serially in declaration order and every result is linked", async (context) => {
+  // 1 本目 pass・2 本目 fail。実プロセス経由の helper では作れない組み合わせで、
+  // 「確定した赤が判定を決める」ことと「両方の結果が記録される」ことを同時に固定する。
+  const gateSpawnFake = createGateSpawn([0, 1]);
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test", "lint:npm run lint"],
+    commands: ["npm run test", "npm run lint"],
+    gateSpawnFake,
+  });
+
+  assert.equal(gateSpawnFake.calls.length, 2);
+  // 宣言順に、直列で走る（同じ作業ツリーを取り合わせない）。
+  assert.deepEqual(
+    gateSpawnFake.calls.map((call) => call.argv),
+    [
+      ["run", "test"],
+      ["run", "lint"],
+    ],
+  );
+  assert.equal(report.childOutcome, "succeeded");
+  assert.equal(report.outcome, "failed");
+  assert.equal(report.gate.status, "failed");
+  assert.equal(code, 1);
+  assert.match(report.failureReason, /1 of 2 declared check\(s\) did not pass/);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(
+    store
+      .listVerificationResultsForAdapterRun(run.id)
+      .map((result) => `${result.checkKind}:${result.status}`)
+      .sort(),
+    ["lint:failed", "test:passed"],
+  );
+});
+
+test("fh runs breaks the linked checks down by status, not just by count", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test", "lint:npm run lint"],
+    commands: ["npm run test", "npm run lint"],
+    gateSpawnFake: createGateSpawn([0, 1]),
+  });
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  // 内訳が status ごとに分かれていること。`total` だけを見ていると、赤（failed）と
+  // 判定不能（errored）で次の行動が違うことが読めない。
+  assert.deepEqual(runs[0].verification, {
+    total: 2,
+    passed: 1,
+    failed: 1,
+    errored: 0,
+    skipped: 0,
+  });
+});
+
+test("fh runs counts a check that could not be started as errored", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    binOnPath: false,
+  });
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 1,
+    passed: 0,
+    failed: 0,
+    errored: 1,
+    skipped: 0,
+  });
+});
+
+test("resume declares and runs its gates the same way launch does", async (context) => {
+  // `--gate` は session 共通フラグなので resume にも渡せる。解析・manifest 照合・実行・
+  // adapter_run への連結が resume 経路でも維持されることを固定する。
+  const gateSpawnFake = createGateSpawn([0]);
+  const { code, report, statePath } = await launchWithGates(context, {
+    action: "resume",
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateSpawnFake,
+  });
+
+  assert.equal(code, 0);
+  assert.equal(report.action, "resume");
+  assert.equal(report.gate.status, "passed");
+  assert.deepEqual(gateSpawnFake.calls[0].argv, ["run", "test"]);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(
+    store.listVerificationResultsForAdapterRun(run.id).map((result) => result.status),
+    ["passed"],
+  );
+});
+
+test("the gate check does not inherit the caller's credentials", async (context) => {
+  // 呼び出し元 `fh` の環境には token 類が載りうる。gate は sandbox の外で走るので、
+  // それをそのまま渡すと「子は outbound を禁じられているのに、gate 経由で持ち出せる」
+  // 経路になる。許可リストに無い名前が 1 つも渡らないことを実際の spawn 引数で確かめる。
+  const gateSpawnFake = createGateSpawn([0]);
+  const prepared = await preparedDirectory(context, { commands: ["npm run test"] });
+  const bin = fakeBinDirectory(prepared.directory);
+  await launch({
+    ...prepared,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    gateSpawnFake,
+    extraFlags: ["--gate", "npm run test"],
+    environment: {
+      ...process.env,
+      PATH: bin,
+      GITHUB_TOKEN: PROMPT_BODY,
+      ANTHROPIC_API_KEY: PROMPT_BODY,
+      SOME_VENDOR_SECRET: PROMPT_BODY,
+    },
+  });
+
+  const passed = gateSpawnFake.calls[0].options.env;
+  assert.equal(passed.GITHUB_TOKEN, undefined);
+  assert.equal(passed.ANTHROPIC_API_KEY, undefined);
+  assert.equal(passed.SOME_VENDOR_SECRET, undefined);
+  // 値そのものが 1 つも漏れていないこと（名前だけを列挙して満足しない）。
+  assert.equal(Object.values(passed).includes(PROMPT_BODY), false);
+  // チェックを走らせるのに要るものは残る。
+  assert.equal(passed.PATH, bin);
+  assert.deepEqual(
+    Object.keys(passed).filter((name) => !GATE_ENVIRONMENT_ALLOWLIST.includes(name)),
+    [],
+  );
+});
+
+test("the allowlist keeps what a task runner needs to start at all", () => {
+  // PATH が落ちると `resolveCheckExecutable` が実行ファイルを解決できず、
+  // すべての gate が errored になる（機能が丸ごと死ぬ）。HOME はツールチェインの
+  // 既定パスの起点なので、両方が許可リストにあることを固定する。
+  for (const name of ["PATH", "HOME", "TMPDIR"]) {
+    assert.ok(GATE_ENVIRONMENT_ALLOWLIST.includes(name), `${name} must stay`);
+  }
+  const reduced = gateEnvironment({ PATH: "/bin", GITHUB_TOKEN: "t", HOME: "/h" });
+  assert.deepEqual({ ...reduced }, { PATH: "/bin", HOME: "/h" });
+});
+
+test("fh runs accounts for every verification status, including skipped", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateSpawnFake: createGateSpawn([0]),
+  });
+
+  // `skipped` を書く producer はまだ無いが、列としては存在する。内訳が `total` を
+  // 説明しなくなる状態（合計が合わないのに読み手が気づけない）を作らないため、
+  // 4 値すべてが数えられていることを、行を直接足して確かめる。
+  const store = createStateStore(statePath);
+  const [run] = store.listAdapterRuns();
+  store.recordVerificationResult({
+    taskId: run.taskId,
+    adapterRunId: run.id,
+    checkKind: "lint",
+    status: "skipped",
+    command: "npm run lint",
+  });
+  store.close();
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 2,
+    passed: 1,
+    failed: 0,
+    errored: 0,
+    skipped: 1,
+  });
+  // 内訳の合計が total を説明すること。これが崩れると読み手は差の存在に気づけない。
+  const { total, ...breakdown } = runs[0].verification;
+  assert.equal(
+    Object.values(breakdown).reduce((sum, count) => sum + count, 0),
+    total,
+  );
 });

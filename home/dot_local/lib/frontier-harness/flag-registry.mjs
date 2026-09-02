@@ -88,6 +88,10 @@ export const COMMAND_FLAGS = Object.freeze({
       "--approval-server-command",
       "--timeout-ms",
       "--progress-interval-ms",
+      // 完了条件。繰り返して複数のチェックを宣言できる（assertKnownFlags は値を取る
+      // フラグの次のトークンを読み飛ばすので、繰り返しはそのまま通る）。
+      "--gate",
+      "--gate-timeout-ms",
     ],
     actions: {
       launch: { value: ["--session-id"] },

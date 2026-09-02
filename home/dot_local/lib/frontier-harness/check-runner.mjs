@@ -18,6 +18,11 @@ import { collapseWhitespace, manifestEntryRejection } from "./manifest-policy.mj
 // チェックが終わらないまま harness を占有しない上限。テストスイートは分単位で走りうるので
 // 短くしすぎず、しかし無限には待たない。
 export const DEFAULT_CHECK_TIMEOUT_MS = 900_000;
+// 呼び出し側が伸ばせる上限。`approval-server.mjs` が escalation の待機に上限を課しているのと
+// 同じ理由で要る —— チェックの実行中はツリーの書き換えを検知できない窓なので、無制限にできると
+// その窓を任意に広げられる。**既定値と対で持つ**: 意味の対になる 2 つの定数が別モジュールに
+// 割れていると、片方だけ動かしたときにどちらが効いているのか読めなくなる。
+export const MAX_CHECK_TIMEOUT_MS = 3_600_000;
 // SIGTERM から SIGKILL までの猶予。`child-runner.mjs` と同じ値を使う（2 つ目の規約を作らない）。
 export const CHECK_TERMINATION_GRACE_MS = 5_000;
 // 時間切れで終わらせたチェックの終了コード。`timeout(1)` の慣習に合わせる。
@@ -56,6 +61,15 @@ export function resolveCheckExecutable(binary, environment) {
 
 function terminalStatus(exitCode) {
   return exitCode === 0 ? "passed" : "failed";
+}
+
+// 呼び出し側が指定した制限時間を、既定と上限に収める。
+//
+// 同じ式を `fh verify` と `fh session --gate` の 2 か所へ書くと、片方だけ上限を外した
+// ときに「どちらの経路から入ったかで効く上限が違う」状態を作れてしまう。クランプは
+// チェック実行を所有するこのモジュールの責務として 1 か所に置く。
+export function resolveCheckTimeoutMs(requested) {
+  return Math.min(requested ?? DEFAULT_CHECK_TIMEOUT_MS, MAX_CHECK_TIMEOUT_MS);
 }
 
 // 承認済みチェックを 1 本走らせ、`verification_results` に入る形の結果だけを返す。

@@ -386,7 +386,7 @@ _assert_lifecycle_scripts_documented() {
     "fh-candidate-max-live:CANDIDATE_MAX_LIVE_ENTRIES:candidate-store.mjs" \
     "fh-review-text-max-length:REVIEW_TEXT_MAX_LENGTH:review-registry.mjs" \
     "fh-review-diff-max-bytes:MAX_DIFF_BYTES:git-worktree.mjs" \
-    "fh-check-max-timeout-ms:MAX_CHECK_TIMEOUT_MS:verify-command.mjs" \
+    "fh-check-max-timeout-ms:MAX_CHECK_TIMEOUT_MS:check-runner.mjs" \
     "fh-status-default-limit:DEFAULT_STATUS_LIMIT:cli.mjs" \
     "fh-status-max-limit:MAX_STATUS_LIMIT:cli.mjs" \
     "fh-clean-target-preview-limit:CLEAN_TARGET_PREVIEW_LIMIT:cli.mjs"; do
