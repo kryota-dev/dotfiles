@@ -77,8 +77,13 @@ Intentionally **not** implemented in this foundation slice:
 - The AC-029 reduction of `multi-review` to a reviewer registry. This PR only changes its
   Phase 1 gate wording; the roster and phase structure are untouched. **Closed by #503**:
   `SKILL.md` now carries only the roster and the finding schema, with the execution protocol
-  in `references/`. The same PR closed AC-032 (`sdd` as a spec compiler) and retired the
-  AC-034 shim.
+  in `references/`. The same PR retired the AC-034 shim.
+- AC-032 (`sdd` owns neither worktree, worker selection, implementation, commit, nor PR
+  creation) is only **partly** met by #503: the *contracts* now live in the skills that own
+  them (`pr-workflow` / `codex` for workers, `commit` / `create-pr` for delivery), but `sdd`
+  is still the *executor* of phases 4-6. Moving execution out collides with the #347
+  single-approval decision that `pr-workflow`'s standard/large path depends on, so it needs
+  an ADR and is handed to #585.
 
 `make test` reaches the complete lint/Node/Bats stack but has one unrelated failure inherited from
 the pre-existing RunCat worktree change: `tests/files.bats` expects `mas "RunCat Neo"`, while the
