@@ -123,6 +123,17 @@ rather than silently ignoring one of them.
 listed at all rather than shown as empty fields that would read as "recorded, and there was
 nothing". The session id in particular still has to be kept by the caller at launch time.
 
+**What it does return is whether the run passed a gate.** Every run carries a `verification`
+count of the deterministic checks linked to it — `total`, and how many `passed`, `failed`, and
+`errored` — and `--run` returns those results themselves alongside the record. A run with
+`total: 0` has passed no gate at all, so its `status: "succeeded"` claims only that the turn
+ended without an error. That distinction used to be unreadable from the record: three children
+in one wave ended their turn saying they would move on to review once CI notified them, and all
+three were recorded as `succeeded` with `exitCode: 0`, identical in shape to the children that
+had actually finished. `denials` was empty for all three as well, because nothing had been
+refused — they simply had not done it. The only thing that gave them away was the comment count
+on their pull requests, which is not part of this record and never will be.
+
 The `failureReason` names *which* signal decided the failure, because the two do not always
 agree. An envelope that reports an error is described by its own subtype (`run reported
 error_max_turns`); a run whose envelope claimed no error but whose process exited non-zero is
@@ -692,6 +703,62 @@ and that launcher keeps an inherited `CLAUDE_CONFIG_DIR`, so a child always runs
 of the session that launched it. Pinning a child to a specific account is done the existing way —
 by declaring `accountScope` on its capability, which `checkCapabilityExecutable` enforces — not
 by passing a launcher name through this command.
+
+### The completion condition is declared, not asserted
+
+`outcome` says whether the turn ended without an error. It has never said whether the child did
+what it was told, and separating those two questions was deliberate (PRD 493 AC-005, PRD 537
+AC-012). What was missing was the line back: neither the launch output nor `adapter_runs`
+referred to a verification, so a child that skipped its instructions looked exactly like one
+that followed them.
+
+```bash
+fh session launch --worktree <abs> --prompt-file <abs> \
+  --gate "npm run test" --gate "lint:npm run lint"
+```
+
+`--gate` declares a completion condition as an approved deterministic check, and repeats for
+more than one. A declaration is `<kind>:<command>`, or just `<command>` with the kind defaulting
+to `test`. The prefix is read as a kind only when it matches the closed check vocabulary, which
+cannot collide with a command because an approvable command always begins with a task runner's
+name — `npm run test -- --grep=a:b` is a command, not a `npm run test -- --grep=a` gate.
+
+Five things follow from reusing `fh verify`'s machinery instead of building a second one:
+
+- **The gate is checked before the child starts.** Its command goes through the same manifest
+  match as the capability, so an unapproved gate queues a gap and exits 2 rather than being
+  discovered after a child has run for hours.
+- **The child is told what it will be measured by.** The declared commands are prepended to the
+  prompt in the same fixed-vocabulary briefing that carries the sandbox constraints. A gate the
+  child cannot see is a trap rather than a condition.
+- **The harness still never sees the output.** The checks run through `check-runner.mjs`, whose
+  stdout and stderr are inherited by the terminal, so a gate adds an exit code to the record and
+  no free text — the property described under deterministic verification is not weakened by
+  being reached from a second command.
+- **The result is linked to the run.** Each check is recorded as a `verification_results` row
+  whose `adapter_run_id` is the session's own run. That column existed from the beginning and
+  nothing had ever written it; writing it is what lets `fh runs` answer "did this run pass
+  anything" from the record alone.
+- **The verdict only moves downward.** A gate that fails makes the session `failed` even when
+  the child's envelope reported success, and a gate that could not be started at all makes it
+  `indeterminate` — which `adapter_runs` still stores as `failed` with a reason, so the status
+  vocabulary does not grow. A gate never turns a failed child into a passing one, and one
+  definitely red check is not softened into "could not tell" by another check that never ran.
+
+A child that did not succeed runs no gate. The question a gate answers — "the turn ended
+cleanly, but did it pass?" — only arises when the turn ended cleanly, and running checks against
+a tree that already failed would add red results that describe the earlier failure rather than a
+missed condition. Each check is bounded by `--gate-timeout-ms`, which is the check timeout
+described under deterministic verification, with the same default and the same ceiling. It is a
+separate flag from `--timeout-ms` because that one is how long the approval channel waits, and
+one name cannot carry two limits.
+
+Declaring no gate leaves the outcome exactly as it was. Turning a missing gate into
+`indeterminate` would be the strictest reading of "do not call it a success if you cannot tell",
+but it would also fail every existing caller at once, and the same fact is legible without it: a
+run with no linked verification result has passed nothing, and `succeeded` there means the turn
+ended and nothing more. Reading it as "the work is done" is the monitor's error to avoid, and
+the record now gives the monitor something to read instead of a pull request's comment count.
 
 A repository's approval is bound to the worktree the child will run in, not to the directory the
 command was invoked from. The manifest, the approval scope, the state root, and the child's
