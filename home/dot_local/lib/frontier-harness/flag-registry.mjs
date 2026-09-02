@@ -13,8 +13,14 @@
 
 const EMPTY = Object.freeze([]);
 
-// 全コマンドに効く。出力形式の選択はコマンドの機能ではないので、各エントリに書かない。
-const GLOBAL_BOOLEAN = Object.freeze(["--json"]);
+// 全コマンドに効く。出力形式の選択も自己記述もコマンドの機能ではないので、各エントリに書かない。
+//
+// **`--help` はここに載る。** 以前は表から漏れていたため `fh approvals --help` が
+// `unknown flag --help` になり、サブコマンドの出力形状を CLI から引く手段が無かった
+// （その欠落が、監視スクリプトの形状取り違えを 42 分にわたって沈黙させた）。fail-closed は
+// 「未知のフラグを拒む」ことであって「`--help` を拒む」ことではないので、直し方は例外の
+// 追加ではなく表への追加になる —— `--help` も他と同じく、表に載っているから通る。
+const GLOBAL_BOOLEAN = Object.freeze(["--json", "--help"]);
 
 function spec({ boolean = EMPTY, value = EMPTY, actions } = {}) {
   return Object.freeze({

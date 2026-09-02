@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,8 +11,14 @@ import {
   CLEAN_TARGET_PREVIEW_LIMIT,
   DEFAULT_STATUS_LIMIT,
   MAX_STATUS_LIMIT,
+  createEmitter,
   runCli,
 } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import {
+  COMMAND_HELP,
+  helpCommandNames,
+  undeclaredOutputKeys,
+} from "../home/dot_local/lib/frontier-harness/command-help.mjs";
 import { HarnessError, describeCliFailure } from "../home/dot_local/lib/frontier-harness/errors.mjs";
 import { INTERNAL_ERROR, USAGE } from "../home/dot_local/lib/frontier-harness/exit-codes.mjs";
 import {
@@ -750,5 +756,274 @@ test("a JSON file the user pointed at is named when it cannot be read", (context
       assert.ok(error.message.includes(taskPath), error.message);
       return true;
     },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 7. サブコマンドの入出力契約が CLI から引ける（#594）
+//
+// 事故は「`fh approvals --json` の envelope がどこからも引けない」ことから始まった。
+// 監視スクリプトが top-level を配列として舐めて型エラーで落ち、`2>/dev/null || true` と
+// 組み合わさって「承認要求 0 件」と区別できない空文字列を返し続け、承認要求 2 件を最大
+// 42 分放置した。ここのテストが守るのは 2 つ:
+//
+//   1. `--help` が全コマンドで引けること（`unknown flag --help` に戻らないこと）
+//   2. **`--help` が嘘にならないこと** —— 宣言した出力契約が実装と drift しないこと
+// ---------------------------------------------------------------------------
+
+// このファイルが実際にコマンドを走らせて、宣言キーと実測キーの一致まで確かめる対象。
+const OUTPUT_OBSERVED_HERE = [
+  "approvals",
+  "clean",
+  "doctor",
+  "gaps",
+  "run",
+  "runs",
+  "status",
+];
+// state を持たない git worktree・子プロセス・承認ファイルを要する残り。実行時 assert
+// （`createEmitter`）が全コマンド・全分岐で未宣言キーを止めるので、こちらは「宣言に
+// 残っているが実装から消えた」向きだけが未観測で残る。名前を書き出しておくのは、
+// 上の一覧が黙って縮んだときに気付けるようにするため。
+const OUTPUT_NOT_OBSERVED_HERE = [
+  "approve",
+  "approve-server",
+  "candidate",
+  "onboard",
+  "review",
+  "session",
+  "verify",
+];
+
+test("every command that takes flags also describes itself", () => {
+  assert.deepEqual(helpCommandNames(), Object.keys(COMMAND_FLAGS).sort());
+  // 分担の宣言が古びていないこと。片方に足して他方を忘れると、下の一致検証が黙って痩せる。
+  assert.deepEqual(
+    [...OUTPUT_OBSERVED_HERE, ...OUTPUT_NOT_OBSERVED_HERE].sort(),
+    helpCommandNames(),
+  );
+});
+
+test("fh <command> --help answers instead of refusing --help as unknown", () => {
+  for (const command of helpCommandNames()) {
+    const output = [];
+    assert.equal(
+      runCli([command, "--help"], { write: (line) => output.push(line) }),
+      0,
+      command,
+    );
+    const text = output.join("\n");
+    // 受け付けるフラグは COMMAND_FLAGS から描画するので、表に足したフラグは必ず出る。
+    for (const flag of [
+      ...COMMAND_FLAGS[command].boolean,
+      ...COMMAND_FLAGS[command].value,
+      ...Object.values(COMMAND_FLAGS[command].actions ?? {}).flatMap((action) => [
+        ...action.boolean,
+        ...action.value,
+      ]),
+    ]) {
+      assert.ok(text.includes(flag), `fh ${command} --help omitted ${flag}`);
+    }
+    // 出力形状が読めることがこの機能の存在理由そのもの。
+    for (const key of Object.keys(COMMAND_HELP[command].output)) {
+      assert.ok(text.includes(key), `fh ${command} --help omitted ${key}`);
+    }
+  }
+});
+
+test("fh approvals --help names the envelope the monitoring script guessed wrong", () => {
+  const output = [];
+  assert.equal(runCli(["approvals", "--help"], { write: (line) => output.push(line) }), 0);
+  const text = output.join("\n");
+  assert.match(text, /approvals/);
+  assert.match(text, /skipped/);
+  // 「top-level は配列ではない」が読めること。取り違えたのはまさにここだった。
+  assert.match(text, /never a bare array/);
+});
+
+test("fh <command> --help --json hands the contract to a script instead of prose", () => {
+  const output = [];
+  assert.equal(
+    runCli(["approvals", "--help", "--json"], { write: (line) => output.push(line) }),
+    0,
+  );
+  const contract = emitted(output);
+  assert.equal(contract.command, "approvals");
+  assert.deepEqual(Object.keys(contract.output).sort(), [
+    "approvals",
+    "pending",
+    "purged",
+    "skipped",
+  ]);
+  assert.ok(contract.flags.boolean.includes("--all"));
+  assert.ok(contract.flags.value.includes("--approvals-dir"));
+  // 形状を推測せず表明できること。envelope が変われば、この照会がまず変わる。
+  assert.equal(Object.hasOwn(contract.output, "approvals"), true);
+});
+
+test("fh --help lists the commands, and a misspelled command still exits 64", () => {
+  const listed = [];
+  assert.equal(runCli(["--help"], { write: (line) => listed.push(line) }), 0);
+  for (const command of helpCommandNames()) {
+    assert.ok(listed.join("\n").includes(command), command);
+  }
+
+  // 打ち間違えたコマンド名を「一覧が出たので成功」と読ませない。
+  const mistyped = [];
+  assert.equal(
+    runCli(["aprovals", "--help"], { write: (line) => mistyped.push(line) }),
+    USAGE,
+  );
+  assert.ok(mistyped.join("\n").includes("approvals"));
+
+  // JSON でも同じ契約が引ける。
+  const asJson = [];
+  runCli(["--help", "--json"], { write: (line) => asJson.push(line) });
+  assert.deepEqual(Object.keys(emitted(asJson).commands).sort(), helpCommandNames());
+});
+
+test("--help does not widen what assertKnownFlags accepts", () => {
+  // `--help` は表に載ったから通るのであって、未知フラグの拒否を迂回するのではない。
+  assert.throws(
+    () => runCli(["approvals", "--bogus-flag", "--help"], { write: () => {} }),
+    /--bogus-flag/,
+  );
+  assert.throws(
+    () => runCli(["session", "launch", "--resume-key", "x", "--help"], { write: () => {} }),
+    /--resume-key/,
+  );
+});
+
+test("an undeclared output key is reported after the payload is written, not instead of it", () => {
+  const output = [];
+  const emit = createEmitter({ command: "status", asJson: true, write: (line) => output.push(line) });
+  assert.throws(
+    () => emit({ routes: [], page: {}, surprise: 1 }),
+    (error) => {
+      assert.match(error.message, /surprise/);
+      // 内部の不整合であって利用者の誤りではないので、64 ではなく 70 で終わる。
+      assert.equal(describeCliFailure(error).exitCode, INTERNAL_ERROR);
+      return true;
+    },
+  );
+  // **payload は失われない。** 子が既に走ったあとの emit もこの経路を通るため、
+  // 契約違反を理由に監査証跡を落とすと、事故の再構成手段が丸ごと消える。
+  assert.deepEqual(JSON.parse(output[0]), { routes: [], page: {}, surprise: 1 });
+
+  // 契約どおりなら黙って通る。
+  assert.doesNotThrow(() => emit({ routes: [], page: {} }));
+  // envelope でないものを出すこと自体が契約違反（形状が引けない状態に戻る）。
+  assert.deepEqual(undeclaredOutputKeys("status", []), ["<not a JSON object>"]);
+  // 未知のコマンドはこの層の担当ではない。
+  assert.deepEqual(undeclaredOutputKeys("bogus", { anything: 1 }), []);
+});
+
+// 宣言キーが実装から消えた向きの drift。実行時 assert は「増えた」側しか止められないので、
+// 実際にコマンドを走らせて、宣言した集合が丸ごと実測されることを確かめる。
+test("the declared output keys are exactly the keys these commands emit", (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const approvalsDirectory = path.join(directory, "approvals");
+  const observed = new Map(OUTPUT_OBSERVED_HERE.map((command) => [command, new Set()]));
+
+  seedAdapterRuns(statePath, 1);
+  const runIds = (() => {
+    const store = createStateStore(statePath);
+    const ids = store.listAdapterRunPage({ limit: 1, offset: 0 }).runs.map((run) => run.id);
+    store.putEvidence({ kind: "old_log", producer: "fake", createdAt: EXPIRED_AT });
+    store.close();
+    return ids;
+  })();
+
+  const taskPath = path.join(directory, "task.json");
+  writeFileSync(taskPath, JSON.stringify({ goal: "declare the output contract" }));
+
+  const scenarios = [
+    ["approvals", ["approvals", "--json", "--approvals-dir", approvalsDirectory]],
+    ["approvals", ["approvals", "--purge", "--json", "--approvals-dir", approvalsDirectory]],
+    ["clean", ["clean", "--dry-run", "--now", NOW, "--json"]],
+    ["clean", ["clean", "--now", NOW, "--json"]],
+    ["doctor", ["doctor", "--json"]],
+    ["gaps", ["gaps", "--json"]],
+    ["run", ["run", "--task", taskPath, "--json"]],
+    ["runs", ["runs", "--json"]],
+    ["runs", ["runs", "--json", "--run", runIds[0]]],
+    ["status", ["status", "--json"]],
+  ];
+  for (const [command, argumentsList] of scenarios) {
+    const output = [];
+    runCli(argumentsList, {
+      config,
+      statePath,
+      stateDirectory: directory,
+      verifiedModels: {},
+      write: (line) => output.push(line),
+    });
+    for (const key of Object.keys(emitted(output))) observed.get(command).add(key);
+  }
+
+  for (const [command, keys] of observed) {
+    assert.deepEqual(
+      [...keys].sort(),
+      Object.keys(COMMAND_HELP[command].output).sort(),
+      `fh ${command} --help does not match what fh ${command} emits`,
+    );
+  }
+});
+
+// 実際に走らせられないコマンドについても、消えた名前だけは捕まえる。実装のどこにも
+// 現れないキーを `--help` が挙げていたら、それは既に嘘になっている。
+test("no declared output key has vanished from the implementation", () => {
+  const sources = readdirSync(
+    new URL("../home/dot_local/lib/frontier-harness/", import.meta.url),
+  )
+    .filter((name) => name.endsWith(".mjs") && name !== "command-help.mjs")
+    .map((name) =>
+      readFileSync(
+        new URL(`../home/dot_local/lib/frontier-harness/${name}`, import.meta.url),
+        "utf8",
+      ),
+    )
+    .join("\n");
+  const orphaned = [];
+  for (const command of helpCommandNames()) {
+    for (const key of Object.keys(COMMAND_HELP[command].output)) {
+      // オブジェクトリテラルの `key:` と短縮記法の `key,` / `key }` のどちらも拾う。
+      if (!new RegExp(`\\b${key}\\s*[:,}\\n]`).test(sources)) {
+        orphaned.push(`${command}: ${key}`);
+      }
+    }
+  }
+  assert.deepEqual(orphaned, []);
+});
+
+test("approve-server declares that it has no JSON envelope rather than staying blank", () => {
+  // 空の `output` は宣言し忘れと区別が付かないので、その旨を積極的に書かせる。
+  for (const command of helpCommandNames()) {
+    const help = COMMAND_HELP[command];
+    assert.ok(
+      Object.keys(help.output).length > 0 || help.outputNote,
+      `${command} declares neither output keys nor a reason for having none`,
+    );
+  }
+  assert.deepEqual(COMMAND_HELP["approve-server"].output, {});
+  assert.match(COMMAND_HELP["approve-server"].outputNote, /no JSON envelope/);
+});
+
+test("the numbers the help quotes are the numbers the code enforces", () => {
+  const helpText = (command) => {
+    const output = [];
+    runCli([command, "--help"], { write: (line) => output.push(line) });
+    return output.join("\n");
+  };
+  // 旧 usage は件数を定数から埋め込んでいた。help 側は文章の一部として書くので、
+  // ここで定数と突き合わせておかないと、上限を変えた日に `--help` だけが嘘になる。
+  for (const command of ["status", "runs"]) {
+    assert.match(helpText(command), new RegExp(`defaults to ${DEFAULT_STATUS_LIMIT}\\b`), command);
+    assert.match(helpText(command), new RegExp(`capped at ${MAX_STATUS_LIMIT}\\b`), command);
+  }
+  assert.match(
+    helpText("clean"),
+    new RegExp(`at most ${CLEAN_TARGET_PREVIEW_LIMIT} targets per class`),
   );
 });
