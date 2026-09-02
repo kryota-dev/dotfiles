@@ -85,7 +85,7 @@ The curated skills in `home/dot_agents/skills/` are grouped by theme below.
 
 ### Git, PR, and GitHub workflow (14 skills)
 
-Core day-to-day development cycle automation, plus the parallel-dev triad (`repo-radar` → `issue-fleet` / `renovate-sweep`) added in the 2026-07-06 stocktake. `wave-orchestrator` extends that family into deep-and-wide territory: independent sessions run in parallel, each taken through the full `pr-workflow`.
+Core day-to-day development cycle automation, plus the parallel-dev triad (`repo-radar` → `issue-fleet` / `renovate-sweep`) added in the 2026-07-06 stocktake. `wave-orchestrator` extends that family into deep-and-wide territory: independent sessions run in parallel, each taken through the full `pr-workflow`. Its `SKILL.md` is a **norm registry** — the rules to follow and the command forms to use verbatim — while the measurements and incident history behind those rules live in its `references/`.
 
 `commit`, `create-pr`, `create-issue`, `pr-draft-summary`, `github-pr-comments`, `github-projects`, `github-sub-issues`, `monitor-ci`, `renovate-analyzer`, `renovate-sweep`, `issue-fleet`, `repo-radar`, `wave-orchestrator`, `delete-merged-branches`
 
