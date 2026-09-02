@@ -41,6 +41,7 @@ telemetry が蓄積された」ことだった。撤去時点で確認した実�
 | rollout が pilot 以降 | `~/.config/frontier-harness/config.json` の `rollout` が `pilot`（`fh doctor --json` の出力でも確認） |
 | `pr-workflow` / `sdd` / `multi-review` が readiness gate を直接呼ぶ | 各 SKILL.md が 2 gate を明示起動（`tests/files.bats` が機械検証） |
 | `wave-orchestrator` の readiness 経路 | Phase 0 前提チェックで `fh doctor --json` の capability 検査と `fh onboard` の manifest 承認を自ら実行し、子セッションは `pr-workflow` 全長で 2 gate を通る |
+| user の直接起動 / 上表に無い呼び出し元 | **shim が担保していたが撤去で失われた経路**。本 skill 単体では adapter を選ばず provider も起動しないため実行には至らないが、readiness gate は自動では走らない。下記「呼び出し規約」で全 caller に両 gate の起動を課してこれを埋める |
 
 **撤去したのは shim（readiness gate の連鎖起動）だけであり、§4 contract と over-provision gate は
 撤去も弱体化もしていない。** この 2 つは本 skill の本体であって移行対象ではない。
@@ -177,5 +178,11 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 **各 caller は本 skill と `/execution-readiness-check` の両方を自分で呼ぶ**（shim 撤去後は本 skill
 が readiness gate を連鎖起動しないため、片方だけを呼ぶと他方が到達不能になる）。順序は問わないが、
 **どちらも実装・レビュー実行より前**に置く。
+
+**これは上の 3 skill に限らない。** 本 skill は `user-invocable` を落としていないので **user の直接起動**も、
+将来この skill を再利用する別の skill も同じ責務を負う。**上表に無い経路から本 skill だけを呼んだ場合、
+readiness gate は走っていない** —— floor を確認しただけで「gate を通した」とみなさず、実行に移る前に
+`/execution-readiness-check` を自分で起動すること。撤去した shim が唯一担保していたのがこの経路である
+（「shim 撤去の記録」表の最終行）。
 
 **idempotency（多重起動の抑制）**: `pr-workflow` → `sdd` → `multi-review` と連鎖すると 1 実行で最大 3 回同じ判定が走る。**同一セッションで一度 pass した行、および明示的に continue-anyway を選んだ行については再提示しない**（前回の判断を再利用する）。model / effort が変更された形跡があるときのみ再評価する。

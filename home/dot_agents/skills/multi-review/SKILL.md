@@ -89,7 +89,7 @@ standalone）や他の reviewer 実装は、この 2 つを参照するために
 
 - **多様性フロア（non-trivial で Claude≥1 + Codex≥1 を保証）**: small=cc-code(Claude)+codex(Codex)、standard/large=cc-security(Claude)+codex/specialists(Codex)。trivial のみ単一モデル（Codex）を許容する。
 - **generalist は Codex 単独**（規模でコスト爆発する層を offload）。small だけは diff が小さくコストが低いため Claude generalist(cc-code) を安価なフロア anchor として併走させる。standard 以上では security(Claude) が anchor を担い、generalist は完全に Codex へ移す。
-- **specialists（言語 roster + 横断 roster のマッチ分）は全て Codex 実行**（従来の Claude subagent spawn を置換。実行形は「Codex leg 実行・並列・観測・resume」節、rubric は agent `.md` が SSOT）。**マッチ 0 件なら spawn しない**現行挙動は不変。
+- **specialists（言語 roster + 横断 roster のマッチ分）は全て Codex 実行**（従来の Claude subagent spawn を置換。実行形は[`references/codex-legs.md`](references/codex-legs.md)、rubric は agent `.md` が SSOT）。**マッチ 0 件なら spawn しない**現行挙動は不変。
 - **architecture は tier gating の対象外**（フラグ/tier のみで判定）: **`--arch`（tier 不問）または tier=large** のとき spawn する。gating table の trivial/small/standard 行の `—` は「通常 `--arch` を付けない運用上の目安」であって、`--tier=small --arch` のように明示すれば spawn する（起動内容表・「aggregate-view reviewer」節と一致）。
 - **architecture / adversarial は Claude 側**（architecture=whole-repo 深い推論・`--arch`/large のみ、adversarial=pr-workflow Phase 6 で cross-model）。
 - **Codex effort は `-c model_reasoning_effort=<high|xhigh>` で leg 別に上書き**する（`codex-model-pin.toml` は変更しない。デフォルト xhigh を fail-safe に据え置き、上表どおり specialist と 軽量 tier generalist だけ high に下げる）。
@@ -109,7 +109,7 @@ standalone）や他の reviewer 実装は、この 2 つを参照するために
 
 ### 動的 specialist roster（言語/ドメイン特化レビュアー）
 
-**差分の言語・ドメインに応じて専門レビュアーを動的に追加**する。汎用レビュー（generalist）が見落としがちな言語固有・データ層固有の観点を補強するため。**実行は Codex**（tier gating table 参照。standard/large でのみ spawn、effort=high）。**rubric（観点・出力形式・「（未確認）」ルール）は agent 定義 `~/.claude/agents/<lang>-reviewer.md` 本文が SSOT**で、Codex heredoc に注入する（frontmatter は除去。実行形は「Codex leg 実行・並列・観測・resume」節）。rubric は常設ツールと同一の `[MUST]/[SHOULD]/[NITS]/[GOOD]`。
+**差分の言語・ドメインに応じて専門レビュアーを動的に追加**する。汎用レビュー（generalist）が見落としがちな言語固有・データ層固有の観点を補強するため。**実行は Codex**（tier gating table 参照。standard/large でのみ spawn、effort=high）。**rubric（観点・出力形式・「（未確認）」ルール）は agent 定義 `~/.claude/agents/<lang>-reviewer.md` 本文が SSOT**で、Codex heredoc に注入する（frontmatter は除去。実行形は[`references/codex-legs.md`](references/codex-legs.md)）。rubric は常設ツールと同一の `[MUST]/[SHOULD]/[NITS]/[GOOD]`。
 
 | specialist | subagent_type | spawn 条件（変更ファイル） |
 |------------|---------------|--------------------------|
@@ -118,7 +118,7 @@ standalone）や他の reviewer 実装は、この 2 つを参照するために
 | Python | `python-reviewer` | `.py` / `.pyi` |
 | Database | `database-reviewer` | `*.sql` / `migrations/` 配下 / `schema.prisma` / `*.schema.ts`（drizzle 等の schema） |
 
-- **検出方法**: Phase 1 の手順 2 で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` で変更ファイルのパス一覧を取得し、上表のマッチ基準で specialist を選ぶ。マッチ基準は列ごとに異なる: **拡張子一致**（`.ts` / `.tsx` / `.mts` / `.cts` / `.jsx` / `.py` / `.pyi` / `*.sql` / `*.schema.ts`）、**パスに `migrations/` を含む**、**basename が `schema.prisma`**（パス不問）。
+- **検出方法**: Phase 1 の手順 2（[`references/execution-protocol.md`](references/execution-protocol.md)）で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` で変更ファイルのパス一覧を取得し、上表のマッチ基準で specialist を選ぶ。マッチ基準は列ごとに異なる: **拡張子一致**（`.ts` / `.tsx` / `.mts` / `.cts` / `.jsx` / `.py` / `.pyi` / `*.sql` / `*.schema.ts`）、**パスに `migrations/` を含む**、**basename が `schema.prisma`**（パス不問）。
 - **重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer と react-reviewer の両方が立つ（観点が直交するため許容）。
 - **マッチ 0 件なら言語 specialist を spawn しない**（tier gating table の非 specialist leg のみが立つ）。dotfiles（shell/zsh/bats）のような非対象言語の PR では言語 specialist を spawn しない。
 - **roster 外の agent**: `renovate-analyzer` 等の専用 skill / フローから起動するエージェントは本動的 roster の spawn 対象外。今後 specialist を増やす場合も「diff の言語・ドメインで自動 spawn する reviewer」のみを上表に載せる。
@@ -134,7 +134,7 @@ standalone）や他の reviewer 実装は、この 2 つを参照するために
 | UX | `ux-reviewer` | UI ファイルの変更（`.tsx` / `.jsx` / `.vue` / `.svelte` / `.astro` / `.css` / `.scss` / `.sass` / `.less` / `.html`） |
 | Performance | `performance-reviewer` | データ層 / hot-path（`*.sql` / `migrations/` 配下 / `schema.prisma` / `*.schema.ts`）を含む、**または**呼び出し元が spec-context の `requirements.md` に性能要件（NFR）を検出して要請したとき |
 
-- **検出方法**: 言語 roster と同じく Phase 1 の手順 2 で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` のパス一覧を上表のマッチ基準で判定する。performance は差分特性に加え **caller 要請**でも spawn しうる（性能は差分の字面だけでは判定しづらいため、spec-context や large tier のヒントを併用する）。
+- **検出方法**: 言語 roster と同じく Phase 1 の手順 2（[`references/execution-protocol.md`](references/execution-protocol.md)）で確保した `${DIFF}` のヘッダ行（`diff --git a/<path> b/<path>`）、または `gh pr diff --repo <owner/repo> <番号> --name-only` のパス一覧を上表のマッチ基準で判定する。performance は差分特性に加え **caller 要請**でも spawn しうる（性能は差分の字面だけでは判定しづらいため、spec-context や large tier のヒントを併用する）。
 - **language roster と重複 spawn 可**: 例えば `.tsx` を含む PR では typescript-reviewer / react-reviewer（言語 roster）と ux-reviewer（横断観点）が同時に立つ（観点が直交するため許容）。DB 系 PR（`*.sql` / `migrations/` / `schema.prisma` / `*.schema.ts`）では database-reviewer（スキーマ安全性・injection）と performance-reviewer（クエリ効率・N+1）が両方立つ —— 追加コストが最も大きい重複パターンだが、観点が異なるため意図的に許容する。
 - **マッチ 0 件なら spawn しない**: 非対象の変更（例: shell/zsh のみの dotfiles PR）では横断観点 specialist を spawn しない。
 - **SSOT**: 各 specialist の観点・出力形式・「（未確認）」ルールはエージェント定義（`~/.claude/agents/{performance,test,ux}-reviewer.md`）本文に内蔵。**Codex 実行では multi-review がこの本文を heredoc 注入**し、「対象説明 + 差分取得コマンド + 作業ディレクトリ + 棄却台帳（+ spec-context があればそのパス）」を添える（観点は再掲・複製しない）。
@@ -172,7 +172,7 @@ multi-review が投稿するインラインコメントの本文先頭には、�
 | NITS    | `[NITS]`     | 軽微な提案 |
 | GOOD    | `[GOOD]`     | 称賛 |
 
-**プロジェクト独自 prefix の自動判定**: PR 本文に独自のレビュー prefix 規約（例: `<!-- for AI code review rule -->` ブロックや「以下の prefix をつけてください」という記述で `[must]/[imo]/[nits]/[typo]/[ask]/[fyi]` 等が指定されている場合）があれば、Phase 1.5 で取得した PR 本文から検出し、**そのプロジェクト規約に合わせて投稿する**。統合分類との対応例: MUST→`[must]`、SHOULD→`[imo]`、NITS→`[nits]`、GOOD→`[fyi]` または称賛。検出した規約はユーザーへの提示時に「PR 規約の prefix（`[must]/[imo]` 等）に合わせる」と明示する。
+**プロジェクト独自 prefix の自動判定**: PR 本文に独自のレビュー prefix 規約（例: `<!-- for AI code review rule -->` ブロックや「以下の prefix をつけてください」という記述で `[must]/[imo]/[nits]/[typo]/[ask]/[fyi]` 等が指定されている場合）があれば、Phase 1.5（[`references/execution-protocol.md`](references/execution-protocol.md)）で取得した PR 本文から検出し、**そのプロジェクト規約に合わせて投稿する**。統合分類との対応例: MUST→`[must]`、SHOULD→`[imo]`、NITS→`[nits]`、GOOD→`[fyi]` または称賛。検出した規約はユーザーへの提示時に「PR 規約の prefix（`[must]/[imo]` 等）に合わせる」と明示する。
 
 **デフォルト**: 独自規約が検出できない場合は `[MUST]/[SHOULD]/[NITS]/[GOOD]` の 4 種に統一する。Conventional Comments 記法（`[imo]` `[ask]` `[fyi]` 等）はデフォルトでは使わない。判断に迷う場合はユーザーに確認する。
 
@@ -238,7 +238,7 @@ Phase 1（準備）→ 1.5（既存レビュー取得）→ 2（並列実行）�
 - **Codex への offload**: generalist（全 tier）と specialists（standard/large）は **Codex 実行**で Claude 予算から外れる。Claude が残るのは cc-code-review（small のフロア anchor）／ cc-security-review（standard/large のフロア anchor）／ architecture-reviewer（large の集約視点）／ adversarial（pr-workflow Phase 6、cross-model）に限られる。**多様性フロア**（non-trivial で Claude≥1 + Codex≥1）は守る。
 - **Codex effort（`-c model_reasoning_effort=`）**: generalist=xhigh（standard/large の唯一の広い網ゆえ品質バー維持）／ specialist=high。`codex-model-pin.toml` は変更せず、デフォルト xhigh を fail-safe に据え置いたうえで leg 別に上書きする。model は `gpt-5.6-terra` 単一。
 - **Claude leg の model / effort の SSOT は各エージェント定義の frontmatter**（cc-code-review / cc-security-review = `model: sonnet` + `effort: xhigh`、architecture-reviewer = `model: sonnet`）。specialist の agent 定義（`model: sonnet` + `effort: high`）は **Codex 実行では未使用**（frontmatter は剥がされる）だが、Claude subagent としての latent 起動時に適用される（多様性フロアの逃げ道）。security-critical / large では Claude leg の Agent 呼び出し時に `model: "opus"` 等を明示指定して品質を上げる opt-in を維持する。
-- **Codex 並列は `CODEX_MAX_CONCURRENCY`（=3）で上限**（「Codex leg 実行・並列・観測・resume」節）。超過分はバッチ順次で、未検証の高並列競合を構造回避する。
+- **Codex 並列は `CODEX_MAX_CONCURRENCY`（=3）で上限**（[`references/codex-legs.md`](references/codex-legs.md)）。超過分はバッチ順次で、未検証の高並列競合を構造回避する。
 - **architecture-reviewer（#223）は最もコストが高い**（repo tree・既存モジュール・設計ドキュメントを横断スキャン）。**`--arch` opt-in または pr-workflow の large tier のときのみ** spawn する（＝ #223 の per-PR コスト方針）。
 - **codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT**（`codex:codex-rescue` を起動しない理由もそこに集約。ここでは再掲しない）。レビュー leg は read-only なので `--profile shared` を使う。
 

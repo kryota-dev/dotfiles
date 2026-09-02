@@ -116,7 +116,7 @@ AskUserQuestion:
 
 #### 「ワークツリーを作成」を選択した場合
 
-`wtp` スキルに従い、Phase 5-1 と同じ命名規約のブランチで専用ワークツリーを作成して移動する:
+`wtp` スキルに従い、Phase 5-1（[`references/delivery.md`](references/delivery.md)）と同じ命名規約のブランチで専用ワークツリーを作成して移動する:
 
 - ブランチ名: Issue 番号がある場合は `claude/{issue-number}/{spec-name}`、ない場合は `claude/{spec-name}`
 
@@ -127,13 +127,13 @@ cd "$WORKTREE_DIR"
 ```
 
 以降の全フェーズ（Spec ディレクトリ作成・実装・コミット・PR 作成）はこのワークツリー内で行う。
-**このケースではブランチが既に作成済みのため、Phase 5-1 のブランチ作成はスキップする。**
+**このケースではブランチが既に作成済みのため、Phase 5-1（[`references/delivery.md`](references/delivery.md)）のブランチ作成はスキップする。**
 
 `wtp` が利用できない、または作成に失敗した場合は、その旨を踏まえて「現在の場所で作業」にフォールバックする。
 
 #### 「現在の場所で作業」を選択した場合
 
-ワークツリーは作成せず、現在のディレクトリのまま次のステップへ進む。Phase 5-1 で通常どおりブランチを作成する。
+ワークツリーは作成せず、現在のディレクトリのまま次のステップへ進む。Phase 5-1（[`references/delivery.md`](references/delivery.md)）で通常どおりブランチを作成する。
 
 ### 0-5. Spec ディレクトリ作成
 
@@ -318,7 +318,7 @@ Read する**（節を飛ばさない）:
 1. **完全自律実行**: ユーザー確認は Phase 0-4 のワークツリー戦略の選択（`AskUserQuestion`）のみ。それ以降は Phase 6 まで承認フローを挟まず一切止まらずに実行する
 2. **MCP ツール不使用**: spec-workflow MCP のツール（approvals, spec-status, log-implementation 等）は一切使用しない
 3. **sleep / polling 禁止**: `sleep` コマンドや `while` ループでの待機は**絶対に使わない**。サブエージェントの結果は完了時に自動で返る
-4. **Leader = 司令塔 + 作業者**: ドキュメント作成と、複数ファイル横断・context 継続が要るコード実装は Leader 自身が行う。調査、および 4-2 の**自己完結タスク**はサブエージェント / Codex worker に委任してよい（判定基準は 4-2）
-5. **コスト最適化 / model・effort tier**: Leader = セッション model（要求水準は `/model-fitness-check` が SSOT。Phase 0 で起動済み。値をここに再掲しない）。**調査はタスク形状別**: retrieval 型（steering docs 転記）= Haiku、pattern-recognition 型（コードベース構造・再利用パターン分析）= Sonnet（Explore に `model` を明示 pin）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスク非依存・並行タスクと共有状態なし）は Sonnet worker or Codex worker に委譲してよい（前提条件・契約は 4-2 を参照。Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT）。
+4. **Leader = 司令塔 + 作業者**: ドキュメント作成と、複数ファイル横断・context 継続が要るコード実装は Leader 自身が行う。調査、および 4-2 の**自己完結タスク**はサブエージェント / Codex worker に委任してよい（判定基準は [`references/implementation.md`](references/implementation.md) の 4-2）
+5. **コスト最適化 / model・effort tier**: Leader = セッション model（要求水準は `/model-fitness-check` が SSOT。Phase 0 で起動済み。値をここに再掲しない）。**調査はタスク形状別**: retrieval 型（steering docs 転記）= Haiku、pattern-recognition 型（コードベース構造・再利用パターン分析）= Sonnet（Explore に `model` を明示 pin）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスク非依存・並行タスクと共有状態なし）は Sonnet worker or Codex worker に委譲してよい（前提条件・契約は [`references/implementation.md`](references/implementation.md) の 4-2 を参照。Codex の起動経路・禁止事項は `codex/SKILL.md` が SSOT）。
 6. **通知は最後だけ**: 作業中にユーザーに通知するのは Phase 6 の完了時のみ。例外は Git 操作エラー時（`notify` + `AskUserQuestion` で待機）
 7. **gitignore 対象ファイルへのアクセス**: `.spec-workflow/` 配下のファイル（テンプレート・Steering docs 等）は gitignore されている可能性がある。Glob/Grep は ripgrep ベースで gitignore を尊重するため検出できない。必ず Bash `ls` + Read ツールで直接アクセスすること
