@@ -24,7 +24,7 @@ import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
 import { describeCliFailure } from "./errors.mjs";
 import { BLOCKED_PENDING_APPROVAL, USAGE } from "./exit-codes.mjs";
-import { assertKnownFlags } from "./flag-registry.mjs";
+import { assertKnownFlags, inspectFlags } from "./flag-registry.mjs";
 import {
   flagValue,
   nonNegativeIntegerFlag,
@@ -129,8 +129,16 @@ function resolveConfigPath(options, environment) {
 // 順序そのものが不変条件なので、テストから直接叩けるよう factory として切り出してある。
 export function createEmitter({ command, asJson, write }) {
   return (value) => {
-    write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
-    assertDeclaredOutput(command, value);
+    const serialized = JSON.stringify(value, null, asJson ? undefined : 2);
+    write(serialized);
+    // **検査するのは「実際に出た JSON」であって、その手前の JavaScript 値ではない。**
+    // `undefined` を値に持つプロパティは `JSON.stringify` で出力から消えるが `Object.keys`
+    // には残るため、シリアライズ前を見ると契約どおりの出力でも 70 に落ちる（`toJSON()` を
+    // 持つ値でも同じ乖離が起きる）。読み手が受け取るものと同じものを検査する。
+    assertDeclaredOutput(
+      command,
+      serialized === undefined ? serialized : JSON.parse(serialized),
+    );
   };
 }
 
@@ -155,8 +163,18 @@ export function runCli(argumentsList, options = {}) {
   // **`--help` もこの検査を通る。** 表に載ったから通るのであって、迂回するのではない。
   // `fh approvals --bogus --help` は今までどおり `--bogus` を名指しで拒む。
   assertKnownFlags(command, flags);
-  const asJson = flags.includes("--json");
-  if (flags.includes("--help")) {
+  // **`--json` / `--help` はフラグ位置に現れたときだけ効く。** 値として渡された文字列が
+  // たまたま一致しただけでコマンドが help にすり替わらないよう、判定は flag-registry の
+  // 走査に委ねる（`fh approve --deny --message "--help"` が承認を記録せず exit 0 で
+  // 終わっていた経路を塞ぐ）。
+  const { tokens, scoped, onlyGlobals } = inspectFlags(command, flags);
+  const asJson = tokens.has("--json");
+  // **スコープが解決していないときは、`fh session --help` の形だけを help として扱う。**
+  // `fh session --bogus-flag --help` で help を出すと、`assertKnownFlags` が黙る条件
+  // （action を解決できない）と重なって未知フラグが名指しされないまま exit 0 になる。
+  // その場合はコマンド実装へ落として、`fh session requires launch or resume, not ...` の
+  // ような名指しのエラーを先に出させる（本来この層より読まれるべき情報である）。
+  if (tokens.has("--help") && (scoped || onlyGlobals)) {
     const known = command !== undefined && Object.hasOwn(COMMAND_HELP, command);
     if (known) {
       write(

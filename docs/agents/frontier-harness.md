@@ -108,11 +108,31 @@ an implementation without documenting it therefore fails on the first invocation
 for every command and every branch, rather than waiting for a reader to notice.
 
 The opposite direction — help declaring a key the implementation stopped emitting — is covered
-by `tests/frontier_harness_cli_quality.test.mjs`, which runs the commands named in its
-`OUTPUT_OBSERVED_HERE` list for real and requires the declared key set to equal the observed one,
-plus a check that no declared key has vanished from the sources entirely. What is left uncovered
-is narrow and named in that file: a key dropped from a command the test cannot drive cheaply,
-whose name survives elsewhere in the sources.
+by `tests/frontier_harness_cli_quality.test.mjs` in two layers. It runs the commands named in its
+`OUTPUT_OBSERVED_HERE` list for real and requires **each branch** to emit exactly the keys that
+branch declares: `fh approvals` listing and `--purge` return different envelopes, and so do
+`fh runs` with and without `--run`, so comparing a union per command would let one branch's keys
+leak into the other unnoticed. For the commands it cannot drive cheaply, it checks that every
+declared key still appears in the module that emits it — searching the whole directory instead
+would pass on names like `status`, `command` or `taskId` that survive anywhere else, which is
+exactly how an earlier version of this check failed to notice a key removed from
+`session-command.mjs`. Commands are exempted from the first layer only with a written reason, so
+shrinking the observed set is a reviewable act rather than a silent one.
+
+What is left uncovered is narrow and named in that file: a key dropped from an undriven command
+whose name still appears in its own module for another purpose.
+
+**`--help` never takes a command's place by accident.** Whether `--json` and `--help` are in
+effect is decided over flag positions, not over the raw argument list, because `assertKnownFlags`
+skips the token after a value flag without looking at it (that is what lets `--timeout-ms -1`
+through). Scanning the raw list instead would mean
+`fh approve --request <id> --deny --message "--help"` printed help and exited 0 without recording
+the denial — a closed approval boundary that reads as success. For the same reason, when the
+subcommand cannot be resolved (`fh session --bogus-flag --help`), help gives way to the command's
+own `fh session requires launch or resume, not --bogus-flag`: that is the one case where
+`assertKnownFlags` stays silent, and answering it with help would leave the bad flag unnamed.
+Bare `fh session --help` still prints help, and `fh approvals --bogus --help` still exits 64
+naming `--bogus`.
 
 `fh approve-server` declares an empty output on purpose. It speaks the MCP permission-prompt
 protocol on stdio and has no envelope of its own, so the emptiness is a statement rather than an
