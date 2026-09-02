@@ -60,14 +60,15 @@ telemetry が蓄積された」ことだった。撤去時点で確認した実�
 
 ### 各行の根拠（2026-09-03 判断）
 
-行を分ける軸は **user と対話するか**である。対話する行は user の実地観察で、対話しない行は公式 docs の
-定性的基準で決めた。**FrontierCode の数値はどの行の根拠にも使っていない**（理由は下記と references）。
+行を分ける軸は **その作業がどれだけ自律的に走るか**である。**floor は作業の重要度ではなく、判断を
+誤ったときの受け皿が実行中に存在するかで決める。****FrontierCode の数値はどの行の根拠にも使って
+いない**（理由は下記と references）。
 
 | 行 | 根拠 |
 |---|---|
 | Opus @ high（分類 / GATE / 統合・裁定） | 公式 effort docs が Opus 5 の推奨開始点を "Start with `high`, the default" とし、API 既定も `high`。**変更なし**（2026-09-03 再確認） |
-| Opus @ xhigh（large tier / adversarial verification） | 公式が xhigh を "Extended capability for **long-horizon work**" と定義し、用途を "Long-running agentic and coding tasks (**over 30 minutes**) with token budgets in the millions" とする。`pr-workflow` 全長（gate → sdd → CI → multi-review → review-resolve-loop）と adversarial ラウンドはこれに正面から該当する。**いずれも user と対話しない子セッションの仕事**なので、下記の対話観察の射程外（2026-09-03 判断） |
-| Opus @ medium（横断設計 / PRD 審議） | **user の実地観察**: Opus 5 @ medium のセッションは会話しやすく、xhigh では「議論したくても理解しがたい回答が返る」「その度に噛み砕かせている」。この 2 行は user と対話しながら進む唯一の行で、観察の射程はここに一致する。**xhigh から 2 段下げる**（2026-09-03 判断。旧 contract は Opus 4.7 / 4.8 世代の運用を持ち越したもので、公式は Opus 5 について "If you carried effort settings over from an earlier model, run a fresh effort sweep on your evals rather than reusing them" と述べるが、その sweep は user 判断で実走しない） |
+| Opus @ xhigh（large tier / adversarial verification） | 公式が xhigh を "Extended capability for **long-horizon work**" と定義し、用途を "Long-running agentic and coding tasks (**over 30 minutes**) with token budgets in the millions" とする。`pr-workflow` 全長（gate → sdd → CI → multi-review → review-resolve-loop）と adversarial ラウンドはこれに正面から該当する。**いずれも誰も見ていない場所で 30 分以上走り、判断を誤っても実行中の受け皿が無い**（2026-09-03 判断） |
+| Opus @ medium（横断設計 / PRD 審議） | **人がループ内にいる行**。判断が浅ければその場で気づいて差し戻せるので、**受け皿が実行中に存在する**。上の 2 行との非対称がここにある。**公式 docs だけではこの水準を正当化できない** —— 推奨開始点は `high` で、medium はその 2 段下だから。**水準そのものは本リポジトリの運用実績に基づく暫定値で、その詳細は公開していない。** 自前の計測が貯まった時点で再検討する（2026-09-03 判断） |
 | Sonnet @ high（trivial / small） | 公式が Sonnet 5 を "defaults to `high` effort on the Claude API and Claude Code" とする。**変更なし**（2026-09-03 再確認） |
 
 **FrontierCode 1.1 を floor の根拠に使わない理由**: Opus 5 / Fable 5.1 とも medium が最良だが順位が
@@ -76,11 +77,11 @@ telemetry が蓄積された」ことだった。撤去時点で確認した実�
 参考資料に留める。ただし Sonnet 5 は単調に xhigh が最良で、レビュー系 agent の `sonnet@xhigh` pin を
 裏づける（数値と出典は references）。
 
-**floor を下げても「読みにくさ」は解決しない。** floor は下限なので、medium 行でも xhigh のセッションは
-monotonic に pass する（止まらない）。公式も "changing effort does not reliably shorten responses, so
-prompt for length instead" と述べており、**回答の長さ・密度は prompt 側の担保**で、この gate の仕事では
-ない。この行を下げた効果は「medium のセッションが止められなくなる」ことであって、「xhigh のセッションを
-止める」ことではない。
+**floor は下限であって推奨値ではない。** medium 行でも xhigh のセッションは monotonic に pass する
+（止まらない）。**この行を下げた効果は「medium のセッションが止められなくなる」ことであって、「xhigh の
+セッションを下げさせる」ことではない。** 出力の長さや密度を変えたいなら effort ではなく prompt で扱う
+—— 公式も "changing effort does not reliably shorten responses, so **prompt for length instead**" と
+述べており、そこはこの gate の仕事ではない。
 
 → 根拠: [`references/effort-floor.md`](references/effort-floor.md)（一次ソースの引用と URL、到達できな
 かった経路、解釈の分岐と交絡、contract が運用と合っていなかった実例）
