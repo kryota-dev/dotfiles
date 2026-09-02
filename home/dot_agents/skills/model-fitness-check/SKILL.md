@@ -14,7 +14,7 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 
 **§4 contract テーブルはこの skill が唯一の SSOT**。`pr-workflow` / `sdd` / `multi-review` はこのテーブルを複製せず、各 entry から本 skill を 1 行で呼ぶだけにする（複製すると Codex pin が 3 箇所で drift した失敗を Claude 側で再演することになる）。
 
-## Frontier Harness への段階移行（AC-034 compatibility shim）
+## readiness gate との関係（直交する 2 つの gate）
 
 `frontier-harness` は route の readiness を `/execution-readiness-check` で確認する。これは
 **adapter capability・account scope・rollout・permission manifest** を見る gate であり、
@@ -22,25 +22,29 @@ argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
 「current session が特定 model かどうかを判定しない」と明言している）。両者は**直交する**ため、
 片方が他方を代替しない。
 
-### shim 契約（移行期間中の挙動）
+**本 skill は readiness gate を呼ばない。** 各 orchestration entry が両方を直接呼ぶ（下記
+「呼び出し規約」）。かつて本 skill は `/execution-readiness-check` を連鎖起動する compatibility
+shim（AC-034）を持っていたが、全 caller の移行が完了したため撤去した（撤去の根拠は
+「shim 撤去の記録」節）。
 
-本 skill は 2 release の間、`execution-readiness-check` を呼ぶ compatibility shim として振る舞う。
-すなわち **本 skill が起動されたら、§4 の floor 判定に加えて
-`/execution-readiness-check <呼び出し元の task / review context>` も起動する**（同一セッションで
-既に起動済みなら再起動しない —— 「idempotency」節と同じ扱い）。これにより `wave-orchestrator` や
-user の直接起動といった legacy invocation でも readiness gate が働く。
+**floor 判定を readiness gate で置き換えてはならない。** それは blocking gate の静かな無効化で
+あり、`wave-orchestrator` が名指しで禁じている退行そのものになる。readiness が `ready` を返した
+ことは、そのセッションが §4 の floor を満たすことを一切意味しない。
 
-### 移行期間中の呼び出し側の責務
+### shim 撤去の記録
 
-`pr-workflow` / `sdd` / `multi-review` は、移行期間中 **両方の gate を明示的に呼ぶ**。floor 判定を
-readiness gate で置き換えてはならない —— それは blocking gate の静かな無効化であり、
-`wave-orchestrator` が名指しで禁じている退行そのものになる。
+shim の撤去条件は「全 legacy caller が `/execution-readiness-check` を直接呼ぶよう移行し、pilot
+telemetry が蓄積された」ことだった。撤去時点で確認した実測は次のとおり:
 
-### 削除条件
+| 撤去条件 | 実測 |
+|---|---|
+| rollout が pilot 以降 | `~/.config/frontier-harness/config.json` の `rollout` が `pilot`（`fh doctor --json` の出力でも確認） |
+| `pr-workflow` / `sdd` / `multi-review` が readiness gate を直接呼ぶ | 各 SKILL.md が 2 gate を明示起動（`tests/files.bats` が機械検証） |
+| `wave-orchestrator` の readiness 経路 | Phase 0 前提チェックで `fh doctor --json` の capability 検査と `fh onboard` の manifest 承認を自ら実行し、子セッションは `pr-workflow` 全長で 2 gate を通る |
+| user の直接起動 / 上表に無い呼び出し元 | **shim が担保していたが撤去で失われた経路**。本 skill 単体では adapter を選ばず provider も起動しないため実行には至らないが、readiness gate は自動では走らない。下記「呼び出し規約」で全 caller に両 gate の起動を課してこれを埋める |
 
-全 legacy caller が `/execution-readiness-check` を直接呼ぶよう移行し、pilot telemetry が
-十分に蓄積されるまで、この §4 contract と over-provision gate を削除・弱体化してはならない。
-shim の撤去は、その条件が満たされたことを確認したうえで別 PR で行う。
+**撤去したのは shim（readiness gate の連鎖起動）だけであり、§4 contract と over-provision gate は
+撤去も弱体化もしていない。** この 2 つは本 skill の本体であって移行対象ではない。
 
 ## §4 contract（Model/effort テーブル）
 
@@ -170,5 +174,15 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 - `multi-review`: Phase 1 の前 —— `/model-fitness-check orchestration`（`multi-review` に Phase 0 は無い）
 
 各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
+
+**各 caller は本 skill と `/execution-readiness-check` の両方を自分で呼ぶ**（shim 撤去後は本 skill
+が readiness gate を連鎖起動しないため、片方だけを呼ぶと他方が到達不能になる）。順序は問わないが、
+**どちらも実装・レビュー実行より前**に置く。
+
+**これは上の 3 skill に限らない。** 本 skill は `user-invocable` を落としていないので **user の直接起動**も、
+将来この skill を再利用する別の skill も同じ責務を負う。**上表に無い経路から本 skill だけを呼んだ場合、
+readiness gate は走っていない** —— floor を確認しただけで「gate を通した」とみなさず、実行に移る前に
+`/execution-readiness-check` を自分で起動すること。撤去した shim が唯一担保していたのがこの経路である
+（「shim 撤去の記録」表の最終行）。
 
 **idempotency（多重起動の抑制）**: `pr-workflow` → `sdd` → `multi-review` と連鎖すると 1 実行で最大 3 回同じ判定が走る。**同一セッションで一度 pass した行、および明示的に continue-anyway を選んだ行については再提示しない**（前回の判断を再利用する）。model / effort が変更された形跡があるときのみ再評価する。

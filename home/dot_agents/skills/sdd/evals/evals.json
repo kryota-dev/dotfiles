@@ -1,0 +1,58 @@
+{
+  "skill_name": "sdd",
+  "note": "#503 の before/after eval。before = SKILL.md 単一ファイルが Phase 0〜6（要件・設計・タスク分解に加えて実装・コミット・PR 作成・完了報告）を全部持っていた版。after = SKILL.md が spec compiler（Phase 0〜3）に縮退し、Phase 4〜6 が references/ で各 SSOT skill へ橋渡しされる版。id 1 は compile 責務、id 2 と id 3 は移設した Phase の規範が失われていないこと、id 4 は所有権の所在が正しく答えられることを見る。",
+  "evals": [
+    {
+      "id": 1,
+      "name": "compiles-the-spec-then-loads-the-implementation-reference",
+      "prompt": "pr-workflow の standard tier から sdd を起動する。対象は issue #700（設定ファイルの読み込み順を変える）。ワークツリーは Phase 0.5 で作成済みなので新規作成はしないこと。",
+      "expected_output": "Phase 0 で 2 つの gate を通し、requirements.md / design.md / tasks.md を生成したうえで、Phase 4 に入る前に references/implementation.md を Read する。",
+      "assertions": [
+        "/execution-readiness-check と /model-fitness-check の両方を Phase 0 で起動している",
+        "ワークツリーを新規作成せず、0-4 のフォールバックを実行していない",
+        "requirements.md / design.md / tasks.md の 3 点を .spec-workflow/specs/ 配下に生成している",
+        "Phase 4 に入る前に references/implementation.md を Read している",
+        "実装後のレビューを自分では行っていない（pr-workflow の PR 作成後パイプラインに委ねている）"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "commit-conventions-defer-to-the-commit-skill",
+      "prompt": "sdd の Phase 5 でコミットを切るとき、メッセージの形式はどう決まる？ /commit を呼べばいい？",
+      "expected_output": "規約の SSOT は commit/SKILL.md（Conventional Commits・日本語・1 コミット 1 目的）だが、承認ゲートを持つ /commit skill 自体は起動しないと答える。",
+      "assertions": [
+        "commit/SKILL.md を規約の SSOT として挙げている",
+        "Conventional Commits 形式と日本語メッセージの両方に触れている",
+        "/commit skill を起動するとは答えていない",
+        "起動しない理由が sdd の自律実行契約と pr-workflow の承認点インベントリにあると説明している"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "worker-delegation-contract-survives-the-split",
+      "prompt": "sdd の Phase 4 で自己完結タスクを Sonnet の subagent に投げたい。委譲プロンプトに何を入れる必要がある？",
+      "expected_output": "pr-workflow「共有作業ツリーでの Claude subagent 委譲契約」を SSOT として、作業ツリー read-only 扱い・復元パターン禁止などの規約を委譲プロンプトへ含めると答える。",
+      "assertions": [
+        "pr-workflow の共有作業ツリー委譲契約を SSOT として参照している",
+        "規約本文を sdd 側で再発明・再掲していない",
+        "作業ツリーを read-only 扱いにし復元パターン（git checkout -- / restore / stash / reset --hard 等）を使わせない旨に触れている",
+        "Phase 1・2 の Explore 型調査サブエージェントも同じ契約の対象だと述べている"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "worktree-ownership-is-not-the-compilers",
+      "prompt": "sdd って自分でワークツリーを作るんだっけ？ pr-workflow から呼ばれたときの挙動を知りたい。",
+      "expected_output": "ワークツリーの provisioning は spec compiler の所有物ではなく、pr-workflow Phase 0.5 が作成済みで sdd 側は 0-4 をスキップすると答える。",
+      "assertions": [
+        "pr-workflow から呼ばれた場合は 0-4 をスキップし新規作成しないと答えている",
+        "ワークツリー操作の SSOT が wtp skill であると述べている",
+        "0-4 の AskUserQuestion は呼び出し元が用意しなかった場合のフォールバックだと位置づけている"
+      ],
+      "files": []
+    }
+  ]
+}

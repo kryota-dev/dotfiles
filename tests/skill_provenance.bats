@@ -290,6 +290,95 @@ _skill_is_external() {
   done < <(_ecc_skill_list)
 }
 
+# Progressive disclosure (SKILL.md links out to references/*.md) is the mechanism #503 used to
+# shrink multi-review and sdd without deleting any norm. It only holds if the links resolve: a
+# dangling `references/foo.md` reads to the agent as "that section exists somewhere", and the norm
+# is silently gone. Checked across every curated skill so the next skill to split inherits the guard.
+@test "skill provenance: every intra-skill markdown link resolves to a file" {
+  # Scans SKILL.md *and* references/*.md. A reference file linking a sibling
+  # (sdd/references/implementation.md -> delivery.md) is just as load-bearing as the
+  # SKILL.md -> references/ hop, and a SKILL.md-only scan would never see it break.
+  # Targets are resolved relative to the *linking* file's directory, which is what a
+  # relative markdown link means.
+  local broken=0 dir name f rel target base
+  for dir in "${HOME_DIR}/dot_agents/skills"/*/; do
+    [ -d "$dir" ] || continue
+    name="$(basename "$dir")"
+    for f in "${dir}SKILL.md" "${dir}"references/*.md; do
+      [ -f "$f" ] || continue
+      base="$(dirname "$f")"
+      # Both the bare form (`references/foo.md`) and the markdown-link form
+      # (`[label](references/foo.md)`) appear in the tree; grep -o gives the path either way.
+      # Anchors are stripped: `foo.md#section` still points at foo.md.
+      while IFS= read -r target; do
+        [ -n "$target" ] || continue
+        target="${target%%#*}"
+        [ -f "${base}/${target}" ] || {
+          rel="${f#"${HOME_DIR}/dot_agents/skills/"}"
+          echo "${rel} links ${target}, which does not exist"
+          broken=$((broken + 1))
+        }
+      done < <(grep -oE '\(([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.md(#[A-Za-z0-9._-]+)?\)' "$f" \
+        | sed -E 's/^\(//; s/\)$//' | sort -u)
+    done
+  done
+  [ "$broken" -eq 0 ]
+}
+
+# AC-040 ships before/after evals with each modified skill. They are only useful if they parse,
+# carry the fields the runner reads, and belong to the skill they sit under -- and a hand-edited
+# JSON file is exactly the kind of artifact that rots without a check.
+#
+# python3 rather than jq: this suite is already free of jq, and python3 is an existing runtime
+# dependency of the bats stack (tests/wave_orchestrator.bats also shells out to it), so this
+# adds no new tool to CI.
+@test "skill provenance: every skill evals.json parses and has the expected shape" {
+  # The skills reduced in #503 must keep shipping evals. Without this, deleting all three files
+  # would leave the find below empty and the test would pass on zero inputs.
+  local required
+  for required in model-fitness-check multi-review sdd; do
+    [ -f "${HOME_DIR}/dot_agents/skills/${required}/evals/evals.json" ] || {
+      echo "${required} no longer ships evals/evals.json (AC-040)"
+      false
+    }
+  done
+
+  local f found=0
+  while IFS= read -r f; do
+    found=1
+    python3 - "$f" <<'PYEOF' || {
+import json, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+assert isinstance(data, dict), f"{path}: top level must be an object"
+# The skill this eval set belongs to is the grandparent dir (<skill>/evals/evals.json);
+# a mismatch means the file was copied without being re-pointed.
+owner = path.parents[1].name
+assert data.get("skill_name") == owner, (
+    f"{path}: skill_name is {data.get('skill_name')!r}, expected {owner!r}"
+)
+evals = data.get("evals")
+assert isinstance(evals, list) and evals, f"{path}: evals must be a non-empty list"
+seen = set()
+for e in evals:
+    ident = e.get("id")
+    assert ident is not None, f"{path}: an eval has no id"
+    assert ident not in seen, f"{path}: duplicate eval id {ident}"
+    seen.add(ident)
+    for key in ("prompt", "expected_output"):
+        assert isinstance(e.get(key), str) and e[key].strip(), f"{path}: eval {ident} has no {key}"
+    assert isinstance(e.get("files", []), list), f"{path}: eval {ident} files must be a list"
+    assert isinstance(e.get("assertions", []), list), f"{path}: eval {ident} assertions must be a list"
+PYEOF
+      echo "invalid evals.json: $f"
+      false
+    }
+  done < <(find "${HOME_DIR}/dot_agents/skills" -mindepth 3 -maxdepth 3 -name 'evals.json')
+  [ "$found" = 1 ]
+}
+
 # --- Informational runtime check ----------------------------------------------
 
 @test "skill provenance: runtime ~/.agents/skills has no unmanaged skill (informational)" {

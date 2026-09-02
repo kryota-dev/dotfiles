@@ -1,0 +1,57 @@
+{
+  "skill_name": "model-fitness-check",
+  "note": "#503 の before/after eval。before = AC-034 compatibility shim を持つ版（本 skill が起動されると /execution-readiness-check も連鎖起動していた）。after = shim を撤去した版（連鎖起動しない。readiness gate は各 caller が自分で呼ぶ）。id 2 と id 3 がその差分を直接判別する。id 1 と id 4 は撤去で §4 floor 判定と over-provision ゲートが失われていないことの回帰チェックで、before / after のどちらでも同じ結果になることが期待値である。",
+  "evals": [
+    {
+      "id": 1,
+      "name": "large-tier-floor-blocks-on-a-lower-session",
+      "prompt": "/model-fitness-check large （現在のセッションは Sonnet 5 で effort は high です）",
+      "expected_output": "large 行の floor（Opus @ xhigh）を下回るため blocking し、切り替えコマンドを添えた選択肢を提示して停止する。",
+      "assertions": [
+        "AskUserQuestion で停止しており、そのまま作業を続行していない",
+        "選択肢に「すでに要求水準を満たしている（変更不要）」「switch して再実行」「continue anyway」「abort」の 4 つが含まれている",
+        "switch 提案に /model opus と /effort xhigh の両方が literal で示されている（xhigh を要求する行なので effort に言及する）",
+        "§4 contract テーブルの値を回答内で再発明しておらず、skill のテーブルに基づいている"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "readiness-gate-does-not-substitute-for-the-floor",
+      "prompt": "さっき /execution-readiness-check を走らせて ready だった。route は通ってるんだから model-fitness-check はスキップしていいよね？ large tier の実装に入りたい。",
+      "expected_output": "2 つの gate は直交しており readiness の ready は floor の充足を意味しないと説明し、floor 判定を実施する。",
+      "assertions": [
+        "readiness gate の結果を根拠に floor 判定を省略していない",
+        "2 つの gate が直交すること（readiness = route が実行可能か / floor = セッションが担えるか）を説明している",
+        "floor 判定を readiness gate で置き換えることが blocking gate の静かな無効化にあたる旨に触れている",
+        "large 行の floor 判定を実際に行っている"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "shim-is-gone-caller-must-invoke-the-readiness-gate",
+      "prompt": "自分のカスタム skill から /model-fitness-check standard だけを呼ぶようにした。これで execution-readiness-check も一緒に走るという理解で合ってる？",
+      "expected_output": "compatibility shim は撤去済みで連鎖起動はしないと答え、caller 側が /execution-readiness-check を自分で呼ぶ必要があると案内する。",
+      "assertions": [
+        "model-fitness-check が execution-readiness-check を連鎖起動する、とは答えていない",
+        "caller が両方の gate を自分で呼ぶ責務を負うことを明示している",
+        "before の挙動（shim による連鎖起動）を現行仕様として案内していない"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "trivial-row-stays-a-non-blocking-fyi",
+      "prompt": "/model-fitness-check trivial （現在のセッションは Opus 5 です）",
+      "expected_output": "trivial 行は cost hint なので blocking せず、一行の FYI と over-provision カウンタの更新に留めて作業を続行する。",
+      "assertions": [
+        "AskUserQuestion で停止していない（non-blocking）",
+        "Sonnet で足りる旨の cost hint を一行で提示している",
+        "over-provision カウンタの現在値を可視な形で残している",
+        "quota 圧力が閾値帯に達していない限り blocking していない"
+      ],
+      "files": []
+    }
+  ]
+}
