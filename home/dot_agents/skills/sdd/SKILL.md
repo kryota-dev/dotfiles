@@ -14,6 +14,22 @@ user-invocable: false
 
 **作業が完了するまで、一切の中断・停止をしてはならない。**
 
+## この SKILL.md の責務（spec compiler）
+
+**この SKILL.md が持つのは spec の compile —— 要件定義（`requirements.md`）・設計（`design.md`）・
+タスク分解（`tasks.md`）の生成 —— と、その前段の gate / 準備だけ。** 実装・コミット・PR 作成は
+compiler の所有物ではなく、`references/` の手順が呼び出し元の契約へ橋渡しする。
+
+**縮退で規範を削ってはいない**（記述は移しただけで、どれも省略可能になっていない）。
+**Phase 4 に入る前に [`references/implementation.md`](references/implementation.md) を、
+Phase 5 に入る前に [`references/delivery.md`](references/delivery.md) を Read すること。**
+
+| ファイル | 内容 | 責務の所有者 |
+|---|---|---|
+| `SKILL.md`（本ファイル） | Phase 0〜3（gate・準備・要件・設計・タスク分解） | `sdd`（spec compiler） |
+| [`references/implementation.md`](references/implementation.md) | Phase 4（実装と品質チェック） | worker 委譲契約は `pr-workflow` / `codex` が SSOT |
+| [`references/delivery.md`](references/delivery.md) | Phase 5（コミット & PR）・Phase 6（完了報告） | 規約は `commit` / `create-pr` が SSOT |
+
 ## ロール定義
 
 | ロール | 担当 | 説明 |
@@ -76,6 +92,12 @@ BASE_BRANCH=$(git branch --show-current)
 
 ### 0-4. ワークツリー戦略の選択
 
+**ワークツリーの provisioning は spec compiler の所有物ではない。** `pr-workflow` から呼ばれる
+既定経路では Phase 0.5 で `/wtp` により作成済みで、委譲プロンプトが**新規作成の抑止**を明示的に
+オーバーライドする。その場合は本節をスキップし、現在のワークツリーで作業する。ワークツリー操作
+そのものの SSOT は `wtp` skill。
+
+以下は**呼び出し元がワークツリーを用意しなかった場合のフォールバック**である。この場合は
 **SDD の本格着手前に、`AskUserQuestion` でワークツリー戦略をユーザーに確認する。**
 これは SDD 全体で唯一のユーザー確認ポイントであり、これ以降は完全自律で実行する（「重要な注意事項」#1 参照）。
 
@@ -269,163 +291,18 @@ Leader 自身が `.spec-workflow/specs/{spec-name}/tasks.md` を作成。
 
 ---
 
-## Phase 4: 実装
+## Phase 4〜6: 実装・コミット & PR・完了報告
 
-### 4-1. 実装準備
+**ここから先は spec compiler の所有物ではない。** 手順は `references/` にあり、**着手前に必ず
+Read する**（節を飛ばさない）:
 
-requirements.md, design.md, tasks.md を精読し、全体像を把握。
+1. **Phase 4（実装・品質チェック）** → [`references/implementation.md`](references/implementation.md)
+   worker 選定と委譲契約の SSOT は `pr-workflow`「共有作業ツリーでの Claude subagent 委譲契約」節と
+   `codex/SKILL.md`「agent profile（workspace-write 実行）」節。
+2. **Phase 5（コミット & PR）・Phase 6（完了報告）** → [`references/delivery.md`](references/delivery.md)
+   commit 規約は `commit/SKILL.md`、PR 作成手順は `create-pr/SKILL.md` が SSOT。
 
-### 4-2. タスク順次実装
-
-**実装の委譲方針**: 複数ファイル横断・context 継続が要るタスクは Leader が実装する（context continuity）。**自己完結タスク**（単一ファイル・tasks.md 上で他タスクへの依存記載なし・並行実行中の他タスクと共有状態を持たない）は、Sonnet worker（`model: sonnet`）または Codex worker（`codex exec --profile agent`、workspace-write）に委譲してよい。既定は Leader / Sonnet worker、cross-model diversity が欲しいときに Codex。
-
-**Codex worker の前提条件と契約**:
-
-- **linked worktree 内でのみ委譲する**。0-4 で「現在の場所で作業」を選んだ／`wtp` にフォールバックした結果 **main worktree にいる場合は Codex 委譲を選択肢から外す**（Leader or Sonnet worker に限定）。判定は `codex/SKILL.md` の fail-closed worktree ガードをそのまま前置して機械的に行い、abort したら委譲を諦める（回避しない）。
-- **呼び出し形・`CODEX_HOME` prelude・worktree ガード・実行順序契約・委任範囲の制約は `codex/SKILL.md`「agent profile（workspace-write 実行）」節が唯一の SSOT**。ここに再掲せず必ずそれに従う。特に **`git -C <worktree> diff` の全体レビュー → ホスト側の検証コマンド（lint / test / build）→ commit** の順序を守り、**diff レビュー前にテスト・lint・ビルドを一切実行しない**（Codex が書いたテスト・Makefile・設定は sandbox 外で走るため）。commit は親が行う（`.git` は Codex から read-only）。
-
-**Claude subagent（Sonnet worker / Explore）の前提条件と契約**:
-
-- **共有作業ツリーへの書き込みガードは `pr-workflow`「共有作業ツリーでの Claude subagent 委譲契約」節が唯一の SSOT**。ここに再掲せず必ずそれに従う（委譲プロンプトに規約を含めること、および spawn 前後の親の責務を含む）。4-2 の実装 worker だけでなく、**Phase 1・2 と本節手順 2 で起動する Explore 型の調査サブエージェントも対象**である（`Edit` / `Write` を持たなくても `Bash` 経由で作業ツリーを書き換えられるため）。
-
-tasks.md の各タスクを順番に実装:
-
-1. tasks.md のステータスを `[ ]` → `[-]` に更新（Edit ツール使用）
-2. 必要に応じて調査サブエージェント（Explore 型）で関連コードを調査
-3. **Leader 自身がコードを実装**
-4. テストが必要な場合はテストも実装
-5. tasks.md のステータスを `[-]` → `[x]` に更新
-6. 次のタスクへ
-
-### 4-3. 品質チェック
-
-**前提（Codex 委譲がある場合は必須）**: 4-2 で Codex worker に委譲したタスクが 1 つでもある場合、本節のコマンドを実行する**前に** `git -C <worktree> diff` の全体を必ずレビューする。品質チェックはホスト（sandbox 外）で実行されるため、レビュー前の実行は任意コード実行に到達しうる（`codex/SKILL.md`「実行順序契約」）。
-
-全タスク完了後:
-
-1. `package.json`（または類似の設定ファイル）の scripts を確認
-2. 利用可能な品質チェックコマンドを実行（lint, type-check, format, test 等）
-3. エラーがあれば修正し、再実行して通るまで繰り返す
-
----
-
-## Phase 5: コミット & PR
-
-### 5-1. ブランチ作成
-
-**Phase 0-4 で「ワークツリーを作成」を選択した場合は、ブランチが既に作成済みのためこのステップをスキップする。**
-
-それ以外の場合:
-
-```bash
-CURRENT=$(git branch --show-current)
-# ベースブランチ（main/master）にいる場合のみ新しいブランチを作成
-if [ "$CURRENT" = "main" ] || [ "$CURRENT" = "master" ]; then
-  # Issue番号がある場合: claude/{issue-number}/{spec-name}
-  # ない場合: claude/{spec-name}
-  git checkout -b {branch-name}
-fi
-```
-
-### 5-2. 変更内容の分析とコミット計画
-
-1. `git status` で未追跡ファイルと変更を確認
-2. `git diff` と `git diff --cached` で変更内容を詳細確認
-3. 変更ファイルをグループ化（機能・モジュール・変更タイプ別）
-4. 各グループの変更性質を特定（feat, fix, docs, chore, refactor, test 等）
-5. 依存関係を考慮した適切なコミット順序を決定
-
-### 5-3. 論理的な粒度でコミット
-
-各コミット:
-
-```bash
-git add {関連ファイル}
-git commit -m "$(cat <<'EOF'
-{type}({scope}): {簡潔な説明}
-
-- {詳細な変更内容1}
-- {詳細な変更内容2}
-EOF
-)"
-```
-
-**コミットの原則:**
-- 1コミット1目的（単一責任の原則）
-- Conventional Commits 形式
-- コミットメッセージは**日本語**で記述
-- 機密情報（.env, credentials 等）が含まれていないか確認
-- ビルドが壊れないコミット順序
-
-### 5-4. リモートにプッシュ
-
-```bash
-git push -u origin {branch-name}
-```
-
-### 5-5. PR作成
-
-1. **PR テンプレートの読み込み**:
-   `.github/PULL_REQUEST_TEMPLATE.md` が存在すれば読み込み、テンプレートに従う
-
-2. **PR 下書きファイルの保存**:
-   ```bash
-   mkdir -p .claude/pull-requests/drafts/{branchName}
-   ```
-   `.claude/pull-requests/drafts/{branchName}/{timestamp}.md` に保存（timestamp は `YYYYMMDD-HHMMSS` 形式）
-
-3. **PR 作成**:
-   ```bash
-   gh pr create \
-     --draft \
-     --title "{type}: {簡潔なタイトル}" \
-     --body-file .claude/pull-requests/drafts/{branchName}/{timestamp}.md \
-     --base "{base-branch}" \
-     --head "{branch-name}" \
-     --assignee "@me"
-   ```
-
-4. **後処理**:
-   - PR 番号を取得
-   - 下書きファイルをリネーム: `.claude/pull-requests/drafts/{branchName}/{timestamp}.md` → `.claude/pull-requests/{prNumber}.md`
-   - 空になったブランチディレクトリを削除
-
-### 5-6. Issue 紐付け
-
-Issue 番号がある場合、PR 本文に `closes #{issue-number}` を含める。
-
----
-
-## Phase 6: 完了報告
-
-### 6-1. ユーザー通知
-
-```bash
-notify
-```
-
-### 6-2. 最終レポート
-
-以下の形式でユーザーに報告:
-
-```markdown
-## SDD 完了レポート: {spec-name}
-
-### 成果物
-- 要件定義: .spec-workflow/specs/{spec-name}/requirements.md
-- 設計書: .spec-workflow/specs/{spec-name}/design.md
-- タスク一覧: .spec-workflow/specs/{spec-name}/tasks.md
-
-### Git
-- ブランチ: {branch-name}
-- PR: {pr-url}
-- コミット:
-  - {commit-hash1} {commit-message1}
-  - {commit-hash2} {commit-message2}
-  - ...
-```
-
----
+レビューは行わない（`pr-workflow` の PR 作成後パイプラインが担う。frontmatter 参照）。
 
 ## エラーハンドリング
 
