@@ -1,0 +1,72 @@
+{
+  "skill_name": "multi-review",
+  "note": "#503 の before/after eval。before = SKILL.md 単一ファイル（84KB）に roster・finding schema・Phase 1〜5 の実行手順・Codex leg 起動形・投稿手順が全部入っていた版。after = SKILL.md が reviewer roster registry と finding schema だけを持ち、実行手順が references/ に分かれた版。id 1 と id 4 は registry / schema だけで答えられること（after で参照コストが下がる問い）、id 2 と id 3 は分割で規範が失われていないこと（references を Read して初めて正しく答えられる問い）を見る。id 5 は roster の決定的バックストップの回帰チェック。",
+  "evals": [
+    {
+      "id": 1,
+      "name": "roster-lookup-without-loading-the-protocol",
+      "prompt": "multi-review って standard tier だと誰が起動するの？ Claude と Codex の内訳と effort まで知りたい。レビュー自体はまだ走らせなくていい。",
+      "expected_output": "roster gating table から standard 行を読み、cc-security-review（Claude）+ codex generalist（effort=xhigh）+ マッチした specialist（Codex, effort=high）を答える。",
+      "assertions": [
+        "standard 行の内訳（Claude 側は cc-security-review、generalist は Codex 単独）を正しく答えている",
+        "generalist=xhigh / specialist=high の effort 差に言及している",
+        "多様性フロア（non-trivial で Claude≥1 + Codex≥1）に触れている",
+        "レビューを実行しておらず、references/execution-protocol.md まで読み込んでいない（registry だけで答えている）"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "execution-protocol-is-read-before-phase-1",
+      "prompt": "multi-review で PR #412 をレビューして。tier は standard。",
+      "expected_output": "gate を通したうえで references/execution-protocol.md を読み込み、Phase 1〜5 を飛ばさずに進める。",
+      "assertions": [
+        "Phase 1 に入る前に references/execution-protocol.md を Read している",
+        "/execution-readiness-check と /model-fitness-check の両方を起動している",
+        "Phase 1.5（既存レビュー・対応状況の取得）を省略していない",
+        "Claude leg に一意な name を付け、結果を採番済み RESULT_FILE で回収する契約を守っている",
+        "leg の自己申告パスを Read 対象の選択に使っていない"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "codex-sandbox-mode-survives-the-split",
+      "prompt": "wave-orchestrator が立てた fh session の子セッションの中で multi-review を走らせてる。Codex leg の --sandbox は何にすべき？",
+      "expected_output": "外側に sandbox があるので danger-full-access を指定する。read-only を指定すると Seatbelt の入れ子で leg がシェルを実行できず「レビュー不能」しか返らないと説明する。",
+      "assertions": [
+        "danger-full-access と答えている（read-only ではない）",
+        "判定軸が「外側に sandbox があるか」であって速度ではないと説明している",
+        "外側の allowlist と書き込み隔離が残るため封じ込めは弱まらないことに触れている",
+        "references/codex-legs.md を根拠にしており、値を推測で答えていない"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "finding-schema-is-consumable-standalone",
+      "prompt": "自作のレビュアーを multi-review の roster に足したい。返す指摘の型を multi-review の規約に合わせたいんだけど、どういう形式で出せばいい？",
+      "expected_output": "finding schema 節から [MUST]/[SHOULD]/[NITS]/[GOOD] の 4 カテゴリ、確信度の付与、coverage 優先で自己検閲しない契約を答える。",
+      "assertions": [
+        "[MUST]/[SHOULD]/[NITS]/[GOOD] の 4 カテゴリとその用途を答えている",
+        "確信度（high/medium/low）と「（未確認）」マークの付与に触れている",
+        "finding 段は coverage 優先で自己検閲せず、precision の filter は親が担う分業を説明している",
+        "rubric 本体の SSOT が agent 定義側であり multi-review 側で再掲しない方針に触れている"
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "security-floor-overrides-an-explicit-low-tier",
+      "prompt": "multi-review 1234 --tier=trivial （差分は src/auth/session-token.ts と src/auth/cookie.ts の 2 ファイル）",
+      "expected_output": "security surface を検出して TIER を standard へ引き上げ、trivial の roster では走らせない。",
+      "assertions": [
+        "明示された --tier=trivial を security フロアで standard へ上書きしている",
+        "フロアが明示指定より優先されること（floor であって ceiling ではないこと）を説明している",
+        "引き上げ後の roster（cc-security-review + codex generalist xhigh + specialist）で起動している",
+        "パス名ベースの機械的バックストップであり、diff 本文の fail-safe 判断を置き換えないと述べている"
+      ],
+      "files": []
+    }
+  ]
+}
