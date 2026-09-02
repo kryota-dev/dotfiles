@@ -3,7 +3,7 @@ name: model-fitness-check
 description: |
   現在のセッションの model / effort が、実行しようとしている作業の §4 contract を満たすかを検出し、満たさなければ実装・レビュー実行に入る前に停止する共有ゲート。skill はセッションの model / effort を変更できない（`/model` `/effort` は user のみ）ため、「検出 → 提案 → 停止」を担う。
   `pr-workflow` / `sdd` / `multi-review` が各 entry から呼ぶ。contract テーブルはこの skill が唯一の SSOT。
-argument-hint: "<work tier>（例: orchestration / large / trivial-small）"
+argument-hint: "<work tier>（例: orchestration / large / 横断設計 / PRD審議 / trivial-small）"
 ---
 
 # model-fitness-check
@@ -226,6 +226,14 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
   の fail-safe 分類と同じ向き）。例: large tier の中で横断設計を行うなら large 行（xhigh）に掛かる。
 - **どの行にも解決できない引数は fail-safe** —— silent pass せず、どの行で判定すべきかを user に提示して
   確認する（model の unknown 文字列と同じ扱い）。
+
+**medium 行（横断設計 / PRD 審議）と `adversarial` に、上表 3 skill からの到達経路は無い**（2026-09-03
+時点）。`pr-workflow` は size tier を転送し、`multi-review` は `orchestration` 固定、`sdd` は
+`orchestration` / `large` のみを渡す。したがって medium 行に掛かるのは **user の直接起動**か、将来
+caller 側が medium 行の語彙を渡すよう更新されたときである。**caller 側の更新は本 skill の変更では
+完了しない** —— 呼び出し規約は本 skill が持つが、**実際に渡す引数を決めるのは各 caller の SKILL.md**
+だから。到達経路が無いことと契約が誤っていることは別なので、**この非対称を理由に medium 行を消さない**
+（消すと、user の直接起動という現に存在する経路まで失われる）。
 
 各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
 

@@ -777,9 +777,13 @@ SHIMEOF
   #    (xhigh, from the effort docs). Collapsing them back into one row would silently re-tie two
   #    decisions that rest on different evidence; see references/effort-floor.md.
   grep -qF '## §4 contract' "$floor"
-  grep -qF '| Opus | high' "$floor"
-  grep -qF '| Opus | xhigh |' "$floor"
-  grep -qF '| Opus | medium |' "$floor"
+  # Pin each floor row's work column TOGETHER WITH its effort. Asserting only that the strings
+  # `| Opus | xhigh |` and `| Opus | medium |` each appear somewhere is not enough: a mutation
+  # that swaps the two efforts between the rows satisfies every such pin and the row count below
+  # (verified by mutation). The pairing IS what #629 decided, so the pairing is what gets pinned.
+  grep -qF '統合・裁定 | Opus | high' "$floor"
+  grep -qF '| large tier / adversarial verification | Opus | xhigh |' "$floor"
+  grep -qF '| 横断設計 / PRD 審議 | Opus | medium |' "$floor"
   local floor_rows
   floor_rows="$(grep -cF '**floor**（blocking）' "$floor" || true)"
   [ "$floor_rows" = "3" ] || {
@@ -787,10 +791,21 @@ SHIMEOF
     false
   }
   # Every floor row must carry a dated rationale reachable from the skill (#629): the contract is
-  # only auditable if each row says why it sits where it does. Pinned on the reference pointer,
-  # since that is what progressive disclosure makes load-bearing.
-  grep -qF 'references/effort-floor.md' "$floor"
-  [ -f "${HOME_DIR}/dot_agents/skills/model-fitness-check/references/effort-floor.md" ]
+  # only auditable if each row says why it sits where it does. Pin the markdown LINK form rather
+  # than the bare filename -- demoting the pointer to prose would keep the string while breaking
+  # progressive disclosure -- and pin that the reference still carries the dated per-row grounds,
+  # so emptying it or dropping a row's rationale fails here instead of silently.
+  grep -qF '### 各行の根拠' "$floor"
+  grep -qF '](references/effort-floor.md)' "$floor"
+  local rationale="${HOME_DIR}/dot_agents/skills/model-fitness-check/references/effort-floor.md"
+  [ -f "$rationale" ]
+  local marker
+  for marker in '2026-09-03' 'large tier / adversarial verification' '横断設計 / PRD 審議'; do
+    grep -qF -- "$marker" "$rationale" || {
+      echo "references/effort-floor.md no longer carries: ${marker}"
+      false
+    }
+  done
   # The floor must still STOP the session. Scoped to the floor-mismatch section: checking the
   # whole file would pass on `AskUserQuestion` borrowed from the over-provision gate, so gutting
   # the floor branch into a non-blocking FYI would go unnoticed (verified by mutation).

@@ -1,6 +1,6 @@
 {
   "skill_name": "model-fitness-check",
-  "note": "#503 の before/after eval。before = AC-034 compatibility shim を持つ版（本 skill が起動されると /execution-readiness-check も連鎖起動していた）。after = shim を撤去した版（連鎖起動しない。readiness gate は各 caller が自分で呼ぶ）。id 2 と id 3 がその差分を直接判別する。id 1 と id 4 は撤去で §4 floor 判定と over-provision ゲートが失われていないことの回帰チェックで、before / after のどちらでも同じ結果になることが期待値である。id 5 と id 6 は #629 の追加分。#629 は旧 xhigh 行（large tier / PRD 審議 / adversarial verification / 横断設計）を「user と対話するか」で 2 分割し、対話する行（横断設計 / PRD 審議）を medium、対話しない長時間実行の行（large tier / adversarial verification）を xhigh とした。id 5 が medium 行の blocking 境界（low のときだけ mismatch）を、id 6 が「floor は下限であって推奨値ではない」ことを押さえる。id 1 は分割後も large 行が xhigh のままであることの回帰チェックを兼ねる。",
+  "note": "#503 の before/after eval。before = AC-034 compatibility shim を持つ版（本 skill が起動されると /execution-readiness-check も連鎖起動していた）。after = shim を撤去した版（連鎖起動しない。readiness gate は各 caller が自分で呼ぶ）。id 2 と id 3 がその差分を直接判別する。id 1 と id 4 は撤去で §4 floor 判定と over-provision ゲートが失われていないことの回帰チェックで、before / after のどちらでも同じ結果になることが期待値である。id 5 と id 6 は #629 の追加分。#629 は旧 xhigh 行（large tier / PRD 審議 / adversarial verification / 横断設計）を「user と対話するか」で 2 分割し、対話する行（横断設計 / PRD 審議）を medium、対話しない長時間実行の行（large tier / adversarial verification）を xhigh とした。id 5 が medium 行の下側境界（low のときだけ mismatch）を、id 7 が **floor と同値の medium ちょうどで pass すること**（＝今回下げた floor 自体の退行検出）を、id 6 が「floor は下限であって推奨値ではない」ことを押さえる。id 1 は分割後も large 行が xhigh のままであることの回帰チェックを兼ねる。id 6 の 4 番目の assertion は当初「over-provision パスまで進んだ」としていたが、medium 行では over-provision が trivial/small 行にしか掛からず出力に現れないため、no-op と区別できない（レビュー指摘）。観測可能な「後続作業が続く」に置き換えてある。",
   "evals": [
     {
       "id": 1,
@@ -75,7 +75,20 @@
         "AskUserQuestion で停止していない（floor を満たしているため）",
         "xhigh から medium へ下げるよう提案していない（floor 行は下限であって推奨値ではない）",
         "over-provision パスを PRD 審議に適用していない（そちらは trivial/small 行にしか掛からない）",
-        "floor パスを pass した後に判定を打ち切らず、over-provision パスまで進んだうえで（過剰でないため）何も出さずに終えている"
+        "判定を終えたうえで、そのまま PRD 審議の作業へ進んでいる（沈黙して終わらず、後続作業が続く）"
+      ],
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "medium-floor-passes-at-exactly-medium",
+      "prompt": "/model-fitness-check 横断設計 （現在のセッションは Opus 5 で effort は medium です）",
+      "expected_output": "medium は横断設計行の floor と同値なので pass し、blocking せず引き上げ提案も出さずに作業を続行する。",
+      "assertions": [
+        "AskUserQuestion で停止していない（floor と同値なので mismatch ではない）",
+        "/effort high や /effort xhigh への引き上げを提案していない（medium で要求を満たしている）",
+        "要求水準を medium と述べており、xhigh とは述べていない",
+        "判定を終えたうえで、そのまま横断設計の作業へ進んでいる"
       ],
       "files": []
     }
