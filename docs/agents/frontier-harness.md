@@ -827,6 +827,61 @@ working directory all resolve from `--worktree`. Resolving them from the caller'
 an approved repository launch a child into an unapproved one, which is the capability gate
 answering a question nobody asked.
 
+### Resume inherits the capability the launch selected
+
+When `--capability` is omitted, `fh session resume` runs on **the capability that session id last
+resolved to**. The correlation key is the session id stamped onto `route_decisions`. That route is
+written *before* the child starts, for both launch and resume, so it is still there when the child
+died and you are resuming exactly because of that.
+
+What is inherited is the *resolved* name. Whether the launch stated it or omitted it is not
+recorded: if it was omitted, the recorded value is the default of that moment, so inheriting the
+record is correct either way. If the default later changes, the recorded value is still the more
+accurate answer to "what was this same session running on".
+
+An explicit `--capability` always wins. Resuming on a stronger capability because the child ran out
+of model is a legitimate operation and stays available.
+
+When nothing can be looked up, the default applies. **`--capability` is not demanded** — if the
+record cannot be read, neither can "was the launch explicit", so demanding it would force a choice
+on callers who never made one. That is the same class of mistake this path exists to fix. Instead,
+**where the capability came from is always stated**: `capabilitySource` in the JSON, and one line on
+stderr, take one of `explicit` / `inherited` / `default`, where `default` also covers "no prior
+record could be read". A caller that relies on inheritance can gate on that value.
+
+If the recorded capability has since left the registry, the default applies as well, and the dropped
+name is written to stderr. Renaming a capability does not strand an older child, but it does not
+silently swap it for a different one either.
+
+**What remains is the direction of the fallback.** The fallback is still
+`DEFAULT_SESSION_CAPABILITY`, so if the default stops being the strongest entry in the registry,
+an uninheritable resume runs on the weaker one. What this removes is the silence, not the drift
+itself — which is exactly why `capabilitySource` exists.
+
+**The correlation key is not on `adapter_runs`, because that table is pruned by retention.**
+`fh clean` deletes adapter runs, so keying inheritance off them would fail in the worst possible
+way: the longer a session stays interrupted, the less inheritance works. `route_decisions` and
+`tasks` are not pruned. On top of that, `adapter_runs` deliberately carries no columns describing
+how the adapter was launched (conversation IDs among them), while `route_decisions` already holds
+the resolved capability, model and effort — so one correlation key is the whole addition. Copying
+the capability into a separate table would instead create two records that can disagree.
+
+The index is **partial and covering**. Since `route_decisions` is never pruned, its index would
+otherwise grow without bound — but the only rows that can ever be an inheritance source are those
+that have a `session_id` *and* a resolved `capability` (routes from anything other than
+`fh session`, and escalation routes stopped at the approval boundary, are neither). Measured:
+SQLite recognises that `session_id = ?` implies `session_id IS NOT NULL` and picks this index as
+`SEARCH ... USING COVERING INDEX`. If it ever stopped doing so the lookup would quietly degrade
+into a full scan, so the `EXPLAIN QUERY PLAN` itself is pinned by a test.
+
+**This migration raises the version of the shared state database.** The state lives in the Git
+common directory and every worktree shares one copy. Once the version is raised, an **older `fh`
+can no longer open it** (`state database schema version 4 is newer than supported version 3`) —
+the same intentional fail-closed behaviour as the v2 and v3 migrations. So do not run
+`chezmoi apply` while sessions built against the older deployment are still running. After the
+apply every `fh` invocation is on the new version, so the mixed window is the apply itself.
+
+
 ## Provider adapters
 
 The three CLIs are not interchangeable. Their non-interactive capabilities are asymmetric, so each

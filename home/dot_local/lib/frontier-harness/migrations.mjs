@@ -216,6 +216,45 @@ const VERIFICATION_PROVENANCE_DDL = `
     ON verification_results (candidate_id);
 `;
 
+// v4: 子セッションが走った capability を、その session id から引けるようにする（#604）。
+//
+// `fh session resume` は launch 時の capability を継承できず、`--capability` を省くたびに
+// 既定へ戻っていた（tier 別 capability を選んだ意図が resume のたびに静かに取り消される）。
+// 継承するには「この session id はどの capability で走ったか」を後から引ける必要がある。
+//
+// 置き場所を **route_decisions** にしたのは、次の 3 つが同時に効くため:
+//
+//   - **`adapter_runs` には置けない。** v2 の但し書きどおり、そちらには adapter の「起動方式」に
+//     属する列（conversation ID を含む）を置かない。加えて `adapter_runs` は retention の
+//     prune 対象なので、`rawArtifactsDays` を過ぎたセッションは継承できなくなる。
+//     `route_decisions` と `tasks` は prune の対象外である（state-records.mjs の
+//     `deleteExpiredRecords` が消すのは adapter_runs / verification_results /
+//     review_findings / telemetry_events と evidence だけ）
+//   - **capability の写しを作らずに済む。** `route_decisions` は既に「解決後の」
+//     capability / model / effort を持っているので、足すのは相関キー 1 本だけでよい。
+//     別テーブルへ capability を複製すると、2 つの記録が食い違いうる経路を新設することになる
+//   - **子を起こす前に書かれる。** したがって子が異常終了しても capability は残る。
+//     「落ちた子を resume する」という、この issue が扱う当のユースケースで引ける
+//
+// session id は会話内容ではない（`requireSafeArgumentValue` を通した識別子であり、
+// prompt 本文はここにも tasks にも流れない）。
+// index は **partial かつ covering** にする。`route_decisions` は prune されない（それが保存先に
+// 選んだ理由でもある）ので、index は消えずに増え続ける。一方、継承元になりうる行は
+// 「session_id を持ち、かつ capability が解決済み」のものだけで、`fh session` 以外の route
+// （session_id が NULL）も escalation route（capability が NULL）も対象外である。
+//
+// ［実測］`WHERE session_id = ? AND capability IS NOT NULL ORDER BY created_at DESC, id DESC LIMIT 1`
+// に対し、SQLite はこの partial index の述語を含意と認識して `SEARCH ... USING COVERING INDEX`
+// を選ぶ（`session_id = ?` が `session_id IS NOT NULL` を含意し、`capability IS NOT NULL` は
+// 述語そのもの）。covering なので lookup でテーブル本体を引かない。
+const SESSION_ROUTE_DDL = `
+  ALTER TABLE route_decisions ADD COLUMN session_id TEXT;
+
+  CREATE INDEX IF NOT EXISTS route_decisions_session_capability_latest_idx
+    ON route_decisions (session_id, created_at DESC, id DESC, capability)
+    WHERE session_id IS NOT NULL AND capability IS NOT NULL;
+`;
+
 // 配列の添字 + 1 がそのまま user_version になる。末尾に足すだけで版が上がるため、
 // 「定数を上げ忘れる / ステップを足し忘れる」という drift が起こらない。
 const MIGRATIONS = [
@@ -228,6 +267,9 @@ const MIGRATIONS = [
   },
   function applyVerificationProvenance(database) {
     database.exec(VERIFICATION_PROVENANCE_DDL);
+  },
+  function applySessionRouteCorrelation(database) {
+    database.exec(SESSION_ROUTE_DDL);
   },
 ];
 

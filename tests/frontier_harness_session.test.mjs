@@ -30,6 +30,7 @@ import {
   parseGateDeclaration,
   resolveGate,
 } from "../home/dot_local/lib/frontier-harness/session-gate.mjs";
+import { SCHEMA_VERSION } from "../home/dot_local/lib/frontier-harness/migrations.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 
 // `fh session launch|resume`（#537）専用のスイート。
@@ -48,6 +49,9 @@ const COMMAND_PATHS = Object.freeze({
 });
 const VERIFIED_MODELS = Object.freeze({});
 const SESSION_CAPABILITY = "session.child";
+// tier 別 capability。既定より弱い（Opus @ high）ものを選ぶことが `fh session launch` の
+// 目的なので、#604 の継承はこの「弱いほうを選んだ」意図が resume で残るかを問う。
+const TIER_CAPABILITY = "session.child.standard";
 const SESSION_ID = "11111111-2222-4333-8444-555555555555";
 const RESUME_KEY = "99999999-8888-4777-8666-555555555555";
 // 記録に混ざってはいけない「会話内容」。prompt 本文をこの文字列にして、保存先の全行を
@@ -74,12 +78,30 @@ const baseConfigInput = {
       model: "claude-opus-5",
       effort: "xhigh",
     },
+    [TIER_CAPABILITY]: {
+      provider: "claude",
+      model: "claude-opus-5",
+      effort: "high",
+    },
   },
   risk: { alwaysEscalate: ["merge"] },
 };
 
 const config = normalizeConfig(baseConfigInput);
 const shadowConfig = normalizeConfig({ ...baseConfigInput, rollout: "shadow" });
+// 既定（`DEFAULT_SESSION_CAPABILITY`）が registry 中で最も強い、という**現構成の性質**を
+// 崩した registry。#604 の安全性がその性質に寄りかかっていないことを確かめるために使う。
+const weakDefaultConfig = normalizeConfig({
+  ...baseConfigInput,
+  capabilities: {
+    ...baseConfigInput.capabilities,
+    [SESSION_CAPABILITY]: {
+      provider: "claude",
+      model: "claude-sonnet-5",
+      effort: "low",
+    },
+  },
+});
 
 const PUBLIC_LOOKUP = () => [{ address: "93.184.216.34", family: 4 }];
 
@@ -314,12 +336,15 @@ async function launch({
   };
 }
 
-async function preparedDirectory(context, { commands = [] } = {}) {
+async function preparedDirectory(
+  context,
+  { commands = [], capabilities = [SESSION_CAPABILITY] } = {},
+) {
   const directory = temporaryDirectory(context);
   const statePath = path.join(directory, "state.db");
   const policyPath = await approveCapabilities(
     directory,
-    [SESSION_CAPABILITY],
+    capabilities,
     statePath,
     directory,
     commands,
@@ -1836,4 +1861,496 @@ test("fh runs accounts for every verification status, including skipped", async 
     Object.values(breakdown).reduce((sum, count) => sum + count, 0),
     total,
   );
+});
+
+// ---------------------------------------------------------------------------
+// resume は launch 時の capability を継承する（#604）
+// ---------------------------------------------------------------------------
+
+// launch → resume を同じ state に対して通す。`--session-id` に採番した値をそのまま
+// `--resume-key` へ渡すのは wave-orchestrator の運用そのもの（Leader が採番し、停止後に
+// 同じ値で起こし直す）で、継承の相関キーもその値である。
+async function launchThenResume(
+  context,
+  {
+    launchFlags = [],
+    resumeFlags = [],
+    capabilities = [SESSION_CAPABILITY, TIER_CAPABILITY],
+    sessionConfig = config,
+    resumeConfig,
+    beforeResume = () => {},
+    childSessionId = RESUME_KEY,
+  } = {},
+) {
+  const prepared = await preparedDirectory(context, { capabilities });
+  const events = [
+    initEvent({ session_id: childSessionId }),
+    resultEvent({ session_id: childSessionId }),
+  ];
+  const launched = await launch({
+    ...prepared,
+    sessionConfig,
+    spawnFake: createFakeSpawn({ lines: events }),
+    sessionIdFlag: RESUME_KEY,
+    extraFlags: launchFlags,
+  });
+  await beforeResume(prepared);
+  const resumed = await launch({
+    ...prepared,
+    sessionConfig: resumeConfig ?? sessionConfig,
+    spawnFake: createFakeSpawn({ lines: events }),
+    action: "resume",
+    extraFlags: resumeFlags,
+  });
+  return { ...prepared, launched, resumed };
+}
+
+test("resume inherits the capability the session was launched with", async (context) => {
+  const { launched, resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+  });
+
+  assert.equal(launched.code, 0);
+  assert.equal(launched.report.capability, TIER_CAPABILITY);
+  assert.equal(launched.report.capabilitySource, "explicit");
+
+  // ここが #604 そのもの。`--capability` を省いた resume が既定へ戻ってはならない。
+  assert.equal(resumed.code, 0);
+  assert.equal(resumed.report.capability, TIER_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "inherited");
+  // 記録側も同じでなければ、`fh runs` から見た tier 選択は消えたままになる。
+  assert.equal(resumed.report.effort, "high");
+});
+
+test("an explicit --capability on resume still wins, so a deliberate change is not undone", async (context) => {
+  // 中断の理由が model 不足だった、という運用は正当なので、継承が明示を上書きしてはならない。
+  const { launched, resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    resumeFlags: ["--capability", SESSION_CAPABILITY],
+  });
+
+  // **継承元が明示値と違うことを先に固定する。** これが無いと、launch 側の `--capability` が
+  // 無視されて既定（= resume の明示値と同じ）で記録されても、下の assert は通ってしまう
+  // ——「明示が継承に勝った」ではなく「たまたま一致した」を見ているテストになる。
+  assert.equal(launched.code, 0);
+  assert.equal(launched.report.capability, TIER_CAPABILITY);
+  assert.equal(launched.report.capabilitySource, "explicit");
+
+  assert.equal(resumed.code, 0);
+  assert.equal(resumed.report.capability, SESSION_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "explicit");
+  assert.equal(resumed.report.effort, "xhigh");
+});
+
+test("a resume with nothing recorded falls back to the default and names the source", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { code, report, stderr } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    action: "resume",
+  });
+
+  // 引けなかったことを理由に `--capability` を要求はしない —— 引けない以上、launch が
+  // 明示だったのかも分からないため、選択していない呼び出し側に選択を強いることになる。
+  // 代わりに `default` と告げて、呼び出し側が機械的に gate できる形にする。
+  assert.equal(code, 0);
+  assert.equal(report.capability, SESSION_CAPABILITY);
+  assert.equal(report.capabilitySource, "default");
+  assert.ok(
+    stderr.some((line) => line.includes(`capability ${SESSION_CAPABILITY} (default)`)),
+    "the source belongs on stderr as well, for the pane that has no JSON",
+  );
+});
+
+test("launch reports the source it used, and never inherits", async (context) => {
+  // launch は新しいセッションの開始なので、たとえ同じ id を再利用しても継承の対象にしない。
+  const { launched } = await launchThenResume(context, {});
+
+  assert.equal(launched.report.capabilitySource, "default");
+  assert.equal(launched.report.capability, SESSION_CAPABILITY);
+});
+
+test("every capability source reaches stderr, not just the default one", async (context) => {
+  // 契約は 3 値すべてを JSON と stderr の両方に出すことなので、`default` だけを確かめても
+  // 半分しか固定できない。stderr は JSON を読まないペイン（wave の監視窓）が唯一見る経路で、
+  // そこに `inherited` が出ないと「継承されたのか既定に落ちたのか」を画面から判断できない。
+  const { launched, resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+  });
+
+  assert.ok(
+    launched.stderr.some((line) =>
+      line.includes(`capability ${TIER_CAPABILITY} (explicit)`),
+    ),
+    "the explicit source belongs on stderr",
+  );
+  assert.ok(
+    resumed.stderr.some((line) =>
+      line.includes(`capability ${TIER_CAPABILITY} (inherited)`),
+    ),
+    "the inherited source belongs on stderr",
+  );
+});
+
+test("inheritance keys off the identifier the caller assigned, not the one the child echoed", async (context) => {
+  // 相関キーは Leader が採番して `--resume-key` に渡す値である。子が構造化出力へ載せる
+  // session_id を鍵にすると、両者がずれた瞬間に継承が静かに外れる。
+  const { resumed, launched } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    childSessionId: SESSION_ID,
+  });
+
+  assert.equal(launched.report.resumeKey, SESSION_ID, "the child echoed a different id");
+  assert.equal(resumed.report.capability, TIER_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "inherited");
+});
+
+test("a second resume keeps carrying the capability forward", async (context) => {
+  const prepared = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+  });
+  assert.equal(prepared.resumed.report.capabilitySource, "inherited");
+
+  const again = await launch({
+    directory: prepared.directory,
+    statePath: prepared.statePath,
+    policyPath: prepared.policyPath,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    action: "resume",
+  });
+
+  // 2 回目は 1 回目の resume が書いた route から引く。継承した値を継承し直せないと、
+  // 長い wave では 2 回目の中断で選択が消えることになる。
+  assert.equal(again.report.capability, TIER_CAPABILITY);
+  assert.equal(again.report.capabilitySource, "inherited");
+});
+
+test("the most recently resolved capability is the one inherited, not the first one", async (context) => {
+  // 上のチェーンは全 route が同じ capability なので、**最古の route を選ぶ実装でも通る**。
+  // 「最後に解決した」という順序そのものを識別するには、途中で capability を変える必要がある。
+  // これは運用上も意味のある経路である —— resume で意図的に capability を上げたなら、
+  // その後の resume が引き継ぐべきは launch 時の値ではなく、上げたあとの値である。
+  const prepared = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    resumeFlags: ["--capability", SESSION_CAPABILITY],
+  });
+  assert.equal(prepared.launched.report.capability, TIER_CAPABILITY);
+  assert.equal(prepared.resumed.report.capability, SESSION_CAPABILITY);
+
+  const third = await launch({
+    directory: prepared.directory,
+    statePath: prepared.statePath,
+    policyPath: prepared.policyPath,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    action: "resume",
+  });
+
+  assert.equal(third.report.capability, SESSION_CAPABILITY, "the later route wins");
+  assert.equal(third.report.capabilitySource, "inherited");
+});
+
+test("an escalation recorded after a resolved route does not shadow it", async (context) => {
+  // escalation route は同じ session id で、しかも**より新しい** created_at を持ちうる。
+  // 「最新の route」を素朴に引くと、承認境界で止まった route が継承元を覆い隠して
+  // 既定へ落ちる。`capability IS NOT NULL` はその経路も塞いでいる。
+  const prepared = await preparedDirectory(context, {
+    capabilities: [SESSION_CAPABILITY, TIER_CAPABILITY],
+  });
+  const events = [
+    initEvent({ session_id: RESUME_KEY }),
+    resultEvent({ session_id: RESUME_KEY }),
+  ];
+
+  const launched = await launch({
+    ...prepared,
+    spawnFake: createFakeSpawn({ lines: events }),
+    sessionIdFlag: RESUME_KEY,
+    extraFlags: ["--capability", TIER_CAPABILITY],
+  });
+  assert.equal(launched.report.capability, TIER_CAPABILITY);
+
+  // 未承認の gate コマンドを宣言して、同じ session id で escalation route を 1 本挟む。
+  const blocked = await launch({
+    ...prepared,
+    spawnFake: createFakeSpawn({ lines: [] }),
+    action: "resume",
+    extraFlags: ["--gate", "npm run never-approved"],
+  });
+  assert.equal(blocked.code, 2, "the unapproved gate must block this resume");
+
+  const resumed = await launch({
+    ...prepared,
+    spawnFake: createFakeSpawn({ lines: events }),
+    action: "resume",
+  });
+
+  assert.equal(resumed.report.capability, TIER_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "inherited");
+});
+
+test("a launch the manifest blocked does not become an inheritance source", async (context) => {
+  // escalation route は capability を持たない（何で走るはずだったかは記録していない）。
+  // それを継承元に採ると、承認されなかった選択が resume 側で復活しうる。
+  const { directory, statePath, policyPath } = await preparedDirectory(context, {
+    capabilities: [SESSION_CAPABILITY],
+  });
+  const spawnFake = createFakeSpawn({ lines: [] });
+
+  const blocked = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    sessionIdFlag: RESUME_KEY,
+    extraFlags: ["--capability", TIER_CAPABILITY],
+  });
+  assert.equal(blocked.code, 2);
+  assert.equal(blocked.report.executed, false);
+
+  const resumed = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+    action: "resume",
+  });
+
+  assert.equal(resumed.report.capability, SESSION_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "default");
+});
+
+test("a recorded capability that left the registry falls back loudly instead of stranding the session", async (context) => {
+  // capability の改名や整理で、過去に起こした子を二度と再開できなくする理由は無い。
+  // ただし黙って落とすと #604 の「静かに取り消される」を別の形で再演することになる。
+  const withoutTier = normalizeConfig({
+    ...baseConfigInput,
+    capabilities: Object.fromEntries(
+      Object.entries(baseConfigInput.capabilities).filter(
+        ([name]) => name !== TIER_CAPABILITY,
+      ),
+    ),
+  });
+  const { resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    resumeConfig: withoutTier,
+  });
+
+  assert.equal(resumed.code, 0);
+  assert.equal(resumed.report.capability, SESSION_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "default");
+  assert.ok(
+    resumed.stderr.some(
+      (line) =>
+        line.includes(TIER_CAPABILITY) && line.includes("no longer usable"),
+    ),
+    "dropping a recorded capability must be said out loud",
+  );
+});
+
+test("the inheritance source survives retention pruning", async (context) => {
+  // 保存先を `adapter_runs` ではなく `route_decisions` にした理由の回帰。`fh clean` の
+  // prune は adapter_runs を消すので、そちらに持たせると rawArtifactsDays を過ぎた
+  // セッションが継承できなくなる（中断が長引くほど効かなくなる、という最悪の壊れ方をする）。
+  const { resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    beforeResume: ({ directory, statePath }) => {
+      const store = createStateStore(statePath);
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      store.pruneExpired({
+        rawCutoff: future,
+        telemetryCutoff: future,
+        artifactRoot: directory,
+      });
+      assert.equal(
+        store.listAdapterRuns().length,
+        0,
+        "the run record must actually be prunable for this test to mean anything",
+      );
+      assert.equal(store.findSessionCapability(RESUME_KEY).capability, TIER_CAPABILITY);
+      store.close();
+    },
+  });
+
+  assert.equal(resumed.report.capability, TIER_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "inherited");
+});
+
+test("the correlation key is on the route, and carries no conversation content", async (context) => {
+  const { statePath } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+  });
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const routes = store.listRoutes();
+  assert.equal(routes.length, 2, "launch and resume each record one route");
+  for (const route of routes) {
+    assert.equal(route.sessionId, RESUME_KEY);
+    assert.equal(route.capability, TIER_CAPABILITY);
+  }
+  // 相関キーは `requireSafeArgumentValue` を通した識別子であって、prompt 本文ではない。
+  const raw = new DatabaseSync(statePath, { readOnly: true });
+  context.after(() => raw.close());
+  for (const row of raw.prepare("SELECT * FROM route_decisions").all()) {
+    assert.ok(
+      !JSON.stringify(row).includes(PROMPT_BODY),
+      "no route row may carry the prompt body",
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 「既定が registry 中で最も強い」に寄りかからない（#604 の前提固定）
+// ---------------------------------------------------------------------------
+
+test("a weaker default no longer decides what a resume runs on", async (context) => {
+  // 現構成では既定（session.child）が最も強いので、省略時のフォールバックは常に上振れする。
+  // その性質が崩れた registry で、**継承が効くかぎり** resume は launch の選択を保つ
+  // ——「既定が最強」という前提に安全性が寄りかからないことを、ここで固定する。
+  const { resumed } = await launchThenResume(context, {
+    launchFlags: ["--capability", TIER_CAPABILITY],
+    sessionConfig: weakDefaultConfig,
+  });
+
+  assert.equal(resumed.report.capability, TIER_CAPABILITY);
+  assert.equal(resumed.report.capabilitySource, "inherited");
+  assert.equal(resumed.report.model, "claude-opus-5");
+  assert.equal(resumed.report.effort, "high");
+});
+
+test("a weaker default is what an uninheritable resume falls back to, and the report says so", async (context) => {
+  // 残余条件を明文化する。継承元が引けないときのフォールバックは**依然として既定**なので、
+  // 既定が弱くなれば resume は弱いほうで走る。#604 が消せるのは「静かであること」までで、
+  // 上振れ／下振れそのものではない。だからこそ `capabilitySource` が要る —— 呼び出し側は
+  // `default` を見て、自分で `--capability` を渡し直すか止まるかを決められる。
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  const { report } = await launch({
+    directory,
+    statePath,
+    policyPath,
+    spawnFake,
+    action: "resume",
+    sessionConfig: weakDefaultConfig,
+  });
+
+  assert.equal(report.capability, SESSION_CAPABILITY);
+  assert.equal(report.capabilitySource, "default");
+  // 既定が弱いまま黙って走った、という形にしない。値そのものを固定して、既定を弱くした
+  // 変更がこのテストを踏むようにする。
+  assert.equal(report.model, "claude-sonnet-5");
+  assert.equal(report.effort, "low");
+});
+
+// ---------------------------------------------------------------------------
+// 相関キーを足した migration（schema v4）
+// ---------------------------------------------------------------------------
+
+// v4 の**直前**（v3）の DB を作る。
+//
+// v3 の DDL を丸ごと写経すると、他のテーブルの定義が本体と二重管理になり、本体が変わっても
+// fixture は古いまま通り続ける。代わりに、現行 schema で作った DB から v4 が足したものだけを
+// 取り去って版数を戻す —— 「v4 を適用する前の姿」を、他のテーブルは本物のまま再現できる。
+function seedDatabaseAtV3(statePath) {
+  createStateStore(statePath).close();
+  const raw = new DatabaseSync(statePath);
+  raw.exec("DROP INDEX route_decisions_session_capability_latest_idx");
+  raw.exec("ALTER TABLE route_decisions DROP COLUMN session_id");
+  raw.exec("PRAGMA user_version = 3");
+  raw.close();
+}
+
+test("a route recorded before the column existed is not an inheritance source", async (context) => {
+  // 実運用でこの migration が当たるのは、既に route を持っている v3 の DB である。
+  // そこで問いたいのは「既存行が壊れないか」だけではなく、**列を持たなかった時代の route が
+  // 継承元として拾われないか** —— session_id が NULL のまま残るので、拾ってはならない。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+
+  seedDatabaseAtV3(statePath);
+  const seeded = new DatabaseSync(statePath);
+  seeded.exec(`
+    INSERT INTO tasks (id, goal, task_json, created_at)
+      VALUES ('task_legacy', 'wave child session legacy', '{}', '2026-01-01T00:00:00.000Z');
+    INSERT INTO route_decisions (id, task_id, kind, capability, provider, reason, created_at, model, effort)
+      VALUES ('route_legacy', 'task_legacy', 'single-worker', 'session.child.standard', 'claude',
+              'recorded before session_id existed', '2026-01-01T00:00:00.000Z', 'claude-opus-5', 'high');
+  `);
+  seeded.close();
+
+  // 開くだけで v4 へ上がる。
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+
+  const [legacy] = store.listRoutes();
+  assert.equal(legacy.id, "route_legacy", "the pre-existing row survives the migration");
+  assert.equal(legacy.capability, "session.child.standard");
+  assert.equal(legacy.sessionId, null, "the new column is NULL for rows written before it");
+
+  // その行は継承元にならない（session_id が無いので、どの resume-key でも引けない）。
+  assert.equal(store.findSessionCapability(RESUME_KEY), null);
+  assert.equal(store.findSessionCapability(SESSION_ID), null);
+  // NULL を鍵にして「たまたま引ける」こともない。
+  assert.equal(store.findSessionCapability(null), null);
+  assert.equal(store.findSessionCapability(""), null);
+});
+
+test("the migration adds the column and its index to a database that already had routes", async (context) => {
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+
+  seedDatabaseAtV3(statePath);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  assert.equal(store.schemaVersion(), SCHEMA_VERSION);
+
+  const raw = new DatabaseSync(statePath, { readOnly: true });
+  context.after(() => raw.close());
+  const columns = raw
+    .prepare("PRAGMA table_info(route_decisions)")
+    .all()
+    .map((row) => row.name);
+  assert.ok(columns.includes("session_id"), "the correlation key column exists");
+  const indexes = raw
+    .prepare("PRAGMA index_list(route_decisions)")
+    .all()
+    .map((row) => row.name);
+  assert.ok(
+    indexes.includes("route_decisions_session_capability_latest_idx"),
+    "the lookup index exists",
+  );
+});
+
+test("the lookup uses the partial index instead of scanning the unpruned route table", async (context) => {
+  // index を partial にした理由は「route_decisions は prune されないので index も増え続ける」
+  // ことにあり、その前提は SQLite が実際にこの index を選ぶことに依存している。
+  // 述語の含意（`session_id = ?` が `session_id IS NOT NULL` を含む）を SQLite が認識しなく
+  // なったら、lookup は全走査へ静かに退化する。計画そのものを固定して気づけるようにする。
+  const directory = temporaryDirectory(context);
+  const statePath = path.join(directory, "state.db");
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+
+  const raw = new DatabaseSync(statePath, { readOnly: true });
+  context.after(() => raw.close());
+  const plan = raw
+    .prepare(
+      `EXPLAIN QUERY PLAN
+       SELECT id, capability, created_at
+       FROM route_decisions
+       WHERE session_id = ? AND capability IS NOT NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+    )
+    .all()
+    .map((row) => row.detail)
+    .join(" ");
+  assert.match(plan, /route_decisions_session_capability_latest_idx/);
+  assert.doesNotMatch(plan, /SCAN/, "the lookup must not degrade into a table scan");
 });
