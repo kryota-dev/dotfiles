@@ -77,6 +77,67 @@ supported; that error names the separate-argument form rather than calling the w
 unknown. Positional arguments are still the command's own business — `fh review` names the
 subcommands it takes.
 
+### The output shape is part of the contract, and `--help` carries it
+
+`fh <command> --help` prints that command's synopsis, the flags it accepts, and **the top-level
+keys its `--json` output carries**. Adding `--json` returns the same contract as JSON, so a
+script can assert the shape it depends on instead of guessing it:
+
+```
+$ fh approvals --help --json | jq -r '.output | keys[]'
+approvals
+pending
+purged
+skipped
+```
+
+`--help` used to be missing from `flag-registry.mjs`, so `fh approvals --help` answered
+`unknown flag --help` and there was no way to learn from the CLI that `fh approvals --json`
+returns `{"approvals": [...], "skipped": [...]}` rather than an array. A monitoring script read
+the top level as that array, jq failed on the type, `2>/dev/null || true` turned the failure
+into an empty string, and an empty string is also what "nothing is waiting" looks like. Two
+approval requests sat undecided for up to 42 minutes. The fix is an entry in the table, not an
+exception to it: `--help` is accepted because it is listed, and `fh approvals --bogus --help`
+still exits 64 naming `--bogus`.
+
+**The contract cannot drift into a lie.** `cli.mjs` wraps `emit` so that a top-level key the
+command's help does not declare is an internal error. The payload is written first — the emit
+that reports a child session runs after the child already ran, and losing that record is worse
+than any wrong help text — and the run then exits 70 naming the undeclared keys. Adding a key to
+an implementation without documenting it therefore fails on the first invocation of that branch,
+for every command and every branch, rather than waiting for a reader to notice.
+
+The opposite direction — help declaring a key the implementation stopped emitting — is covered
+by `tests/frontier_harness_cli_quality.test.mjs` in two layers. It runs the commands named in its
+`OUTPUT_OBSERVED_HERE` list for real and requires **each branch** to emit exactly the keys that
+branch declares: `fh approvals` listing and `--purge` return different envelopes, and so do
+`fh runs` with and without `--run`, so comparing a union per command would let one branch's keys
+leak into the other unnoticed. For the commands it cannot drive cheaply, it checks that every
+declared key still appears in the module that emits it — searching the whole directory instead
+would pass on names like `status`, `command` or `taskId` that survive anywhere else, which is
+exactly how an earlier version of this check failed to notice a key removed from
+`session-command.mjs`. Commands are exempted from the first layer only with a written reason, so
+shrinking the observed set is a reviewable act rather than a silent one.
+
+What is left uncovered is narrow and named in that file: a key dropped from an undriven command
+whose name still appears in its own module for another purpose.
+
+**`--help` never takes a command's place by accident.** Whether `--json` and `--help` are in
+effect is decided over flag positions, not over the raw argument list, because `assertKnownFlags`
+skips the token after a value flag without looking at it (that is what lets `--timeout-ms -1`
+through). Scanning the raw list instead would mean
+`fh approve --request <id> --deny --message "--help"` printed help and exited 0 without recording
+the denial — a closed approval boundary that reads as success. For the same reason, when the
+subcommand cannot be resolved (`fh session --bogus-flag --help`), help gives way to the command's
+own `fh session requires launch or resume, not --bogus-flag`: that is the one case where
+`assertKnownFlags` stays silent, and answering it with help would leave the bad flag unnamed.
+Bare `fh session --help` still prints help, and `fh approvals --bogus --help` still exits 64
+naming `--bogus`.
+
+`fh approve-server` declares an empty output on purpose. It speaks the MCP permission-prompt
+protocol on stdio and has no envelope of its own, so the emptiness is a statement rather than an
+omission, and a test requires every command to declare either keys or a reason for having none.
+
 ### A failure the caller can act on carries no stack trace
 
 | Failure | Output | Exit |

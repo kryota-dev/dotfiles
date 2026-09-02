@@ -11,12 +11,20 @@ import {
   startApprovalServerCommand,
 } from "./approval-commands.mjs";
 import { runCandidateCommand } from "./candidate-command.mjs";
+import {
+  COMMAND_HELP,
+  assertDeclaredOutput,
+  commandHelpJson,
+  renderCommandHelp,
+  renderUsage,
+  usageJson,
+} from "./command-help.mjs";
 import { defaultCommandPaths, providerAvailability } from "./command-paths.mjs";
 import { normalizeConfig } from "./config.mjs";
 import { createDoctorReport } from "./doctor.mjs";
 import { describeCliFailure } from "./errors.mjs";
 import { BLOCKED_PENDING_APPROVAL, USAGE } from "./exit-codes.mjs";
-import { assertKnownFlags } from "./flag-registry.mjs";
+import { assertKnownFlags, inspectFlags } from "./flag-registry.mjs";
 import {
   flagValue,
   nonNegativeIntegerFlag,
@@ -112,62 +120,26 @@ function resolveConfigPath(options, environment) {
   });
 }
 
-function usage() {
-  return [
-    "Usage: frontier-harness <command> [--json]",
-    "",
-    "Every command refuses a flag it does not know, by name.",
-    "",
-    "Commands:",
-    "  approvals      List pending approval requests (--all, or --purge to drop decided ones)",
-    "  approve        Answer one approval request (--request <id> --allow|--deny)",
-    "  approve-server Run the stdio permission prompt tool for a child session",
-    "                 (--session, --approvals-dir, --rules, --timeout-ms,",
-    "                  --progress-interval-ms; path flags must be absolute)",
-    "  doctor  Report adapter and capability readiness",
-    "  clean   Prune expired raw evidence and aggregate telemetry",
-    "          --dry-run prunes nothing and lists what it would delete",
-    "  gaps    List command/domain/capability requests the manifest did not approve",
-    "  onboard Review and approve the repository capability manifest, in two steps:",
-    "            fh onboard --manifest <path>            review; prints a request id",
-    "            fh onboard --manifest <path> --approve --request <id>",
-    "          --from-gaps builds the candidate from the approved manifest plus",
-    "          everything queued by `fh gaps`",
-    "  run     Record a shadow route for a task JSON file",
-    "  runs    Show how recorded adapter runs ended, newest first, each with a count",
-    "          of the verification results linked to it (0 means no gate was passed)",
-    `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset,`,
-    "          --run <adapter run id> for a single record and its verifications",
-    "  session Launch or resume a child session through the approval channel:",
-    "            fh session launch --worktree <abs> --prompt-file <abs>",
-    "            fh session resume --worktree <abs> --prompt-file <abs> --resume-key <id>",
-    "          Optional: --capability (default session.child), --session-id, --label,",
-    "          --sandbox, --approvals-dir, --approval-server-command, --timeout-ms,",
-    "          --progress-interval-ms. Path flags must be absolute.",
-    "          --gate \"[<kind>:]<approved command>\" declares a completion condition;",
-    "          repeat it for more. Each is run after the child and linked to the run,",
-    "          so a gate that does not pass keeps the session out of `succeeded`.",
-    "          --gate-timeout-ms caps each gate check (not the approval channel).",
-    "  status  Show recorded route decisions, newest first",
-    `          Optional: --limit (default ${DEFAULT_STATUS_LIMIT}, max ${MAX_STATUS_LIMIT}), --offset`,
-    "  verify  Run an approved deterministic check and record its result:",
-    "            fh verify --task <task id> --command <approved command>",
-    "          Optional: --kind (default test), --worktree <abs>, --timeout-ms,",
-    "          --candidate <id> to run the check inside a candidate worktree.",
-    "          Exits 0 only when the check passed.",
-    "  review  Hand a reviewer a packet, and take findings back into the registry:",
-    "            fh review packet --task <task id> --out <abs> [--base <rev>]",
-    "            fh review record --task <task id> --findings <abs>",
-    "          A packet carries the task, constraints, diff, and verification",
-    "          results, and has no channel for the writer's conversation.",
-    "  candidate  Manage disposable child worktrees for write-capable routes:",
-    "            fh candidate create --task <task id> [--base <rev>] [--label <l>]",
-    "            fh candidate list",
-    "            fh candidate adopt --candidate <id>",
-    "            fh candidate discard --candidate <id>",
-    "          Adoption requires deterministic checks recorded after creation;",
-    "          a candidate that conflicts is retained, never discarded.",
-  ].join("\n");
+
+// コマンドの JSON を書き出し、`fh <command> --help` が宣言した出力契約と突き合わせる。
+//
+// **payload を先に書き、検査はそのあと。** 契約違反は内部の不整合であって利用者の誤りでは
+// ないうえ、`session` のように子が既に走ったあとの emit もここを通る。先に落とすと
+// 「何が起きたか」を再構成する手段が丸ごと消える —— この harness が最も避けたい失敗である。
+// 順序そのものが不変条件なので、テストから直接叩けるよう factory として切り出してある。
+export function createEmitter({ command, asJson, write }) {
+  return (value) => {
+    const serialized = JSON.stringify(value, null, asJson ? undefined : 2);
+    write(serialized);
+    // **検査するのは「実際に出た JSON」であって、その手前の JavaScript 値ではない。**
+    // `undefined` を値に持つプロパティは `JSON.stringify` で出力から消えるが `Object.keys`
+    // には残るため、シリアライズ前を見ると契約どおりの出力でも 70 に落ちる（`toJSON()` を
+    // 持つ値でも同じ乖離が起きる）。読み手が受け取るものと同じものを検査する。
+    assertDeclaredOutput(
+      command,
+      serialized === undefined ? serialized : JSON.parse(serialized),
+    );
+  };
 }
 
 // 戻り値は command で型が分かれる: `onboard`（domain のアドレス解決を伴う）、`session`
@@ -178,14 +150,45 @@ function usage() {
 export function runCli(argumentsList, options = {}) {
   const environment = options.environment ?? process.env;
   const write = options.write ?? ((line) => process.stdout.write(`${line}\n`));
-  const [command, ...flags] = argumentsList;
+  // 先頭が `-` で始まるならコマンド名ではない。`fh --help` を「`--help` というコマンド」と
+  // 読むと、自己記述を求めた呼び出しが未知コマンド扱いで落ちる。
+  const [first, ...rest] = argumentsList;
+  const command =
+    typeof first === "string" && !first.startsWith("-") ? first : undefined;
+  const flags = command === undefined ? [...argumentsList] : rest;
   // 打ち間違えたフラグを黙って捨てない。ここは副作用の手前（state root の解決も
   // config の読み出しもまだ）なので、拒否だけが起きて何も変わらない。
   // 未知の**コマンド**はこの層の担当ではなく、下の usage が扱う。
+  //
+  // **`--help` もこの検査を通る。** 表に載ったから通るのであって、迂回するのではない。
+  // `fh approvals --bogus --help` は今までどおり `--bogus` を名指しで拒む。
   assertKnownFlags(command, flags);
-  const asJson = flags.includes("--json");
-  const emit = (value) =>
-    write(asJson ? JSON.stringify(value) : JSON.stringify(value, null, 2));
+  // **`--json` / `--help` はフラグ位置に現れたときだけ効く。** 値として渡された文字列が
+  // たまたま一致しただけでコマンドが help にすり替わらないよう、判定は flag-registry の
+  // 走査に委ねる（`fh approve --deny --message "--help"` が承認を記録せず exit 0 で
+  // 終わっていた経路を塞ぐ）。
+  const { tokens, scoped, onlyGlobals } = inspectFlags(command, flags);
+  const asJson = tokens.has("--json");
+  // **スコープが解決していないときは、`fh session --help` の形だけを help として扱う。**
+  // `fh session --bogus-flag --help` で help を出すと、`assertKnownFlags` が黙る条件
+  // （action を解決できない）と重なって未知フラグが名指しされないまま exit 0 になる。
+  // その場合はコマンド実装へ落として、`fh session requires launch or resume, not ...` の
+  // ような名指しのエラーを先に出させる（本来この層より読まれるべき情報である）。
+  if (tokens.has("--help") && (scoped || onlyGlobals)) {
+    const known = command !== undefined && Object.hasOwn(COMMAND_HELP, command);
+    if (known) {
+      write(
+        asJson
+          ? JSON.stringify(commandHelpJson(command))
+          : renderCommandHelp(command),
+      );
+      return 0;
+    }
+    // 打ち間違えたコマンド名を「一覧が出たので成功」と読ませない。help そのものは出す。
+    write(asJson ? JSON.stringify(usageJson()) : renderUsage());
+    return command === undefined ? 0 : USAGE;
+  }
+  const emit = createEmitter({ command, asJson, write });
   const cwd = options.cwd ?? process.cwd();
 
   // 承認チャネルは SQLite state も config.json も必要としない。承認待ちは既定 8 時間に
@@ -555,7 +558,7 @@ export function runCli(argumentsList, options = {}) {
     store.close();
   }
 
-  write(usage());
+  write(renderUsage());
   return USAGE;
 }
 

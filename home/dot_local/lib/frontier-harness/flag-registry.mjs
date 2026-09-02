@@ -13,8 +13,14 @@
 
 const EMPTY = Object.freeze([]);
 
-// 全コマンドに効く。出力形式の選択はコマンドの機能ではないので、各エントリに書かない。
-const GLOBAL_BOOLEAN = Object.freeze(["--json"]);
+// 全コマンドに効く。出力形式の選択も自己記述もコマンドの機能ではないので、各エントリに書かない。
+//
+// **`--help` はここに載る。** 以前は表から漏れていたため `fh approvals --help` が
+// `unknown flag --help` になり、サブコマンドの出力形状を CLI から引く手段が無かった
+// （その欠落が、監視スクリプトの形状取り違えを 42 分にわたって沈黙させた）。fail-closed は
+// 「未知のフラグを拒む」ことであって「`--help` を拒む」ことではないので、直し方は例外の
+// 追加ではなく表への追加になる —— `--help` も他と同じく、表に載っているから通る。
+const GLOBAL_BOOLEAN = Object.freeze(["--json", "--help"]);
 
 function spec({ boolean = EMPTY, value = EMPTY, actions } = {}) {
   return Object.freeze({
@@ -141,6 +147,47 @@ function resolveScope(command, flags) {
     boolean: [...entry.boolean, ...selected.boolean],
     value: [...entry.value, ...selected.value],
   };
+}
+
+// `--json` / `--help` が**フラグ位置**に現れたかを調べる。値として渡された文字列がたまたま
+// `--json` / `--help` と一致しても、それは値であってフラグではない。
+//
+// **なぜ要るのか。** `assertKnownFlags` は値を取るフラグの次のトークンを、内容を見ずに値として
+// 読み飛ばす（`--timeout-ms -1` を通すための意図的な設計）。そこへ `cli.mjs` が
+// `flags.includes("--help")` のような位置非依存の判定を重ねると、
+// `fh approve --request <id> --deny --message "--help"` が **承認を記録しないまま help を出して
+// exit 0 で終わる**。承認境界を閉じる操作が沈黙して成功に見えるのは、この harness が最も
+//避けたい失敗である。走査の規則を 2 か所に書かず、フラグ位置の判定はここに集約する。
+//
+// 返り値:
+//   - `tokens`: フラグ位置に現れたトークンの集合（値は含まない）
+//   - `scoped`: スコープが解決したか。`false` は「このコマンド・この action ではフラグを検証
+//     できていない」を意味する（`assertKnownFlags` が黙る条件と同じ）
+//   - `onlyGlobals`: 全コマンド共通のフラグ以外に、フラグも位置引数も無いか
+export function inspectFlags(command, flags) {
+  const scope = resolveScope(command, flags);
+  // スコープが解決しないと、どのフラグが値を取るのかが分からない。読み飛ばしをやめて
+  // 全トークンをフラグ扱いに倒す（`--json` を取りこぼす側ではなく、拾う側に倒す）。
+  const valueFlags = new Set(scope?.value ?? EMPTY);
+  const globals = new Set(GLOBAL_BOOLEAN);
+  const tokens = new Set();
+  let onlyGlobals = true;
+  for (let index = 0; index < flags.length; index += 1) {
+    const token = flags[index];
+    if (typeof token !== "string") {
+      onlyGlobals = false;
+      continue;
+    }
+    tokens.add(token);
+    if (valueFlags.has(token)) {
+      // 値は次のトークン。フラグ位置には数えない（`assertKnownFlags` と同じ規則）。
+      index += 1;
+      onlyGlobals = false;
+      continue;
+    }
+    if (!globals.has(token)) onlyGlobals = false;
+  }
+  return { tokens, scoped: scope !== null, onlyGlobals };
 }
 
 // 未知のフラグをフラグ名付きで拒否する。値を取るフラグの次のトークンは値として読み飛ばす
