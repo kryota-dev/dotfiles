@@ -235,6 +235,12 @@ caller 側が medium 行の語彙を渡すよう更新されたときである�
 だから。到達経路が無いことと契約が誤っていることは別なので、**この非対称を理由に medium 行を消さない**
 （消すと、user の直接起動という現に存在する経路まで失われる）。
 
+**PRD 審議を根拠に引数を選ぶ caller があってはならない。** PRD 審議を実際に行うのは
+`pr-workflow` の large tier が起動する `/grill-me` であって、`sdd` ではない。`sdd` は自分が行う作業
+（Phase 1–3 の spec 執筆 = 1 行目、または large tier）で引数を選ぶ。#629 以前の `sdd` には
+「PRD 審議相当なら `large`」という条件が残っており、**自分が行わない作業を根拠に xhigh を要求する**
+形になっていたため、同 issue で除去した。
+
 各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
 
 **各 caller は本 skill と `/execution-readiness-check` の両方を自分で呼ぶ**（shim 撤去後は本 skill
