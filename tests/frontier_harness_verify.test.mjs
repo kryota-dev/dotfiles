@@ -217,15 +217,24 @@ test("a make target becomes argv without a shell, but make options never do", ()
     assert.deepEqual(checkCommandArgv(command), ["make", "lint"], `argv: ${command}`);
   }
   // `-f` / `-C` はリポジトリ外の makefile を読ませ、`VAR=value` は recipe の展開先を変える。
-  // 承認側で閉じたものが実行側だけ通る、という抜けを作らない。
+  // ターゲットに埋め込まれた `..` も同じくツリーの外を指す。承認側で閉じたものが実行側だけ通る、
+  // という抜けを作らない。
+  //
+  // 型まで固定するのは、これが**使い方の誤り**（呼び出し側の引数が違う）として投げられる
+  // TypeError であって、環境の問題として記録される `errored` とは別の扱いだからである。
   for (const command of [
     "make -f /tmp/evil.mk all",
     "make --file=/tmp/evil.mk all",
     "make -C /tmp/evil all",
     "make SHELL=/tmp/evil test",
+    "make a/../../etc/cron.d/evil",
     "make",
   ]) {
-    assert.throws(() => checkCommandArgv(command), /approvable form/, command);
+    assert.throws(
+      () => checkCommandArgv(command),
+      { name: "TypeError", message: /approvable form/ },
+      command,
+    );
   }
 });
 

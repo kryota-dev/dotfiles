@@ -609,6 +609,11 @@ as not being in an approvable form. `make` on its own is rejected too, for the r
 other runner requires arguments: the default target leaves the approved string saying nothing
 about what will run.
 
+A target may not contain `..`. The character set above constrains only the *first* character of
+each target, so `make a/../../etc/cron.d/evil` would otherwise pass — the rule that a target
+cannot begin with `.` does not stop one from climbing out later on. That check applies to `make`
+alone: `go test ./...` is an existing approvable command whose `..` is legitimate.
+
 The narrower character set is deliberate and applies to `make` alone. The paragraph above
 already grants that an approved runner dispatches to something the repository controls —
 `make test` reads the `Makefile` exactly as `npm run test` reads `package.json`, so the

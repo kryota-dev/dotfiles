@@ -4260,7 +4260,19 @@ test("task の commands / domains は境界で検証される", () => {
 test("make はターゲットを伴う形でだけ承認できる", () => {
   // Makefile 駆動のリポジトリには package.json も pyproject.toml も無く、承認できる
   // コマンドが 1 つも作れないと `fh session --gate` の機能一式が使えない（#617）。
-  for (const command of ["make lint", "make test-node", "make lint test-node", "make build/app.o"]) {
+  for (const command of [
+    "make lint",
+    "make test-node",
+    "make lint test-node",
+    "make build/app.o",
+    // 先頭 1 文字は `[A-Za-z0-9_]`、以降は `-` と `.` と `/` を許す。許可側の端も固定しておかないと
+    // 文字クラスを狭める方向の退行が拒否ケースだけでは検出できない。
+    "make a",
+    "make 1",
+    "make _",
+    "make LINT",
+    "make lint-console",
+  ]) {
     assert.equal(manifestEntryRejection("commands", command), null, command);
   }
   // 引数必須は既存ランナーと同じ規律。`make` 単体は既定ターゲットを走らせるので、
@@ -4283,6 +4295,14 @@ test("make の引数はターゲット名だけで、オプションと変数上
     "make SHELL=/tmp/evil test",
     "make CC=clang all",
     "make test SHELL=/tmp/evil",
+    // `.` 始まりも閉じる。ここを落とすと、先頭文字クラスを `[A-Za-z0-9_./-]` へ広げる退行を
+    // 他の拒否ケース（いずれも `-` か `=` を含む）では検出できない。
+    "make .",
+    "make ./local",
+    "make ../outside",
+    // 先頭文字クラスは各ターゲットの 1 文字目しか縛らないので、途中から遡る形は別に弾いている。
+    "make a/../../etc/cron.d/evil",
+    "make test/../../../tmp/evil.mk",
   ]) {
     const rejection = manifestEntryRejection("commands", command);
     assert.match(rejection ?? "", /make <target>/, command);
@@ -4305,8 +4325,22 @@ test("make の狭い字集合は既存ランナーへ波及しない", () => {
   ]) {
     assert.equal(manifestEntryRejection("commands", command), null, command);
   }
+  // 許可例だけでは既存の字集合が**広がる**方向の退行しか見えない。狭まる方向も対にして固定する。
+  for (const command of ["npm run test?", "pytest test,unit", "cargo test --features=a+b"]) {
+    assert.match(
+      manifestEntryRejection("commands", command) ?? "",
+      /only a project task runner/,
+      command,
+    );
+  }
+  // `..` を弾くのは make の枝だけである。既存ランナー側の `go test ./...` を巻き込まない。
+  assert.equal(manifestEntryRejection("commands", "go test ./..."), null);
   // 同じ引数を make へ渡すと通らない（非対称が固定される）。
-  assert.match(manifestEntryRejection("commands", "make --grep=a") ?? "", /make <target>/);
+  assert.match(
+    manifestEntryRejection("commands", "make --grep=a") ?? "",
+    /make <target>/,
+    "make --grep=a",
+  );
   // タスクランナーですらないものは従来どおりの理由文で落ちる。
   assert.match(
     manifestEntryRejection("commands", "curl http://example.com"),

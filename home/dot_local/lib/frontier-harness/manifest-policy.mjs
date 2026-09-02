@@ -58,19 +58,32 @@ const APPROVABLE_RUNNER_COMMAND =
 // 「What "approved" actually authorizes」が既にその前提を述べている。狭めるのは、そこに書かれた
 // 前提から**外れる**引数だけでよい。
 //
-// 先頭 1 文字を `[A-Za-z0-9_]` に固定すると、`-` 始まり（フラグ）と `.` 始まり（`../` のような相対
-// パス）が同時に閉じる。`:` を落とすのは `session-gate.mjs` の `parseGateDeclaration` が
-// `<kind>:<command>` を最初の `:` で割るためでもある（`make` は check kind の閉じた語彙に無いので
-// 衝突は起きないが、字集合としても重ならないほうが安全側に倒れる）。
+// 先頭 1 文字を `[A-Za-z0-9_]` に固定すると、`-` 始まり（フラグ）と `.` 始まり（`./` や `../`）が
+// 閉じる。`:` を落とすのは `session-gate.mjs` の `parseGateDeclaration` が `<kind>:<command>` を
+// 最初の `:` で割るためでもある（`make` は check kind の閉じた語彙に無いので衝突は起きないが、
+// 字集合としても重ならないほうが安全側に倒れる）。
 //
 // 引数を必須にする（`+`）のは既存ランナーと同じ規律。`make` 単体は既定ターゲットを走らせるので、
 // 何が起きるかが承認文字列から読めなくなる。
 const APPROVABLE_MAKE_COMMAND = /^make(?: [A-Za-z0-9_][A-Za-z0-9_./-]*)+$/;
 
+// **上の文字クラスが縛るのは各ターゲットの先頭 1 文字だけである。** 2 文字目以降は `/` と `.` を
+// 許すので、`make a/../../etc/cron.d/evil` のように英数字で始まってから遡る形は素通りする。
+// 「先頭が `.` でなければ相対パス脱出を防げる」は成り立たないので、`..` はここで別に弾く。
+//
+// 承認の意味を「このリポジトリの Makefile に定義された recipe を走らせてよい」に保つための検査で
+// あり、`fh onboard` の承認画面に `make test/../../../tmp/evil.mk` のような一見無害な文字列が
+// 候補として出てくる経路を閉じる。
+//
+// **`make` の枝の中だけに掛ける。** 既存ランナー側には `go test ./...` という正当な `..` があり、
+// コマンド文字列全体へ一律に掛けるとそちらを巻き込んで後方互換を壊す。
+const MAKE_TARGET_TRAVERSAL = /\.\./;
+
 const CAPABILITY_NAME = /^[a-z][a-z0-9._-]*$/;
 
 function isApprovableCommand(command) {
-  return APPROVABLE_RUNNER_COMMAND.test(command) || APPROVABLE_MAKE_COMMAND.test(command);
+  if (APPROVABLE_RUNNER_COMMAND.test(command)) return true;
+  return APPROVABLE_MAKE_COMMAND.test(command) && !MAKE_TARGET_TRAVERSAL.test(command);
 }
 
 // 承認できる形でなかったときの理由。
@@ -80,7 +93,7 @@ function isApprovableCommand(command) {
 // だったので、`make` で始まる入力には「どう書けば承認できるか」が分かる文を返す。
 function approvableRejectionReason(command) {
   if (/^make(?:\s|$)/.test(command)) {
-    return "make can only be approved as `make <target>`; options and variable overrides are not approvable";
+    return "make can only be approved as `make <target>`; options, variable overrides, and `..` inside a target are not approvable";
   }
   return "only a project task runner command with arguments can be approved";
 }
