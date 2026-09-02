@@ -599,6 +599,35 @@ that spawns its own children and ignores SIGTERM can leave them behind. Putting 
 its own process group would fix that and introduce a worse failure — orphans that outlive the
 harness by the full timeout — so the timeout stays a safety valve rather than a guarantee.
 
+### What `make` may be approved as
+
+`make` is an approvable runner, but only as `make <target>` — one or more target names, each
+starting with a letter, digit, or underscore and drawn from `[A-Za-z0-9_./-]`. Options and
+command-line variable assignments are not approvable, so `make -f /tmp/evil.mk all`,
+`make --file=… all`, `make -C /tmp/evil all`, and `make SHELL=/tmp/evil test` are all rejected
+as not being in an approvable form. `make` on its own is rejected too, for the reason every
+other runner requires arguments: the default target leaves the approved string saying nothing
+about what will run.
+
+A target may not contain `..`. The character set above constrains only the *first* character of
+each target, so `make a/../../etc/cron.d/evil` would otherwise pass — the rule that a target
+cannot begin with `.` does not stop one from climbing out later on. That check applies to `make`
+alone: `go test ./...` is an existing approvable command whose `..` is legitimate.
+
+The narrower character set is deliberate and applies to `make` alone. The paragraph above
+already grants that an approved runner dispatches to something the repository controls —
+`make test` reads the `Makefile` exactly as `npm run test` reads `package.json`, so the
+indirection itself is nothing new. `-f`, `--file`, and `-C` are different in kind: they aim
+`make` at a makefile *outside* the repository, which is the one assumption that paragraph
+rests on. Variable overrides such as `SHELL=` change what a recipe expands to, with the same
+effect. `npm run <script>` has no argument that does either, so this is the one place where
+`make` genuinely needs to be held tighter rather than merely differently.
+
+The tokenised exact match is untouched by this. Approving `make lint` approves that string and
+nothing else: `make test-node` still misses, `make lint; curl …` still splits into a second
+segment that no approval covers, and `/tmp/evil/make lint` is still refused for not being in
+an approvable form.
+
 ## Review registry
 
 ```bash
