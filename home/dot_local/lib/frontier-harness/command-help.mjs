@@ -281,6 +281,8 @@ export const COMMAND_HELP = Object.freeze({
     output: {
       action: '"launch" or "resume"',
       capability: "the capability the child ran as",
+      capabilitySource:
+        "where the capability came from: \"explicit\", \"inherited\", or \"default\"",
       sessionId: "the id of the child session",
       taskId: "the task row recorded for this session",
       routeId: "the route row recorded for this session",
