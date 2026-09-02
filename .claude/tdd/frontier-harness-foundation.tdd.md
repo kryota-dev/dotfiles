@@ -72,8 +72,13 @@ Intentionally **not** implemented in this foundation slice:
   change rather than a silent behaviour change.
 - Before/after skill evals for the **modified** skills (`pr-workflow`, `sdd`, `multi-review`,
   `model-fitness-check`) required by AC-040; only the two new skills ship `evals/evals.json`.
+  **Partly closed by #503**: `sdd`, `multi-review`, and `model-fitness-check` now ship
+  `evals/evals.json`; `pr-workflow` is still outstanding (owned by #585).
 - The AC-029 reduction of `multi-review` to a reviewer registry. This PR only changes its
-  Phase 1 gate wording; the roster and phase structure are untouched.
+  Phase 1 gate wording; the roster and phase structure are untouched. **Closed by #503**:
+  `SKILL.md` now carries only the roster and the finding schema, with the execution protocol
+  in `references/`. The same PR closed AC-032 (`sdd` as a spec compiler) and retired the
+  AC-034 shim.
 
 `make test` reaches the complete lint/Node/Bats stack but has one unrelated failure inherited from
 the pre-existing RunCat worktree change: `tests/files.bats` expects `mas "RunCat Neo"`, while the

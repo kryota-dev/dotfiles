@@ -91,13 +91,13 @@
 
 ### コードレビューとマルチエージェントオーケストレーション（9 スキル）
 
-サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。加えて、実装前に必ず呼ばれる直交する 2 つのゲート（セッション自身の model／effort floor を見る `model-fitness-check` と、adapter capability・rollout を見る `execution-readiness-check`）と、それらが参照する routing harness。
+サブエージェントをスポーンしたり複数のレビュアーを調整するレビューパイプライン。加えて、実装前に必ず呼ばれる直交する 2 つのゲート（セッション自身の model／effort floor を見る `model-fitness-check` と、adapter capability・rollout を見る `execution-readiness-check`）と、それらが参照する routing harness。 各 orchestration entry は **両方**のゲートを自分で起動します。全 caller の移行完了により AC-034 の互換 shim を撤去したため、`model-fitness-check` が readiness gate を連鎖起動することはもうありません。`multi-review` の `SKILL.md` は **reviewer registry**（tier 別 roster 予算と finding schema）で、Phase ごとの実行手順は `references/` にあります。
 
 `cc-code-review`、`cc-security-review`、`multi-review`、`codex`、`review-resolve-loop`、`review-fleet`、`model-fitness-check`、`execution-readiness-check`、`frontier-harness`
 
 ### 計画とスペック駆動開発（5 スキル）
 
-構造化されたタスク分解、要件分析、エンドツーエンドのデリバリーフロー。
+構造化されたタスク分解、要件分析、エンドツーエンドのデリバリーフロー。 `sdd` は **spec compiler** です。`SKILL.md` は Phase 0〜3（ゲート・要件・設計・タスク分解）を持ち、Phase 4〜6 は `references/` にあって、その契約を所有するスキル（worker 委譲は `pr-workflow` と `codex`、デリバリー規約は `commit` と `create-pr`）へ委ねます。
 
 `planning`、`sdd`、`grill-me`、`prompt-conform`、`pr-workflow`
 

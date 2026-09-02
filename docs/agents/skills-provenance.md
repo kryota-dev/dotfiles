@@ -91,13 +91,13 @@ Core day-to-day development cycle automation, plus the parallel-dev triad (`repo
 
 ### Code review and multi-agent orchestration (9 skills)
 
-Review pipelines that spawn subagents or coordinate multiple reviewers, plus the two orthogonal gates they all call before implementation (`model-fitness-check` for the session's own model/effort floor, `execution-readiness-check` for adapter capability and rollout) and the routing harness those gates consult.
+Review pipelines that spawn subagents or coordinate multiple reviewers, plus the two orthogonal gates they all call before implementation (`model-fitness-check` for the session's own model/effort floor, `execution-readiness-check` for adapter capability and rollout) and the routing harness those gates consult. Each orchestration entry invokes **both** gates itself: `model-fitness-check` no longer chain-invokes the readiness gate, since the AC-034 compatibility shim was retired once every caller had migrated. `multi-review`'s `SKILL.md` is a **reviewer registry** — the tier-to-roster budget and the finding schema — while the phase-by-phase execution protocol lives in its `references/`.
 
 `cc-code-review`, `cc-security-review`, `multi-review`, `codex`, `review-resolve-loop`, `review-fleet`, `model-fitness-check`, `execution-readiness-check`, `frontier-harness`
 
 ### Planning and spec-driven development (5 skills)
 
-Structured task decomposition, requirement analysis, and end-to-end delivery flows.
+Structured task decomposition, requirement analysis, and end-to-end delivery flows. `sdd` is a **spec compiler**: its `SKILL.md` covers phases 0–3 (gates, requirements, design, task decomposition), and phases 4–6 live in its `references/`, where they defer to the skills that own those contracts (`pr-workflow` and `codex` for worker delegation, `commit` and `create-pr` for delivery conventions).
 
 `planning`, `sdd`, `grill-me`, `prompt-conform`, `pr-workflow`
 

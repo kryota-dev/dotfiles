@@ -81,7 +81,7 @@ harness へ置き換える。モデル名や固定 role ではなく、task stat
 - AC-031: `/pr-workflow` は利用者向け entrypoint を維持し、thin policy adapter として `fh` を呼び出す。
 - AC-032: `/sdd` は requirements/design/task decomposition を生成する spec compiler へ縮退する。worktree、worker selection、implementation、commit、PR 作成を所有しない。
 - AC-033: `execution-readiness-check` を新しい dynamic gate とする。capability、availability、quota、permission manifest を検証し、session model だけを理由に block しない。
-- AC-034: `model-fitness-check` は 2 release の間、`execution-readiness-check` を呼ぶ compatibility shim として残す。
+- AC-034: `model-fitness-check` は 2 release の間、`execution-readiness-check` を呼ぶ compatibility shim として残す。**（#503 で達成・撤去済み）** 撤去条件（全 caller の readiness gate 直接呼び出し + pilot telemetry）を満たしたため shim を除去した。§4 contract と over-provision gate は撤去対象外で、`tests/files.bats` の floor 生存テストが機械検証する。
 - AC-035: `wave-orchestrator` は `fh` の state と batch approval を利用し、可逆な routine decision は代理応答できる。merge 等の無条件 escalation と一次ソース検証の安全契約は維持する。
 - AC-036: rollout は shadow mode（既存 workflow を維持し route/evidence を記録）→ pilot repository → default の順に進める。`--legacy` で旧 path に戻せること。
 
@@ -120,7 +120,7 @@ harness へ置き換える。モデル名や固定 role ではなく、task stat
 
 # Open Questions
 
-- `execution-readiness-check` と `model-fitness-check` shim の正確な 2 release 判定方法（versioning scheme と retirement signal）。
+- ~~`execution-readiness-check` と `model-fitness-check` shim の正確な 2 release 判定方法（versioning scheme と retirement signal）。~~ **解決（#503）**: release 数ではなく撤去条件そのものを retirement signal とした —— (1) `rollout` が `pilot` 以降であること、(2) `pr-workflow` / `sdd` / `multi-review` が `/execution-readiness-check` を直接起動すること、(3) `wave-orchestrator` が Phase 0 で `fh doctor --json` と `fh onboard` を自ら通すこと。3 点とも実測で確認したうえで撤去した。
 - Claude/Codex/Antigravity の non-interactive invocation ごとの最終 model ID、effort、timeout、quota source。registry は `doctor` と eval により実測して初期値を確定する。
 - Antigravity の project-scope permission を headless workflow から宣言的に管理できる公式 API/file location。初期版は documented global settings と onboarding manifest の組み合わせを使う。
 - repository の package-manager/config から test/lint/build command を安全に検出する allowlist と、domain allowlist の candidate generation 規則。
