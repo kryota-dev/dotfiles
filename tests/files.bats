@@ -770,17 +770,27 @@ SHIMEOF
     false
   }
 
-  # 2. The contract the shim guarded is intact. Both blocking floor rows must remain: dropping
-  #    either one is how the floor gets lost without any test noticing.
+  # 2. The contract the shim guarded is intact. All three blocking floor rows must remain: dropping
+  #    any one of them is how the floor gets lost without any test noticing. #629 split the old
+  #    single xhigh row in two, so the count went 2 -> 3 -- the axis is now whether the work talks
+  #    to the user (medium, from the user's field observation) or runs unattended for a long horizon
+  #    (xhigh, from the effort docs). Collapsing them back into one row would silently re-tie two
+  #    decisions that rest on different evidence; see references/effort-floor.md.
   grep -qF '## §4 contract' "$floor"
   grep -qF '| Opus | high' "$floor"
   grep -qF '| Opus | xhigh |' "$floor"
+  grep -qF '| Opus | medium |' "$floor"
   local floor_rows
   floor_rows="$(grep -cF '**floor**（blocking）' "$floor" || true)"
-  [ "$floor_rows" = "2" ] || {
-    echo "expected 2 blocking floor rows in the §4 contract, found ${floor_rows}"
+  [ "$floor_rows" = "3" ] || {
+    echo "expected 3 blocking floor rows in the §4 contract, found ${floor_rows}"
     false
   }
+  # Every floor row must carry a dated rationale reachable from the skill (#629): the contract is
+  # only auditable if each row says why it sits where it does. Pinned on the reference pointer,
+  # since that is what progressive disclosure makes load-bearing.
+  grep -qF 'references/effort-floor.md' "$floor"
+  [ -f "${HOME_DIR}/dot_agents/skills/model-fitness-check/references/effort-floor.md" ]
   # The floor must still STOP the session. Scoped to the floor-mismatch section: checking the
   # whole file would pass on `AskUserQuestion` borrowed from the over-provision gate, so gutting
   # the floor branch into a non-blocking FYI would go unnoticed (verified by mutation).

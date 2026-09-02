@@ -1,6 +1,6 @@
 {
   "skill_name": "model-fitness-check",
-  "note": "#503 の before/after eval。before = AC-034 compatibility shim を持つ版（本 skill が起動されると /execution-readiness-check も連鎖起動していた）。after = shim を撤去した版（連鎖起動しない。readiness gate は各 caller が自分で呼ぶ）。id 2 と id 3 がその差分を直接判別する。id 1 と id 4 は撤去で §4 floor 判定と over-provision ゲートが失われていないことの回帰チェックで、before / after のどちらでも同じ結果になることが期待値である。",
+  "note": "#503 の before/after eval。before = AC-034 compatibility shim を持つ版（本 skill が起動されると /execution-readiness-check も連鎖起動していた）。after = shim を撤去した版（連鎖起動しない。readiness gate は各 caller が自分で呼ぶ）。id 2 と id 3 がその差分を直接判別する。id 1 と id 4 は撤去で §4 floor 判定と over-provision ゲートが失われていないことの回帰チェックで、before / after のどちらでも同じ結果になることが期待値である。id 5 と id 6 は #629 の追加分。#629 は旧 xhigh 行（large tier / PRD 審議 / adversarial verification / 横断設計）を「user と対話するか」で 2 分割し、対話する行（横断設計 / PRD 審議）を medium、対話しない長時間実行の行（large tier / adversarial verification）を xhigh とした。id 5 が medium 行の blocking 境界（low のときだけ mismatch）を、id 6 が「floor は下限であって推奨値ではない」ことを押さえる。id 1 は分割後も large 行が xhigh のままであることの回帰チェックを兼ねる。",
   "evals": [
     {
       "id": 1,
@@ -50,6 +50,32 @@
         "Sonnet で足りる旨の cost hint を一行で提示している",
         "over-provision カウンタの現在値を可視な形で残している",
         "quota 圧力が閾値帯に達していない限り blocking していない"
+      ],
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "cross-cutting-design-row-blocks-only-below-medium",
+      "prompt": "/model-fitness-check 横断設計 （現在のセッションは Opus 5 で effort は low です）",
+      "expected_output": "横断設計は medium を floor とする行で、low はそれを下回るため blocking し、/effort medium を添えた選択肢を提示して停止する。",
+      "assertions": [
+        "AskUserQuestion で停止しており、そのまま作業を続行していない",
+        "switch 提案に /effort medium が literal で示されている（既定 high 以外を要求する行なので effort に言及する）",
+        "要求水準を xhigh と述べていない（#629 で横断設計 / PRD 審議は medium へ分割された）",
+        "§4 contract テーブルの値を回答内で再発明しておらず、skill のテーブルに基づいている"
+      ],
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "medium-floor-is-a-lower-bound-not-a-recommendation",
+      "prompt": "/model-fitness-check PRD審議 （現在のセッションは Opus 5 で effort は xhigh です）",
+      "expected_output": "xhigh は medium 行の floor を monotonic に上回るため pass し、blocking もせず「medium へ下げては」という提案も出さずに作業を続行する。",
+      "assertions": [
+        "AskUserQuestion で停止していない（floor を満たしているため）",
+        "xhigh から medium へ下げるよう提案していない（floor 行は下限であって推奨値ではない）",
+        "over-provision パスを PRD 審議に適用していない（そちらは trivial/small 行にしか掛からない）",
+        "floor パスを pass した後に判定を打ち切らず、over-provision パスまで進んだうえで（過剰でないため）何も出さずに終えている"
       ],
       "files": []
     }

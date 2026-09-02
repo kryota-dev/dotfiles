@@ -53,13 +53,45 @@ telemetry が蓄積された」ことだった。撤去時点で確認した実�
 | 作業 | Model | Effort | 行種別 |
 |------|-------|--------|--------|
 | `pr-workflow` の分類 / GATE / 統合; `sdd` Phase 1–3 の spec 執筆; `multi-review` の統合・裁定 | Opus | high（既定。ゲートは言及しない） | **floor**（blocking） |
-| large tier / PRD 審議 / adversarial verification / 横断設計 | Opus | xhigh | **floor**（blocking） |
+| large tier / adversarial verification | Opus | xhigh | **floor**（blocking） |
+| 横断設計 / PRD 審議 | Opus | medium | **floor**（blocking） |
 | trivial / small tier のみ | Sonnet | high | **cost hint**（non-blocking FYI） |
 | Fable-orchestrator セッション（`cldf` 系） | Fable | セッション既定 | floor 判定は常に pass（monotonic ルール）。over-provision 閾値ゲートは適用 |
+
+### 各行の根拠（2026-09-03 判断）
+
+行を分ける軸は **user と対話するか**である。対話する行は user の実地観察で、対話しない行は公式 docs の
+定性的基準で決めた。**FrontierCode の数値はどの行の根拠にも使っていない**（理由は下記と references）。
+
+| 行 | 根拠 |
+|---|---|
+| Opus @ high（分類 / GATE / 統合・裁定） | 公式 effort docs が Opus 5 の推奨開始点を "Start with `high`, the default" とし、API 既定も `high`。**変更なし**（2026-09-03 再確認） |
+| Opus @ xhigh（large tier / adversarial verification） | 公式が xhigh を "Extended capability for **long-horizon work**" と定義し、用途を "Long-running agentic and coding tasks (**over 30 minutes**) with token budgets in the millions" とする。`pr-workflow` 全長（gate → sdd → CI → multi-review → review-resolve-loop）と adversarial ラウンドはこれに正面から該当する。**いずれも user と対話しない子セッションの仕事**なので、下記の対話観察の射程外（2026-09-03 判断） |
+| Opus @ medium（横断設計 / PRD 審議） | **user の実地観察**: Opus 5 @ medium のセッションは会話しやすく、xhigh では「議論したくても理解しがたい回答が返る」「その度に噛み砕かせている」。この 2 行は user と対話しながら進む唯一の行で、観察の射程はここに一致する。**xhigh から 2 段下げる**（2026-09-03 判断。旧 contract は Opus 4.7 / 4.8 世代の運用を持ち越したもので、公式は Opus 5 について "If you carried effort settings over from an earlier model, run a fresh effort sweep on your evals rather than reusing them" と述べるが、その sweep は user 判断で実走しない） |
+| Sonnet @ high（trivial / small） | 公式が Sonnet 5 を "defaults to `high` effort on the Claude API and Claude Code" とする。**変更なし**（2026-09-03 再確認） |
+
+**FrontierCode 1.1 を floor の根拠に使わない理由**: Opus 5 / Fable 5.1 とも medium が最良だが順位が
+**単調でなく、`max` が `high` と同点で `xhigh` だけが凹む**。「effort が高いほどスコープ外の変更をして
+減点される」という説では max の位置を説明できない。**説明のつかない順位は floor の根拠にできない**ので
+参考資料に留める。ただし Sonnet 5 は単調に xhigh が最良で、レビュー系 agent の `sonnet@xhigh` pin を
+裏づける（数値と出典は references）。
+
+**floor を下げても「読みにくさ」は解決しない。** floor は下限なので、medium 行でも xhigh のセッションは
+monotonic に pass する（止まらない）。公式も "changing effort does not reliably shorten responses, so
+prompt for length instead" と述べており、**回答の長さ・密度は prompt 側の担保**で、この gate の仕事では
+ない。この行を下げた効果は「medium のセッションが止められなくなる」ことであって、「xhigh のセッションを
+止める」ことではない。
+
+→ 根拠: [`references/effort-floor.md`](references/effort-floor.md)（一次ソースの引用と URL、到達できな
+かった経路、解釈の分岐と交絡、contract が運用と合っていなかった実例）
 
 ## capability 順序（monotonic）
 
 能力順序を **Fable > Opus > Sonnet > Haiku** と定義する。同一 family 内では **generation が効く**。
+
+effort の順序は **`low` < `medium` < `high` < `xhigh` < `max`** とする（公式 effort docs の 5 段階）。
+model と effort は**それぞれ独立に**「現在 ≥ 要求」を判定し、**両方を満たしたときだけ floor をパスする**
+（model が上位でも effort が要求を下回れば mismatch。逆も同じ）。
 
 判定は **2 パス**で構成する（詳細は「判定と出力」）。**floor パス（上方向）を通過しても判定は終わらず、必ず over-provision パス（下方向）に進む**——ここが over-provision ゲートに到達する唯一の経路なので、floor パスを「無条件 silent pass」で早期 return してはならない:
 
@@ -92,23 +124,27 @@ telemetry が蓄積された」ことだった。撤去時点で確認した実�
 
 - **high を要求する行**で `CLAUDE_EFFORT` が `high` のとき: pass 扱いでよい（丸めの結果でも実際の high でも要求は満たされる）。
 - **xhigh を要求する行**で `CLAUDE_EFFORT` が `high` のとき: 乖離を断言せず、「xhigh か、検出できず high に丸められたか」を user に確認する（fail-safe。silent に mismatch とも pass とも決めつけない）。
+- **medium を要求する行**で `CLAUDE_EFFORT` が `high` のとき: pass 扱いでよい（丸め先の `high` は medium
+  を上回るので、丸めの結果でも実際の high でも要求は満たされる）。**丸めは常に `high` へ寄せる＝ floor を
+  割る方向へは倒れない**ので、medium 行で丸めを疑って確認する必要はない。
 
 ## 判定と出力
 
 判定は capability 節の 2 パス（floor → over-provision）に沿って進む。**floor パスが pass でもそこで終了せず、over-provision パスに進む**（これがゲートに到達する唯一の経路）。作業の行種別に応じて次のように分岐する:
 
-### floor 行（Opus @ high / Opus @ xhigh）で mismatch
+### floor 行（Opus @ high / Opus @ xhigh / Opus @ medium）で mismatch
 
 `AskUserQuestion` で **blocking** し、次の 4 択を提示する:
 
 1. **すでに要求水準を満たしている（変更不要）**: 検出が誤りで、実際には現在の model / effort が要求を満たしている場合に選ぶ。選択後は switch 提案を出さず、そのまま進める。
-2. **switch して再実行**: literal な切り替えコマンドを表示する（例: `/model opus`、xhigh 行なら加えて `/effort xhigh`）。user が切り替えてから再開。
+2. **switch して再実行**: literal な切り替えコマンドを表示する（例: `/model opus`、xhigh 行なら加えて `/effort xhigh`、medium 行なら `/effort medium`）。user が切り替えてから再開。
 3. **continue anyway**: 検出通り不足している前提で、このまま進む。
 4. **abort**: 作業を中止する。
 
 選択肢 1 は実運用で「検出が誤りで、実際には要求水準を満たしていた」ケースが起き、提示された 3 択（switch / continue anyway / abort）のどれも正解でなかったために追加した。
 
-- **effort は xhigh を要求する行でのみ言及する**。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
+- **effort に言及するのは、その行が既定（`high`）以外を要求するときだけ**（xhigh 行と medium 行）。既定 high で足りる行では effort に一切触れない（`/effort` コマンドも出さない）。
+- **medium 行で mismatch するのは `CLAUDE_EFFORT` が `low` のときだけ**（`medium` 以上は monotonic にすべて pass する）。floor を pass した以上、`xhigh` のセッションに「medium へ下げては」と提案しない —— **floor 行は下限であって推奨値ではない**。下方向の是正は over-provision パスの担当で、そちらは trivial/small 行にしか掛からない。
 - effort は `CLAUDE_EFFORT`（「effort の検出」参照）から読む。ただし xhigh 要求行で `CLAUDE_EFFORT` が `high` の場合、丸めの制約により「本当に high」と「解決できなかった」を区別できないため、乖離を断言せず**提示して確認する**（silent に mismatch と決めつけない）。
 
 ### trivial / small 行
@@ -172,6 +208,23 @@ trivial/small の毎回 FYI とは別に、**過剰スペックの累積**を「
 - `pr-workflow`: Phase 0 冒頭 —— `/model-fitness-check <tier>`（Phase 0 の分類結果をそのまま渡す）
 - `sdd`: Phase 0 冒頭 —— `/model-fitness-check orchestration`（large 相当なら `large`）
 - `multi-review`: Phase 1 の前 —— `/model-fitness-check orchestration`（`multi-review` に Phase 0 は無い）
+
+### 引数から行への解決
+
+**引数の語彙もこの skill が SSOT である**（テーブルの行に到達できない引数は、契約に到達できないのと
+同じだから）。次のいずれかに解決する:
+
+| 引数 | 解決先の行 |
+|---|---|
+| `large` / `adversarial` | Opus @ xhigh |
+| `横断設計` / `cross-cutting` / `PRD審議` / `prd` | Opus @ medium |
+| `orchestration` / `standard` | Opus @ high |
+| `trivial` / `small` | Sonnet @ high（cost hint） |
+
+- **1 回の起動で複数の行に該当する作業なら、最も高い floor を要求する行を採る**（round-up。`pr-workflow`
+  の fail-safe 分類と同じ向き）。例: large tier の中で横断設計を行うなら large 行（xhigh）に掛かる。
+- **どの行にも解決できない引数は fail-safe** —— silent pass せず、どの行で判定すべきかを user に提示して
+  確認する（model の unknown 文字列と同じ扱い）。
 
 各 skill は本 skill を呼ぶ 1 行を持つのみで、**§4 テーブルも行種別の説明も再掲しない**。
 
