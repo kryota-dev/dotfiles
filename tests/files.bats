@@ -744,29 +744,157 @@ SHIMEOF
   done
 }
 
-@test "execution-readiness-check is the dynamic gate beside the legacy model-fitness contract" {
+# The AC-034 compatibility shim (model-fitness-check chain-invoking the readiness gate) was
+# retired once every caller reached the readiness gate on its own. Removing a gate's shim is
+# exactly the shape of change that silently disables the gate behind it, so this test pins the
+# two halves that must survive the removal: the §4 floor contract itself, and the fact that
+# every orchestration entry still invokes BOTH gates.
+@test "the model/effort floor gate survives the removal of the AC-034 compatibility shim" {
   local readiness="${HOME_DIR}/dot_agents/skills/execution-readiness-check/SKILL.md"
-  local shim="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
+  local floor="${HOME_DIR}/dot_agents/skills/model-fitness-check/SKILL.md"
   [ -f "$readiness" ]
-  [ -f "$shim" ]
+  [ -f "$floor" ]
   grep -q "^name: execution-readiness-check$" "$readiness"
-  grep -q "^name: model-fitness-check$" "$shim"
-  grep -q "Frontier Harness への段階移行" "$shim"
-  # AC-034: during the migration window the shim itself must invoke the dynamic gate.
-  grep -q 'execution-readiness-check' "$shim"
-  # The dynamic gate must state that it does not replace the model/effort floor.
-  grep -q 'model-fitness-check' "$readiness"
-  # Both gates are orthogonal, so every orchestration path must invoke BOTH.
-  # Dropping the model-fitness-check call would silently disable the blocking floor gate.
+  grep -q "^name: model-fitness-check$" "$floor"
+
+  # 1. The shim is gone: model-fitness-check must not chain-invoke the readiness gate.
+  run grep -qF 'compatibility shim' "$floor"
+  [ "$status" -ne 0 ] || {
+    echo "model-fitness-check still describes itself as a compatibility shim"
+    false
+  }
+  run grep -qF 'も起動する' "$floor"
+  [ "$status" -ne 0 ] || {
+    echo "model-fitness-check still chain-invokes another gate (the shim contract)"
+    false
+  }
+
+  # 2. The contract the shim guarded is intact. Both blocking floor rows must remain: dropping
+  #    either one is how the floor gets lost without any test noticing.
+  grep -qF '## §4 contract' "$floor"
+  grep -qF '| Opus | high' "$floor"
+  grep -qF '| Opus | xhigh |' "$floor"
+  local floor_rows
+  floor_rows="$(grep -cF '**floor**（blocking）' "$floor" || true)"
+  [ "$floor_rows" = "2" ] || {
+    echo "expected 2 blocking floor rows in the §4 contract, found ${floor_rows}"
+    false
+  }
+  # The floor must still stop the session rather than emit an FYI.
+  grep -qF 'blocking' "$floor"
+  grep -qF 'AskUserQuestion' "$floor"
+  # The over-provision gate is the downward half of the same contract; it is not shim material.
+  grep -qF 'over-provision 閾値ゲート' "$floor"
+
+  # 3. The two gates stay orthogonal in prose, on both sides, so neither is read as a
+  #    replacement for the other now that nothing chains them together.
+  grep -qF 'model-fitness-check' "$readiness"
+  grep -q '置き換えてはならない' "$floor"
+
+  # 4. Every orchestration path must invoke BOTH gates *itself*. With the shim gone this is the
+  #    only thing keeping the readiness gate reachable from these entries -- and the only thing
+  #    keeping the floor reachable at all. Matched on the slash-invocation form so that merely
+  #    naming a gate in prose does not satisfy the check.
   local caller gate
   for caller in pr-workflow sdd multi-review; do
     for gate in execution-readiness-check model-fitness-check; do
-      grep -q "${gate}" "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
-        echo "${caller}/SKILL.md does not invoke ${gate}"
+      grep -qF "/${gate}" "${HOME_DIR}/dot_agents/skills/${caller}/SKILL.md" || {
+        echo "${caller}/SKILL.md does not invoke /${gate}"
         false
       }
     done
   done
+}
+
+# #503 reduced multi-review to a registry: SKILL.md carries the reviewer roster and the finding
+# schema, and the phase-by-phase execution protocol moved to references/. The failure mode of that
+# split is a norm going missing -- either because a reference file is dropped, or because SKILL.md
+# stops telling the agent to read it (progressive disclosure only works if the pointer is load-bearing).
+@test "multi-review SKILL.md stays a reviewer registry with its execution protocol reachable" {
+  local skill="${HOME_DIR}/dot_agents/skills/multi-review/SKILL.md"
+  local refs="${HOME_DIR}/dot_agents/skills/multi-review/references"
+
+  # The two things the registry owns.
+  grep -qF 'roster gating table' "$skill"
+  grep -qF '## finding schema' "$skill"
+  local category
+  for category in MUST SHOULD NITS GOOD; do
+    grep -qF "\`[${category}]\`" "$skill" || {
+      echo "multi-review SKILL.md no longer defines the [${category}] finding category"
+      false
+    }
+  done
+  # The roster is what callers read this file for; every gated tier must still be in the table.
+  local tier
+  for tier in trivial small standard large; do
+    grep -qF "**${tier}**" "$skill" || {
+      echo "multi-review roster gating table lost the ${tier} row"
+      false
+    }
+  done
+
+  # Everything moved out must exist and be pointed at from SKILL.md.
+  local ref
+  for ref in execution-protocol target-resolution codex-legs fact-check posting operations; do
+    [ -f "${refs}/${ref}.md" ] || {
+      echo "multi-review references/${ref}.md is missing"
+      false
+    }
+    grep -qF "references/${ref}.md" "$skill" || {
+      echo "multi-review SKILL.md does not point at references/${ref}.md"
+      false
+    }
+  done
+
+  # The pointer has to be an instruction to read, not a footnote -- otherwise the phases are
+  # silently optional.
+  grep -qF 'を Read する' "$skill"
+
+  # Norms that must not have evaporated in the move (one representative per reference file).
+  grep -qF 'CODEX_MAX_CONCURRENCY' "${refs}/codex-legs.md"
+  grep -qF 'danger-full-access' "${refs}/codex-legs.md"
+  grep -qF 'confused-deputy' "${refs}/execution-protocol.md"
+  grep -qF 'APPROVE' "${refs}/posting.md"
+  grep -qF 'fact-check-worker' "${refs}/fact-check.md"
+}
+
+# #503 reduced sdd to a spec compiler: SKILL.md compiles requirements/design/tasks, and phases 4-6
+# (implementation, commit & PR, report) moved to references/ where they defer to the skills that
+# own those contracts (pr-workflow / codex for workers, commit / create-pr for delivery).
+@test "sdd SKILL.md stays a spec compiler with its delivery phases reachable" {
+  local skill="${HOME_DIR}/dot_agents/skills/sdd/SKILL.md"
+  local refs="${HOME_DIR}/dot_agents/skills/sdd/references"
+
+  # The compiler's own output.
+  local artifact
+  for artifact in requirements.md design.md tasks.md; do
+    grep -qF "$artifact" "$skill" || {
+      echo "sdd SKILL.md no longer compiles ${artifact}"
+      false
+    }
+  done
+
+  local ref
+  for ref in implementation delivery; do
+    [ -f "${refs}/${ref}.md" ] || {
+      echo "sdd references/${ref}.md is missing"
+      false
+    }
+    grep -qF "references/${ref}.md" "$skill" || {
+      echo "sdd SKILL.md does not point at references/${ref}.md"
+      false
+    }
+  done
+  grep -qF 'を Read する' "$skill"
+
+  # The moved phases must still defer to the SSOT skills rather than restating their contracts,
+  # and must not start invoking the approval-gated skills (which would break sdd's autonomy
+  # contract and pr-workflow's approval inventory).
+  grep -qF 'pr-workflow' "${refs}/implementation.md"
+  grep -qF 'codex/SKILL.md' "${refs}/implementation.md"
+  grep -qF 'commit/SKILL.md' "${refs}/delivery.md"
+  grep -qF 'create-pr/SKILL.md' "${refs}/delivery.md"
+  grep -qF 'skill として起動しない' "${refs}/delivery.md"
 }
 
 @test "model-fitness-check expands the effort placeholder exactly once" {
@@ -923,18 +1051,22 @@ SHIMEOF
   # Every delegation site must reach the SSOT: sdd owns the standard/large implementation
   # worker (Phase 4-2), multi-review owns the review legs (Phase 2), issue-fleet reuses one
   # worktree across a serial lane of implementation subagents (Phase 3-4).
+  # Searched over SKILL.md *and* references/ (_skill_text): #503 moved sdd's Phase 4 and
+  # multi-review's Phase 2 into references/, and the pointer has to survive wherever the
+  # delegation site now lives.
   local f
   for f in sdd multi-review issue-fleet; do
-    grep -qF -- '共有作業ツリーでの Claude subagent 委譲契約' "${skills}/${f}/SKILL.md" ||
+    _skill_text "$f" | grep -qF -- '共有作業ツリーでの Claude subagent 委譲契約' ||
       { echo "missing SSOT pointer in: $f"; return 1; }
   done
   # The pointers must stay pointers. These rule bodies may appear ONLY in the SSOT --
   # restating them here is exactly the drift structure #524 set out to avoid, and it is
   # invisible to every other check because both copies would still read as correct.
+  # references/ is in scope too, or a split skill gains a place to hide a second copy.
   local marker
   for f in sdd multi-review issue-fleet; do
     for marker in 'git stash' 'git worktree add --detach' 'ポリシー統制であり技術統制ではない'; do
-      if grep -qF -- "$marker" "${skills}/${f}/SKILL.md"; then
+      if _skill_text "$f" | grep -qF -- "$marker"; then
         echo "SSOT body duplicated into ${f}: ${marker}"
         return 1
       fi
@@ -1017,12 +1149,21 @@ SHIMEOF
   [ -f "$skill" ]
   # The review phase and its review-team machinery are gone; review is owned by
   # pr-workflow's post-PR pipeline (monitor-ci -> multi-review -> review-resolve-loop).
-  ! grep -q '^## Phase 5: レビュー' "$skill"
-  ! grep -q 'shutdown_request' "$skill"
-  ! grep -q 'Review Team' "$skill"
-  # Phases are renumbered and contiguous after the removal.
-  grep -q '^## Phase 5: コミット & PR' "$skill"
-  grep -q '^## Phase 6: 完了報告' "$skill"
+  # Scanned across references/ too (#503 moved phases 4-6 there), so re-adding a review
+  # phase in a reference file cannot slip past this.
+  run bash -c '_skill_text sdd | grep -q "^## Phase 5: レビュー"'
+  [ "$status" -ne 0 ] || { echo "sdd regained a built-in review phase"; return 1; }
+  local banned
+  for banned in shutdown_request 'Review Team'; do
+    if _skill_text sdd | grep -qF -- "$banned"; then
+      echo "sdd regained review-team machinery: $banned"
+      return 1
+    fi
+  done
+  # Phases are renumbered and contiguous after the removal. They live in
+  # references/delivery.md since #503, so assert on the skill's full prose.
+  _skill_text sdd | grep -q '^## Phase 5: コミット & PR'
+  _skill_text sdd | grep -q '^## Phase 6: 完了報告'
   # Hidden from the / menu so a user cannot run it standalone, while pr-workflow can
   # still invoke it via the Skill tool (user-invocable: false blocks menu/user access
   # but NOT Skill-tool access; per the CC docs it keeps "Claude can invoke: yes").
@@ -1056,16 +1197,20 @@ SHIMEOF
     grep -qE "^\| \*\*${t}\*\*" "$skill" || { echo "missing gating row for tier: $t"; return 1; }
   done
   # Codex observation/offload wiring: --json stream + -o result file + named
-  # concurrency cap + resume's fresh fallback.
-  grep -q -- '--json' "$skill"
-  grep -q -- '-o <RESULT_FILE>' "$skill"
-  grep -q 'CODEX_MAX_CONCURRENCY' "$skill"
-  grep -q 'fresh フォールバック' "$skill"
+  # concurrency cap + resume's fresh fallback. These are execution details, so since
+  # #503 they live in references/codex-legs.md -- assert on the skill's full prose.
+  local text
+  text="$(_skill_text multi-review)"
+  printf '%s' "$text" | grep -q -- '--json'
+  printf '%s' "$text" | grep -q -- '-o <RESULT_FILE>'
+  printf '%s' "$text" | grep -q 'CODEX_MAX_CONCURRENCY'
+  printf '%s' "$text" | grep -q 'fresh フォールバック'
   # #407 robustness — phrase-level assertions that guard semantic regression, not
   # mere word presence (a bare 'fail-open'/'--tier' elsewhere must not satisfy these):
   # fail-open guard — an undefined --tier value is treated as empty, not fail-open.
-  grep -q 'fail-open' "$skill"
-  grep -qE '未定義値.*空扱い' "$skill"
+  # (argument parsing moved to references/target-resolution.md in #503.)
+  printf '%s' "$text" | grep -q 'fail-open'
+  printf '%s' "$text" | grep -qE '未定義値.*空扱い'
   # security floor is a post-determination, UNCONDITIONAL backstop that overrides
   # even an explicit --tier=trivial/small (M1) — assert the max() formula + override.
   grep -q 'security フロア' "$skill"
@@ -1076,15 +1221,19 @@ SHIMEOF
   grep -q '大文字小文字を無視' "$skill"
   grep -q 'jwt' "$skill"; grep -q 'oauth' "$skill"
   grep -q 'floor であって ceiling ではない' "$skill"
-  # resolved OQ-005 (sessions.json TTL / cleanup).
-  grep -q 'OQ-005: 解決済み' "$skill"
+  # resolved OQ-005 (sessions.json TTL / cleanup) — in references/codex-legs.md since #503.
+  printf '%s' "$text" | grep -q 'OQ-005: 解決済み'
   # tier auto-inference points at pr-workflow's tier table as SSOT (no paraphrase).
+  # This one stays pinned to SKILL.md: tier determination is registry surface (#503).
   grep -qE 'size tier の判定軸.*SSOT' "$skill"
   grep -q 'size tier の判定軸' "$pw"
   # pr-workflow Phase 6 explicitly forwards the determined tier to multi-review.
   grep -q -- '--tier' "$pw"
   # The stale "always-on 3 tools" framing must be gone from the tier-aware roster.
-  ! grep -q '3ツールレビュー' "$skill"
+  if printf '%s' "$text" | grep -q '3ツールレビュー'; then
+    echo "the always-on 3-tool framing came back"
+    return 1
+  fi
   ! grep -q '常設 3 ツール' "$skill"
 }
 
