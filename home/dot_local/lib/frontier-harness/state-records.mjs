@@ -30,6 +30,23 @@ function toAdapterRun(row) {
   };
 }
 
+// `fh runs` が返す形。adapter run に**連結された検証**の件数を添える（#573）。
+//
+// これが `succeeded` と「gate を通った」を区別する唯一の手掛かりである。`total` が 0 の run は
+// 「ターンがエラーなく終わった」以上のことを主張していない —— 検証を 1 本も通していない。
+// 件数を status ごとに分けるのは、赤（failed）と判定不能（errored）で次の行動が違うため。
+function toAdapterRunWithVerification(row) {
+  return {
+    ...toAdapterRun(row),
+    verification: {
+      total: Number(row.checks_total),
+      passed: Number(row.checks_passed),
+      failed: Number(row.checks_failed),
+      errored: Number(row.checks_errored),
+    },
+  };
+}
+
 function toVerificationResult(row) {
   return {
     id: row.id,
@@ -120,9 +137,23 @@ export function createRecordAccessors(database) {
   // 一覧は route と同じく SQL 側で切り、新しい順に返す。run 記録も state root に
   // 溜まり続けるので、既定で全件を吐くと「直近どう終わったか」を見たいだけの呼び出しが
   // 数千件の JSON を返す。
+  //
+  // 連結された検証の件数は相関サブクエリで数える。件数を JS 側で組み立てると、
+  // 対象 id の可変長 IN 句を文字列で作ることになり、このファイルが避けている
+  // 「SQL を生成する」形に戻る。列は増えるが、statement は静的なまま読める。
+  const VERIFICATION_COUNTS = `
+           (SELECT COUNT(*) FROM verification_results v
+             WHERE v.adapter_run_id = adapter_runs.id) AS checks_total,
+           (SELECT COUNT(*) FROM verification_results v
+             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'passed') AS checks_passed,
+           (SELECT COUNT(*) FROM verification_results v
+             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'failed') AS checks_failed,
+           (SELECT COUNT(*) FROM verification_results v
+             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'errored') AS checks_errored`;
   const selectAdapterRunPage = database.prepare(`
     SELECT id, task_id, route_id, capability, provider, model, effort,
-           status, started_at, finished_at, exit_code, failure_reason, created_at
+           status, started_at, finished_at, exit_code, failure_reason, created_at,
+${VERIFICATION_COUNTS}
     FROM adapter_runs
     ORDER BY created_at DESC, id DESC
     LIMIT ? OFFSET ?
@@ -132,7 +163,8 @@ export function createRecordAccessors(database) {
   );
   const selectAdapterRunById = database.prepare(`
     SELECT id, task_id, route_id, capability, provider, model, effort,
-           status, started_at, finished_at, exit_code, failure_reason, created_at
+           status, started_at, finished_at, exit_code, failure_reason, created_at,
+${VERIFICATION_COUNTS}
     FROM adapter_runs
     WHERE id = ?
   `);
@@ -157,6 +189,15 @@ export function createRecordAccessors(database) {
            command, exit_code, evidence_id, created_at
     FROM verification_results
     WHERE task_id = ?
+    ORDER BY created_at, id
+  `);
+  // run 単位の絞り込み。`fh runs --run <id>` が「この run が何を通ったのか」を返すのに使う
+  // （task 単位では、同じ task の別 run の結果まで混ざる）。
+  const selectVerificationResultsForAdapterRun = database.prepare(`
+    SELECT id, task_id, adapter_run_id, candidate_id, tree_hash, check_kind, status,
+           command, exit_code, evidence_id, created_at
+    FROM verification_results
+    WHERE adapter_run_id = ?
     ORDER BY created_at, id
   `);
 
@@ -317,7 +358,7 @@ export function createRecordAccessors(database) {
     },
     listAdapterRunPage({ limit, offset = 0 }) {
       return {
-        runs: selectAdapterRunPage.all(limit, offset).map(toAdapterRun),
+        runs: selectAdapterRunPage.all(limit, offset).map(toAdapterRunWithVerification),
         total: Number(countAdapterRuns.get().total),
       };
     },
@@ -325,7 +366,7 @@ export function createRecordAccessors(database) {
     // 呼び出し側から「まだ何も走っていない」と区別が付かない。
     readAdapterRun(id) {
       const row = selectAdapterRunById.get(id);
-      return row === undefined ? null : toAdapterRun(row);
+      return row === undefined ? null : toAdapterRunWithVerification(row);
     },
 
     recordVerificationResult(input) {
@@ -354,6 +395,11 @@ export function createRecordAccessors(database) {
     },
     listVerificationResultsForTask(taskId) {
       return selectVerificationResultsForTask.all(taskId).map(toVerificationResult);
+    },
+    listVerificationResultsForAdapterRun(adapterRunId) {
+      return selectVerificationResultsForAdapterRun
+        .all(adapterRunId)
+        .map(toVerificationResult);
     },
 
     recordReviewFinding(input) {

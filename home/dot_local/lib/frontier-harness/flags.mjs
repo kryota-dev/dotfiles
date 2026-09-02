@@ -36,3 +36,21 @@ export function nonNegativeIntegerFlag(flags, name) {
   }
   return value;
 }
+
+// 同じフラグを複数回渡せる形。`flagValue` は最初の 1 件しか見ないので、繰り返しを黙って
+// 捨ててしまう（`--gate a --gate b` が a だけになる）。宣言が 1 つ落ちた gate は
+// 「宣言したのに検証されなかった条件」になるので、取りこぼしを沈黙で済ませない。
+export function repeatedFlagValues(flags, name) {
+  const values = [];
+  for (let index = 0; index < flags.length; index += 1) {
+    if (flags[index] !== name) continue;
+    const value = flags[index + 1];
+    // 後続のフラグを値として受け取らない（flagValue と同じ規約）。
+    if (!value || value.startsWith("--")) {
+      throw new TypeError(`${name} requires a value`);
+    }
+    values.push(value);
+    index += 1;
+  }
+  return values;
+}
