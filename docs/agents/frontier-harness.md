@@ -77,6 +77,47 @@ supported; that error names the separate-argument form rather than calling the w
 unknown. Positional arguments are still the command's own business — `fh review` names the
 subcommands it takes.
 
+### The output shape is part of the contract, and `--help` carries it
+
+`fh <command> --help` prints that command's synopsis, the flags it accepts, and **the top-level
+keys its `--json` output carries**. Adding `--json` returns the same contract as JSON, so a
+script can assert the shape it depends on instead of guessing it:
+
+```
+$ fh approvals --help --json | jq -r '.output | keys[]'
+approvals
+pending
+purged
+skipped
+```
+
+`--help` used to be missing from `flag-registry.mjs`, so `fh approvals --help` answered
+`unknown flag --help` and there was no way to learn from the CLI that `fh approvals --json`
+returns `{"approvals": [...], "skipped": [...]}` rather than an array. A monitoring script read
+the top level as that array, jq failed on the type, `2>/dev/null || true` turned the failure
+into an empty string, and an empty string is also what "nothing is waiting" looks like. Two
+approval requests sat undecided for up to 42 minutes. The fix is an entry in the table, not an
+exception to it: `--help` is accepted because it is listed, and `fh approvals --bogus --help`
+still exits 64 naming `--bogus`.
+
+**The contract cannot drift into a lie.** `cli.mjs` wraps `emit` so that a top-level key the
+command's help does not declare is an internal error. The payload is written first — the emit
+that reports a child session runs after the child already ran, and losing that record is worse
+than any wrong help text — and the run then exits 70 naming the undeclared keys. Adding a key to
+an implementation without documenting it therefore fails on the first invocation of that branch,
+for every command and every branch, rather than waiting for a reader to notice.
+
+The opposite direction — help declaring a key the implementation stopped emitting — is covered
+by `tests/frontier_harness_cli_quality.test.mjs`, which runs the commands named in its
+`OUTPUT_OBSERVED_HERE` list for real and requires the declared key set to equal the observed one,
+plus a check that no declared key has vanished from the sources entirely. What is left uncovered
+is narrow and named in that file: a key dropped from a command the test cannot drive cheaply,
+whose name survives elsewhere in the sources.
+
+`fh approve-server` declares an empty output on purpose. It speaks the MCP permission-prompt
+protocol on stdio and has no envelope of its own, so the emptiness is a statement rather than an
+omission, and a test requires every command to declare either keys or a reason for having none.
+
 ### A failure the caller can act on carries no stack trace
 
 | Failure | Output | Exit |
