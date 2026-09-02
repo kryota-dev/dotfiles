@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  MAX_CHECK_TIMEOUT_MS,
   checkCommandArgv,
   runDeterministicCheck,
 } from "../home/dot_local/lib/frontier-harness/check-runner.mjs";
@@ -20,10 +21,7 @@ import {
   manifestGapsDirectory,
 } from "../home/dot_local/lib/frontier-harness/manifest-gaps.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
-import {
-  MAX_CHECK_TIMEOUT_MS,
-  verificationClaims,
-} from "../home/dot_local/lib/frontier-harness/verify-command.mjs";
+import { verificationClaims } from "../home/dot_local/lib/frontier-harness/verification-registry.mjs";
 
 // `fh verify`（#495）専用のスイート。
 //

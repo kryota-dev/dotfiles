@@ -1,9 +1,7 @@
-import { DEFAULT_CHECK_TIMEOUT_MS, runDeterministicCheck } from "./check-runner.mjs";
+import { resolveCheckTimeoutMs, runDeterministicCheck } from "./check-runner.mjs";
 import { collapseWhitespace } from "./manifest-policy.mjs";
 import { VERIFICATION_CHECK_KINDS } from "./record-validation.mjs";
-// チェックに与える時間の上限は `fh verify` と同じ値を使う。同じ意味の定数を 2 つ持つと、
-// 片方だけ動かしたときに「どちらが効いているのか」が読めなくなる。
-import { MAX_CHECK_TIMEOUT_MS } from "./verify-command.mjs";
+import { DEFAULT_CHECK_KIND } from "./verification-registry.mjs";
 
 // セッションの完了条件（completion gate）—— 「ターンがエラーなく終わったか」と
 // 「指示した gate を通ったか」を分けるための連結（#573）。
@@ -19,9 +17,6 @@ import { MAX_CHECK_TIMEOUT_MS } from "./verify-command.mjs";
 // **判定に使うのは終了コードだけである。** gate は `check-runner.mjs` をそのまま使うので、
 // 子の stdout / stderr は端末へ継承され harness は 1 バイトも受け取らない。「記録に自由文が
 // 入らない」は規約ではなく、持っていないので載せられないという性質のまま保たれる。
-
-// kind を省いた宣言の既定。`fh verify --kind` の既定と揃える。
-export const DEFAULT_GATE_CHECK_KIND = "test";
 
 // gate の宣言は `<kind>:<command>` か、kind を省いた `<command>`。
 //
@@ -43,13 +38,32 @@ export function parseGateDeclaration(value) {
   if (command.length === 0) {
     throw new TypeError(`--gate ${value} declares a check kind but no command`);
   }
-  return Object.freeze({ kind: declaredKind ?? DEFAULT_GATE_CHECK_KIND, command });
+  return Object.freeze({ kind: declaredKind ?? DEFAULT_CHECK_KIND, command });
 }
 
 // `--gate-timeout-ms` の解決。`fh session --timeout-ms` は承認チャネルの待機時間なので、
-// gate は別のフラグを持つ（同じ名前で 2 つの意味を担わせない）。
+// gate は別のフラグを持つ（同じ名前で 2 つの意味を担わせない）。クランプ自体は
+// `check-runner.mjs` が持つ（`fh verify` と同じ上限であることを構造で保つ）。
 export function gateTimeoutMs(requested) {
-  return Math.min(requested ?? DEFAULT_CHECK_TIMEOUT_MS, MAX_CHECK_TIMEOUT_MS);
+  return resolveCheckTimeoutMs(requested);
+}
+
+// 1 セッションが宣言できる gate の本数。
+//
+// **本数にも上限が要る。** 個々のチェックには制限時間があるが、gate は直列に走るので、
+// 承認済みコマンドを繰り返し宣言すれば「本数 × 上限」の時間だけ harness を占有できてしまう。
+// `check-runner.mjs` が制限時間を置いた理由（チェックが終わらないまま harness を占有しない）は
+// 本数についても同じように効かなければならない。実運用の完了条件は test / lint / typecheck の
+// 数本で足りるので、余裕を見た小さな値に留める。
+export const MAX_SESSION_GATES = 8;
+
+export function assertGateCount(gates) {
+  if (gates.length > MAX_SESSION_GATES) {
+    throw new TypeError(
+      `--gate may be declared at most ${MAX_SESSION_GATES} times, not ${gates.length}`,
+    );
+  }
+  return gates;
 }
 
 // 宣言された gate を順に走らせる。

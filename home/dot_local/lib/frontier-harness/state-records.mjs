@@ -43,6 +43,10 @@ function toAdapterRunWithVerification(row) {
       passed: Number(row.checks_passed),
       failed: Number(row.checks_failed),
       errored: Number(row.checks_errored),
+      // `VERIFICATION_STATUSES` の 4 値をすべて数える。内訳が total を説明しない状態
+      // （合計が合わないのに読み手が気づけない）を作らないため、書き手が現れていない
+      // status も欠かさない。
+      skipped: Number(row.checks_skipped),
     },
   };
 }
@@ -149,7 +153,9 @@ export function createRecordAccessors(database) {
            (SELECT COUNT(*) FROM verification_results v
              WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'failed') AS checks_failed,
            (SELECT COUNT(*) FROM verification_results v
-             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'errored') AS checks_errored`;
+             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'errored') AS checks_errored,
+           (SELECT COUNT(*) FROM verification_results v
+             WHERE v.adapter_run_id = adapter_runs.id AND v.status = 'skipped') AS checks_skipped`;
   const selectAdapterRunPage = database.prepare(`
     SELECT id, task_id, route_id, capability, provider, model, effort,
            status, started_at, finished_at, exit_code, failure_reason, created_at,

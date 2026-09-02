@@ -15,12 +15,18 @@ import {
 import { BLOCKED_PENDING_APPROVAL } from "../home/dot_local/lib/frontier-harness/exit-codes.mjs";
 import { createChildRunner } from "../home/dot_local/lib/frontier-harness/child-runner.mjs";
 import { runCli } from "../home/dot_local/lib/frontier-harness/cli.mjs";
+import {
+  DEFAULT_CHECK_TIMEOUT_MS,
+  MAX_CHECK_TIMEOUT_MS,
+} from "../home/dot_local/lib/frontier-harness/check-runner.mjs";
 import { normalizeConfig } from "../home/dot_local/lib/frontier-harness/config.mjs";
 import {
+  MAX_SESSION_GATES,
   combineOutcome,
-  resolveGate,
+  gateTimeoutMs,
   gateVerdict,
   parseGateDeclaration,
+  resolveGate,
 } from "../home/dot_local/lib/frontier-harness/session-gate.mjs";
 import { createStateStore } from "../home/dot_local/lib/frontier-harness/state-store.mjs";
 
@@ -250,6 +256,8 @@ async function launch({
   accountScope = "personal",
   // gate のチェックは実プロセスとして走るので、PATH に何が見えるかがそのまま結果になる。
   environment,
+  // 子の spawn とは別の口。gate ごとに違う終了コードを与えたいテストが使う。
+  gateSpawnFake,
 }) {
   const worktree = worktreeOverride ?? path.join(directory, "worktree");
   mkdirSync(worktree, { recursive: true });
@@ -290,6 +298,7 @@ async function launch({
       policyPath,
       write: (line) => output.push(line),
       spawn: spawnFake?.spawn,
+      ...(gateSpawnFake === undefined ? {} : { gateSpawn: gateSpawnFake.spawn }),
       probeSpawn: probeFake.spawn,
       sessionIo: { stderr: { write: (line) => stderr.push(line) } },
     },
@@ -330,14 +339,25 @@ function fakeBinDirectory(directory, { exitCode = 0, name = "npm" } = {}) {
 // gate を宣言したセッションを 1 本起こす。gate のチェックは実プロセスとして走る。
 async function launchWithGates(
   context,
-  { gates, commands, gateExitCode = 0, binOnPath = true, spawnOverride },
+  {
+    gates,
+    commands,
+    gateExitCode = 0,
+    binOnPath = true,
+    spawnOverride,
+    gateSpawnFake,
+    extraFlags = [],
+    action = "launch",
+  },
 ) {
   const prepared = await preparedDirectory(context, { commands });
   const bin = fakeBinDirectory(prepared.directory, { exitCode: gateExitCode });
   const result = await launch({
     ...prepared,
+    action,
     spawnFake: spawnOverride ?? createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
-    extraFlags: gates.flatMap((gate) => ["--gate", gate]),
+    ...(gateSpawnFake === undefined ? {} : { gateSpawnFake }),
+    extraFlags: [...gates.flatMap((gate) => ["--gate", gate]), ...extraFlags],
     // PATH から `npm` を外すと、チェックは「起動できなかった」= errored になる。
     environment: {
       ...process.env,
@@ -1389,6 +1409,7 @@ test("a session that declared no gate is not silently read as verified", async (
     passed: 0,
     failed: 0,
     errored: 0,
+    skipped: 0,
   });
 });
 
@@ -1409,6 +1430,7 @@ test("fh runs reports how many checks each run is linked to", async (context) =>
     passed: 1,
     failed: 0,
     errored: 0,
+    skipped: 0,
   });
 
   // 1 件を引くときは、何を通したのかまで返る。
@@ -1514,5 +1536,209 @@ test("a gate that was declared but never measured is not a pass", () => {
       childOutcome: "failed",
     }).failureReason,
     null,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// レビュー指摘への回帰テスト（PR #613）
+// ---------------------------------------------------------------------------
+
+// gate ごとに違う終了コードを返す fake。`options.gateSpawn` の注入口を通る唯一の経路で、
+// 実プロセスに依存する `launchWithGates` では作れない「一方 pass・一方 fail」を作る。
+function createGateSpawn(exitCodes) {
+  const calls = [];
+  const spawn = (executable, argv, options) => {
+    const child = new EventEmitter();
+    child.kill = () => {};
+    calls.push({ executable, argv, options });
+    const code = exitCodes[calls.length - 1];
+    setImmediate(() => child.emit("close", code));
+    return child;
+  };
+  return { spawn, calls };
+}
+
+test("an invalid --gate-timeout-ms is refused before the child is started", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context, {
+    commands: ["npm run test"],
+  });
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+
+  await assert.rejects(
+    launch({
+      directory,
+      statePath,
+      policyPath,
+      spawnFake,
+      extraFlags: ["--gate", "npm run test", "--gate-timeout-ms", "0"],
+    }),
+    /--gate-timeout-ms must be a positive integer/,
+  );
+
+  // **子を起こす前に落ちること。** 以前は gate 実行の直前で初めて評価していたため、
+  // 例外は子が走り終わったあとに投げられ、adapter_runs も evidence も残らないまま
+  // 抜けていた（記録を残さずにクラッシュする、この設計が最も嫌う失敗）。
+  assert.equal(spawnFake.calls.length, 0);
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  assert.deepEqual(store.listAdapterRuns(), []);
+});
+
+test("an invalid --gate-timeout-ms is refused even when no gate is declared", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context);
+
+  // gate を宣言していないからといって、打ち間違えたフラグを黙って捨てない。
+  await assert.rejects(
+    launch({
+      directory,
+      statePath,
+      policyPath,
+      spawnFake: createFakeSpawn({ lines: [initEvent(), resultEvent()] }),
+      extraFlags: ["--gate-timeout-ms", "not-a-number"],
+    }),
+    /--gate-timeout-ms must be a positive integer/,
+  );
+});
+
+test("the gate timeout is clamped to the same ceiling as fh verify", () => {
+  assert.equal(gateTimeoutMs(undefined), DEFAULT_CHECK_TIMEOUT_MS);
+  assert.equal(gateTimeoutMs(1_000), 1_000);
+  // 上限を超える指定は黙って通さずクランプする。`fh verify --timeout-ms` と同じ値であること
+  // （`check-runner.mjs` が両方の唯一の出どころ）。
+  assert.equal(gateTimeoutMs(MAX_CHECK_TIMEOUT_MS * 10), MAX_CHECK_TIMEOUT_MS);
+});
+
+test("more gates than the cap are refused instead of occupying the harness", async (context) => {
+  const { directory, statePath, policyPath } = await preparedDirectory(context, {
+    commands: ["npm run test"],
+  });
+  const spawnFake = createFakeSpawn({ lines: [initEvent(), resultEvent()] });
+  const tooMany = Array.from({ length: MAX_SESSION_GATES + 1 }, () => [
+    "--gate",
+    "npm run test",
+  ]).flat();
+
+  await assert.rejects(
+    launch({ directory, statePath, policyPath, spawnFake, extraFlags: tooMany }),
+    new RegExp(`--gate may be declared at most ${MAX_SESSION_GATES} times`),
+  );
+  assert.equal(spawnFake.calls.length, 0);
+});
+
+test("gates run serially in declaration order and every result is linked", async (context) => {
+  // 1 本目 pass・2 本目 fail。実プロセス経由の helper では作れない組み合わせで、
+  // 「確定した赤が判定を決める」ことと「両方の結果が記録される」ことを同時に固定する。
+  const gateSpawnFake = createGateSpawn([0, 1]);
+  const { code, report, statePath } = await launchWithGates(context, {
+    gates: ["npm run test", "lint:npm run lint"],
+    commands: ["npm run test", "npm run lint"],
+    gateSpawnFake,
+  });
+
+  assert.equal(gateSpawnFake.calls.length, 2);
+  // 宣言順に、直列で走る（同じ作業ツリーを取り合わせない）。
+  assert.deepEqual(
+    gateSpawnFake.calls.map((call) => call.argv),
+    [
+      ["run", "test"],
+      ["run", "lint"],
+    ],
+  );
+  assert.equal(report.childOutcome, "succeeded");
+  assert.equal(report.outcome, "failed");
+  assert.equal(report.gate.status, "failed");
+  assert.equal(code, 1);
+  assert.match(report.failureReason, /1 of 2 declared check\(s\) did not pass/);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(
+    store
+      .listVerificationResultsForAdapterRun(run.id)
+      .map((result) => `${result.checkKind}:${result.status}`)
+      .sort(),
+    ["lint:failed", "test:passed"],
+  );
+});
+
+test("fh runs breaks the linked checks down by status, not just by count", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test", "lint:npm run lint"],
+    commands: ["npm run test", "npm run lint"],
+    gateSpawnFake: createGateSpawn([0, 1]),
+  });
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  // 内訳が status ごとに分かれていること。`total` だけを見ていると、赤（failed）と
+  // 判定不能（errored）で次の行動が違うことが読めない。
+  assert.deepEqual(runs[0].verification, {
+    total: 2,
+    passed: 1,
+    failed: 1,
+    errored: 0,
+    skipped: 0,
+  });
+});
+
+test("fh runs counts a check that could not be started as errored", async (context) => {
+  const { statePath, directory } = await launchWithGates(context, {
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    binOnPath: false,
+  });
+
+  const listed = [];
+  assert.equal(
+    runCli(["runs", "--json"], {
+      config,
+      statePath,
+      cwd: directory,
+      write: (line) => listed.push(line),
+    }),
+    0,
+  );
+  const { runs } = JSON.parse(listed.at(-1));
+  assert.deepEqual(runs[0].verification, {
+    total: 1,
+    passed: 0,
+    failed: 0,
+    errored: 1,
+    skipped: 0,
+  });
+});
+
+test("resume declares and runs its gates the same way launch does", async (context) => {
+  // `--gate` は session 共通フラグなので resume にも渡せる。解析・manifest 照合・実行・
+  // adapter_run への連結が resume 経路でも維持されることを固定する。
+  const gateSpawnFake = createGateSpawn([0]);
+  const { code, report, statePath } = await launchWithGates(context, {
+    action: "resume",
+    gates: ["npm run test"],
+    commands: ["npm run test"],
+    gateSpawnFake,
+  });
+
+  assert.equal(code, 0);
+  assert.equal(report.action, "resume");
+  assert.equal(report.gate.status, "passed");
+  assert.deepEqual(gateSpawnFake.calls[0].argv, ["run", "test"]);
+
+  const store = createStateStore(statePath);
+  context.after(() => store.close());
+  const [run] = store.listAdapterRuns();
+  assert.deepEqual(
+    store.listVerificationResultsForAdapterRun(run.id).map((result) => result.status),
+    ["passed"],
   );
 });

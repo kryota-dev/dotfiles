@@ -1,8 +1,5 @@
 import { LIVE_CANDIDATE_STATUSES } from "./candidate-store.mjs";
-import {
-  DEFAULT_CHECK_TIMEOUT_MS,
-  runDeterministicCheck,
-} from "./check-runner.mjs";
+import { resolveCheckTimeoutMs, runDeterministicCheck } from "./check-runner.mjs";
 import { createGitRunner, worktreeTreeHash } from "./git-worktree.mjs";
 import { BLOCKED_PENDING_APPROVAL, VERIFICATION_FAILED } from "./exit-codes.mjs";
 import { flagValue, optionalFlagValue, positiveIntegerFlag } from "./flags.mjs";
@@ -19,6 +16,11 @@ import {
   resolveRepositoryScope,
 } from "./state-paths.mjs";
 import { createStateStore } from "./state-store.mjs";
+import {
+  DEFAULT_CHECK_KIND,
+  VERIFICATION_EVIDENCE_KIND,
+  verificationClaims,
+} from "./verification-registry.mjs";
 
 // `fh verify` —— 承認済みの決定的チェックを**実際に走らせて**、その結果を記録する（#495）。
 //
@@ -43,24 +45,7 @@ import { createStateStore } from "./state-store.mjs";
 // 承認は所有元リポジトリのものを使い、チェックだけを candidate のツリーで走らせられる。
 // 呼び出し側が渡した path を信用するわけではないので、`--worktree` の gate は弱まらない。
 
-export const DEFAULT_CHECK_KIND = "test";
-// チェックに与える時間の上限。`approval-server.mjs` が escalation の待機に上限を課しているのと
-// 同じ理由で、ここにも要る —— チェックの実行中はツリーの書き換えを検知できない窓（下記参照）
-// なので、`--timeout-ms` を無制限にできると、その窓を任意に広げられる。
-export const MAX_CHECK_TIMEOUT_MS = 3_600_000;
-export const VERIFICATION_EVIDENCE_KIND = "verification_run";
-
 const PRODUCER = "frontier-harness";
-
-// evidence に載せてよいのは固定語彙だけ。status と checkKind はどちらも閉じた enum なので、
-// ここから組み立てた文が自由文になることはない（`session-command.mjs` の sessionClaims と同じ規律）。
-export function verificationClaims({ checkKind, status, timedOut }) {
-  const claims = [`the deterministic ${checkKind} check ${status}`];
-  if (timedOut) {
-    claims.push("the check was terminated for exceeding its time limit");
-  }
-  return claims;
-}
 
 export async function runVerifyCommand({
   flags,
@@ -86,10 +71,7 @@ export async function runVerifyCommand({
     "--worktree",
   );
   const candidateId = optionalFlagValue(flags, "--candidate");
-  const timeoutMs = Math.min(
-    positiveIntegerFlag(flags, "--timeout-ms") ?? DEFAULT_CHECK_TIMEOUT_MS,
-    MAX_CHECK_TIMEOUT_MS,
-  );
+  const timeoutMs = resolveCheckTimeoutMs(positiveIntegerFlag(flags, "--timeout-ms"));
 
   const statePath = options.statePath ?? defaultStatePath(worktree);
   const store = createStateStore(statePath);

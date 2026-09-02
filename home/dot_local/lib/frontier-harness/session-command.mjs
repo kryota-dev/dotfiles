@@ -29,6 +29,7 @@ import { nowIso } from "./record-validation.mjs";
 import { isProviderExecutionAllowed, runWithRolloutGuard } from "./rollout.mjs";
 import { allowsWrite, normalizeSandboxPolicy } from "./sandbox.mjs";
 import {
+  assertGateCount,
   gateBriefing,
   gateClaims,
   gateTimeoutMs,
@@ -46,7 +47,10 @@ import {
   resolveStateDirectory,
 } from "./state-paths.mjs";
 import { createStateStore } from "./state-store.mjs";
-import { VERIFICATION_EVIDENCE_KIND, verificationClaims } from "./verify-command.mjs";
+import {
+  VERIFICATION_EVIDENCE_KIND,
+  verificationClaims,
+} from "./verification-registry.mjs";
 
 // `fh session launch|resume` —— wave-orchestrator の子セッションを非対話で起こす（#537）。
 //
@@ -152,7 +156,7 @@ function readLabel(flags) {
 // 掛かるので、未承認の gate を宣言したセッションは子を起こす前に exit 2 で止まる。数時間
 // 走ったあとで「その gate は承認されていない」と分かる形にはしない。
 function readGates(flags) {
-  return repeatedFlagValues(flags, "--gate").map(parseGateDeclaration);
+  return assertGateCount(repeatedFlagValues(flags, "--gate").map(parseGateDeclaration));
 }
 
 function selectCapability(config, capabilityName) {
@@ -239,6 +243,18 @@ export async function runSessionCommand({
   const capability = selectCapability(config, capabilityName);
   const worktree = requireWorktree(flagValue(flags, "--worktree"));
   const gates = readGates(flags);
+  // **副作用より前に解決する。** 以前はこの値を gate 実行の直前（子が成功したときにだけ
+  // 通る枝）で読んでいた。そのため:
+  //
+  //   - `--gate` 付きで無効値を渡すと、TypeError が**子の実行後**に投げられ、`adapter_runs` も
+  //     evidence も残らないまま runSessionCommand を抜けていた。これは下の `guarded.result` の
+  //     catch が「子は既に走ったかもしれないので、記録を残さずにクラッシュするのが最悪の
+  //     失敗になる」として塞いだ経路そのものである
+  //   - `--gate` 無しなら無効値がそのまま黙って捨てられていた（`flag-registry.mjs` の
+  //     「打ち間違えたフラグを黙って捨てない」方針に反する）
+  //
+  // `--gate` の有無にも子の成否にも依らず、ここで一度だけ検証・クランプする。
+  const gateTimeout = gateTimeoutMs(positiveIntegerFlag(flags, "--gate-timeout-ms"));
   // 制約の説明と完了条件を先に置く。呼び出し側の prompt はそのまま後ろに続く。
   const prompt = `${SANDBOX_BRIEFING}${gateBriefing(gates)}${readPrompt(flags)}`;
   const label = readLabel(flags);
@@ -525,7 +541,7 @@ export async function runSessionCommand({
             // 「gate が赤でも緑に見える」という、この issue が直そうとしている失敗の
             // ミニチュアをテスト側に作ることになる（`options.probeSpawn` と同じ形）。
             spawn: options.gateSpawn,
-            timeoutMs: gateTimeoutMs(positiveIntegerFlag(flags, "--gate-timeout-ms")),
+            timeoutMs: gateTimeout,
             ...(options.terminationGraceMs === undefined
               ? {}
               : { terminationGraceMs: options.terminationGraceMs }),
