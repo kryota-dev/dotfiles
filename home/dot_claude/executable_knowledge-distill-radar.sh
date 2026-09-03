@@ -456,7 +456,11 @@ main() {
   # what this job exists to produce, so a missing library must not cost a week's
   # report -- but it must not pass for a normal week either.
   RUNLOG_OK=0
-  if [ -r "$RUNLOG_LIB" ]; then
+  # Sourcing is code execution, so the file has to be ours -- the same reasoning
+  # ntfy_publish applies to its env file. Only ownership is checked, not the
+  # mode: this library is deployed 0644 on purpose (it is a shared library, not
+  # a secret), so requiring 0600/0400 here would reject the correct file.
+  if [ -r "$RUNLOG_LIB" ] && [ -O "$RUNLOG_LIB" ]; then
     # shellcheck source=/dev/null
     . "$RUNLOG_LIB" 2>/dev/null || true
     if job_runlog_available 2>/dev/null && job_runlog_init "$RUNLOG_FILE" 2>/dev/null; then
@@ -517,11 +521,14 @@ EOF
   # before it reaches any of the logic below. ntfy_publish above already uses
   # this form (#642 / #647 describe the same trap on the tests' side).
   STDOUT_FILE="$(mktemp "${TMPDIR:-/tmp}/knowledge-distill-radar.XXXXXX")"
+  # Armed before the second mktemp: under `set -e` a failure there would exit
+  # with the first file already created but no trap to remove it.
+  STDERR_FILE=""
+  trap 'rm -f "$STDOUT_FILE" "$STDERR_FILE"' EXIT
   # stderr goes to its own file rather than straight into the log, because the
   # cause classification reads it. It is still appended to the log afterwards,
   # so the operator-facing log keeps everything it used to carry.
   STDERR_FILE="$(mktemp "${TMPDIR:-/tmp}/knowledge-distill-radar-err.XXXXXX")"
-  trap 'rm -f "$STDOUT_FILE" "$STDERR_FILE"' EXIT
 
   # `--output-format json` carries num_turns and the run's own subtype alongside
   # the result text. Those are what turn "it failed again" into something that
@@ -549,6 +556,16 @@ EOF
     # script-level exit, skipping the fallback and the notification below.
     HEADLINE="$(printf '%s\n' "$RUN_BODY" | grep -E '^HEADLINE:' | tail -1 |
       sed 's/^HEADLINE:[[:space:]]*//' || true)"
+    # The headline is model-authored text, and this run's inputs (instincts,
+    # memories, session summaries) are not under our control. It now travels
+    # further than before -- into a file that keeps 200 records, not just a
+    # notification -- so strip the bytes that would be read as terminal escape
+    # sequences by whatever later prints it. C0 and DEL only: bytes 0x80-0x9F
+    # are continuation bytes in UTF-8, and dropping them would corrupt the
+    # Japanese text this headline normally is. Length is deliberately not
+    # capped, because a byte-wise cut could split a multi-byte character and
+    # turn a merely long headline into a record jq refuses to write.
+    HEADLINE="$(printf '%s' "$HEADLINE" | tr -d '\000-\037\177')"
 
     # A run that exits 0 without leaving a report broke its output contract, so
     # it is a failure with its own cause rather than a success.

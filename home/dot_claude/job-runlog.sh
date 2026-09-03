@@ -53,7 +53,10 @@ job_runlog_init() {
   local file="$1" dir
   [ -n "$file" ] || return 1
   dir="$(dirname "$file")"
-  mkdir -p "$dir" 2>/dev/null || return 1
+  # umask inside the subshell so the directory is never briefly world-readable
+  # between creation and chmod. The chmod stays for the case where the directory
+  # already existed with looser permissions.
+  (umask 077 && mkdir -p "$dir") 2>/dev/null || return 1
   chmod 700 "$dir" 2>/dev/null || return 1
   if [ ! -f "$file" ]; then
     (
@@ -93,13 +96,23 @@ job_runlog_record() {
   case "$count" in '' | *[!0-9]*) return 0 ;; esac
   [ "$count" -gt "$max" ] || return 0
   # Same directory as the target so the rename stays on one filesystem and the
-  # history is never observed half-trimmed.
-  tmp="${file}.trim.$$"
+  # history is never observed half-trimmed. `mktemp` rather than a PID-derived
+  # name: it creates with O_EXCL and so will not follow a symlink planted at a
+  # predictable path (CWE-377). An explicit template is required because macOS
+  # `mktemp -t` ignores TMPDIR, and here the file has to land beside the target
+  # anyway for the rename to stay on one filesystem.
+  tmp="$(mktemp "${file}.trim.XXXXXX" 2>/dev/null)" || return 1
   (
     umask 077
     tail -n "$max" "$file" >"$tmp"
-  ) 2>/dev/null || return 1
-  mv -f "$tmp" "$file" 2>/dev/null || return 1
+  ) 2>/dev/null || {
+    rm -f "$tmp"
+    return 1
+  }
+  mv -f "$tmp" "$file" 2>/dev/null || {
+    rm -f "$tmp"
+    return 1
+  }
 }
 
 # job_runlog_last_field <file> <field>
