@@ -38,7 +38,7 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 | `claude` / `cld` | Claude Code | 個人（fill-gaps） | per-account 環境セットで mise 管理の `claude` バイナリを実行；すでに設定済みの `CLAUDE_CONFIG_DIR` を維持（フック起動の子プロセスが親セッションのアカウントに留まるため）、未設定なら `~/.claude` にデフォルト |
 | `cld-r06` | Claude Code | 業務（r06） | 同じラッパー；`CLAUDE_CONFIG_DIR` を無条件に `~/.claude-r06` に強制（override） |
 | `claude-config` | Claude Code | 個人 | zsh ヘルパー：ECC config-protection ゲートを無効化してから `claude` ラッパーを呼ぶ；意図的な設定編集用 |
-| `cldf` | Claude Code | 個人 | zsh ヘルパー：`claude` ラッパーを `--model claude-fable-5` と [Fable 5 オーケストレータープロンプト](#fable-5-オーケストレーターcldf-系)付きで呼ぶ — main セッションは Fable 5、実行は Sonnet subagent に委譲 |
+| `cldf` | Claude Code | 個人 | zsh ヘルパー：`claude` ラッパーを `--model claude-fable-5-1` と [Fable オーケストレータープロンプト](#fable-オーケストレーターcldf-系)付きで呼ぶ — main セッションは Fable 5.1、実行は Sonnet subagent に委譲 |
 | `cldf-r06` | Claude Code | 業務（r06） | r06 アカウントでの `cldf` |
 | `codex` / `cdx` | Codex CLI | `CLAUDE_CONFIG_DIR` に追従（fill-gaps） | brew 管理の `codex` バイナリを実行し、argv に `--profile` がなければ `--profile shared` を注入；`CODEX_HOME` は `CLAUDE_CONFIG_DIR` が設定されていればそれに追従（`.claude-r06` なら `~/.codex-r06`、それ以外は `~/.codex`）、未設定なら明示的な `CODEX_HOME` を尊重するか `~/.codex` にデフォルト |
 | `cdx-r06` | Codex CLI | 業務（r06） | 同じラッパー；`CODEX_HOME` を無条件に `~/.codex-r06` に強制（override）；`--profile shared` は引き続き注入 |
@@ -47,16 +47,33 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 
 ---
 
-## Fable 5 オーケストレーター（`cldf` 系）
+## Fable オーケストレーター（`cldf` 系）
 
-`cldf` / `cldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `claude` ラッパー（ベアの `claude`/`cld` と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
+`cldf` / `cldf-r06` エイリアスは Claude Code を**オーケストレーター構成**で起動します。main セッションは `claude-fable-5-1` で俯瞰・立案・統合を担い、タスク実行は Sonnet 系 subagent へ委譲します。これらは `claude` ラッパー（ベアの `claude`/`cld` と同じアカウント分離環境）を `_claude_fable` という薄いヘルパーでラップしており、次を行います:
 
-- main モデルをフル ID `--model claude-fable-5`（`fable` エイリアスではない）で pin する。委譲プロンプトの Sonnet 5 世代前提と main モデル世代が silently ずれないようにするためで、モデル世代交代時にはプロンプトとセットで意識的に更新する。
+- main モデルをフル ID `--model claude-fable-5-1`（`fable` エイリアスではない）で pin する。委譲プロンプトの Sonnet 5 世代前提と main モデル世代が silently ずれないようにするためで、モデル世代交代時にはプロンプトとセットで意識的に更新する（エイリアスは現在 [Fable 5.1 に解決される](https://code.claude.com/docs/en/model-config)ため、放っておくと次の世代交代で勝手に動く）。フラグを使うのは、ピッカーを開かずに pin を効かせるため: Claude Code は [main モデルを](https://code.claude.com/docs/en/model-config)セッション内 `/model` > `--model` > `ANTHROPIC_MODEL` > 設定ファイルの `model` > 組織既定 > `ANTHROPIC_DEFAULT_MODEL` の順で解決するので、`--model` は過去に `/model` で保存した既定に勝つ。
 - `home/dot_claude/fable-orchestrator-prompt.md`（デプロイ先: `~/.claude/fable-orchestrator-prompt.md`）を、readable なときのみ `--append-system-prompt-file <path>` で指定する。渡すのは **path** で、CLI 側が process 起動時にファイルを読む — プロンプトが伸びても argv には載らない。ファイル不在時（`chezmoi apply` 前 / 手動削除後）でもセッションは正常起動し、オーケストレーター誘導だけが効かない。
 
 プロンプトファイルは意図的に `~/.claude/…` に置き、両アカウントから絶対パスで読む — `hooks-fork/` と同じ「default アカウント配下を両アカウントで共有」前例。
 
-`CLAUDE_CODE_SUBAGENT_MODEL` は**意図的に未設定**にしています。この環境変数は per-invocation `model` param と agent frontmatter より最優先で全 subagent を固定するため、設定してしまうと「難タスクだけ Fable に escalate する」経路が消えます。代わりにオーケストレータープロンプトが subagent のモデル選択を誘導します（既定 `model: sonnet`、難検証のみ `fable` に上げる、`subagent_type: "fork"` は常に親モデルを継承する点に注意）。
+`CLAUDE_CODE_SUBAGENT_MODEL` は**意図的に未設定**にしていますが、理由はこのドキュメントが以前述べていたものとは違います。Claude Code は v2.1.251 以降、[subagent のモデルを次の順で解決](https://code.claude.com/docs/en/sub-agents)します:
+
+1. spawn 時に渡した `model` パラメータ
+2. agent 定義の `model:` frontmatter（`inherit` は「main 会話と同じモデル」の意）
+3. `CLAUDE_CODE_SUBAGENT_MODEL`
+4. main 会話のモデル
+
+v2.1.251 より前はこの環境変数が 1 番目で、spawn 時指定と frontmatter の両方を上書きしていたため、設定すれば実際に「難タスクだけ Fable に escalate する」経路が消えていました。現在は**既定値**に降格しているので、設定してもその経路は潰れません。
+
+それでも未設定のままにしているのは、別の理由からです: 効く範囲が狭く、「subagent の既定モデル」を宣言する場所を 2 つに割るには見合いません。この環境変数が届くのは、frontmatter の `model:` も spawn 時の `model` も持たない spawn だけで:
+
+- `home/dot_claude/agents/` の subagent は全て frontmatter で `model: sonnet` を pin 済みで、規則 2 が規則 3 に勝つため、いずれも影響を受けません。
+- built-in のうち `general-purpose` は公式 docs が対象と明記しています（"the `CLAUDE_CODE_SUBAGENT_MODEL` model if you set one and nothing assigns a model another way, otherwise the main conversation's model"）。
+- 一方 `Explore` / `Plan` は main 会話のモデルを継承し、公式 docs は "setting `CLAUDE_CODE_SUBAGENT_MODEL` by itself doesn't change the model the built-in Explore and Plan subagents run on" と明記しています。
+
+オーケストレータープロンプトと環境変数の両方に既定を書けば以後ずっと同期し続ける必要が生まれるので、プロンプト側を唯一の宣言箇所とします（既定 `model: sonnet`、難検証のみ `fable` に上げる、`subagent_type: "fork"` は常に親モデルを継承）。代償として `model` を省略した spawn は Fable を継承するため、プロンプトはオーケストレーターに `model` の明示を求めています — `Explore` / `Plan` に届く唯一の手段でもあります。
+
+v2.1.257 で追加された [`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`](https://code.claude.com/docs/en/env-vars) は、subagent / teammate / workflow agent に対して旧来の「全上書き」挙動を（"the built-in Explore and Plan definitions included"）復活させるものです。これは当初の理由のまま未設定にしています: 設定すると escalation 経路が実際に消えるためです。
 
 ソース: `home/dot_config/zsh/claude.zsh`（`_claude_fable` ヘルパー。`CLAUDE_CONFIG_DIR` を明示的に設定してから `claude` ラッパーを呼ぶ）。
 

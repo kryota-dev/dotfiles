@@ -277,7 +277,7 @@ EOF
 
 # ---------- residual zsh helpers in claude.zsh ----------
 
-@test "claude.zsh: _claude_fable pins claude-fable-5 and skips the prompt when absent" {
+@test "claude.zsh: _claude_fable pins claude-fable-5-1 and skips the prompt when absent" {
   run zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
@@ -285,7 +285,7 @@ EOF
     _claude_fable \"\$HOME/.claude\"
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|$BATS_TEST_TMPDIR/.claude|--model claude-fable-5" ]
+  [ "$output" = "claude|$BATS_TEST_TMPDIR/.claude|--model claude-fable-5-1" ]
 }
 
 @test "claude.zsh: _claude_fable appends the orchestrator prompt file when readable" {
@@ -298,18 +298,49 @@ EOF
     _claude_fable \"\$HOME/.claude\"
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|--model claude-fable-5 --append-system-prompt-file $BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md" ]
+  [ "$output" = "claude|--model claude-fable-5-1 --append-system-prompt-file $BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md" ]
 }
 
+# The mock reports argc and one argument per line rather than "$*", and the caller passes an
+# argument with a space plus an empty one. A single "$*" observation cannot tell "$@" from "$*":
+# with one caller flag both spellings render the same joined string, so a regression that collapses
+# argv into one word would pass unnoticed. Counting arguments catches it (5 vs 2), and the spaced /
+# empty arguments pin the word boundaries the helper must preserve.
 @test "claude.zsh: _claude_fable passes the caller's own flags through before the fable flags" {
   run zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
-    claude() { print -r -- \"claude|\$*\"; }
-    _claude_fable \"\$HOME/.claude\" --resume
+    claude() { print -r -- \"argc=\$#\"; for a in \"\$@\"; do print -r -- \"[\$a]\"; done; }
+    _claude_fable \"\$HOME/.claude\" --resume 'two words' ''
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|--resume --model claude-fable-5" ]
+  [ "${lines[0]}" = "argc=5" ]
+  [ "${lines[1]}" = "[--resume]" ]
+  [ "${lines[2]}" = "[two words]" ]
+  [ "${lines[3]}" = "[]" ]
+  [ "${lines[4]}" = "[--model]" ]
+  [ "${lines[5]}" = "[claude-fable-5-1]" ]
+}
+
+# #627 decided to leave CLAUDE_CODE_SUBAGENT_MODEL unset: since Claude Code 2.1.251 it is only the
+# default (a per-spawn model and the agent frontmatter's model: both outrank it), so setting it
+# would not close the "escalate a hard verification to fable" path — but it would split the
+# declaration of the subagent default between this helper and the orchestrator prompt. That
+# decision only lived in prose across four files, so this test makes it executable: it fails the
+# moment the helper starts injecting either variable. _FORCE stays unset for the original reason
+# (setting it really does close the escalation path). The vars are unset first so an exported value
+# in the caller's environment cannot make this pass vacuously, and "-" (not ":-") is used so
+# assigning an empty string still counts as set.
+@test "claude.zsh: _claude_fable leaves CLAUDE_CODE_SUBAGENT_MODEL and its _FORCE variant unset (#627)" {
+  run zsh -fc "
+    export HOME='$BATS_TEST_TMPDIR'
+    unset CLAUDE_CODE_SUBAGENT_MODEL CLAUDE_CODE_SUBAGENT_MODEL_FORCE
+    source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+    claude() { print -r -- \"model=\${CLAUDE_CODE_SUBAGENT_MODEL-__NONE__}|force=\${CLAUDE_CODE_SUBAGENT_MODEL_FORCE-__NONE__}\"; }
+    _claude_fable \"\$HOME/.claude\"
+  "
+  [ "$status" -eq 0 ]
+  [ "$output" = "model=__NONE__|force=__NONE__" ]
 }
 
 @test "claude.zsh: cldf/cldf-r06 wire the fable orchestrator per account" {
