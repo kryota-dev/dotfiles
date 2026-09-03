@@ -9,7 +9,12 @@ on:
       - 'scripts/**'
       - 'docs/**'
       - 'Makefile'
-      - '.github/workflows/ci.yml'
+      # The whole .github tree, not just this file. A Renovate PR that bumps an
+      # action pin inside another workflow changes only that workflow, so a
+      # narrower filter meant Lint and Test never ran on it -- and a required
+      # check that never runs never reports, leaving the PR unmergeable forever.
+      # renovate.json5 is in here for the same reason.
+      - '.github/**'
   pull_request:
     branches: [main]
     paths:
@@ -18,7 +23,12 @@ on:
       - 'scripts/**'
       - 'docs/**'
       - 'Makefile'
-      - '.github/workflows/ci.yml'
+      # The whole .github tree, not just this file. A Renovate PR that bumps an
+      # action pin inside another workflow changes only that workflow, so a
+      # narrower filter meant Lint and Test never ran on it -- and a required
+      # check that never runs never reports, leaving the PR unmergeable forever.
+      # renovate.json5 is in here for the same reason.
+      - '.github/**'
   workflow_dispatch:
 
 concurrency:
