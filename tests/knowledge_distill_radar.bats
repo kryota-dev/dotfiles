@@ -221,8 +221,9 @@ EOF
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
-  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" TMPDIR="${BATS_TEST_TMPDIR}" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
     KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
     KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
@@ -256,8 +257,9 @@ EOF
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
-  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" TMPDIR="${BATS_TEST_TMPDIR}" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
     KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
     KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
@@ -287,8 +289,9 @@ EOF
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
-  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" TMPDIR="${BATS_TEST_TMPDIR}" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
     KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
     KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
@@ -457,8 +460,9 @@ EOF
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
-  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" TMPDIR="${BATS_TEST_TMPDIR}" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
     KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
     KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
@@ -480,8 +484,9 @@ EOF
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
-  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" TMPDIR="${BATS_TEST_TMPDIR}" \
     NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
     KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=2 \
     KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
     bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
@@ -490,4 +495,314 @@ EOF
   grep -qF 'report file missing' "${home}/radar.log"
   [ "$(jq -r .topic <"${STUB_DIR}/curl_stdin")" = "claude-attention" ]
   [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "5" ]
+}
+
+# --- Failure tracking and measured limits (#643) --------------------------
+#
+# Four consecutive weeks failed with nothing recorded anywhere, so nobody
+# noticed for five weeks. The tests below pin the two halves of the fix: the
+# limits are sized from measurement, and every run leaves a record behind.
+
+# Build a fake HOME with the launchers, the ntfy env file and a stubbed curl.
+# Mirrors the fixture the four main() tests above assemble by hand; the run
+# history tests need the same scaffolding several more times.
+mkfixture() {
+  local home="$1"
+  mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
+  cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
+  cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
+  chmod 600 "${home}/.config/ntfy/notify-env"
+}
+
+# Run the wrapper against a fixture HOME. Extra env assignments may be passed
+# as KEY=VALUE arguments. TMPDIR is handed through deliberately: launchd sets
+# it in production, and `env -i` without it is a less faithful fixture, not a
+# stricter one.
+runmain() {
+  local home="$1"
+  shift
+  run env -i HOME="$home" XDG_STATE_HOME="${home}/state" \
+    TMPDIR="${BATS_TEST_TMPDIR}" \
+    NTFY_TEST_STUB_DIR="$STUB_DIR" NTFY_TEST_CURL_EXIT=0 \
+    KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=3 \
+    KNOWLEDGE_DISTILL_RADAR_RETRY_DELAY_SECONDS=0 \
+    KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${HOME_DIR}/dot_claude/job-runlog.sh" \
+    KNOWLEDGE_DISTILL_RADAR_LOG_FILE="${home}/radar.log" \
+    "$@" \
+    bash -c 'bash "$1" >/dev/null 2>&1' _ "$WRAPPER"
+}
+
+runlog_of() {
+  printf '%s\n' "$1/state/knowledge-distill-radar/runs.jsonl"
+}
+
+@test "limits are sized from measured runs, not raised blindly (#643)" {
+  # Measured on the real job: ~10.5s per tool call across three runs; the two
+  # max-turns deaths spent 523s and 539s reaching turn 50, and the one success
+  # finished in 589s of a 600s budget -- 1.8% of headroom. At that throughput a
+  # 600s watchdog cannot hold 50 serialized turns, so the backstop had become
+  # the primary limit. 80 x 10.5s is about 840s, which puts --max-turns back in
+  # front of the watchdog, the relationship the watchdog comment claims.
+  grep -qE '^MAX_TURNS=80$' "$WRAPPER"
+  grep -qE '^TIMEOUT_SECONDS="\$\{KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS:-1200\}"$' "$WRAPPER"
+  # The reasoning has to travel with the numbers, or the next person raising
+  # them has no baseline to argue against.
+  grep -qF '589' "$WRAPPER"
+}
+
+@test "prompt forbids shell chaining but allows batching calls into one turn (#643)" {
+  # The allowlist is prefix-matched per command, which is why the prompt bans
+  # `;` and `&&`. That ban is about the shell, not about how many independent
+  # Bash calls one turn may carry -- and reading it as the latter is what burnt
+  # 50 turns on 50 calls. The measured run that did batch reached 1.93 calls
+  # per turn, i.e. the same work inside 30 turns.
+  grep -qF 'セミコロンや && で連結しないでください' "$WRAPPER"
+  grep -qF '同一ターンでまとめて発行' "$WRAPPER"
+}
+
+@test "run history is delegated to the shared library, not reimplemented" {
+  # Same SSOT posture as ~/.config/ntfy/lib.sh: the wrapper sources the library
+  # rather than carrying its own copy, so a second caller cannot drift.
+  grep -qF '.claude/job-runlog.sh' "$WRAPPER"
+  grep -qE '^[[:space:]]*\.[[:space:]]+"\$RUNLOG_LIB"' "$WRAPPER"
+  # The reader/writer logic itself must live in the library.
+  run grep -qF 'job_runlog_record()' "$WRAPPER"
+  [ "$status" -ne 0 ]
+}
+
+@test "main(): a failed run is recorded with a machine-readable cause" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-record-fail"
+  mkfixture "$home"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+echo "Error: Reached max turns (80)" >&2
+exit 1
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  local log
+  log="$(runlog_of "$home")"
+  [ -f "$log" ]
+  [ "$(wc -l <"$log")" -eq 1 ]
+  [ "$(jq -r .status <"$log")" = "max_turns" ]
+  [ "$(jq -r .exit_code <"$log")" = "1" ]
+  [ "$(jq -r .attempt <"$log")" = "1" ]
+  [ "$(jq -r .period <"$log")" = "$(date +%G-W%V)" ]
+  # Which signal decided the classification, following the convention #526
+  # established for the same ambiguity in frontier-harness.
+  [ "$(jq -r .decided_by <"$log")" = "stderr" ]
+  run bash -c 'jq -e ".duration_seconds | type == \"number\"" <"$1"' _ "$log"
+  [ "$status" -eq 0 ]
+  # The record is per-user state, not something to leave world-readable.
+  [ "$(_file_mode "$log")" = "600" ]
+  [ "$(_file_mode "$(dirname "$log")")" = "700" ]
+}
+
+@test "main(): the same cause twice running is called out in the notification" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-streak"
+  mkfixture "$home"
+  mkdir -p "${home}/state/knowledge-distill-radar"
+  printf '%s\n' \
+    '{"status":"max_turns","period":"2026-W35","ts_epoch":1}' \
+    >"$(runlog_of "$home")"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+echo "Error: Reached max turns (80)" >&2
+exit 1
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  local message
+  message="$(jq -r .message <"${STUB_DIR}/curl_stdin")"
+  # Two distinct scheduled slots, same cause: this is the signal that separates
+  # a one-off outage from something that will keep happening.
+  [[ "$message" == *"2週連続"* ]]
+  [[ "$message" == *"max_turns"* ]]
+  [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "5" ]
+}
+
+@test "main(): a single failure is not dressed up as a streak" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-no-streak"
+  mkfixture "$home"
+  mkdir -p "${home}/state/knowledge-distill-radar"
+  # Last week failed for a DIFFERENT reason, so the streak restarts.
+  printf '%s\n' \
+    '{"status":"timeout","period":"2026-W35","ts_epoch":1}' \
+    >"$(runlog_of "$home")"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+echo "Error: Reached max turns (80)" >&2
+exit 1
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  local message
+  message="$(jq -r .message <"${STUB_DIR}/curl_stdin")"
+  [[ "$message" != *"週連続"* ]]
+}
+
+@test "main(): the watchdog timeout is recorded as its own cause" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-timeout"
+  mkfixture "$home"
+  printf '%s\n' '#!/bin/bash' 'sleep 30' >"${home}/.local/launchers/claude"
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home" KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS=1
+  [ "$status" -eq 1 ]
+  local log
+  log="$(runlog_of "$home")"
+  [ "$(jq -r .status <"$log")" = "timeout" ]
+  [ "$(jq -r .decided_by <"$log")" = "exit_code" ]
+  # No envelope survives a SIGTERM (#526 §1.3), so the turn count is absent
+  # rather than invented.
+  [ "$(jq -r .num_turns <"$log")" = "null" ]
+  grep -qF 'timed out' "${home}/radar.log"
+  [ ! -f "${home}/state/knowledge-distill-radar/last-run" ]
+}
+
+@test "main(): a transient API error is retried once and both attempts are recorded" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-retry"
+  mkfixture "$home"
+  # 08-07 failed this way on a coalesced wake fire, before the network was up.
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+n=$(cat "$HOME/attempts" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" >"$HOME/attempts"
+if [ "$n" -eq 1 ]; then
+  echo "API Error: Unable to connect to API (ENOTFOUND)" >&2
+  exit 1
+fi
+report="$(printf '%s' "$*" | grep -oE '[^ ]+\.kryota-dev/knowledge-distill/[^ ]+\.md' | head -1)"
+mkdir -p "$(dirname "$report")"
+printf '# report\n' >"$report"
+printf '%s\n' '{"session_id":"s","is_error":false,"subtype":"success","num_turns":21,"result":"HEADLINE: 復旧後の縮退レポート"}'
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 0 ]
+  [ "$(cat "${home}/attempts")" = "2" ]
+  local log
+  log="$(runlog_of "$home")"
+  [ "$(wc -l <"$log")" -eq 2 ]
+  [ "$(head -1 "$log" | jq -r .status)" = "api_error" ]
+  [ "$(head -1 "$log" | jq -r .attempt)" = "1" ]
+  [ "$(tail -1 "$log" | jq -r .status)" = "ok" ]
+  [ "$(tail -1 "$log" | jq -r .attempt)" = "2" ]
+  # The week is only stamped once the retry actually produced the report.
+  [ -f "${home}/state/knowledge-distill-radar/last-run" ]
+}
+
+@test "main(): budget exhaustion is not retried" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-noretry"
+  mkfixture "$home"
+  # Re-running a run that ran out of turns just spends the budget twice and
+  # dies in the same place, so this path must stay single-shot.
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+n=$(cat "$HOME/attempts" 2>/dev/null || echo 0)
+echo "$((n + 1))" >"$HOME/attempts"
+echo "Error: Reached max turns (80)" >&2
+exit 1
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  [ "$(cat "${home}/attempts")" = "1" ]
+  [ "$(wc -l <"$(runlog_of "$home")")" -eq 1 ]
+}
+
+@test "main(): a success after a failure records ok and says it recovered" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-recover"
+  mkfixture "$home"
+  mkdir -p "${home}/state/knowledge-distill-radar"
+  printf '%s\n' \
+    '{"status":"max_turns","period":"2026-W35","ts_epoch":1}' \
+    >"$(runlog_of "$home")"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+report="$(printf '%s' "$*" | grep -oE '[^ ]+\.kryota-dev/knowledge-distill/[^ ]+\.md' | head -1)"
+mkdir -p "$(dirname "$report")"
+printf '# report\n' >"$report"
+printf '%s\n' '{"session_id":"s","is_error":false,"subtype":"success","num_turns":37,"result":"HEADLINE: 昇華提案 2件"}'
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 0 ]
+  local log message
+  log="$(runlog_of "$home")"
+  [ "$(tail -1 "$log" | jq -r .status)" = "ok" ]
+  # num_turns is the number that had to be dug out of session transcripts to
+  # size the limits at all; from now on it is in the record.
+  [ "$(tail -1 "$log" | jq -r .num_turns)" = "37" ]
+  [ "$(tail -1 "$log" | jq -r .subtype)" = "success" ]
+  message="$(jq -r .message <"${STUB_DIR}/curl_stdin")"
+  [[ "$message" == *"復旧"* ]]
+  # The headline still comes through, now read out of the JSON envelope.
+  [[ "$message" == *"昇華提案 2件"* ]]
+  [ "$(jq -r .priority <"${STUB_DIR}/curl_stdin")" = "3" ]
+}
+
+@test "main(): a missing run-history library degrades loudly, not silently" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-nolib"
+  mkfixture "$home"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+report="$(printf '%s' "$*" | grep -oE '[^ ]+\.kryota-dev/knowledge-distill/[^ ]+\.md' | head -1)"
+mkdir -p "$(dirname "$report")"
+printf '# report\n' >"$report"
+printf '%s\n' '{"session_id":"s","is_error":false,"subtype":"success","num_turns":12,"result":"HEADLINE: ok"}'
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home" KNOWLEDGE_DISTILL_RADAR_RUNLOG_LIB="${home}/absent-lib.sh"
+  # Losing the bookkeeping must not lose the report.
+  [ "$status" -eq 0 ]
+  [ -f "${home}/state/knowledge-distill-radar/last-run" ]
+  # But it must not pass for a normal week either: a record that is quietly
+  # absent is indistinguishable from a week that never ran, which is the exact
+  # failure this whole change exists to remove.
+  grep -qF 'run history unavailable' "${home}/radar.log"
+  [[ "$(jq -r .message <"${STUB_DIR}/curl_stdin")" == *"実行履歴を記録できませんでした"* ]]
+}
+
+@test "main(): a long gap since the last success is surfaced on the notification" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-stale"
+  mkfixture "$home"
+  mkdir -p "${home}/state/knowledge-distill-radar"
+  local now
+  now="$(date +%s)"
+  # Succeeded 35 days ago, has failed since: the shape #643 sat in unnoticed.
+  printf '%s\n' \
+    "{\"status\":\"ok\",\"period\":\"2026-W31\",\"ts_epoch\":$((now - 35 * 86400))}" \
+    "{\"status\":\"timeout\",\"period\":\"2026-W35\",\"ts_epoch\":$((now - 7 * 86400))}" \
+    >"$(runlog_of "$home")"
+  cat >"${home}/.local/launchers/claude" <<'EOF'
+#!/bin/bash
+echo "Error: Reached max turns (80)" >&2
+exit 1
+EOF
+  chmod +x "${home}/.local/launchers/claude"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  [[ "$(jq -r .message <"${STUB_DIR}/curl_stdin")" == *"最終成功から35日"* ]]
+}
+
+@test "main(): claude missing from PATH is recorded too" {
+  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
+  local home="${BATS_TEST_TMPDIR}/home-noclaude"
+  mkfixture "$home"
+  runmain "$home"
+  [ "$status" -eq 1 ]
+  [ "$(jq -r .status <"$(runlog_of "$home")")" = "no_claude" ]
 }
