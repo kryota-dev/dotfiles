@@ -86,7 +86,7 @@ user が採用トークンを明示選択する（`AskUserQuestion` 3 択: 全�
    - RE2 が拒否する構文（`\1`〜`\9`, `(?=`, `(?!`, `(?<=`, `(?<!`）を含むトークンがあれば fail し、どのトークンが原因か報告
 5. **Go RE2 での本物の syntax 検証**:
    ```bash
-   PROBE=$(mktemp -d)
+   PROBE=$(mktemp -d "${TMPDIR:-/tmp}/redact-probe.XXXXXX")
    trap 'rm -rf "$PROBE"' EXIT
    cat > "$PROBE/gitleaks.toml" <<EOF
    [extend]
@@ -158,7 +158,7 @@ subprocess.run(
    printf '%s' "<追加した名前>" \
      | gitleaks stdin --no-banner --config ~/.config/git/gitleaks-own.toml
    ```
-   `gitleaks stdin` サブコマンドが無い環境では、mktemp のテスト repo で `trap 'rm -rf "$T"' EXIT` を必ず付けた上で確認する
+   `gitleaks stdin` サブコマンドが無い環境では、`T=$(mktemp -d "${TMPDIR:-/tmp}/redact-e2e.XXXXXX")` で作ったテスト repo で `trap 'rm -rf "$T"' EXIT` を必ず付けた上で確認する
 
 ## 出力形式（最終レポート）
 
