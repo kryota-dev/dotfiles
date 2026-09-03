@@ -28,6 +28,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 - [CLV2 observer wiring](#clv2-observer-wiring)
 - [Scheduled morning radar](#scheduled-morning-radar)
 - [Improvement candidate queue](#improvement-candidate-queue)
+- [Auto memory revalidation](#auto-memory-revalidation)
 - [Review subagents](#review-subagents)
 - [r06 work account](#r06-work-account)
 - [Env vars reference](#env-vars-reference)
@@ -466,6 +467,38 @@ Issue kryota-dev/dotfiles#501 (sub-issue of #473): the ECC continuous-improvemen
 - **Provenance only.** A candidate carries `evidence_accounts` (which accounts the evidence came from) and nothing else about accounts; which account a change would affect is a planning decision made after adoption.
 
 The weekly evaluator that populates this queue (#506) and the end-of-task presentation path that reads it (#507) are separate changes. The queue works standalone: pipe a candidate into `agent-improvement upsert` and the whole adopt / defer / reject / promote cycle is exercisable without either.
+
+---
+
+## Auto memory revalidation
+
+Issue kryota-dev/dotfiles#631: [auto memory](https://code.claude.com/docs/en/memory#auto-memory) is written by Claude and read at the start of every session, but nothing ever checked whether entries written months ago are still true. A read-only audit found four rotten entries — two that had drifted from the code they described (a `make` target retired in a later PR, a CI cache path that had since been widened) and two that duplicated permanent rules already in `~/AGENTS.md`. A stale memory is worse than no memory: it makes Claude confidently recommend a command that no longer exists.
+
+`knowledge-distill` gained a **Phase 0.5** that revalidates the existing memory directory. It runs immediately after the Phase 0 health diagnostic and **before** the Phase 1 degraded exit, because the rot it looks for progresses independently of how many CLV2 instincts accumulated that week.
+
+| Piece | Path | Role |
+|---|---|---|
+| Checker | `home/dot_agents/skills/knowledge-distill/scripts/memory-revalidate.py` → `~/.agents/skills/knowledge-distill/scripts/` | Python 3 (stdlib only); the whole phase in one command |
+| Phase definition | `home/dot_agents/skills/knowledge-distill/SKILL.md` | Where the phase sits, how to read the output, what stays a proposal |
+| Weekly wiring | `home/dot_claude/executable_knowledge-distill-radar.sh` | Grants the script by full path in `--allowedTools` ([notifications](../architecture/notifications.md#weekly-knowledge-distill-delivery-368)) |
+| Fixture + tests | `tests/fixtures/knowledge-distill/memory-revalidate/`, `tests/knowledge_distill_memory_revalidate.bats` | Reproduces all four audited findings on a synthetic memory directory |
+
+**Six checks.** Two shapes of rot: a reference whose target moved or vanished, and an entry a permanent rule has since absorbed. The official guidance already says Claude "skips anything your CLAUDE.md files already say", so the second shape is that rule having broken after the fact.
+
+| id | What it looks at | Shape |
+|---|---|---|
+| `path-exists` | Repo-relative paths inside code spans still resolve | Moved target |
+| `make-target` | `make <target>` inside code spans still exists in the Makefile | Moved target |
+| `pr-reference` | `#N` / `<owner>/<repo>#N` resolves on GitHub | Moved target |
+| `staleness` | The referenced file's last commit is newer than the memory's own date | Moved target |
+| `rule-duplication` | A CLAUDE.md / AGENTS.md section already says the same thing | Absorbed rule |
+| `memory-index-size` | `MEMORY.md` fits the 200-line / 25 KB load limit | Index truncation |
+
+**"Could not check" is not "nothing wrong".** Every check reports `checked` / `findings` / `unchecked` / `reasons` separately, so "0 findings out of 0 candidates" and "0 findings out of 12" are different lines in the report rather than the same reassuring zero. `unchecked` holds candidates deliberately out of scope (absolute paths, brace expansions, bare filenames) with a reason each; `reasons` holds the check failing to run at all (`gh` missing, not a git repo, no rule files). The exit code keeps the two apart on separate bits: `0` clean, `1` findings, `2` inconclusive, `3` both, `64` usage error, `70` internal error. An unexpected exception inside a check is mapped to `inconclusive` rather than swallowed, so a broken check can never present itself as a clean one.
+
+**The detector does not use the searches that go silent.** `rg` used recursively and `grep -rI` skip both gitignored files and files containing raw NUL bytes without printing anything, which would let the duplication check quietly return zero. The memory directory is enumerated with `os.scandir`, rule files are read by explicit path, and a file containing a NUL byte makes the checks that touch it `inconclusive` instead of invisible. Only `git` and `gh` are ever executed, always as argument lists — never through a shell — and memory-derived values are validated before they reach either.
+
+**Read-only, proposals only.** The checker never writes into the memory directory (a test compares the directory byte-for-byte across a run), and findings are reported without quoting memory prose — file name, line, the reference found, and the reason, nothing else. Editing or deleting a memory stays a user decision, the same rule the skill applies to its other promotion proposals. Semantic questions — whether a learning is still relevant, whether a stated condition has been met — are deliberately left to a human.
 
 ---
 

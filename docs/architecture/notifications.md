@@ -183,10 +183,17 @@ topic (no dedicated topic was added).
 - **Permissions**: headless `--allowedTools` is confined to
   `Skill(knowledge-distill)`, read-only Bash prefixes matching the skill's own
   Phase 0/2 diagnostics (`ls`/`cat`/`date`/`jq`/`grep`/`find`/`head`/`tail`/
-  `wc`/`ghq list`/the `instinct-cli.py evolve` invocation), and
-  `Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)`. Proposal application
-  remains manual — neither the wrapper nor the skill ever applies its own
-  promotions.
+  `wc`/`ghq list`/the `instinct-cli.py evolve` invocation), the Phase 0.5
+  `memory-revalidate.py` invocation (#631 — granted by full path, not by
+  widening the entry to a bare `python3` prefix, and read-only in the same
+  sense as the diagnostics: it never writes into the auto memory directory),
+  and `Edit(~/dotfiles/.kryota-dev/knowledge-distill/**)`. A command absent
+  from this list is denied silently, so a phase written into SKILL.md but
+  missing here would be indistinguishable from a phase that does not exist
+  (the failure #491 was). Proposal application remains manual — neither the
+  wrapper nor the skill ever applies its own promotions, and that now includes
+  the memory findings Phase 0.5 reports (see
+  [auto memory revalidation](../agents/claude-code.md#auto-memory-revalidation)).
 - **Notification**: on success, `claude-attention` receives the `HEADLINE` at
   priority 3 (default), prefixed with `[縮退]` and the instinct count when the
   precheck found a dry pipeline. Error paths (claude missing / timeout /
