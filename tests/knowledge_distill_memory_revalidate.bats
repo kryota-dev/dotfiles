@@ -117,14 +117,90 @@ EOF
 
 @test "乖離 2: memory より後に変更された参照先を staleness の finding として報告する" {
   revalidate --github off
-  local c
+  local c f
   c="$(check_json staleness)"
   [ "$(jq -r .status <<<"$c")" = "finding" ]
   [ "$(jq -r '[.findings[] | select(.subject == ".github/workflows/setup-validation.yml")] | length' <<<"$c")" -eq 1 ]
+  # 同じ 1 件の finding に対して、由来（どの memory の何行目か）と両方の日付を固定する。
+  # 「どこかで staleness が出た」だけだと、別の memory / 別の参照が偶然 stale になっても通る。
+  f="$(jq -c '[.findings[] | select(.subject == ".github/workflows/setup-validation.yml")][0]' <<<"$c")"
+  [ "$(jq -r '.memory_file' <<<"$f")" = "MEMORY.md" ]
+  [ "$(jq -r '.line' <<<"$f")" -gt 0 ]
+  [[ "$(jq -r '.reason' <<<"$f")" == *"2026-08-30"* ]]   # 参照先の最終コミット日（setup で固定）
+  [[ "$(jq -r '.reason' <<<"$f")" == *"2026-06-21"* ]]   # memory 側の modified
   # 日付の出所を必ず併記する（mtime 由来か frontmatter 由来かで証拠の強さが違う）。
-  [[ "$(jq -r '.findings[0].reason' <<<"$c")" == *"frontmatter-modified"* ]]
+  [[ "$(jq -r '.reason' <<<"$f")" == *"frontmatter-modified"* ]]
   # memory より前のコミットしか無いファイルは finding にしない。
   [ "$(jq -r '[.findings[] | select(.subject | contains("lint-pins"))] | length' <<<"$c")" -eq 0 ]
+}
+
+@test "staleness: memory の日付が mtime 由来のときもその出所を明示して判定する" {
+  # 実在する memory は `modified` frontmatter を持たない世代のものがあり、その場合の経路は
+  # mtime フォールバックになる。fixture は再現を mtime に依存させないため全件 `modified` を
+  # 持たせてあるので、フォールバック自体はここで独立に固定する。
+  local note="${WS}/memory/mtime-only.md"
+  cat >"$note" <<'EOF'
+# frontmatter を持たない memory
+
+CI の定義は `.github/workflows/setup-validation.yml` にある。
+EOF
+  # 参照先の最終コミット（2026-08-30）より前に memory が書かれた状態を作る。
+  python3 -c 'import os,sys; t=1767000000; os.utime(sys.argv[1], (t, t))' "$note"
+  revalidate --github off
+  local f
+  f="$(jq -c '[.checks[] | select(.id == "staleness")][0].findings[]
+        | select(.memory_file == "mtime-only.md")' <<<"$output")"
+  [ -n "$f" ]
+  [ "$(jq -r '.subject' <<<"$f")" = ".github/workflows/setup-validation.yml" ]
+  [[ "$(jq -r '.reason' <<<"$f")" == *"mtime"* ]]
+  [ "$(jq -r '[.memory_files[] | select(.name == "mtime-only.md")][0].modified_source' <<<"$output")" = "mtime" ]
+
+  # 逆向き: 参照先の最終コミットより後の mtime なら finding にしない。
+  python3 -c 'import os,sys; t=1798000000; os.utime(sys.argv[1], (t, t))' "$note"
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "staleness")][0].findings
+        | map(select(.memory_file == "mtime-only.md")) | length' <<<"$output")" -eq 0 ]
+}
+
+@test "staleness: 日付の解釈をホストの timezone に依存させない" {
+  # offset を持たない `modified:` をローカル時刻として解釈すると、同じ memory と同じ git 履歴でも
+  # 実行マシンの TZ で判定が変わる。UTC 固定であることを、TZ を振って同じ結果になることで固定する。
+  local note="${WS}/memory/naive-date.md"
+  cat >"$note" <<'EOF'
+---
+name: naive-date
+modified: 2026-08-30T00:00:01
+---
+
+CI の定義は `.github/workflows/setup-validation.yml` にある。
+EOF
+  local a b
+  a="$(TZ=UTC python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github off |
+    jq -c '[.checks[] | select(.id == "staleness")][0].findings | map(select(.memory_file == "naive-date.md"))')"
+  b="$(TZ=Pacific/Kiritimati python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github off |
+    jq -c '[.checks[] | select(.id == "staleness")][0].findings | map(select(.memory_file == "naive-date.md"))')"
+  [ "$a" = "$b" ]
+  # UTC と決めた解釈であることを出所に残す（証拠の強さが読み手に伝わるように）。
+  revalidate --github off
+  [ "$(jq -r '[.memory_files[] | select(.name == "naive-date.md")][0].modified_source' <<<"$output")" = "frontmatter-modified(naive-utc)" ]
+}
+
+@test "staleness: modified が壊れているときは mtime へ無言で落とさない" {
+  local note="${WS}/memory/bad-modified.md"
+  cat >"$note" <<'EOF'
+---
+name: bad-modified
+modified: いつだったか忘れた
+---
+
+CI の定義は `.github/workflows/setup-validation.yml` にある。
+EOF
+  revalidate --github off
+  # 「modified が無い」と「modified があるのに読めない」は別の事実。後者を隠すと、
+  # 壊れた監査対象データが弱い根拠（mtime）にすり替わったまま気づけない。
+  [[ "$(jq -r '[.memory_files[] | select(.name == "bad-modified.md")][0].modified_source' <<<"$output")" == "frontmatter-modified(unparsable)"* ]]
 }
 
 @test "重複 2 件: 恒久ルールが同じことを書いている topic file を報告する" {
@@ -270,6 +346,41 @@ EOF
   [ "$(jq -r '[.memory_files[] | select(.name == "nul-note.md")][0].error' <<<"$output")" = "nul-bytes" ]
 }
 
+@test "ルールファイル側の NUL / デコード失敗も inconclusive にする（memory 側と対称）" {
+  # 無言スキップ経路は memory 側だけの話ではない。読めないルールファイルを黙って
+  # 対象から外すと、重複検出は「照合したが 0 件」と見分けが付かなくなる。
+  printf -- '# rule\n\nNUL\000 bytes in a rule file\n' >"${WS}/rules/AGENTS.fixture.md"
+  revalidate --github off
+  local c
+  c="$(check_json rule-duplication)"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [ "$(jq -r '[.reasons[] | select(contains("nul-bytes"))] | length' <<<"$c")" -ge 1 ]
+  [ "$(jq -r '[.reasons[] | select(contains("AGENTS.fixture.md"))] | length' <<<"$c")" -ge 1 ]
+  # 読めなかったルールファイルに由来する finding を出してはならない。
+  [ "$(jq -r '[.findings[] | select(.subject | contains("レビュー指摘の検証"))] | length' <<<"$c")" -eq 0 ]
+
+  printf -- '# rule\n\n\xff\xfe not utf-8\n' >"${WS}/rules/AGENTS.fixture.md"
+  revalidate --github off
+  c="$(check_json rule-duplication)"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [ "$(jq -r '[.reasons[] | select(contains("decode-error"))] | length' <<<"$c")" -ge 1 ]
+}
+
+@test "memory ディレクトリ内の symlink は追わず、読めない理由として記録する" {
+  # memory ディレクトリへ書ける者が `*.md` という名前のリンクを置けば、ディレクトリ外の
+  # 任意ファイルを「memory」として読ませ、抽出結果をレポートへ載せられる。
+  printf 'secret-looking content `home/nope.md`\n' >"${BATS_TEST_TMPDIR}/outside.md"
+  ln -s "${BATS_TEST_TMPDIR}/outside.md" "${WS}/memory/linked.md"
+  revalidate --github off
+  [ "$(jq -r '[.memory_files[] | select(.name == "linked.md")][0].error' <<<"$output")" = "symlink" ]
+  # リンク先の中身を走査していない = そこにある参照を finding にしていない。
+  [ "$(jq -r '[.checks[] | select(.id == "path-exists")][0].findings
+        | map(select(.subject | contains("nope"))) | length' <<<"$output")" -eq 0 ]
+  # 黙って飛ばしてもいない（読めなかった理由として実行不能に上がる）。
+  [ "$(jq -r '[.checks[] | select(.id == "path-exists")][0].reasons
+        | map(select(contains("symlink"))) | length' <<<"$output")" -ge 1 ]
+}
+
 @test "UTF-8 としてデコードできない memory も inconclusive になる" {
   printf -- '---\nname: bad\n---\n\n\xff\xfe not utf-8\n' >"${WS}/memory/bad-encoding.md"
   revalidate --github off
@@ -308,6 +419,59 @@ EOF
   [ "$bytes" -gt 25000 ]
   revalidate --github off
   [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].status' <<<"$output")" = "finding" ]
+}
+
+@test "MEMORY.md の閾値はちょうどの値では finding にせず、1 超えたら finding にする" {
+  # 「超過」だけを見ていると、境界がどちら側にあるのかが契約として固定されない。
+  # 公式仕様は「先頭 200 行 / 25KB までが読み込まれる」なので、ちょうどは収まっている。
+  write_index_lines() {
+    # 警告帯にも入らない小さな本文で、指定の行数ちょうどのファイルを作る。
+    python3 - "$1" "${WS}/memory/MEMORY.md" <<'PY'
+import sys
+n = int(sys.argv[1])
+head = "---\nname: MEMORY\nmodified: 2026-08-31T09:00:00+09:00\n---\n"
+body = "".join("- e\n" for _ in range(n - head.count("\n")))
+open(sys.argv[2], "w", encoding="utf-8").write(head + body)
+PY
+  }
+  write_index_lines 200
+  [ "$(wc -l <"${WS}/memory/MEMORY.md")" -eq 200 ]
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].findings
+        | map(select(.reason | contains("超過"))) | length' <<<"$output")" -eq 0 ]
+
+  write_index_lines 201
+  [ "$(wc -l <"${WS}/memory/MEMORY.md")" -eq 201 ]
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].findings
+        | map(select(.reason | contains("超過"))) | length' <<<"$output")" -eq 1 ]
+}
+
+@test "MEMORY.md のバイト境界も 25000 ちょうどは通し、25001 で finding にする" {
+  write_index_bytes() {
+    python3 - "$1" "${WS}/memory/MEMORY.md" <<'PY'
+import sys
+target = int(sys.argv[1])
+head = "---\nname: MEMORY\nmodified: 2026-08-31T09:00:00+09:00\n---\n"
+# 行数は上限内に収めたまま、バイト数だけを狙った値にする。
+line = "- " + "x" * 497 + "\n"
+body = line * ((target - len(head)) // len(line))
+body += "y" * (target - len(head) - len(body))
+open(sys.argv[2], "w", encoding="utf-8").write(head + body)
+PY
+  }
+  write_index_bytes 25000
+  [ "$(wc -c <"${WS}/memory/MEMORY.md" | tr -d ' ')" -eq 25000 ]
+  [ "$(wc -l <"${WS}/memory/MEMORY.md")" -le 200 ]
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].findings
+        | map(select(.reason | contains("超過"))) | length' <<<"$output")" -eq 0 ]
+
+  write_index_bytes 25001
+  [ "$(wc -c <"${WS}/memory/MEMORY.md" | tr -d ' ')" -eq 25001 ]
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].findings
+        | map(select(.reason | contains("超過"))) | length' <<<"$output")" -eq 1 ]
 }
 
 @test "MEMORY.md が上限の 90% に達したら接近を finding として知らせる" {
@@ -391,13 +555,66 @@ EOF
 # --- 読み取り専用 -----------------------------------------------------------
 
 @test "memory ディレクトリへ書き込まない" {
+  # ハッシュは python3（CI で明示インストール済み）で取る。`shasum` は Ubuntu では
+  # ランナーイメージ同梱の perl に依存しており、宣言していない依存になる。
+  digest_tree() {
+    python3 - "$1" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+for path in sorted(root.rglob("*")):
+    if path.is_file():
+        print(path.relative_to(root), hashlib.sha256(path.read_bytes()).hexdigest())
+PY
+  }
   local before after
-  before="$(cd "${WS}/memory" && find . -type f -exec shasum {} + | sort)"
+  before="$(digest_tree "${WS}/memory")"
   revalidate --github off
-  after="$(cd "${WS}/memory" && find . -type f -exec shasum {} + | sort)"
+  after="$(digest_tree "${WS}/memory")"
   [ "$before" = "$after" ]
   # 新規ファイル（一時ファイル・キャッシュ等）も作らせない。
   [ "$(find "${WS}/memory" -mindepth 1 | wc -l | tr -d ' ')" -eq 4 ]
+}
+
+@test "--memory-dir 省略時はリポジトリから既定の memory ディレクトリを導出する" {
+  # 既定導出が壊れても、常に --memory-dir を渡す suite では気づけない。
+  local slug config
+  # スクリプトは --repo を resolve() してから slug 化する（macOS では /tmp が
+  # /private/tmp へ解決される）。テスト側も同じ解決を経てから綴りを組み立てる。
+  slug="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]).replace("/", "-").replace(".", "-"))' "${WS}/repo")"
+  config="${BATS_TEST_TMPDIR}/config"
+  mkdir -p "${config}/projects/${slug}"
+  cp -R "${WS}/memory" "${config}/projects/${slug}/memory"
+  run python3 "$SCRIPT" --repo "${WS}/repo" --config-dir "$config" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github off
+  [ "$(jq -r '.memory_dir' <<<"$output")" = "${config}/projects/${slug}/memory" ]
+  [ "$(jq -r '.memory_file_count' <<<"$output")" -eq 4 ]
+  # 導出先が存在しなければ「問題なし」ではなく inconclusive に倒れる。
+  run python3 "$SCRIPT" --repo "${WS}/repo" --config-dir "${BATS_TEST_TMPDIR}/no-config" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github off
+  [ "$status" -eq 2 ]
+}
+
+@test "PR 照会は 1 実行あたりの上限で打ち切り、超過分を unchecked として列挙する" {
+  local stub="${BATS_TEST_TMPDIR}/stub-many"
+  mkdir -p "$stub"
+  printf '%s\n' '#!/bin/bash' 'exit 0' >"${stub}/gh"
+  chmod +x "${stub}/gh"
+  (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
+  # 上限（50）を超える一意な参照を 1 ファイルに並べる。
+  {
+    printf -- '---\nname: many-refs\nmodified: 2026-08-31T09:00:00+09:00\n---\n\n'
+    for i in $(seq 1000 1069); do printf -- '- ref #%s\n' "$i"; done
+  } >"${WS}/memory/many-refs.md"
+  run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github auto
+  local c
+  c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
+  [ "$(jq -r '.checked' <<<"$c")" -le 50 ]
+  [ "$(jq -r '[.unchecked[] | select(.reason | contains("照会上限"))] | length' <<<"$c")" -ge 1 ]
 }
 
 # --- 報告 -------------------------------------------------------------------
@@ -471,6 +688,64 @@ EOF
     printf '%s\n' "$offenders"
     false
   }
+}
+
+@test "閾値とチェック一覧の散文ミラーが、スクリプトの実体と一致する" {
+  # 同じ事実（200 行 / 25KB / 6 チェック）が、スクリプトの定数・SKILL.md・docs(EN/JA)・PRD の
+  # 複数箇所に手書きで現れている。このリポジトリは「同じものを 2 箇所に置くなら機械で比較する」
+  # 流儀を既に持つ（tests/knowledge_distill_radar.bats の instinct-count marker、
+  # tests/docs_facts.bats の FACT マーカー）ので、散文だけが取り残される drift をここで止める。
+  local lines bytes
+  lines="$(grep -oE '^MEMORY_INDEX_MAX_LINES = [0-9_]+' "$SCRIPT" | grep -oE '[0-9_]+$' | tr -d '_')"
+  bytes="$(grep -oE '^MEMORY_INDEX_MAX_BYTES = [0-9_]+' "$SCRIPT" | grep -oE '[0-9_]+$' | tr -d '_')"
+  [ -n "$lines" ] && [ -n "$bytes" ]
+  # 散文は「200 行 / 25KB」という単位付きの表記なので、KB 側は 1000 で割った値と突き合わせる。
+  local kb=$((bytes / 1000))
+  [ "$((kb * 1000))" -eq "$bytes" ] || {
+    echo "MEMORY_INDEX_MAX_BYTES=${bytes} は KB 表記に丸められない。散文側の書式を見直すこと"
+    false
+  }
+
+  local doc
+  for doc in "${HOME_DIR}/dot_agents/skills/knowledge-distill/SKILL.md" \
+    "${DOCS_DIR}/agents/claude-code.md" "${DOCS_DIR}/agents/claude-code.ja.md"; do
+    [ -f "$doc" ]
+    # EN は `200-line`、JA は `200 行`。区切りの揺れは許し、数値と単位の対応だけを固定する。
+    grep -qE "${lines}[ -]?(行|line)" "$doc" || {
+      echo "${doc##*/} が MEMORY_INDEX_MAX_LINES=${lines} を散文に書いていない"
+      false
+    }
+    grep -qE "${kb} ?KB" "$doc" || {
+      echo "${doc##*/} が MEMORY_INDEX_MAX_BYTES=${bytes}（${kb}KB）を散文に書いていない"
+      false
+    }
+  done
+
+  # 6 チェックの id が、スクリプトの CHECK_IDS と各表で一致すること（増減の取り残しを防ぐ）。
+  local ids id
+  ids="$(python3 -c '
+import ast, sys
+tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())
+for node in tree.body:
+    if isinstance(node, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id == "CHECK_IDS" for t in node.targets
+    ):
+        print(" ".join(e.value for e in node.value.elts))
+        break
+' "$SCRIPT")"
+  [ -n "$ids" ]
+  [ "$(wc -w <<<"$ids" | tr -d ' ')" -eq 6 ]
+  for doc in "${HOME_DIR}/dot_agents/skills/knowledge-distill/SKILL.md" \
+    "${DOCS_DIR}/agents/claude-code.md" "${DOCS_DIR}/agents/claude-code.ja.md" \
+    "${REPO_ROOT}/.claude/prds/631-knowledge-distill-memory-revalidation.prd.md"; do
+    [ -f "$doc" ]
+    for id in $ids; do
+      grep -qF "$id" "$doc" || {
+        echo "${doc##*/} にチェック id '${id}' が現れていない"
+        false
+      }
+    done
+  done
 }
 
 @test "外部コマンドを shell 経由で起動しない" {

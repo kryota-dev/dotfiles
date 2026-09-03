@@ -108,6 +108,12 @@ run_fn() {
   grep -qF 'scripts/memory-revalidate.py' "${skill_dir}/SKILL.md"
   # The headless prompt has to name the phase, or claude has no reason to run it.
   grep -qF 'Phase 0.5' "$WRAPPER"
+  # `Bash(<full path>:*)` constrains the command NAME only -- everything after it is
+  # unvalidated. --memory-dir / --repo / --rules / --config-dir all take arbitrary paths,
+  # so a prompt injection carried in an instinct or a session summary could widen what the
+  # weekly run reads, and the allowlist would not object. The prompt has to pin the
+  # argument list and say so.
+  grep -qF -- '--memory-dir / --repo / --rules / --config-dir は付けないでください' "$WRAPPER"
 }
 
 @test "token hygiene: no -H/--header Authorization, no set -x, token via -K" {
