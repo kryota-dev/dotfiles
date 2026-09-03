@@ -13,7 +13,7 @@ java = "temurin-25.0.4+101.0.LTS"
 # CLI tools (auto-selected via registry)
 act = "0.2.89"
 actionlint = "1.7.12"
-aws-cli = "2.36.37"
+aws-cli = "2.36.38"
 bats = "1.14.0"
 bun = "1.4.0"
 chezmoi = "2.72.1"
