@@ -198,11 +198,19 @@ EOF
 }
 
 @test "gh が PATH に無ければ inconclusive（--github=on ならその旨も残す）" {
-  local empty="${BATS_TEST_TMPDIR}/empty-bin"
-  mkdir -p "$empty"
-  # git / python3 は必要なので、gh だけを外した PATH を作れない環境では意味がないが、
-  # ここでは `command -v gh` が失敗する PATH をスクリプトに与えられれば十分。
-  run env PATH="${empty}:/usr/bin:/bin" python3 "$SCRIPT" \
+  # gh だけが引けない PATH を、必要な実行ファイルの symlink だけを置いた
+  # ディレクトリとして組み立てる。`/usr/bin:/bin` を足す形は使えない ——
+  # GitHub Actions の Ubuntu ランナーは gh を /usr/bin/gh に同梱しているため、
+  # gh が見つかってしまい、別の理由（remote 未解決）で inconclusive になる。
+  # 手元の macOS では gh が /usr/bin に無いので、この差は CI でしか露見しなかった。
+  local fakebin real_python
+  fakebin="${BATS_TEST_TMPDIR}/fakebin"
+  mkdir -p "$fakebin"
+  # git は残す（外すと staleness の理由が増え、何を検証しているのかが曖昧になる）。
+  ln -sf "$(command -v git)" "${fakebin}/git"
+  # python3 は shim ではなく実体を絶対パスで起動する。PATH に依存させない。
+  real_python="$(python3 -c 'import sys; print(sys.executable)')"
+  run env PATH="$fakebin" "$real_python" "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
     --rules "${WS}/rules/AGENTS.fixture.md" --format json --github on
   [ "$status" -eq 3 ]
