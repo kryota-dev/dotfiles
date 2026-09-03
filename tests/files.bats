@@ -174,6 +174,34 @@ load helpers/setup
   [ -f "${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh" ]
 }
 
+@test "scheduled-job run log is a sourced library, deployed 0644 (#643)" {
+  local lib="${HOME_DIR}/dot_claude/job-runlog.sh"
+  [ -f "$lib" ]
+  # chezmoi's executable_ prefix is what deploys 0755. This file is sourced, so
+  # carrying it would be wrong -- same posture as home/dot_config/ntfy/lib.sh.tmpl.
+  [ ! -f "${HOME_DIR}/dot_claude/executable_job-runlog.sh" ]
+  # Job-agnostic on purpose: callers pass their own history file, so a second
+  # scheduled job (or the #644 staleness work) wires in without this file
+  # learning any labels. Checked against code lines only -- the header comment
+  # names those jobs precisely to explain why none of them appear below it.
+  run bash -c "grep -vE '^[[:space:]]*#' \"\$1\" | grep -qE 'knowledge-distill|morning-radar|macos-defaults'" _ "$lib"
+  [ "$status" -ne 0 ]
+}
+
+@test "knowledge-distill radar sources the run-log library instead of copying it (#643)" {
+  local wrapper="${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh"
+  # Same SSOT posture the ntfy library established: one implementation, sourced
+  # by every caller, so two callers cannot drift apart.
+  grep -qF '.claude/job-runlog.sh' "$wrapper"
+  grep -qE '^[[:space:]]*\.[[:space:]]+"\$RUNLOG_LIB"' "$wrapper"
+  # The reader/writer bodies must live in the library, not be re-declared here.
+  for fn in job_runlog_record job_runlog_repeat_periods job_runlog_stale_days; do
+    run grep -qF "${fn}()" "$wrapper"
+    [ "$status" -ne 0 ]
+    grep -qF "${fn}()" "${HOME_DIR}/dot_claude/job-runlog.sh"
+  done
+}
+
 @test "knowledge-distill plist schedules Friday only and never runs at load" {
   local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
   # RunAtLoad must stay absent so (re-)registration never triggers a billed run.
