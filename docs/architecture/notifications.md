@@ -194,6 +194,21 @@ topic (no dedicated topic was added).
   wrapper nor the skill ever applies its own promotions, and that now includes
   the memory findings Phase 0.5 reports (see
   [auto memory revalidation](../agents/claude-code.md#auto-memory-revalidation)).
+
+  What the allowlist does and does not constrain, per the
+  [permission rules](https://code.claude.com/docs/en/permissions#compound-commands):
+  a compound command cannot slip past a prefix rule, because "Claude Code is
+  aware of shell operators … The recognized command separators are `&&`, `||`,
+  `;`, `|`, `|&`, `&`, and newlines. A rule must match each subcommand
+  independently" (an unparseable compound, such as a trailing `&&`, isn't split
+  and isn't approved — it fails closed). What a rule does *not* constrain is
+  everything after the matched prefix: `Bash(<path>:*)` grants "this program,
+  any arguments". `memory-revalidate.py` takes `--memory-dir` / `--repo` /
+  `--rules` / `--config-dir`, all of which accept arbitrary paths, so the
+  headless prompt pins the argument list and says not to add them — a prompt
+  injection carried in an instinct or a memory could otherwise widen what the
+  weekly run reads without the allowlist objecting.
+  `tests/knowledge_distill_radar.bats` asserts the prompt still says so.
 - **Notification**: on success, `claude-attention` receives the `HEADLINE` at
   priority 3 (default), prefixed with `[縮退]` and the instinct count when the
   precheck found a dry pipeline. Error paths (claude missing / timeout /

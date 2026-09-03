@@ -170,6 +170,18 @@ LaunchAgent（金曜 18:00 ローカル時刻）が現在これを headless で�
   存在しないフェーズと区別が付きません（#491 がその故障でした）。昇華提案の適用は
   引き続き手動です —— wrapper も skill も自身の昇華提案を自動適用することはなく、それは
   Phase 0.5 が報告する memory の finding にも同じく当てはまります（[auto-memory の再検証](../agents/claude-code.ja.md#auto-memory-の再検証)）。
+
+  許可リストが**縛るもの**と**縛らないもの**（[permission rules](https://code.claude.com/docs/en/permissions#compound-commands) より）:
+  複合コマンドが prefix ルールをすり抜けることはありません ——「Claude Code is aware of
+  shell operators … The recognized command separators are `&&`, `||`, `;`, `|`, `|&`, `&`,
+  and newlines. A rule must match each subcommand independently」（末尾 `&&` のように
+  パースできない複合は分割されず承認もされない = fail closed）。**縛らないのは、
+  マッチした prefix より後ろのすべて**です。`Bash(<path>:*)` が許すのは「このプログラムを、
+  任意の引数で」であり、`memory-revalidate.py` の `--memory-dir` / `--repo` / `--rules` /
+  `--config-dir` はいずれも任意のパスを取ります。そのため headless プロンプト側で引数を固定し、
+  「付けないこと」を明示しています —— instinct や memory に混入した指示に従って引数を足されると、
+  週次実行が読む範囲が広がっても許可リストは拒否しないからです。プロンプトがその指示を
+  保っていることは `tests/knowledge_distill_radar.bats` が assert します。
 - **通知**: 成功時、`claude-attention` は priority 3（default）で `HEADLINE` を受け取り、
   precheck が dry pipeline と判定した場合は `[縮退]` と instinct 数のプレフィックスが
   付きます。エラー経路（claude 不在 / timeout / 非 0 exit / レポートファイル欠損）は

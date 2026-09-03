@@ -690,6 +690,29 @@ PY
   }
 }
 
+@test "staleness は 1 実行あたりの git log 照会上限で打ち切り、超過分を unchecked に列挙する" {
+  # 上限（200）を超える一意な参照先を作る。上限が消えたり緩んだりすると、memory が
+  # 大量のパスに触れている週に git 起動が青天井になる。
+  local i
+  mkdir -p "${WS}/repo/many"
+  for i in $(seq 1 210); do printf 'x\n' >"${WS}/repo/many/f${i}.txt"; done
+  (
+    cd "${WS}/repo" || exit 1
+    _git add -A
+    GIT_AUTHOR_DATE="$BASE_COMMIT_DATE" GIT_COMMITTER_DATE="$BASE_COMMIT_DATE" \
+      _git commit -q -m many
+  ) >/dev/null
+  {
+    printf -- '---\nname: many-paths\nmodified: 2026-08-31T09:00:00+09:00\n---\n\n'
+    for i in $(seq 1 210); do printf -- '- `many/f%s.txt`\n' "$i"; done
+  } >"${WS}/memory/many-paths.md"
+  revalidate --github off
+  local c
+  c="$(check_json staleness)"
+  [ "$(jq -r '.checked' <<<"$c")" -le 200 ]
+  [ "$(jq -r '[.unchecked[] | select(.reason | contains("照会上限"))] | length' <<<"$c")" -ge 1 ]
+}
+
 @test "閾値とチェック一覧の散文ミラーが、スクリプトの実体と一致する" {
   # 同じ事実（200 行 / 25KB / 6 チェック）が、スクリプトの定数・SKILL.md・docs(EN/JA)・PRD の
   # 複数箇所に手書きで現れている。このリポジトリは「同じものを 2 箇所に置くなら機械で比較する」
