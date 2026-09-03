@@ -11,15 +11,21 @@
   ],
   rebaseWhen: 'conflicted',
   automergeType: 'pr',
-  minor: {
-    automerge: false,
-  },
-  patch: {
-    automerge: true,
-  },
-  pin: {
-    automerge: true,
-  },
+  // Every update type is an automerge candidate. Whether a given PR actually
+  // merges is decided by the `renovate-gate` required status check
+  // (.github/workflows/renovate-gate.yml), never by this file.
+  //
+  // The per-updateType lanes that used to live here (minor off, patch/pin on)
+  // plus four packageRules pinning automerge off for the risky dependencies were
+  // a second, weaker copy of that judgement. Weaker because the only signal
+  // available in config is updateType, and updateType is precisely the signal
+  // that fails for the dependencies that most need judgement: a digest bump of a
+  // skill archive is a one-line diff tracking a moving `main` with no upstream
+  // release step, and config cannot tell that apart from a tagged patch release.
+  // The gate reads the actual update instead.
+  automerge: true,
+  // Keep waiting for the branch to go green. The gate is one of the required
+  // checks, so this is what makes Renovate hold until the whole set passes.
   ignoreTests: false,
   customManagers: [
     {
@@ -80,7 +86,9 @@
     {
       // ECC ships executable hook code, so it is pinned to an immutable commit digest (not a
       // moveable tag). github-tags tracks release tags and updates both the version and the
-      // commit digest in [ecc]; the packageRule below keeps ECC out of automerge.
+      // commit digest in [ecc]. ECC ships third-party hook code that runs in every session,
+      // so it never reaches the deterministic fast lane: renovate-gate classifies a digest
+      // bump as needing agent review regardless of how small the diff is.
       customType: 'regex',
       managerFilePatterns: [
         '/home/\\.chezmoidata\\.toml$/',
@@ -175,39 +183,4 @@
       '/home/dot_config/mise/config\\.toml/',
     ],
   },
-  packageRules: [
-    {
-      // ECC ships third-party executable hook code: never auto-merge, always review.
-      matchDepNames: ['affaan-m/ECC'],
-      automerge: false,
-    },
-    {
-      // Third-party skills (drawio, supabase archives; eli5 single-file external).
-      // Content is markdown-only today (no shell/JS/Python payload), so supply-chain
-      // risk is limited to prompt-injected instructions — but the digest datasource
-      // means Renovate produces `digest` PRs whose automerge behaviour is otherwise
-      // inherited implicitly. Pin it explicitly to `false` so a compromised upstream
-      // cannot ride the pin-automerge lane.
-      matchDepNames: ['jgraph/drawio-mcp', 'supabase/agent-skills', 'anthropics/claude-plugins-community'],
-      automerge: false,
-    },
-    {
-      // claude-code-action runs an AI agent with Bash + a long-lived OAuth token in the
-      // renovate-triage workflow: the largest blast radius in the repo. It tracks the
-      // moving `v1` tag pinned to a digest, so a `digest` PR would otherwise inherit the
-      // pin-automerge lane. Force manual review of every bump so a compromised upstream
-      // cannot ride automerge into a run that holds secrets.
-      matchDepNames: ['anthropics/claude-code-action'],
-      automerge: false,
-    },
-    {
-      // phone-harness, both pins. Unlike the markdown-only skill archives above,
-      // this one ships executable Python that captures the screen and synthesises
-      // HID-level input on a real, unlocked phone — and its SKILL.md is what
-      // steers an agent into doing so. A patch bump would otherwise ride the
-      // patch/pin automerge lane straight onto a device holding real accounts.
-      matchDepNames: ['phone-harness', 'ShawnPana/phone-harness'],
-      automerge: false,
-    },
-  ],
 }
