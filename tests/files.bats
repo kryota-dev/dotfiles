@@ -1467,12 +1467,15 @@ SHIMEOF
   [ -f "$s" ]
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   # The model pin is covered by docs_facts (it is cross-checked against the FACT marker),
-  # but effortLevel has no doc counterpart — without this it could vanish unnoticed and
-  # every session would silently drop to the default effort.
+  # but effortLevel carries no FACT marker — without this it could vanish unnoticed and
+  # every session would silently drop to the API default (high).
+  # #629 lowered this from xhigh to medium: the session default and the §4 floor are
+  # independent, so this value is an operating preference, not the contract. Raising it back
+  # is a user decision, but it must not drift away silently in either direction.
   local effort
   effort="$(jq -r '.effortLevel' "$s")"
-  [ "$effort" = "xhigh" ] || {
-    echo "settings.json .effortLevel is '${effort}' but the declared session default is xhigh"
+  [ "$effort" = "medium" ] || {
+    echo "settings.json .effortLevel is '${effort}' but the declared session default is medium"
     false
   }
 }

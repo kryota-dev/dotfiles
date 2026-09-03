@@ -58,7 +58,7 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | Setting | Value | Notes |
 |---|---|---|
 | `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | Pinned model with 1 M context (kept in sync with `home/dot_claude/settings.json`) |
-| `effortLevel` | `xhigh` | Persisted reasoning effort; `/effort` overrides it for one session |
+| `effortLevel` | `medium` | Persisted reasoning effort; `/effort` overrides it for one session. Independent of the §4 floor: on work whose floor row asks for more, `model-fitness-check` stops and offers to raise it |
 | `language` | `Japanese` | All conversational output in Japanese |
 | `alwaysThinkingEnabled` | `false` | Extended thinking opt-in is per-task |
 | `cleanupPeriodDays` | `20` | Auto-prune sessions older than 20 days |

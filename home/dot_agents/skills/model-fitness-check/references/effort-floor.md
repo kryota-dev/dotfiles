@@ -241,15 +241,39 @@ blocking の希少性が支えているので、これは gate 自身を蝕む�
 **floor を「安全側だから高めに」と置くのは、この意味で安全側ではない。** 受け皿の有無で決める（前述の
 構造的な非対称）ほうが、gate の信頼性を保てる。
 
+## session 既定（`effortLevel`）と floor の関係
+
+**session 既定と floor は独立である。** floor は「その作業を担うのに最低限どの水準が要るか」で、
+session 既定は「指定が無いときそのセッションが何で走るか」。**片方を動かしても他方は動かない。**
+
+`home/dot_claude/settings.json` の `effortLevel` は当初 `xhigh` のまま据え置いたが、**2026-09-03 に
+運用上の判断で `medium` へ変更した**（PRD 330 AC-014 で 2026-07-25 に採用した値の上書き。PRD は当時の
+決定の履歴なので書き換えず、上書きの事実をここと PR に記録する）。
+
+**この変更で §4 の各行の floor は動いていない。** 動いたのは既定値だけである。したがって:
+
+- **large tier / adversarial verification に入ると、floor（xhigh）を下回るので gate が停止し、
+  引き上げを提案する。これは故障ではなく設計どおりの挙動**である —— 普段は軽い水準で作業し、
+  重い作業に入るときだけ gate が知らせる形になる。
+- 横断設計 / PRD 審議の行（medium）では、既定のまま floor を満たす。
+- `/effort` によるセッション単位の上書きは従来どおり効く。
+
+**`home/dot_claude/settings.json` は `~/.claude` と `~/.claude-r06` で共有される 1 ファイルである**
+（r06 側は symlink）。よってこの既定は**両アカウントに効く**。
+
+**この変更は「読みやすさ」を effort で買う試みではない。** 公式が
+"changing effort does not reliably shorten responses, so prompt for length instead" と述べるとおり、
+出力の密度・長さは prompt 側の担保である（`home/dot_claude/fable-orchestrator-prompt.md` の
+「ユーザーへ返す文面の密度と長さ」節がそれを持つ）。
+
 ## 変更しなかったもの
 
 - **`~/.config/frontier-harness/config.json`（chezmoi source: `home/dot_config/frontier-harness/config.json`）は変更していない。** `session.child` = Opus @ xhigh は
   large tier の子に、`session.child.standard` = Opus @ high はそれ以外に割り当てられており
   （`wave-orchestrator/SKILL.md`「capability を tier で選ぶ」）、**新 contract はこの割り当てと矛盾
   しない**。横断設計 / PRD 審議は人がループ内にいる作業で、`fh session launch` で起こす子セッションの
-  仕事ではないため、medium 行は capability registry に対応物を必要としない。
-- **`home/dot_claude/settings.json` の `effortLevel: "xhigh"` も変更していない。** これは user の
-  standing preference（PRD 330 AC-014、user 承認 2026-07-25）であって contract の floor ではない。
-  floor が下がっても session 既定が下がるわけではなく、**両者は独立**である。
+  仕事ではないため、medium 行は capability registry に対応物を必要としない。**session 既定を下げても
+  子セッションの capability は変わらない**（子は capability registry の値で argv を受け取るため）。
 - **レビュー系 agent の `effort: xhigh` frontmatter も変更していない**（前述のとおり Sonnet 5 の
-  単調性で裏づけられる）。
+  単調性で裏づけられる）。frontmatter で pin された subagent は、**呼び出し元セッションの既定が
+  medium でも pin された effort で動く**。

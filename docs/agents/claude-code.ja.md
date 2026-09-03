@@ -58,7 +58,7 @@
 | 設定 | 値 | 備考 |
 |---|---|---|
 | `model` | <!-- FACT:claude-model-pin -->claude-opus-5[1m]<!-- /FACT --> | 1 M コンテキストのピン固定モデル（`home/dot_claude/settings.json` と同期） |
-| `effortLevel` | `xhigh` | 永続化される推論 effort。`/effort` でセッション単位に上書き可能 |
+| `effortLevel` | `medium` | 永続化される推論 effort。`/effort` でセッション単位に上書き可能。§4 floor とは独立で、floor 行がより上位を要求する作業では `model-fitness-check` が停止して引き上げを提案する |
 | `language` | `Japanese` | 会話出力はすべて日本語 |
 | `alwaysThinkingEnabled` | `false` | 拡張思考はタスク単位でオプトイン |
 | `cleanupPeriodDays` | `20` | 20 日より古いセッションを自動削除 |
