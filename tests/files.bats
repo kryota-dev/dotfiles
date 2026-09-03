@@ -770,17 +770,42 @@ SHIMEOF
     false
   }
 
-  # 2. The contract the shim guarded is intact. Both blocking floor rows must remain: dropping
-  #    either one is how the floor gets lost without any test noticing.
+  # 2. The contract the shim guarded is intact. All three blocking floor rows must remain: dropping
+  #    any one of them is how the floor gets lost without any test noticing. #629 split the old
+  #    single xhigh row in two, so the count went 2 -> 3 -- the axis is now whether the work talks
+  #    to the user (medium, from the user's field observation) or runs unattended for a long horizon
+  #    (xhigh, from the effort docs). Collapsing them back into one row would silently re-tie two
+  #    decisions that rest on different evidence; see references/effort-floor.md.
   grep -qF '## §4 contract' "$floor"
-  grep -qF '| Opus | high' "$floor"
-  grep -qF '| Opus | xhigh |' "$floor"
+  # Pin each floor row's work column TOGETHER WITH its effort. Asserting only that the strings
+  # `| Opus | xhigh |` and `| Opus | medium |` each appear somewhere is not enough: a mutation
+  # that swaps the two efforts between the rows satisfies every such pin and the row count below
+  # (verified by mutation). The pairing IS what #629 decided, so the pairing is what gets pinned.
+  grep -qF '統合・裁定 | Opus | high' "$floor"
+  grep -qF '| large tier / adversarial verification | Opus | xhigh |' "$floor"
+  grep -qF '| 横断設計 / PRD 審議 | Opus | medium |' "$floor"
   local floor_rows
   floor_rows="$(grep -cF '**floor**（blocking）' "$floor" || true)"
-  [ "$floor_rows" = "2" ] || {
-    echo "expected 2 blocking floor rows in the §4 contract, found ${floor_rows}"
+  [ "$floor_rows" = "3" ] || {
+    echo "expected 3 blocking floor rows in the §4 contract, found ${floor_rows}"
     false
   }
+  # Every floor row must carry a dated rationale reachable from the skill (#629): the contract is
+  # only auditable if each row says why it sits where it does. Pin the markdown LINK form rather
+  # than the bare filename -- demoting the pointer to prose would keep the string while breaking
+  # progressive disclosure -- and pin that the reference still carries the dated per-row grounds,
+  # so emptying it or dropping a row's rationale fails here instead of silently.
+  grep -qF '### 各行の根拠' "$floor"
+  grep -qF '](references/effort-floor.md)' "$floor"
+  local rationale="${HOME_DIR}/dot_agents/skills/model-fitness-check/references/effort-floor.md"
+  [ -f "$rationale" ]
+  local marker
+  for marker in '2026-09-03' 'large tier / adversarial verification' '横断設計 / PRD 審議'; do
+    grep -qF -- "$marker" "$rationale" || {
+      echo "references/effort-floor.md no longer carries: ${marker}"
+      false
+    }
+  done
   # The floor must still STOP the session. Scoped to the floor-mismatch section: checking the
   # whole file would pass on `AskUserQuestion` borrowed from the over-provision gate, so gutting
   # the floor branch into a non-blocking FYI would go unnoticed (verified by mutation).
@@ -1442,12 +1467,15 @@ SHIMEOF
   [ -f "$s" ]
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   # The model pin is covered by docs_facts (it is cross-checked against the FACT marker),
-  # but effortLevel has no doc counterpart — without this it could vanish unnoticed and
-  # every session would silently drop to the default effort.
+  # but effortLevel carries no FACT marker — without this it could vanish unnoticed and
+  # every session would silently drop to the API default (high).
+  # #629 lowered this from xhigh to medium: the session default and the §4 floor are
+  # independent, so this value is an operating preference, not the contract. Raising it back
+  # is a user decision, but it must not drift away silently in either direction.
   local effort
   effort="$(jq -r '.effortLevel' "$s")"
-  [ "$effort" = "xhigh" ] || {
-    echo "settings.json .effortLevel is '${effort}' but the declared session default is xhigh"
+  [ "$effort" = "medium" ] || {
+    echo "settings.json .effortLevel is '${effort}' but the declared session default is medium"
     false
   }
 }
