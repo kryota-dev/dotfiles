@@ -56,7 +56,7 @@ jobs:
           persist-credentials: false
 
       - name: Renovate triage
-        uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1.0.210
+        uses: anthropics/claude-code-action@fa2b2666b747000bf42767d1f332065b375e3c8f # v1.0.214
         with:
           # Pass the job-scoped least-privilege GITHUB_TOKEN explicitly. Without it the action
           # falls back to an OIDC exchange that requires `id-token: write` (absent here) and
