@@ -3303,14 +3303,25 @@ _allowed_bash_rules() {
   grep -qF 'new_major' "$c"
 }
 
-@test "CI runs on every workflow change, so a required check can always report" {
-  # A Renovate PR that bumps an action pin inside another workflow changes only
-  # that file. With a narrower paths filter Lint and Test never ran on it, and a
-  # required check that never runs never reports -- the PR could not be merged.
+@test "CI carries no paths filter, so its required checks always report" {
+  # Lint and Test are required status checks on main. A required check that never
+  # runs never reports, and GitHub holds the PR at pending forever -- so any paths
+  # filter narrow enough to skip them is a filter that can deadlock a PR (a
+  # docs-only or AGENTS.md-only change would never receive them). Leaving them
+  # unrequired is the wrong trade in the other direction: auto-merge waits only on
+  # required checks, so a Renovate PR with a red Test would merge itself.
   local ci="${REPO_ROOT}/.github/workflows/ci.yml"
-  # The pattern deliberately omits the leading "- ": grep reads an argument
-  # starting with a dash as an option, whatever the -F.
-  [ "$(grep -cF "'.github/**'" "$ci")" -eq 2 ]
+  local on_block
+  on_block="$(awk '/^on:/ { on = 1; next } on && /^[a-z]/ { exit } on' "$ci")"
+  [ -n "$on_block" ] || {
+    echo "could not read the on: block of ci.yml"
+    false
+  }
+  ! grep -qE '^\s*paths:' <<<"$on_block" || {
+    echo "ci.yml has a paths filter; its required checks can stop reporting:"
+    echo "$on_block"
+    false
+  }
 }
 
 @test "renovate review action: the permission check is the first step" {

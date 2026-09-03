@@ -153,10 +153,12 @@ its verdict and nothing acts on it.
 5. **Target branches**: add the default branch (`main`)
 6. **Rules**: enable **Require status checks to pass**, then add:
    - `renovate-gate` — the gate itself
-   - `Lint`, `Test` — the CI jobs the classifier deliberately does not read. These are
-     safe to require because `ci.yml` watches `.github/**`: a Renovate PR that only bumps
-     an action pin inside another workflow still runs them. A narrower filter would leave
-     such a PR permanently unmergeable, since a check that never runs never reports.
+   - `Lint`, `Test`, `Sync ghq completion` — the CI jobs the classifier deliberately
+     does not read. These are safe to require because `ci.yml` carries **no `paths:`
+     filter**: every pull request receives them. Any filter narrow enough to skip a job
+     would leave the PRs it skips permanently unmergeable, since a check that never runs
+     never reports — and leaving them unrequired is the wrong trade in the other
+     direction, because auto-merge waits only on required checks.
    - `CodeQL`, `GitGuardian Security Checks` — optional, same reasoning
 7. Leave **Require branches to be up to date before merging** *off*. Turning it on
    makes Renovate rebase every PR whenever `main` moves, which stalls auto-merge.

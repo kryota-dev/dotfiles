@@ -1,34 +1,23 @@
 name: CI
 
+# No `paths:` filter, deliberately.
+#
+# Lint and Test are registered as required status checks on `main`, and a required
+# check that never runs never reports -- GitHub holds such a PR at pending forever.
+# Any filter narrow enough to skip a job is therefore a filter that can deadlock a
+# pull request: a docs-only or AGENTS.md-only change would never receive them.
+#
+# Skipping the two checks is also the wrong trade in the other direction. GitHub's
+# auto-merge waits only on *required* checks, so leaving them unrequired would let a
+# Renovate PR with a red Test merge itself.
+#
+# Running both on every pull request costs about four minutes and removes the whole
+# class of problem. See docs/architecture/renovate-automation.md.
 on:
   push:
     branches: [main]
-    paths:
-      - 'home/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - 'docs/**'
-      - 'Makefile'
-      # The whole .github tree, not just this file. A Renovate PR that bumps an
-      # action pin inside another workflow changes only that workflow, so a
-      # narrower filter meant Lint and Test never ran on it -- and a required
-      # check that never runs never reports, leaving the PR unmergeable forever.
-      # renovate.json5 is in here for the same reason.
-      - '.github/**'
   pull_request:
     branches: [main]
-    paths:
-      - 'home/**'
-      - 'tests/**'
-      - 'scripts/**'
-      - 'docs/**'
-      - 'Makefile'
-      # The whole .github tree, not just this file. A Renovate PR that bumps an
-      # action pin inside another workflow changes only that workflow, so a
-      # narrower filter meant Lint and Test never ran on it -- and a required
-      # check that never runs never reports, leaving the PR unmergeable forever.
-      # renovate.json5 is in here for the same reason.
-      - '.github/**'
   workflow_dispatch:
 
 concurrency:

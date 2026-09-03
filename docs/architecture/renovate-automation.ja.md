@@ -147,10 +147,11 @@ required status check は一度だけ手で設定する。これが無いと、�
 5. **Target branches**: 既定ブランチ（`main`）を追加
 6. **Rules**: **Require status checks to pass** を有効化し、次を追加する:
    - `renovate-gate` — ゲート本体
-   - `Lint`, `Test` — 決定論ゲートが意図的に読まない CI ジョブ。必須化して安全なのは
-     `ci.yml` が `.github/**` を監視しているためで、他のワークフロー内の action pin だけを
-     更新する Renovate PR でもこれらが走る。フィルタが狭いと、そうした PR は永久にマージ
-     できなくなる（走らないチェックは報告されないため）
+   - `Lint`, `Test`, `Sync ghq completion` — 決定論ゲートが意図的に読まない CI ジョブ。
+     必須化して安全なのは `ci.yml` が **`paths:` フィルタを持たない**ためで、全 pull request
+     がこれらを受け取る。ジョブを飛ばしうるフィルタは、飛ばされた PR を永久にマージ不能に
+     する（走らないチェックは報告されない）。逆に必須にしないのも誤りで、auto-merge は
+     required check しか待たないため、CI が赤いままマージされうる
    - `CodeQL`, `GitGuardian Security Checks` — 任意。理由は同じ
 7. **Require branches to be up to date before merging** は**オフ**のままにする。
    有効にすると `main` が動くたびに Renovate が全 PR をリベースすることになり、
