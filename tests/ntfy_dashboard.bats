@@ -42,7 +42,7 @@ LIB="${HOME_DIR}/dot_config/ntfy/lib.sh.tmpl"
 
 @test "ntfy_write_dashboard_env writes a 0600 file with the expected keys" {
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
 
   # Source the template-stripped library (same strip trick as make lint); the

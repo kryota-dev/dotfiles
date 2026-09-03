@@ -43,8 +43,8 @@ MOCK_JSON_RL_SD_ONLY='{"model":{"display_name":"TestModel"},"effort":{"level":"h
 # each test likewise gets a throwaway XDG_CACHE_HOME instead of touching the
 # real ~/.cache.
 setup() {
-  RL_CACHE_HOME="$(mktemp -d)"
-  HARNESS_COST_DIR="$(mktemp -d)"
+  RL_CACHE_HOME="$(_mktemp_dir)"
+  HARNESS_COST_DIR="$(_mktemp_dir)"
   HARNESS_COST_FILE="${HARNESS_COST_DIR}/harness-cost-bats-statusline.json"
   export TMPDIR="$HARNESS_COST_DIR"
 }

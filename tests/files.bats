@@ -121,7 +121,7 @@ load helpers/setup
   command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
   local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.morning-radar.plist.tmpl"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
   plutil -lint "${tmp}/agent.plist"
@@ -163,7 +163,7 @@ load helpers/setup
   command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
   local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.ntfy-dashboard.plist.tmpl"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   sed -E 's|\{\{[^}]*\.ntfy_dashboard\.([a-z_]+)[^}]*\}\}|1|g; s|\{\{[^}]*\.ntfy\.port[^}]*\}\}|1|g; s|\{\{ \.chezmoi\.homeDir \}\}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
   plutil -lint "${tmp}/agent.plist"
@@ -193,7 +193,7 @@ load helpers/setup
   command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
   local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.knowledge-distill.plist.tmpl"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
   plutil -lint "${tmp}/agent.plist"
@@ -223,7 +223,7 @@ load helpers/setup
   command -v plutil >/dev/null 2>&1 || skip "plutil unavailable"
   local plist="${HOME_DIR}/Library/LaunchAgents/dev.kryota.macos-defaults-drift.plist.tmpl"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   sed 's|{{ \.chezmoi\.homeDir }}|/Users/test|g' "$plist" >"${tmp}/agent.plist"
   plutil -lint "${tmp}/agent.plist"
@@ -399,7 +399,7 @@ STUB
 @test "morning-radar wrapper skips a second run on the same day" {
   local wrapper="${HOME_DIR}/dot_claude/executable_morning-radar.sh"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   # Pre-seed today's stamp in a sandboxed HOME/XDG state dir (R1.5). claude is
   # not resolvable from the sandbox HOME, so a bypassed guard exits 1 instead.
@@ -1318,7 +1318,7 @@ SHIMEOF
 # timestamp plans stay ignored — the handoff artifact would break otherwise.
 @test "Plan-PRD pipeline plans are un-ignored in the global gitignore" {
   local gi="${HOME_DIR}/dot_gitignore_global"
-  local tmp; tmp=$(mktemp -d)
+  local tmp; tmp=$(_mktemp_dir)
   cd "$tmp"
   git init -q
   git config core.excludesfile "$gi"
@@ -1637,7 +1637,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1664,7 +1664,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1683,7 +1683,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   run env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1702,7 +1702,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1734,7 +1734,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1756,7 +1756,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1778,7 +1778,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   env HOME="${sandbox}/home" PATH="${sandbox}/bin:${PATH}" \
@@ -1805,7 +1805,7 @@ FAKE_CLAUDE
   command -v chezmoi >/dev/null 2>&1 || skip "chezmoi not installed"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
   local sandbox
-  sandbox="$(mktemp -d)"
+  sandbox="$(_mktemp_dir)"
   _reconciler_sandbox "$sandbox"
 
   # Fresh apply: marketplace registered, plugin installed.
@@ -1835,7 +1835,7 @@ FAKE_CLAUDE
   [ -f "$script" ]
   bash -n "$script"
   command -v jq >/dev/null 2>&1 || skip "jq unavailable"
-  local tmp; tmp=$(mktemp -d)
+  local tmp; tmp=$(_mktemp_dir)
   # Pin XDG_DATA_HOME inside the sandbox so the bare-`claude` fallback branch can never
   # touch the developer's real ~/.local/share/ecc-homunculus.
   local run=(env "HOME=$tmp" "XDG_DATA_HOME=$tmp/.local/share" bash "$script")
@@ -2234,7 +2234,7 @@ FIXTURE
   local script="${HOME_DIR}/run_onchange_after_13-setup-mcp.sh.tmpl"
   [ -f "$script" ]
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   mkdir -p "$tmp/bin"
   # Fake mise that emulates `mise exec -- <cmd...>` by logging the wrapped command together
   # with the CLAUDE_CONFIG_DIR it ran under. Lets us assert the script's real behaviour
@@ -2317,7 +2317,7 @@ FAKE
   command -v zsh >/dev/null || skip "zsh not available"
   local zsh="${HOME_DIR}/dot_config/zsh/claude.zsh"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   mkdir -p "$tmp/.config/zsh"
   # Stand in for the 1Password-rendered secrets file (non-exported assignments, single-quoted).
   cat >"$tmp/.config/zsh/claude-secrets.zsh" <<'SECRETS'
@@ -2358,7 +2358,7 @@ SECRETS
   local launcher="${HOME_DIR}/dot_claude/executable_ecc-hook.sh"
   [ -f "$launcher" ]
   command -v node >/dev/null 2>&1 || skip "node unavailable"
-  local tmp; tmp=$(mktemp -d)
+  local tmp; tmp=$(_mktemp_dir)
   mkdir -p "$tmp/scripts/hooks"
   # Stub bootstrap that prints the value the ECC runtime would read.
   printf '%s\n' 'process.stdout.write(process.env.ECC_DISABLED_HOOKS || "")' \
@@ -2383,7 +2383,7 @@ SECRETS
   [ "$output" = "a,b" ]
 
   # Bootstrap missing + extra set: fail-open passthrough still wins (no merge attempted).
-  local tmp2; tmp2=$(mktemp -d)
+  local tmp2; tmp2=$(_mktemp_dir)
   run env CLAUDE_PLUGIN_ROOT="$tmp2" ECC_DISABLED_HOOKS_EXTRA="c,d" \
     bash "$launcher" <<<"passthrough"
   [ "$status" -eq 0 ]
@@ -2543,7 +2543,7 @@ _gate_decision() {
 # GATEGUARD_BASH_EXTRA_DESTRUCTIVE out of ~/.claude/settings.json (task #12 SSOT).
 @test "codex gateguard reads the EXTRA regex from settings.json when no env override" {
   local gate="${HOME_DIR}/dot_config/gateguard/executable_codex-bash-gate.js"
-  local tmp; tmp=$(mktemp -d)
+  local tmp; tmp=$(_mktemp_dir)
   mkdir -p "$tmp/.claude"
   printf '%s' '{"env":{"GATEGUARD_BASH_EXTRA_DESTRUCTIVE":"chezmoi\\s+destroy\\b"}}' > "$tmp/.claude/settings.json"
   local out
@@ -2651,10 +2651,10 @@ _gate_decision() {
   elif command -v gtimeout >/dev/null 2>&1; then to=gtimeout
   else skip "timeout not available"; fi
   local hooksdir repo
-  hooksdir=$(mktemp -d)
+  hooksdir=$(_mktemp_dir)
   cp "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit" "${hooksdir}/pre-commit"
   chmod +x "${hooksdir}/pre-commit"
-  repo=$(mktemp -d)
+  repo=$(_mktemp_dir)
   git -C "$repo" init -q
   git -C "$repo" config core.hooksPath "$hooksdir"
   git -C "$repo" config commit.gpgsign false
@@ -2678,17 +2678,17 @@ _gate_decision() {
   elif command -v gtimeout >/dev/null 2>&1; then to=gtimeout
   else skip "timeout not available"; fi
   local hooksdir repo wt
-  hooksdir=$(mktemp -d)
+  hooksdir=$(_mktemp_dir)
   cp "${HOME_DIR}/dot_config/git/hooks/executable_pre-commit" "${hooksdir}/pre-commit"
   chmod +x "${hooksdir}/pre-commit"
-  repo=$(mktemp -d)
+  repo=$(_mktemp_dir)
   git -C "$repo" init -q
   git -C "$repo" config core.hooksPath "$hooksdir"
   git -C "$repo" config commit.gpgsign false
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name t
   git -C "$repo" commit --allow-empty -qm init
-  wt=$(mktemp -d)
+  wt=$(_mktemp_dir)
   git -C "$repo" worktree add -q "$wt" -b wt
   # Repo-local hook that drops a marker into the shared .git dir when it runs.
   printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
