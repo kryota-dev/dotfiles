@@ -21,10 +21,33 @@ setup() {
 if [ "${GH_STUB_FAIL:-}" = "1" ]; then
   exit 1
 fi
+if [ "$2" = "diff" ]; then
+  if [ "${GH_STUB_DIFF_FAIL:-}" = "1" ]; then
+    exit 1
+  fi
+  cat "${GH_STUB_DIFF}"
+  exit 0
+fi
 cat "${GH_STUB_PAYLOAD}"
 EOF
   chmod +x "${STUB_DIR}/gh"
   GH_STUB_PAYLOAD="${BATS_TEST_TMPDIR}/payload.json"
+  GH_STUB_DIFF="${BATS_TEST_TMPDIR}/diff.txt"
+  # Default diff: an ordinary patch bump, so tests that are not about version
+  # comparison keep exercising the branch they mean to.
+  make_diff "2.98.0" "2.99.0"
+}
+
+# Build a version-pin diff. $1=old version, $2=new version.
+make_diff() {
+  cat >"$GH_STUB_DIFF" <<EOF
+diff --git a/f0 b/f0
+--- a/f0
++++ b/f0
+@@ -1 +1 @@
+-tool = "$1"
++tool = "$2"
+EOF
 }
 
 # Build a gh pr view payload. $1=title, $2=additions, $3=deletions, $4=file count,
@@ -50,7 +73,8 @@ EOF
 
 run_classify() {
   run env PATH="${STUB_DIR}:${PATH}" GH_STUB_PAYLOAD="$GH_STUB_PAYLOAD" \
-    GH_STUB_FAIL="${GH_STUB_FAIL:-0}" GITHUB_REPOSITORY="owner/repo" \
+    GH_STUB_DIFF="$GH_STUB_DIFF" GH_STUB_FAIL="${GH_STUB_FAIL:-0}" \
+    GH_STUB_DIFF_FAIL="${GH_STUB_DIFF_FAIL:-0}" GITHUB_REPOSITORY="owner/repo" \
     bash "$SCRIPT" "${1:-101}"
 }
 
@@ -88,7 +112,8 @@ assert_verdict() {
 }
 
 @test "passes a scoped npm dependency pin" {
-  make_payload "chore(deps): update dependency npm:agent-browser to v0.36.0"
+  make_payload "chore(deps): update dependency npm:agent-browser to v0.36.1"
+  make_diff "0.36.0" "0.36.1"
   run_classify
   assert_verdict pass
 }
@@ -155,16 +180,84 @@ assert_verdict() {
 @test "the always-review list matches whole names, not substrings" {
   # A dependency whose name merely contains one of the entries must still pass.
   make_payload "chore(deps): update dependency phone-harness-viewer to v1.2.3"
+  make_diff "1.2.2" "1.2.3"
   run_classify
   assert_verdict pass
 }
 
-# --- narrowing checks -----------------------------------------------------------
+# --- version comparison ---------------------------------------------------------
 
-@test "a multi-file change is needs-agent" {
-  make_payload "chore(deps): update dependency gh to v2.99.0" 1 1 2
+@test "a major bump is needs-agent even though the title shape matches" {
+  # The title carries only the new version, so shape alone cannot tell v2.99.0
+  # from v3.0.0. The old version comes from the diff.
+  make_payload "chore(deps): update dependency somelib to v3.0.0"
+  make_diff "2.9.0" "3.0.0"
   run_classify
   assert_verdict needs-agent
+  [[ "$output" == *"メジャー更新"* ]]
+}
+
+@test "a patch bump within the same major passes" {
+  make_payload "chore(deps): update dependency gh to v2.99.0"
+  make_diff "2.98.0" "2.99.0"
+  run_classify
+  assert_verdict pass
+}
+
+@test "a minor bump within the same major passes" {
+  make_payload "chore(deps): update dependency yazi to v26.9.1"
+  make_diff "26.8.15" "26.9.1"
+  run_classify
+  assert_verdict pass
+}
+
+@test "a 0.x minor bump is needs-agent (semver lets it break)" {
+  make_payload "chore(deps): update dependency npm:agent-browser to v0.36.0"
+  make_diff "0.35.2" "0.36.0"
+  run_classify
+  assert_verdict needs-agent
+  [[ "$output" == *"0.x"* ]]
+}
+
+@test "a 0.x patch bump passes" {
+  make_payload "chore(deps): update dependency npm:agent-browser to v0.35.2"
+  make_diff "0.35.1" "0.35.2"
+  run_classify
+  assert_verdict pass
+}
+
+@test "an unreadable old version is needs-agent, never pass" {
+  make_payload "chore(deps): update dependency gh to v2.99.0"
+  printf 'diff --git a/f b/f\n@@ -1 +1 @@\n+tool = "2.99.0"\n' >"$GH_STUB_DIFF"
+  run_classify
+  assert_verdict needs-agent
+}
+
+@test "a failed diff fetch is needs-agent, never pass" {
+  make_payload "chore(deps): update dependency gh to v2.99.0"
+  GH_STUB_DIFF_FAIL=1
+  run_classify
+  assert_verdict needs-agent
+}
+
+# --- narrowing checks -----------------------------------------------------------
+
+@test "a multi-file change is needs-agent even when the totals stay +1/-1" {
+  # Two files whose additions/deletions sum to exactly +1/-1, so the line-count
+  # condition cannot be what rejects this. If the file_count check were removed,
+  # this case would reach `pass`.
+  cat >"$GH_STUB_PAYLOAD" <<'EOF'
+{"author":{"login":"app/renovate"},"title":"chore(deps): update dependency gh to v2.99.0",
+ "mergeable":"MERGEABLE",
+ "files":[{"path":"a","additions":1,"deletions":0},{"path":"b","additions":0,"deletions":1}],
+ "labels":[]}
+EOF
+  run_classify
+  assert_verdict needs-agent
+  [[ "$output" == *"1 つではない"* ]] || {
+    echo "rejected for the wrong reason: $output"
+    false
+  }
 }
 
 @test "a diff larger than +1/-1 is needs-agent" {
@@ -187,6 +280,12 @@ assert_verdict() {
 
 @test "a [SECURITY] title is needs-agent" {
   make_payload "chore(deps): [SECURITY] update dependency gh to v2.99.0"
+  run_classify
+  assert_verdict needs-agent
+}
+
+@test "a lowercase [security] title is needs-agent" {
+  make_payload "chore(deps): [security] update dependency gh to v2.99.0"
   run_classify
   assert_verdict needs-agent
 }

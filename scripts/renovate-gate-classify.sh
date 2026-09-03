@@ -41,7 +41,7 @@ set -euo pipefail
 # to the agent. Keeping this as a positive allowlist (rather than a denylist of
 # the risky shapes) means a new Renovate title form Renovate invents later is
 # routed to the agent by default instead of silently joining the fast lane.
-readonly PASS_TITLE_RE='update dependency ([^ ]+) to v[0-9]+\.[0-9]+\.[0-9]+$'
+readonly PASS_TITLE_RE='update dependency ([^ ]+) to v([0-9]+\.[0-9]+\.[0-9]+)$'
 
 # Dependencies that always get agent review, whatever shape their update takes.
 #
@@ -133,8 +133,11 @@ done
   verdict needs-agent 'コンフリクトしているため要対応'
 }
 
-case "$title" in
-  *'[SECURITY]'*) verdict needs-agent 'security advisory 付きの更新' ;;
+# Renovate writes `[SECURITY]` in caps, but matching only that spelling would let a
+# differently-cased advisory title reach the fast lane. Fold the case first.
+title_lc="$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]')"
+case "$title_lc" in
+  *'[security]'*) verdict needs-agent 'security advisory 付きの更新' ;;
 esac
 case " $labels " in
   *' security '* | *' vulnerability '*) verdict needs-agent 'security ラベルが付与されている' ;;
@@ -162,4 +165,47 @@ done
   verdict needs-agent "バージョンピン 1 行の差分ではない (+${additions} -${deletions})"
 }
 
-verdict pass 'タグ付きリリースへのバージョンピン 1 行更新'
+# The title carries only the NEW version, so nothing above can tell a patch bump
+# from a major one -- `update dependency X to v3.0.0` matches the shape allowlist
+# exactly as `... to v2.99.0` does. Read the old version out of the diff's removed
+# line (a version pin is `-gh = "2.98.0"` / `+gh = "2.99.0"`) and compare.
+#
+# Renovate PR bodies carry an old->new table too, but the diff is the artefact
+# being merged: if the body and the diff ever disagree, the diff is what lands.
+new_version="${BASH_REMATCH[2]}"
+diff_out=''
+if ! diff_out="$(gh pr diff "$number" --repo "$repo" 2>/dev/null)"; then
+  verdict needs-agent '差分を取得できず旧バージョンを判定できないため要審査'
+fi
+# `|| true` matters here: under `set -o pipefail` a grep that matches nothing
+# returns 1, which would abort the script inside the command substitution before
+# the emptiness check below could route the PR to the agent. A diff with no
+# readable old version has to become needs-agent, not a crash.
+old_version="$(printf '%s' "$diff_out" |
+  grep -E '^-[^-]' |
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+' |
+  head -n 1 || true)"
+[ -n "$old_version" ] || {
+  verdict needs-agent '差分から旧バージョンを読み取れないため要審査'
+}
+
+old_major="${old_version%%.*}"
+new_major="${new_version%%.*}"
+[ "$old_major" = "$new_major" ] || {
+  verdict needs-agent "メジャー更新 (${old_version} -> ${new_version}) のため要審査"
+}
+
+# Under semver a 0.x minor bump is allowed to break, so 0.x only takes the fast
+# lane when the minor is unchanged. This is why `npm:agent-browser 0.35.2 ->
+# 0.36.0` does not sail through as an ordinary minor.
+if [ "$new_major" = '0' ]; then
+  old_minor="${old_version#*.}"
+  old_minor="${old_minor%%.*}"
+  new_minor="${new_version#*.}"
+  new_minor="${new_minor%%.*}"
+  [ "$old_minor" = "$new_minor" ] || {
+    verdict needs-agent "0.x 系のマイナー更新 (${old_version} -> ${new_version}) は破壊的変更を許すため要審査"
+  }
+fi
+
+verdict pass "タグ付きリリースへのバージョンピン 1 行更新 (${old_version} -> ${new_version})"
