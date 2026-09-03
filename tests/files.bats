@@ -3095,3 +3095,179 @@ _gate_decision() {
   ! grep -qF 'tailscale serve' "$s"
   ! grep -qF 'op item' "$s"
 }
+
+# --- Renovate merge gate (#renovate-automerge-gate) ------------------------------
+#
+# These assertions pin the security boundary of the gate as behaviour of the files
+# rather than as prose in a comment. Each one guards a property that would fail
+# silently: an allowlist that quietly grew, a permission check that drifted below a
+# step with side effects, a status posted against the wrong sha, or an automerge
+# lane re-encoded in config where it cannot see what the gate sees.
+
+@test "renovate gate: the three wrapper scripts exist and are executable" {
+  local s
+  for s in renovate-gate-classify renovate-gate-verdict renovate-gate-status; do
+    [ -f "${REPO_ROOT}/scripts/${s}.sh" ]
+    [ -x "${REPO_ROOT}/scripts/${s}.sh" ]
+  done
+}
+
+@test "renovate gate: the agent's allowlist excludes every state-changing gh path" {
+  local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
+  [ -f "$w" ]
+  local allowlist
+  allowlist="$(grep -F -- '--allowedTools' "$w")"
+  [ -n "$allowlist" ]
+  # The agent may read, and may write only through the two wrappers. Anything that
+  # merges, closes, reviews, edits or reaches the raw API would let it act on its
+  # own judgement instead of recording it.
+  local forbidden
+  for forbidden in 'gh pr merge' 'gh pr close' 'gh pr review' 'gh pr edit' \
+    'gh issue comment' 'gh api' 'gh search'; do
+    ! grep -qF "$forbidden" <<<"$allowlist" || {
+      echo "renovate-gate.yml allowlists '${forbidden}'"
+      false
+    }
+  done
+}
+
+@test "renovate gate: the agent cannot report its own status" {
+  # The whole gate rests on this: the agent records a verdict to a local file and
+  # the workflow decides what status that becomes. Handing it the status reporter
+  # would let it mark its own review as passing.
+  local w
+  for w in renovate-gate renovate-review-action renovate-digest; do
+    local f="${REPO_ROOT}/.github/workflows/${w}.yml"
+    [ -f "$f" ]
+    local allowlist
+    allowlist="$(grep -F -- '--allowedTools' "$f" || true)"
+    [ -z "$allowlist" ] || ! grep -qF 'renovate-gate-status.sh' <<<"$allowlist" || {
+      echo "${w}.yml allowlists the status reporter to the agent"
+      false
+    }
+  done
+}
+
+@test "renovate gate: the verdict recorder never reaches the network" {
+  # Its only job is to write one local file. A `gh` or `curl` appearing here would
+  # silently widen the agent's write surface past the wrapper boundary.
+  local s="${REPO_ROOT}/scripts/renovate-gate-verdict.sh"
+  run grep -nE '^[^#]*\b(gh|curl|wget|nc)\b' "$s"
+  [ "$status" -ne 0 ] || {
+    echo "verdict recorder references a network client: ${output}"
+    false
+  }
+}
+
+@test "renovate gate: statuses are reported against the PR head sha" {
+  # For pull_request events github.sha is the ephemeral merge commit. A status
+  # posted there is invisible to the required check, which is evaluated against the
+  # PR head -- so the gate would look green while blocking nothing.
+  local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
+  grep -qF 'github.event.pull_request.head.sha' "$w"
+  ! grep -qE 'HEAD_SHA:\s*\$\{\{\s*github\.sha\s*\}\}' "$w" || {
+    echo "renovate-gate.yml reports a status against github.sha"
+    false
+  }
+}
+
+@test "renovate gate: a missing verdict is reported as a failure" {
+  # "No error" must never be read as "approved": if the agent dies without writing
+  # a verdict, the reporting step still runs and fails the check.
+  local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
+  grep -qF 'if: always()' "$w"
+  grep -qF 'if [ ! -s "$VERDICT_FILE" ]; then' "$w"
+}
+
+@test "renovate gate: non-Renovate pull requests get an immediate success" {
+  # The status is required on every PR, so a human-authored PR that never receives
+  # it would sit at pending forever.
+  local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
+  grep -qF 'Approve non-Renovate pull requests immediately' "$w"
+  grep -qE "is_renovate != 'true'" "$w"
+}
+
+@test "renovate review action: the permission check is the first step" {
+  # This repository is public, so anyone can submit an approving review. The check
+  # must run before any step with side effects -- being merely present is not
+  # enough, so assert its position, not its existence.
+  local w="${REPO_ROOT}/.github/workflows/renovate-review-action.yml"
+  [ -f "$w" ]
+  local first
+  first="$(awk '/^    steps:/ { on = 1; next } on && /^      - / { print; exit }' "$w")"
+  [[ "$first" == *"Verify the reviewer can write"* ]] || {
+    echo "first step of renovate-review-action.yml is: ${first}"
+    false
+  }
+  # ...and it must be the collaborator permission API, not a login comparison.
+  grep -qF 'collaborators/${REVIEWER}/permission' "$w"
+}
+
+@test "renovate review action: every later step is gated on the permission result" {
+  local w="${REPO_ROOT}/.github/workflows/renovate-review-action.yml"
+  # The authorship step is the only one allowed to depend on perm directly; every
+  # other step depends on authorship, which itself depends on perm.
+  grep -qE "steps\.perm\.outputs\.allowed == 'true'" "$w"
+  # The checkout must not run before authorship is known.
+  local checkout_line perm_line
+  perm_line="$(grep -n 'id: perm' "$w" | cut -d: -f1)"
+  checkout_line="$(grep -n 'actions/checkout' "$w" | cut -d: -f1)"
+  [ "$perm_line" -lt "$checkout_line" ] || {
+    echo "checkout (line ${checkout_line}) precedes the permission check (line ${perm_line})"
+    false
+  }
+}
+
+@test "renovate review action: the agent decides, the workflow closes" {
+  # `close` in the verdict file is an instruction to the workflow, not something
+  # the agent can carry out -- `gh pr close` must live in a run step.
+  local w="${REPO_ROOT}/.github/workflows/renovate-review-action.yml"
+  grep -qF 'gh pr close' "$w"
+  local allowlist
+  allowlist="$(grep -F -- '--allowedTools' "$w")"
+  ! grep -qF 'gh pr close' <<<"$allowlist"
+}
+
+@test "renovate gate: no issue_comment trigger anywhere in the workflows" {
+  # On a public repo an issue_comment trigger takes orders from anyone who can type
+  # in the comment box. The authenticated instruction channel is pull_request_review
+  # plus the permission check.
+  local f
+  for f in "${REPO_ROOT}"/.github/workflows/renovate-*.yml; do
+    ! grep -qE '^\s*issue_comment:' "$f" || {
+      echo "$(basename "$f") triggers on issue_comment"
+      false
+    }
+  done
+}
+
+@test "renovate config: automerge is on globally and no rule turns it back off" {
+  # The per-updateType lanes and the four automerge:false packageRules were a second,
+  # weaker copy of the gate's judgement -- weaker because config can only key on
+  # updateType, which is exactly the signal that fails for digest bumps.
+  local r="${REPO_ROOT}/.github/renovate.json5"
+  grep -qE '^\s*automerge: true,' "$r"
+  ! grep -qE '^\s*automerge: false,' "$r" || {
+    echo "renovate.json5 still pins automerge off somewhere"
+    false
+  }
+  # Renovate must keep waiting for the branch to be green: the gate is one of the
+  # required checks it waits on.
+  grep -qE '^\s*ignoreTests: false,' "$r"
+}
+
+@test "renovate gate: the scheduled triage workflow is gone, replaced by the digest" {
+  [ ! -f "${REPO_ROOT}/.github/workflows/renovate-triage.yml" ]
+  [ -f "${REPO_ROOT}/.github/workflows/renovate-digest.yml" ]
+  # The digest never touches the gate, so it must not hold statuses: write.
+  ! grep -qE '^\s*statuses: write' "${REPO_ROOT}/.github/workflows/renovate-digest.yml"
+}
+
+@test "renovate gate: the required-check name is pinned in the script and the docs" {
+  # Renaming the context without re-registering the required status check would
+  # stop the gate blocking merges, with nothing else to notice.
+  local ctx='renovate-gate'
+  grep -qE "^readonly STATUS_CONTEXT='${ctx}'\$" "${REPO_ROOT}/scripts/renovate-gate-status.sh"
+  grep -qF "$ctx" "${REPO_ROOT}/docs/architecture/renovate-automation.md"
+  grep -qF "$ctx" "${REPO_ROOT}/docs/architecture/renovate-automation.ja.md"
+}

@@ -240,22 +240,33 @@ _phone_harness_pin() {
     false
   }
 
-  # This ships executable code that drives a real phone: both dep names must sit
-  # in an automerge:false rule rather than inheriting the patch/pin lane.
-  # matchDepNames is an unordered array, so extract the rule block and check for
-  # membership instead of matching a literal (order-dependent) array rendering.
-  local rule
-  rule="$(awk '/matchDepNames:.*phone-harness/ { found = 1 } found { print } found && /^[[:space:]]*},[[:space:]]*$/ { exit }' "$renovate")"
-  [[ "$rule" == *"'phone-harness'"* ]] || {
-    echo "no packageRule matches the phone-harness PyPI dep"
+  # This ships executable code that drives a real phone, so neither pin may reach
+  # the merge gate's deterministic fast lane.
+  #
+  # The guarantee used to be an `automerge: false` packageRule. It is now the gate
+  # (scripts/renovate-gate-classify.sh), which is strictly stronger: the old rule
+  # could only key on updateType, and a PyPI patch bump of this package is shaped
+  # exactly like an ordinary CLI bump. The gate names the dependency instead.
+  local classifier="${REPO_ROOT}/scripts/renovate-gate-classify.sh"
+  grep -qE "^readonly ALWAYS_REVIEW_DEPS=.*phone-harness" "$classifier" || {
+    echo "phone-harness is not in the classifier's always-review list"
     false
   }
-  [[ "$rule" == *"'ShawnPana/phone-harness'"* ]] || {
-    echo "no packageRule matches the phone-harness SKILL.md git-refs dep"
+  # The SKILL.md pin is a git-refs digest, which the shape allowlist already sends
+  # to the agent -- assert the allowlist still cannot match a digest title.
+  local pass_re
+  pass_re="$(sed -n "s/^readonly PASS_TITLE_RE='\(.*\)'\$/\1/p" "$classifier")"
+  [ -n "$pass_re" ] || {
+    echo "could not read PASS_TITLE_RE from the classifier"
     false
   }
-  [[ "$rule" == *'automerge: false'* ]] || {
-    echo "phone-harness is not covered by an automerge: false packageRule"
+  [[ ! "update ShawnPana/phone-harness digest to abc1234" =~ $pass_re ]] || {
+    echo "the classifier's fast lane matches a phone-harness digest bump"
+    false
+  }
+  # And no config-level automerge lane may quietly come back for this dep.
+  ! grep -qE '^\s*automerge: false,' "$renovate" || {
+    echo "renovate.json5 pins automerge off again; the gate is meant to own this"
     false
   }
 }
