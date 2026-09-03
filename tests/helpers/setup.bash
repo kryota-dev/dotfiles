@@ -130,14 +130,17 @@ _onepassword_item_list() {
 
 # Create a scratch directory for a test, honoring TMPDIR.
 #
-# macOS mktemp(1) only consults TMPDIR when it is given a template (or -t);
-# a bare `mktemp -d` ignores TMPDIR and grabs the Darwin default
-# /var/folders/.../T instead. Under sandboxing that default is unwritable, so
-# a bare `mktemp -d` fails with "mkdtemp failed: Operation not permitted" --
-# a suite-wide false red unrelated to whatever change is under test (#642).
-# Passing an explicit template makes both macOS and Linux honor TMPDIR, so
-# every test must obtain its scratch dir through this helper instead of
-# calling mktemp directly.
+# macOS mktemp(1) only consults TMPDIR when it is given an explicit template.
+# With -t -- and with no arguments at all, which mktemp(1) documents as
+# equivalent to `-t tmp` -- it builds the template from _CS_DARWIN_USER_TEMP_DIR
+# and names TMPDIR only as the fallback for when that is unavailable, which on
+# macOS it never is. So a bare `mktemp -d` ignores TMPDIR and grabs the Darwin
+# default /var/folders/.../T instead. Under sandboxing that default is
+# unwritable, so a bare `mktemp -d` fails with "mkdtemp failed: Operation not
+# permitted" -- a suite-wide false red unrelated to whatever change is under
+# test (#642). Passing an explicit template makes both macOS and Linux honor
+# TMPDIR, so every test must obtain its scratch dir through this helper instead
+# of calling mktemp directly.
 _mktemp_dir() {
   local dir="${TMPDIR:-/tmp}"
   # Strip a trailing slash: macOS sets TMPDIR with one (/var/folders/.../T/),
