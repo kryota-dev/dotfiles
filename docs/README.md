@@ -29,6 +29,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 | [zsh startup, prompt & shell modules](architecture/shell-environment.md) | `.zprofile` → `.zshrc` → sheldon deferred loading; how to add a new `.zsh` module |
 | [Developer toolchain: mise, Brewfile & git](architecture/dev-tooling.md) | mise version pins, `Brewfile` + `.brewfile-linux-exclude`, git 1Password signing, global gitleaks hook |
 | [Notifications: self-hosted ntfy over Tailscale](architecture/notifications.md) | Claude Code hook events → ntfy server (Docker, loopback-only) → tailnet devices; topics, auth/ACL, setup & recovery runbooks |
+| [Renovate automation: the merge gate](architecture/renovate-automation.md) | How dependency updates merge unattended: the deterministic classifier, the agent gate as a required status check, the three-layer fail-closed design, and the ruleset setup |
 
 ### Agents
 
