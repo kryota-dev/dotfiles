@@ -2990,6 +2990,61 @@ _gate_decision() {
   grep -qF "compose\\\\.yaml\\\\.tmpl" "$r"
 }
 
+@test "renovate: every managerFilePatterns entry anchors its regex to the repo root (#646)" {
+  local r="${REPO_ROOT}/.github/renovate.json5"
+  # Renovate resolves managerFilePatterns against fileList entries from
+  # `git ls-tree -r <branch>`, i.e. repo-root-relative paths with no leading
+  # `/` or `./` (lib/util/git/index.ts getFileList, lib/workers/repository/
+  # extract/file-match.ts getMatchingFiles). A slash-delimited entry is
+  # interpreted as a regex, not a glob (lib/util/string-match.ts
+  # isRegexMatch/parseRegexMatch), and `RegExp#test` matches anywhere in the
+  # string unless anchored. An unanchored pattern therefore matches nested
+  # copies too -- e.g. tests/fixtures/.../home/dot_config/mise/config.toml,
+  # the fixture #641 added and renamed away once we saw Renovate could read it
+  # as a real dependency (#646). So every slash-delimited entry here must be a
+  # full `^...$` match against the repo-root-relative path.
+  local patterns
+  patterns="$(awk '
+    /managerFilePatterns:[[:space:]]*\[/ { in_block = 1; next }
+    in_block && /\]/ { in_block = 0; next }
+    in_block { print }
+  ' "$r")"
+  [ -n "$patterns" ] || {
+    echo "extracted zero managerFilePatterns entries from $r -- extraction is broken"
+    false
+  }
+  local count=0
+  local line entry
+  while IFS= read -r line; do
+    # Trim surrounding whitespace and a trailing comma, then strip the outer
+    # JSON5 single quotes to get the raw string Renovate sees.
+    entry="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*,\{0,1\}[[:space:]]*$//' <<<"$line")"
+    entry="${entry#\'}"
+    entry="${entry%\'}"
+    [ -n "$entry" ] || continue
+    count=$((count + 1))
+    case "$entry" in
+      /*)
+        # Slash-delimited: must be a regex fully anchored with ^ ... $.
+        case "$entry" in
+          '/^'*'$/' | '/^'*'$/i') : ;;
+          *)
+            echo "managerFilePatterns entry is not anchored with ^...\$: ${entry}"
+            false
+            ;;
+        esac
+        ;;
+      *)
+        # Not slash-delimited: a glob, not subject to the regex-anchor requirement.
+        : ;;
+    esac
+  done <<<"$patterns"
+  [ "$count" -ge 1 ] || {
+    echo "no managerFilePatterns string entries parsed out of $r"
+    false
+  }
+}
+
 @test "CI resolves shellcheck and shfmt from the mise pin, not from the runner image (#475)" {
   local ci="${REPO_ROOT}/.github/workflows/ci.yml"
   local mise="${HOME_DIR}/dot_config/mise/config.toml"

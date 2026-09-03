@@ -27,11 +27,29 @@
   // Keep waiting for the branch to go green. The gate is one of the required
   // checks, so this is what makes Renovate hold until the whole set passes.
   ignoreTests: false,
+  // Every managerFilePatterns entry below (and the mise one at the bottom of this
+  // file) is a slash-delimited string, which Renovate parses as a regex, not a
+  // glob. It matches against fileList entries from `git ls-tree -r`, i.e.
+  // repo-root-relative paths with no leading `/` or `./` -- so `^` anchors to the
+  // repo root and every pattern here is written as a full `^...$` match. Without
+  // that anchor, `RegExp#test` matches anywhere in the string, so a pattern like
+  // `/home/dot_config/mise/config\.toml/` also matches nested copies such as
+  // tests/fixtures/.../repo/home/dot_config/mise/config.toml -- the fixture #641
+  // added and then renamed away once we saw Renovate could read it as a real
+  // dependency (#646).
+  //
+  // The anchors make that intent readable from the pattern itself; they are not
+  // the only thing keeping such a fixture out, and they are not a boundary.
+  // `config:recommended` pulls in `:ignoreModulesAndTests`, whose ignorePaths
+  // (`**/tests/**` among them) drop those files before any manager sees them.
+  // And user patterns are *added* to a manager's defaults rather than replacing
+  // them, so the mise manager's own `**/{,.}mise/config{,.*}.toml` default keeps
+  // matching nested copies no matter what the entry below says.
   customManagers: [
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         'anthropic_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -46,7 +64,7 @@
       // Same tracking pattern as anthropic_commit above.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         'drawio_mcp_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -61,7 +79,7 @@
       // (supabase and supabase-postgres-best-practices).
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         'supabase_agent_skills_commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -74,7 +92,7 @@
     {
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         'moralerspace_font\\s*=\\s*"(?<currentValue>\\d+\\.\\d+\\.\\d+)"',
@@ -91,7 +109,7 @@
       // bump as needing agent review regardless of how small the diff is.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         '\\[ecc\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>[^"]+)"[\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -107,7 +125,7 @@
       // docker-compose manager), so track it with a regex manager instead.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
+        '/^home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
       ],
       matchStrings: [
         'image: binwiederhier/ntfy:(?<currentValue>v[0-9.]+)@(?<currentDigest>sha256:[a-f0-9]+)',
@@ -120,7 +138,7 @@
       // same compose template — tracked with a regex manager like ntfy above.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
+        '/^home/dot_config/ntfy/compose\\.yaml\\.tmpl$/',
       ],
       matchStrings: [
         'image: nginx:(?<currentValue>[0-9.]+-alpine)@(?<currentDigest>sha256:[a-f0-9]+)',
@@ -136,7 +154,7 @@
       // [phone_harness] table so it cannot latch onto a `version =` elsewhere.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         '\\[phone_harness\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>[^"]+)"',
@@ -151,7 +169,7 @@
       // above: the two artifacts move independently upstream.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         '\\[phone_harness\\][\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -167,7 +185,7 @@
       // phone-harness SKILL.md) — this repo has no PyPI/npm release to pin instead.
       customType: 'regex',
       managerFilePatterns: [
-        '/home/\\.chezmoidata\\.toml$/',
+        '/^home/\\.chezmoidata\\.toml$/',
       ],
       matchStrings: [
         '\\[eli5\\][\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
@@ -179,8 +197,9 @@
     },
   ],
   mise: {
+    // Anchored full-match regex; see the customManagers comment above for why.
     managerFilePatterns: [
-      '/home/dot_config/mise/config\\.toml/',
+      '/^home/dot_config/mise/config\\.toml$/',
     ],
   },
 }
