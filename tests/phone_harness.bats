@@ -248,8 +248,16 @@ _phone_harness_pin() {
   # could only key on updateType, and a PyPI patch bump of this package is shaped
   # exactly like an ordinary CLI bump. The gate names the dependency instead.
   local classifier="${REPO_ROOT}/scripts/renovate-gate-classify.sh"
-  grep -qE "^readonly ALWAYS_REVIEW_DEPS=.*phone-harness" "$classifier" || {
-    echo "phone-harness is not in the classifier's always-review list"
+  # Not by name: the classifier scopes its fast lane to the mise config, and both
+  # phone-harness pins live in .chezmoidata.toml. Naming the dependency here would
+  # only re-create the maintenance burden the path rule exists to remove.
+  grep -qE "^readonly FAST_LANE_PIN_FILE='home/dot_config/mise/config\\.toml'\$" "$classifier" || {
+    echo "the classifier does not scope its fast lane to the mise config"
+    false
+  }
+  grep -qE '^\[phone_harness\]' "${HOME_DIR}/.chezmoidata.toml" || {
+    echo "the phone-harness pins are no longer in .chezmoidata.toml; the fast-lane"
+    echo "scope no longer covers them and this guard has become vacuous"
     false
   }
   # The SKILL.md pin is a git-refs digest, which the shape allowlist already sends

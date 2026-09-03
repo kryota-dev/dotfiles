@@ -49,7 +49,20 @@ of the update**, not a risk score, and never on how small the diff looks.
 | `update deno monorepo to v2.8.3` | `needs-agent` | Grouped update, not a single named dependency |
 | `update dependency somelib to v3.0.0` (from `2.9.0`) | `needs-agent` | Major bump — the title alone cannot show this, so the old version is read from the diff |
 | `update dependency npm:agent-browser to v0.36.0` (from `0.35.2`) | `needs-agent` | Under semver a `0.x` minor bump may break |
+| A pin outside `home/dot_config/mise/config.toml` | `needs-agent` | Only tools you invoke deliberately take the fast lane — see below |
 | Anything unparsable, or a failed `gh` call | `needs-agent` | Unclassifiable is never "safe" |
+
+**The fast lane is scoped by where the pin lives, not by which dependency it is.**
+`update dependency phone-harness to v1.2.3` is shaped exactly like `update
+dependency gh to v2.99.0`, yet one of them ships Python that synthesises HID input
+on an unlocked phone. Naming the risky dependencies would work only until the
+toolchain changed. The repository already draws the line structurally:
+`home/dot_config/mise/config.toml` holds tools you invoke deliberately, while
+`home/.chezmoidata.toml` holds pieces of the environment that run on their own —
+ECC's hook code, phone-harness, the skill archives. Container images and workflow
+pins live elsewhere again. So only a pin in the mise config is eligible; adding a
+CLI there makes it eligible automatically, and **a pin location nobody anticipated
+defaults to review rather than to merge.**
 
 **The title alone cannot tell a patch bump from a major one.** Renovate titles carry only
 the new version, so `to v3.0.0` and `to v2.99.0` are the same shape. The classifier reads

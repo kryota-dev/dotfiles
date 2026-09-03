@@ -50,15 +50,23 @@ diff --git a/f0 b/f0
 EOF
 }
 
+# The only pin file eligible for the fast lane. Duplicated from the script on
+# purpose: if the constant changes without these tests changing, the fast lane has
+# silently moved to a different set of dependencies.
+FAST_LANE_PATH="home/dot_config/mise/config.toml"
+
 # Build a gh pr view payload. $1=title, $2=additions, $3=deletions, $4=file count,
-# $5=mergeable, $6=labels (space separated), $7=author.
+# $5=mergeable, $6=labels (space separated), $7=author, $8=path of the first file.
 make_payload() {
   local title="$1" add="${2:-1}" del="${3:-1}" files="${4:-1}"
   local mergeable="${5:-MERGEABLE}" labels="${6:-}" author="${7:-app/renovate}"
+  local path="${8:-$FAST_LANE_PATH}"
   local file_json='' i
   for ((i = 0; i < files; i++)); do
     [ -n "$file_json" ] && file_json+=','
-    file_json+="{\"path\":\"f${i}\",\"additions\":${add},\"deletions\":${del}}"
+    local p="$path"
+    [ "$i" -gt 0 ] && p="other-${i}"
+    file_json+="{\"path\":\"${p}\",\"additions\":${add},\"deletions\":${del}}"
   done
   local label_json='' l
   for l in $labels; do
@@ -162,27 +170,51 @@ assert_verdict() {
   assert_verdict needs-agent
 }
 
-@test "a phone-harness version pin is needs-agent despite the ordinary shape" {
-  # Ships executable Python that drives a real, unlocked phone. Its title is
-  # indistinguishable from a `gh` bump, so shape alone must not clear it.
-  make_payload "chore(deps): update dependency phone-harness to v1.2.3"
-  run_classify
-  assert_verdict needs-agent
-}
+# --- the fast lane is scoped by where the pin lives, not by dependency name ------
 
-@test "an ECC version pin is needs-agent despite the ordinary shape" {
-  # Third-party hook code that runs in every agent session.
-  make_payload "chore(deps): update dependency affaan-m/ecc to v2.2.0"
-  run_classify
-  assert_verdict needs-agent
-}
-
-@test "the always-review list matches whole names, not substrings" {
-  # A dependency whose name merely contains one of the entries must still pass.
-  make_payload "chore(deps): update dependency phone-harness-viewer to v1.2.3"
+@test "a pin outside the mise config is needs-agent despite the ordinary shape" {
+  # Pins in .chezmoidata.toml are pieces of the environment that run on their own
+  # (hook code, skills, the phone-harness CLI). Their titles are shaped exactly
+  # like a `gh` bump, so only the pin's location separates them.
+  make_payload "chore(deps): update dependency phone-harness to v1.2.3" \
+    1 1 1 MERGEABLE "" app/renovate "home/.chezmoidata.toml"
   make_diff "1.2.2" "1.2.3"
   run_classify
-  assert_verdict pass
+  assert_verdict needs-agent
+  [[ "$output" == *"fast lane の対象外"* ]] || {
+    echo "rejected for the wrong reason: $output"
+    false
+  }
+}
+
+@test "a container image pin is needs-agent" {
+  make_payload "chore(deps): update dependency ntfy to v2.28.0" \
+    1 1 1 MERGEABLE "" app/renovate "home/dot_config/ntfy/compose.yaml.tmpl"
+  make_diff "2.27.0" "2.28.0"
+  run_classify
+  assert_verdict needs-agent
+}
+
+@test "a workflow pin is needs-agent" {
+  make_payload "chore(deps): update dependency some-action to v1.2.3" \
+    1 1 1 MERGEABLE "" app/renovate ".github/workflows/ci.yml"
+  make_diff "1.2.2" "1.2.3"
+  run_classify
+  assert_verdict needs-agent
+}
+
+@test "a new pin file nobody anticipated defaults to review, not to merge" {
+  # The rule is an allowlist of one path, so a pin location added later is
+  # reviewed until someone deliberately widens the lane.
+  make_payload "chore(deps): update dependency newthing to v1.2.3" \
+    1 1 1 MERGEABLE "" app/renovate "home/dot_config/something-new.toml"
+  make_diff "1.2.2" "1.2.3"
+  run_classify
+  assert_verdict needs-agent
+}
+
+@test "the script pins the fast-lane path as a readonly constant" {
+  grep -qE "^readonly FAST_LANE_PIN_FILE='${FAST_LANE_PATH}'\$" "$SCRIPT"
 }
 
 # --- version comparison ---------------------------------------------------------

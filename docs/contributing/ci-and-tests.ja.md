@@ -232,7 +232,7 @@ action の ref は他の `uses:` と同様 SHA ピン + Renovate 追跡で、そ
 
 ### Renovate と ECC ピニング
 
-`.github/renovate.json5` がすべての依存関係の更新を管理します。`customManager` の正規表現が `.chezmoidata.toml` の ECC `version` と `commit` フィールドを一緒に更新します。ECC の更新は全エージェントセッションで走る実行可能なフックコードを配布するため、マージゲートの決定論的な fast lane には決して乗りません。`scripts/renovate-gate-classify.sh` が `affaan-m/ecc` を always-review リストに明示しており、差分の大きさに依らず必ずエージェントが審査します（`automerge: false` の packageRule を置き換えたもの。設定側は updateType しか見られませんでした）。`.chezmoiexternal.toml` エントリの 168 時間の外部更新間隔（`refreshPeriod`）は Renovate のバンプとは別です。
+`.github/renovate.json5` がすべての依存関係の更新を管理します。`customManager` の正規表現が `.chezmoidata.toml` の ECC `version` と `commit` フィールドを一緒に更新します。ECC の更新は全エージェントセッションで走る実行可能なフックコードを配布し、マージゲートの決定論的な fast lane には決して乗りません。その lane は `home/dot_config/mise/config.toml` の pin に限定されており、ECC は `.chezmoidata.toml` に pin されているためです。差分の大きさに依らず必ずエージェントが審査し、ツールが入れ替わっても規則の手入れは要りません（`automerge: false` の packageRule を置き換えたもの。設定側は updateType しか見られませんでした）。`.chezmoiexternal.toml` エントリの 168 時間の外部更新間隔（`refreshPeriod`）は Renovate のバンプとは別です。
 
 ---
 

@@ -238,7 +238,7 @@ All workflows set `permissions: {}` at the top level and grant only the minimum 
 
 ### Renovate and ECC pinning
 
-`.github/renovate.json5` manages all dependency updates. A `customManager` regex bumps the ECC `version` and `commit` fields together in `.chezmoidata.toml`. ECC updates ship executable hook code that runs in every agent session, so they never take the merge gate's deterministic fast lane: `scripts/renovate-gate-classify.sh` names `affaan-m/ecc` in its always-review list, and an agent reviews every bump regardless of how small the diff looks. (This replaced an `automerge: false` packageRule, which could only key on updateType and so could not tell an ECC bump apart from any other tagged release.) The 168-hour external refresh interval (`refreshPeriod`) on `.chezmoiexternal.toml` entries is separate from the Renovate bump.
+`.github/renovate.json5` manages all dependency updates. A `customManager` regex bumps the ECC `version` and `commit` fields together in `.chezmoidata.toml`. ECC updates ship executable hook code that runs in every agent session, and they never take the merge gate's deterministic fast lane: that lane is scoped to pins in `home/dot_config/mise/config.toml`, and ECC is pinned in `.chezmoidata.toml`. An agent reviews every bump regardless of how small the diff looks, and the rule needs no maintenance as the toolchain changes. (This replaced an `automerge: false` packageRule, which could only key on updateType and so could not tell an ECC bump apart from any other tagged release.) The 168-hour external refresh interval (`refreshPeriod`) on `.chezmoiexternal.toml` entries is separate from the Renovate bump.
 
 ---
 

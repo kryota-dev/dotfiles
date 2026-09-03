@@ -43,28 +43,35 @@ set -euo pipefail
 # routed to the agent by default instead of silently joining the fast lane.
 readonly PASS_TITLE_RE='update dependency ([^ ]+) to v([0-9]+\.[0-9]+\.[0-9]+)$'
 
-# Dependencies that always get agent review, whatever shape their update takes.
+# The one file whose version pins may take the fast lane.
 #
-# This is NOT the `automerge: false` config lane that .github/renovate.json5 used
-# to carry. That lane said "never merge this automatically" and Renovate decided
-# it from updateType alone; this says "always let the agent look", and the gate
-# still decides the outcome. The distinction is why this list can live here
-# without recreating the weakness that removing those rules was meant to fix.
+# Update titles do not carry the distinction that matters here. `update dependency
+# phone-harness to v1.2.3` is shaped exactly like `update dependency gh to
+# v2.99.0`, yet one of them ships Python that synthesises HID input on an unlocked
+# phone and the other ships a CLI that prints GitHub issues. Naming the risky
+# dependencies would work until the next time the toolchain changes -- a list of
+# instances has to be maintained against a world that keeps moving.
 #
-# The entries are here because their update titles are shaped exactly like an
-# ordinary CLI bump -- `update dependency phone-harness to v1.2.3` is
-# indistinguishable by shape from `update dependency gh to v2.99.0` -- while what
-# ships inside them is not ordinary at all:
+# The repository already draws the line structurally, in where it keeps each pin:
 #
-#   phone-harness   executable Python that captures the screen and synthesises
-#                   HID-level input on a real, unlocked phone.
-#   affaan-m/ecc    third-party hook code that runs automatically in every agent
-#                   session, with that session's tool access.
+#   home/dot_config/mise/config.toml   tools the user invokes deliberately --
+#                                      gh, jq, terraform, ripgrep, the language
+#                                      runtimes. Running one is a decision.
 #
-# Everything else the removed packageRules covered (the skill archives, the
-# claude-code-action pin) is tracked as a digest, which the shape allowlist below
-# already routes to the agent.
-readonly ALWAYS_REVIEW_DEPS='phone-harness affaan-m/ecc'
+#   home/.chezmoidata.toml             pieces of the environment that run on
+#                                      their own: ECC's hook code (every agent
+#                                      session), phone-harness, the skill
+#                                      archives. Nobody invokes these; they are
+#                                      already running.
+#
+#   dot_config/ntfy/compose.yaml.tmpl  container images.
+#   .github/workflows/*.yml            code that runs in CI holding secrets.
+#
+# So the rule is the category, not the instance: only a pin in the mise config is
+# eligible for the fast lane. Adding a CLI to mise makes it eligible automatically;
+# adding a skill, a hook or a new pin file does not, and a pin location nobody
+# anticipated defaults to review rather than to merge.
+readonly FAST_LANE_PIN_FILE='home/dot_config/mise/config.toml'
 
 # Renovate's bot login, matching the `--author app/renovate` filter the rest of
 # the repo's tooling uses (scripts/renovate-triage-comment.sh).
@@ -110,11 +117,13 @@ author="$(field '.author.login // ""')"
 title="$(field '.title // ""')"
 mergeable="$(field '.mergeable // ""')"
 file_count="$(field '.files | length')"
+changed_path="$(field '.files[0].path // ""')"
 additions="$(field '[.files[].additions] | add // 0')"
 deletions="$(field '[.files[].deletions] | add // 0')"
 labels="$(field '[.labels[].name] | join(" ")')"
 
-for v in "$author" "$title" "$mergeable" "$file_count" "$additions" "$deletions" "$labels"; do
+for v in "$author" "$title" "$mergeable" "$file_count" "$changed_path" \
+  "$additions" "$deletions" "$labels"; do
   [ "$v" = 'JQ_FAILED' ] && verdict needs-agent 'PR 情報を解釈できなかったため判定不能'
 done
 
@@ -147,19 +156,17 @@ esac
 [[ "$title" =~ $PASS_TITLE_RE ]] || {
   verdict needs-agent 'タグ付きリリースのバージョンピン更新と判定できないタイトル'
 }
-dep="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-
-# Shape is not enough for these: see ALWAYS_REVIEW_DEPS above.
-for reviewed in $ALWAYS_REVIEW_DEPS; do
-  [ "$dep" = "$reviewed" ] && {
-    verdict needs-agent "実行コードを配布する依存 (${dep}) のため形に依らず要審査"
-  }
-done
-
 # Narrowing checks. These can only reject; a title that failed the allowlist has
 # already been sent to the agent above.
 [ "$file_count" = '1' ] || {
   verdict needs-agent "変更ファイルが 1 つではない (${file_count} ファイル)"
+}
+
+# The category check: see FAST_LANE_PIN_FILE above. Everything pinned elsewhere --
+# the skill archives, the hook code, the container images, the CI actions -- is the
+# agent's to read, however ordinary its title looks.
+[ "$changed_path" = "$FAST_LANE_PIN_FILE" ] || {
+  verdict needs-agent "fast lane の対象外のファイル (${changed_path}) の更新のため要審査"
 }
 [ "$additions" = '1' ] && [ "$deletions" = '1' ] || {
   verdict needs-agent "バージョンピン 1 行の差分ではない (+${additions} -${deletions})"

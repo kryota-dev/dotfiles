@@ -47,7 +47,19 @@ allowlist** であり、差分の小ささを根拠にはしない。
 | `update deno monorepo to v2.8.3` | `needs-agent` | グループ更新であり単一の名前付き依存ではない |
 | `update dependency somelib to v3.0.0`（`2.9.0` から） | `needs-agent` | メジャー更新。タイトルだけでは分からないため旧バージョンを差分から読む |
 | `update dependency npm:agent-browser to v0.36.0`（`0.35.2` から） | `needs-agent` | semver 上、`0.x` のマイナー更新は破壊的変更を許す |
+| `home/dot_config/mise/config.toml` 以外の pin | `needs-agent` | fast lane に乗れるのは明示的に起動する道具だけ（後述） |
 | 解釈不能なもの、`gh` の呼び出し失敗 | `needs-agent` | 判定不能は決して「安全」ではない |
+
+**fast lane の範囲は、どの依存かではなく pin がどこに置かれているかで決まる。**
+`update dependency phone-harness to v1.2.3` は `update dependency gh to v2.99.0` と
+形が完全に同一だが、一方はロック解除された端末に HID 入力を合成する Python を配布する。
+危険な依存を名指しする方式は、ツールが入れ替わるまでしか保たない。このリポジトリは既に
+その線を構造として引いている: `home/dot_config/mise/config.toml` にはあなたが明示的に
+起動する道具が、`home/.chezmoidata.toml` には環境の一部として勝手に走るもの —— ECC の
+hook コード、phone-harness、skill アーカイブ —— が置かれている。コンテナイメージと
+ワークフローの pin はさらに別の場所にある。したがって fast lane に乗れるのは mise 設定の
+pin だけであり、そこに CLI を足せば自動的に対象になり、**誰も想定していなかった置き場所は
+既定でマージではなく審査に倒れる。**
 
 **タイトルだけでは patch と major を区別できない。** Renovate のタイトルは新バージョンしか
 含まないため、`to v3.0.0` と `to v2.99.0` は同じ形である。分類器は差分の削除行
