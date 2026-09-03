@@ -32,6 +32,8 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 
 すべてのテストは `tests/` 以下にあり、`bats tests/*.bats` でまとめて実行されます。ヘルパー `tests/helpers/setup.bash` がすべてのテストファイル向けに `REPO_ROOT` と `HOME_DIR`（= `<repo>/home`）を定義します。
 
+同ヘルパーは `_mktemp_dir` も定義しており、テストは一時ディレクトリを `mktemp -d` の直接呼び出しではなく必ずこのヘルパーから取得します。macOS の `mktemp` はテンプレートを与えたときにしか `TMPDIR` を参照しないため、ベア呼び出しは `/var/folders/…/T` を掴んで sandbox 配下のセッションでは失敗し、変更と無関係にスイート全体が赤くなります。この規約は `tests/tmpdir_policy.bats` が機械的に強制します（#642）。
+
 ### `tests/files.bats`
 
 `home/` 内に chezmoi ソースファイルが存在することを確認します。主なカテゴリ：

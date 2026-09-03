@@ -32,6 +32,8 @@ Contributors should run `make test` locally before pushing — it chains the sam
 
 All tests live under `tests/` and are run together via `bats tests/*.bats`. The helper `tests/helpers/setup.bash` defines `REPO_ROOT` and `HOME_DIR` (= `<repo>/home`) for every test file.
 
+It also defines `_mktemp_dir`, and every test must take its scratch directory from there rather than calling `mktemp -d` directly: macOS's `mktemp` consults `TMPDIR` only when given a template, so a bare call lands in `/var/folders/…/T` and fails under a sandboxed session, turning the whole suite red for reasons unrelated to the change under test. `tests/tmpdir_policy.bats` enforces this mechanically (#642).
+
 ### `tests/files.bats`
 
 Asserts that chezmoi source files exist in `home/`. Key categories:

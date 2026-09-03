@@ -14,6 +14,13 @@ WRAPPER="${HOME_DIR}/dot_claude/executable_macos-defaults-drift-check.sh"
 TEST_DOMAIN="com.kryota.dotfiles-bats-fixture-365"
 
 setup() {
+  # The build_expected/read_value round-trip tests below run their body via a
+  # fresh `bash -c` subshell that only sources $WRAPPER, not this file, so the
+  # _mktemp_dir helper (tests/helpers/setup.bash) would otherwise be
+  # "command not found" in there. Exporting it as a function makes bash
+  # propagate it to that child process (#642).
+  export -f _mktemp_dir
+
   STUB_DIR="${BATS_TEST_TMPDIR}/stub"
   mkdir -p "$STUB_DIR"
   cat >"${STUB_DIR}/curl" <<'EOF'
@@ -240,7 +247,7 @@ EOF
 
   run env MACOS_DEFAULTS_DRIFT_REPO_DIR="$FIXTURE_REPO" bash -c '
     source "$1"
-    tmp_dir="$(mktemp -d)"
+    tmp_dir="$(_mktemp_dir)"
     trap "rm -rf \"$tmp_dir\"" EXIT
     ssot_lines="$(parse_ssot)"
     printf "%s\n" "$ssot_lines" | build_expected "$tmp_dir"
@@ -276,7 +283,7 @@ EOF
 
   run env MACOS_DEFAULTS_DRIFT_REPO_DIR="$multi_repo" bash -c '
     source "$1"
-    tmp_dir="$(mktemp -d)"
+    tmp_dir="$(_mktemp_dir)"
     trap "rm -rf \"$tmp_dir\"" EXIT
     parse_ssot | build_expected "$tmp_dir"
     a="$(read_value "$tmp_dir/'"$domain_a"'" SharedKeyName)"

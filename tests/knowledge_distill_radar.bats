@@ -189,7 +189,7 @@ run_fn() {
 @test "same-week guard skips a second run within the same ISO week" {
   [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
   mkdir -p "${tmp}/state/knowledge-distill-radar"
   printf '%s\n' "$(date +%G-W%V)" >"${tmp}/state/knowledge-distill-radar/last-run"

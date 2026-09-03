@@ -127,3 +127,20 @@ _onepassword_item_list() {
     in_arr && /"op:\/\//      { print }
   ' "${HOME_DIR}/run_once_after_11-validate-1password.sh.tmpl"
 }
+
+# Create a scratch directory for a test, honoring TMPDIR.
+#
+# macOS mktemp(1) only consults TMPDIR when it is given a template (or -t);
+# a bare `mktemp -d` ignores TMPDIR and grabs the Darwin default
+# /var/folders/.../T instead. Under sandboxing that default is unwritable, so
+# a bare `mktemp -d` fails with "mkdtemp failed: Operation not permitted" --
+# a suite-wide false red unrelated to whatever change is under test (#642).
+# Passing an explicit template makes both macOS and Linux honor TMPDIR, so
+# every test must obtain its scratch dir through this helper instead of
+# calling mktemp directly.
+_mktemp_dir() {
+  local dir="${TMPDIR:-/tmp}"
+  # Strip a trailing slash: macOS sets TMPDIR with one (/var/folders/.../T/),
+  # and leaving it in would produce a "//" in the generated path.
+  mktemp -d "${dir%/}/bats.XXXXXX"
+}
