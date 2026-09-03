@@ -29,8 +29,19 @@ auto-memory は「新しく保存されたか」しか観測されておらず�
 3. **finding は「断定できる形」にだけ出す。** 絶対パス・`~` 始まり・glob・root セグメントが
    無いものなどは、存在しないことを断定できないので `unchecked` に落とし、**必ず列挙する**。
 
-単一ファイルに閉じてあるのは、週次 headless 実行の `--allowedTools` 許可エントリを 1 件に
-保つため（許可リストに無いコマンドは production で無言拒否される。#491 と同型の故障）。
+## なぜ単一ファイルなのか（house rule の「800 行で分割検討」に対する検討結果）
+
+**許可リストのエントリ数は理由にならない。** Python はスクリプトのディレクトリを `sys.path` へ
+自動追加するので、薄いエントリポイント + ローカルパッケージへ分割しても `--allowedTools` に
+載る呼び出しパスもエントリ数も変わらない。
+
+**実際の理由は、単一ファイルがそのまま静的検査の境界になっていること。**
+`tests/knowledge_distill_memory_revalidate.bats` は `$SCRIPT` 1 本に対して
+(1) `py_compile` (2) 閾値定数がすべて名前付きで存在すること (3) 起動する外部コマンドが
+`git` と `gh` だけであることの AST 検査 —— を掛けている。ロジックを隣接モジュールへ移すと、
+guard を同時に作り直さない限り**検査対象外のコードが生まれる**。分割そのものは可能だが、
+それは「guard の再設計」を伴う別の変更であり、本スクリプトの受け入れ条件には含まれない。
+house rule の当該条項も「800 行で分割検討」であって分割の義務ではない。
 """
 
 from __future__ import annotations
@@ -100,10 +111,11 @@ MEMORY_INDEX_NAME = "MEMORY.md"
 
 FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
 MODIFIED_FIELD_RE = re.compile(r"^modified:[ \t]*(.+?)[ \t]*$", re.M)
+# 時刻部分のあとに UTC offset（`Z` / `+09:00` / `-0500`）が付いているか。
+ISO_OFFSET_RE = re.compile(r"\d[Zz]$|\d[+-]\d{2}:?\d{2}$")
 FENCE_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"`+([^`\n]+?)`+")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*$")
-FENCED_BLOCK_RE = re.compile(r"^[ ]{0,3}(`{3,}|~{3,}).*?^[ ]{0,3}\1", re.S | re.M)
 HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
@@ -271,13 +283,57 @@ def parse_iso8601(value: str) -> Optional[datetime]:
         except ValueError:
             continue
         if parsed.tzinfo is None:
-            parsed = parsed.astimezone()
+            # offset を持たない値は UTC とみなす。`astimezone()` はホストの
+            # timezone を仮定するので、同じ memory と同じ git 履歴でも実行した
+            # マシンの TZ で staleness の判定が変わってしまう。報告に出す出所へ
+            # `naive-utc` を添えて、この解釈をしたことを読み手に見せる。
+            parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
     return None
 
 
 def iso(dt: Optional[datetime]) -> str:
     return dt.isoformat() if dt else "unknown"
+
+
+def tilde(path: Path) -> str:
+    """ホームディレクトリを `~` に畳んだ表示用パスを返す。
+
+    レポートに `/Users/<username>/...` をそのまま載せると、ローカルアカウント名が
+    毎週の成果物へ入る。この節は週次レポートへ丸ごと転記される設計なので、
+    載せる必要のない識別子は入口で落とす。
+    """
+    home = str(Path.home())
+    text = str(path)
+    if home and text.startswith(home):
+        return "~" + text[len(home) :]
+    return text
+
+
+def iter_fence_state(text: str) -> Iterable[Tuple[int, str, bool, bool]]:
+    """行ごとに (行番号, 行, フェンス内か, フェンス記号行か) を返す。
+
+    フェンスの開閉規則は CommonMark に合わせる —— 閉じフェンスは**同じ文字**で
+    **開きフェンス以上の長さ**であること。`split_markdown`（パス / make target の抽出）と
+    `strip_fenced_blocks`（重複判定の正規化）がこの 1 つの状態機械を共有するので、
+    「片方だけが閉じたと見なす」不整合が構造的に起こらない。
+    """
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        fence = FENCE_RE.match(line)
+        if fence:
+            marker = fence.group(1)
+            if not in_fence:
+                in_fence, fence_char, fence_len = True, marker[0], len(marker)
+                yield lineno, line, True, True
+                continue
+            if marker[0] == fence_char and len(marker) >= fence_len:
+                in_fence = False
+                yield lineno, line, True, True
+                continue
+        yield lineno, line, in_fence, False
 
 
 def split_markdown(text: str) -> List[Tuple[int, List[str], str]]:
@@ -287,26 +343,22 @@ def split_markdown(text: str) -> List[Tuple[int, List[str], str]]:
     抽出をコード内に限るのは、地の文の `make sure` のような英文を target と誤認しないため。
     """
     rows: List[Tuple[int, List[str], str]] = []
-    in_fence = False
-    fence_char = ""
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        fence = FENCE_RE.match(line)
-        if fence:
-            marker = fence.group(1)
-            if not in_fence:
-                in_fence, fence_char = True, marker[0]
-                rows.append((lineno, [], ""))
-                continue
-            if marker[0] == fence_char:
-                in_fence = False
-                rows.append((lineno, [], ""))
-                continue
-        if in_fence:
+    for lineno, line, in_fence, is_marker in iter_fence_state(text):
+        if is_marker:
+            rows.append((lineno, [], ""))
+        elif in_fence:
             rows.append((lineno, [line], ""))
-            continue
-        codes = [m.group(1) for m in INLINE_CODE_RE.finditer(line)]
-        rows.append((lineno, codes, INLINE_CODE_RE.sub(" ", line)))
+        else:
+            codes = [m.group(1) for m in INLINE_CODE_RE.finditer(line)]
+            rows.append((lineno, codes, INLINE_CODE_RE.sub(" ", line)))
     return rows
+
+
+def strip_fenced_blocks(text: str) -> str:
+    """フェンス内の行を落とす（重複判定の正規化用）。"""
+    return "\n".join(
+        line for _lineno, line, in_fence, is_marker in iter_fence_state(text) if not (in_fence or is_marker)
+    )
 
 
 def normalize_for_shingles(text: str) -> str:
@@ -316,7 +368,7 @@ def normalize_for_shingles(text: str) -> str:
     差で n-gram が割れない。両側に同じ処理を掛けるため情報の非対称は生じない。
     """
     text = FRONTMATTER_RE.sub("", text, count=1)
-    text = FENCED_BLOCK_RE.sub(" ", text)
+    text = strip_fenced_blocks(text)
     text = HTML_COMMENT_RE.sub(" ", text)
     text = MD_LINK_RE.sub(r"\1", text)
     text = unicodedata.normalize("NFKC", text).lower()
@@ -346,7 +398,15 @@ def containment(subset: Set[str], superset: Set[str]) -> float:
 
 
 def repo_root_of(repo: Path) -> Path:
-    """worktree からでも共有元リポジトリのルートを返す（git が無ければ引数のまま）。"""
+    """worktree からでも共有元リポジトリのルートを返す（git が無ければ引数のまま）。
+
+    `home/dot_local/lib/frontier-harness/state-root.mjs` に、同じ `--git-common-dir` からの
+    導出を symlink 解決・containment 検証まで含めて行う実装がある。あちらは**書き込み先**を
+    決めるため untrusted checkout を脅威に含めるのに対し、ここは読み取り専用の走査先を
+    **best-effort で当てる**だけで、外したときは memory ディレクトリ不在として
+    `inconclusive` に落ちる。よって同じ厳格さを持ち込まない（劣化コピーではなく、
+    要求の違いによる意図的な簡略化）。言語が違うのでコード共有もしない。
+    """
     try:
         result = run_command(["git", "-C", str(repo), "rev-parse", "--git-common-dir"])
     except (OSError, subprocess.SubprocessError):
@@ -408,10 +468,37 @@ def load_memory_files(memory_dir: Path) -> List[MemoryFile]:
 
     ripgrep 系の再帰検索は使わない（gitignore 対象と NUL 入りファイルを無言で飛ばすため）。
     """
+    # symlink は追わない。memory ディレクトリへ書ける者が `*.md` という名前のリンクを
+    # 仕掛ければ、ディレクトリ外の任意ファイルを「memory」として読ませ、抽出結果を
+    # レポートへ載せられる。読み取り専用の走査であっても、境界の外へ出ないことを入口で
+    # 決める。ただし黙って飛ばさず、下で `symlink` という読めない理由として記録する。
+    names: List[str] = []
+    skipped_links: List[str] = []
     with os.scandir(memory_dir) as entries:
-        names = sorted(e.name for e in entries if e.is_file() and e.name.endswith(".md"))
+        for entry in entries:
+            if not entry.name.endswith(".md"):
+                continue
+            if entry.is_symlink():
+                skipped_links.append(entry.name)
+            elif entry.is_file(follow_symlinks=False):
+                names.append(entry.name)
+    names.sort()
+    skipped_links.sort()
 
     files: List[MemoryFile] = []
+    for name in skipped_links:
+        files.append(
+            MemoryFile(
+                name=name,
+                path=memory_dir / name,
+                text=None,
+                error="symlink",
+                size_bytes=0,
+                line_count=0,
+                modified=None,
+                modified_source="unknown",
+            )
+        )
     for name in names:
         path = memory_dir / name
         text, error, raw = read_text_file(path)
@@ -423,14 +510,29 @@ def load_memory_files(memory_dir: Path) -> List[MemoryFile]:
             if front:
                 field_match = MODIFIED_FIELD_RE.search(front.group(1))
                 if field_match:
-                    modified = parse_iso8601(field_match.group(1))
+                    raw_value = field_match.group(1).strip().strip("\"'")
+                    modified = parse_iso8601(raw_value)
                     if modified:
-                        source = "frontmatter-modified"
+                        # offset を持つ値と、こちらが UTC と決めた naive 値を区別して
+                        # 出す。staleness の finding はこの出所を根拠として併記するので、
+                        # 証拠の強さが読み手に伝わる必要がある。
+                        source = (
+                            "frontmatter-modified"
+                            if ISO_OFFSET_RE.search(raw_value)
+                            else "frontmatter-modified(naive-utc)"
+                        )
+                    else:
+                        # `modified:` があるのに読めない、は「無い」とは別の事実。
+                        # 黙って mtime へ落とすと、壊れた監査対象データが隠れる。
+                        source = "frontmatter-modified(unparsable)"
         if modified is None:
             try:
                 modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-                source = "mtime"
-            except OSError:
+                source = "mtime" if source == "unknown" else source + "->mtime"
+            except (OSError, OverflowError, ValueError):
+                # fromtimestamp は範囲外の値で OverflowError / ValueError も出す。
+                # ここで漏らすとプロセス全体が exit 70 になり、「想定外例外は
+                # inconclusive へ写像する」という不変条件を破る。
                 source = "unknown"
         files.append(
             MemoryFile(
@@ -489,11 +591,16 @@ def classify_path_token(token: str, repo: Path, tracked_basenames: Optional[Set[
     if not (BARE_FILENAME_RE.match(token) or BARE_DOTFILE_RE.match(token)):
         return None
     if (repo / token).exists():
+        # リポジトリ直下に同名がある場合だけ、参照先を一意に決められる。
         return "exists", token, ""
     if tracked_basenames is None:
         return "unchecked", None, "ディレクトリを伴わないファイル名（git の追跡一覧を取得できず未解決）"
     if token in tracked_basenames:
-        return "exists", None, ""
+        # 同名の追跡ファイルはあるが、どの階層のものを指すのかは決められない。
+        # ここで `exists` を返すと (1) 参照先が別階層にしか無いのに「実在する」と
+        # 言ってしまい、(2) 参照先パスが定まらないので staleness が黙って飛ばす。
+        # 「存在は否定できないが特定もできない」を unchecked として明示する。
+        return "unchecked", None, "ディレクトリを伴わないファイル名（同名の追跡ファイルはあるが参照先が一意に定まらない）"
     return "unchecked", None, "ディレクトリを伴わないファイル名（リポジトリ直下にも追跡一覧にも無い）"
 
 
@@ -571,17 +678,11 @@ def parse_makefile_targets(makefile_text: str) -> Set[str]:
 
 def check_make_target(memory_files: Sequence[MemoryFile], repo: Path) -> CheckResult:
     result = CheckResult("make-target")
-    makefile = repo / "Makefile"
-    makefile_text: Optional[str] = None
-    if makefile.is_file():
-        makefile_text, error, _ = read_text_file(makefile)
-        if makefile_text is None:
-            result.add_reason("Makefile を読めなかった（{}）".format(error))
-    else:
-        result.add_reason("リポジトリに Makefile が無く、target の実在を確認できない")
 
-    targets = parse_makefile_targets(makefile_text) if makefile_text is not None else set()
-
+    # 先に候補を集める。Makefile の有無を先に見ると、`make` の言及が 1 件も無い memory
+    # に対しても「Makefile が無い」という実行不能理由が立ち、検査すべき対象がゼロなだけの
+    # 実行まで inconclusive になる（実行不能の警告が意味を失う）。
+    candidates: List[Tuple[str, int, str]] = []
     for mem in memory_files:
         if mem.text is None:
             continue
@@ -589,21 +690,7 @@ def check_make_target(memory_files: Sequence[MemoryFile], repo: Path) -> CheckRe
             for segment in codes:
                 for match in MAKE_INVOCATION_RE.finditer(segment):
                     for name in match.group(1).split():
-                        if makefile_text is None:
-                            result.unchecked.append(
-                                Item(mem.name, lineno, "make " + name, "Makefile を読めていない")
-                            )
-                            continue
-                        result.checked += 1
-                        if name not in targets:
-                            result.findings.append(
-                                Item(
-                                    mem.name,
-                                    lineno,
-                                    "make " + name,
-                                    "Makefile に target `{}` が存在しない".format(name),
-                                )
-                            )
+                        candidates.append((mem.name, lineno, name))
             for match in MAKE_PROSE_TARGET_RE.finditer(prose):
                 result.unchecked.append(
                     Item(
@@ -613,6 +700,31 @@ def check_make_target(memory_files: Sequence[MemoryFile], repo: Path) -> CheckRe
                         "コードスパン外の記述（地の文の誤検出を避けるため判定しない）",
                     )
                 )
+
+    if not candidates:
+        return result
+
+    makefile = repo / "Makefile"
+    makefile_text: Optional[str] = None
+    if makefile.is_file():
+        makefile_text, error, _ = read_text_file(makefile)
+        if makefile_text is None:
+            result.add_reason("Makefile を読めなかった（{}）".format(error))
+    else:
+        result.add_reason("リポジトリに Makefile が無く、target の実在を確認できない")
+
+    if makefile_text is None:
+        for mem_name, lineno, name in candidates:
+            result.unchecked.append(Item(mem_name, lineno, "make " + name, "Makefile を読めていない"))
+        return result
+
+    targets = parse_makefile_targets(makefile_text)
+    for mem_name, lineno, name in candidates:
+        result.checked += 1
+        if name not in targets:
+            result.findings.append(
+                Item(mem_name, lineno, "make " + name, "Makefile に target `{}` が存在しない".format(name))
+            )
     return result
 
 
@@ -662,8 +774,12 @@ def check_pr_reference(memory_files: Sequence[MemoryFile], repo: Path, mode: str
     if not refs:
         return result
 
-    default_slug = resolve_repo_slug(repo)
-    if default_slug is None:
+    # 既定の照会先が要るのは、slug を伴わない `#N` 形式の参照があるときだけ。
+    # 常に解決を試みると、`<owner>/<repo>#N` しか書かれていない memory でも
+    # remote 未設定というだけで inconclusive が立つ。
+    needs_default_slug = any(slug is None for _, _, _, slug in refs)
+    default_slug = resolve_repo_slug(repo) if needs_default_slug else None
+    if needs_default_slug and default_slug is None:
         result.add_reason("git remote origin から `<owner>/<repo>` を解決できず、既定の照会先が定まらない")
 
     cache: Dict[Tuple[str, str], Tuple[str, str]] = {}
@@ -750,7 +866,15 @@ def check_staleness(
     queries = 0
 
     for cand in candidates:
-        if cand.verdict != "exists" or not cand.relpath:
+        if cand.verdict != "exists":
+            # 存在しない / 判定対象外の候補は path-exists 側で既に報告済み。
+            continue
+        if not cand.relpath:
+            # 参照先パスが一意に定まらない候補（黙って飛ばすと、その参照先が memory より
+            # 新しく変わっていても正常扱いのまま検知されない）。
+            result.unchecked.append(
+                Item(cand.memory_file, cand.line, cand.raw, "参照先パスが一意に定まらず最終変更日を引けない")
+            )
             continue
         mem = by_name.get(cand.memory_file)
         if mem is None or mem.modified is None:
@@ -826,11 +950,9 @@ def load_rule_sections(rule_files: Sequence[Path], result: CheckResult) -> List[
         if text is None:
             result.add_reason("ルールファイル {} を読めなかった（{}）".format(path.name, error))
             continue
-        label = str(path)
+        label = tilde(path)
         current_heading = "(冒頭)"
         buffer: List[str] = []
-        in_fence = False
-        fence_char = ""
 
         def flush(heading: str, body: List[str]) -> None:
             joined = "\n".join(body)
@@ -839,17 +961,10 @@ def load_rule_sections(rule_files: Sequence[Path], result: CheckResult) -> List[
             if grams:
                 sections.append(RuleSection(label, heading, grams))
 
-        for line in text.splitlines():
-            fence = FENCE_RE.match(line)
-            if fence:
-                marker = fence.group(1)
-                if not in_fence:
-                    in_fence, fence_char = True, marker[0]
-                elif marker[0] == fence_char:
-                    in_fence = False
-                buffer.append(line)
-                continue
-            heading = None if in_fence else HEADING_RE.match(line)
+        # フェンス判定は `iter_fence_state` に一本化する（見出しの検出と、
+        # 正規化側のフェンス除去が別々の規則で動くのを避ける）。
+        for _lineno, line, in_fence, is_marker in iter_fence_state(text):
+            heading = None if (in_fence or is_marker) else HEADING_RE.match(line)
             if heading:
                 flush(current_heading, buffer)
                 current_heading = heading.group(2)
@@ -1061,9 +1176,9 @@ def build_report(
     if inconclusive:
         exit_code |= EXIT_INCONCLUSIVE
     return {
-        "memory_dir": str(memory_dir),
-        "repo": str(repo),
-        "rule_files": [str(p) for p in rule_files],
+        "memory_dir": tilde(memory_dir),
+        "repo": tilde(repo),
+        "rule_files": [tilde(p) for p in rule_files],
         "memory_file_count": len(memory_files),
         "memory_files": [
             {
