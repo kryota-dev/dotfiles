@@ -155,7 +155,7 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 
 `renovate.json5` には `customManager` の正規表現が含まれており、`.chezmoidata.toml` の `version` と `commit` フィールドにマッチし、新しい ECC リリースタグが現れると 1 つの PR として両方を一緒にバンプします。
 
-重要なポリシー: **ECC は絶対に自動マージしません。** `renovate.json5` の `packageRule` で `affaan-m/ECC` に `"automerge": false` を設定しています。ECC タールボールにはエージェントハーネス内で実行される実行可能なフックスクリプトが含まれているため、すべての ECC バンプは手動でレビューする必要があります。
+重要なポリシー: **ECC の更新は必ずマージ前に審査されます。** ECC タールボールにはエージェントハーネス内で実行される実行可能なフックスクリプトが含まれます。マージゲートの fast lane は `home/dot_config/mise/config.toml` の pin —— あなたが明示的に起動する道具 —— に限定されており、ECC はこの `.chezmoidata.toml` に pin されているため、その lane には決して乗らず、差分がどう見えようとエージェントが審査します。この保証は ECC を名指ししていることではなく、**pin がどこに置かれているか**から導かれます。依存をこのファイルに置けば、自動的に審査対象になります。（マージゲート導入前は `renovate.json5` の `automerge: false` packageRule でした。設定側は updateType しか見られず、ECC のリリースを他のタグ付きリリースと区別できません — [Renovate 自動化](renovate-automation.ja.md) 参照。）
 
 同じ「データにピン固定して Renovate でバンプ」パターンは `anthropics/skills`（`.skills.anthropic_commit`）と Moralerspace フォント（`.versions.moralerspace_font`）にも適用されます。
 
@@ -170,7 +170,7 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 
 両者は upstream 履歴上の別地点にあってかまいません。`SKILL.md` は独立した markdown なので、スキル側の pin が遅れていてもインストール済みの CLI が壊れることはなく、最悪でもスキル本文が実際より少し古いヘルパーを説明するだけです。2 つの正規表現はいずれも `[phone_harness]` テーブルにスコープされており、隣接テーブルの `version =` / `commit =` を掴むことはありません。
 
-ECC と同様に **phone-harness も絶対に自動マージしません**。しかもその理由は markdown のみのスキルアーカイブより強いものです。phone-harness は、実機のロック解除された端末の画面をキャプチャし HID レベルの入力を合成する実行可能な Python を配布し、その `SKILL.md` こそがエージェントをその操作へ導くものだからです。明示的な `automerge: false` がなければ、パッチバンプが patch/pin の自動マージレーンに乗り、実アカウントを保持した端末へそのまま到達します。
+ECC と同様に **phone-harness の更新も必ずマージ前に審査されます**。しかもその理由は markdown のみのスキルアーカイブより強いものです。phone-harness は、実機のロック解除された端末の画面をキャプチャし HID レベルの入力を合成する実行可能な Python を配布し、その `SKILL.md` こそがエージェントをその操作へ導くものだからです。2 つの pin はどちらも覆われており、しかもどちらも名指しではありません。PyPI リリースは fast lane の対象外である `.chezmoidata.toml` に pin され、`SKILL.md` の digest は `digest` 更新としてやはりその lane に乗りません。保証を担っているのは**対象範囲**です —— `update dependency phone-harness to v1.2.3` は通常の CLI 更新と形が完全に同一であり、更新の*形*だけでは実アカウントを保持した端末への到達を止められないからです。
 
 ---
 

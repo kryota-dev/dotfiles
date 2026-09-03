@@ -74,7 +74,7 @@ canonical with Japanese (`*.ja.md`) mirrors. `docs/` is the single home for the 
 engine, the lifecycle apply timeline, the lint/CI internals, and the AI-agent layer; this
 file stays short and points there.
 
-- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md)
+- **Architecture:** [overview](docs/architecture/overview.md) · [chezmoi engine](docs/architecture/chezmoi-engine.md) · [externals & pinning](docs/architecture/externals-and-pinning.md) · [lifecycle scripts](docs/architecture/lifecycle-scripts.md) · [shell environment](docs/architecture/shell-environment.md) · [dev tooling](docs/architecture/dev-tooling.md) · [Renovate automation](docs/architecture/renovate-automation.md)
 - **AI agents:** [overview](docs/agents/overview.md) · [account isolation](docs/agents/account-isolation.md) · [Claude Code](docs/agents/claude-code.md) · [Codex](docs/agents/codex.md) · [skill provenance](docs/agents/skills-provenance.md)
 - **Contributing:** [local dev & the make contract](docs/contributing/local-dev.md) · [CI & tests](docs/contributing/ci-and-tests.md) · [worktrees & env](docs/contributing/worktrees-and-env.md)
 - **Explanation:** [design rationale](docs/explanation/design-rationale.md) · [secrets & isolation](docs/explanation/secrets-and-isolation.md)
@@ -84,6 +84,16 @@ The chezmoi naming conventions, lint pipeline internals (shellcheck/shfmt flags,
 are documented there, not duplicated here. Note: the chezmoi **behavior** config is
 `home/dot_config/chezmoi/private_chezmoi.toml` (deploys to `~/.config/chezmoi/chezmoi.toml`,
 0600); template **data** is `home/.chezmoidata.toml`.
+
+## Dependency updates
+
+Renovate pull requests merge unattended. The `renovate-gate` required status check
+decides: `scripts/renovate-gate-classify.sh` clears ordinary version pins, everything
+else (digest bumps, majors, security advisories) goes to an agent review, and a
+missing check or missing verdict blocks the merge. Approve the PR to override,
+Request changes to reject or redirect. See
+[Renovate automation](docs/architecture/renovate-automation.md) — including the
+ruleset setup, which is configured in the GitHub UI and not managed as code.
 
 ## Git config
 

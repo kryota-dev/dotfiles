@@ -10,11 +10,11 @@ all: help
 ## Run shellcheck, shfmt check, and zsh syntax check
 lint:
 	@echo "==> Running shellcheck..."
-	@find home \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
+	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 - || exit 1; \
 	done
 	@echo "==> Running shfmt check..."
-	@find home \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
+	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shfmt -d -i 2 -ci || exit 1; \
 	done
 	@echo "==> Checking zsh syntax..."
@@ -26,7 +26,7 @@ lint:
 ## Format shell scripts with shfmt (writes .sh in place; .tmpl shown as diff only)
 fmt:
 	@echo "==> Formatting .sh files (shfmt -w)..."
-	@find home -name '*.sh' ! -name 'symlink_*' -exec shfmt -w -i 2 -ci {} +
+	@find home scripts -name '*.sh' ! -name 'symlink_*' -exec shfmt -w -i 2 -ci {} +
 	@echo "==> Checking .sh.tmpl files (must be fixed manually due to chezmoi {{ }} syntax)..."
 	@find home -name '*.sh.tmpl' ! -name 'symlink_*' | while read -r f; do \
 		diff=$$(sed '/{{/d' "$$f" | shfmt -d -i 2 -ci 2>&1) && true; \

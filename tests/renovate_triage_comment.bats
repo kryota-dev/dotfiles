@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# Create-only comment wrapper for the Renovate triage workflow
+# Create-only comment wrapper for the Renovate automation workflows
 # (scripts/renovate-triage-comment.sh). `gh` is stubbed on PATH; no network, CI-safe.
 # Covers the structural write-scope guarantees: fixed argc, dashboard-only-#12,
 # open-Renovate-PR-only, create-only (never edit/delete), empty-body refusal.

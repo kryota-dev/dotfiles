@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Create-only comment wrapper for the Renovate triage workflow
-# (.github/workflows/renovate-triage.yml). The scheduled agent is allowlisted to
-# call ONLY this script for writes, so its write surface is structurally limited to
+# Create-only comment wrapper for the Renovate automation workflows
+# (.github/workflows/renovate-gate.yml, renovate-review-action.yml and
+# renovate-digest.yml). Their agents are allowlisted to call ONLY this script and
+# the verdict recorder for writes, so the write surface is structurally limited to
 # CREATING a comment on either the Dependency Dashboard (issue #12) or an OPEN,
 # Renovate-authored PR. It can never edit or delete a comment, never call `gh api`,
-# and never comment on an arbitrary issue/PR. This makes the workflow's read-only
-# guarantee structural rather than prompt-dependent.
+# and never comment on an arbitrary issue/PR. This makes the read-only guarantee
+# structural rather than prompt-dependent.
 #
 # Usage: renovate-triage-comment.sh <dashboard|pr> <number> <body>
 #   exit 64: usage / validation error   exit 65: target is not an open Renovate PR

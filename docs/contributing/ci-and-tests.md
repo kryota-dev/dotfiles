@@ -168,12 +168,60 @@ The job installs chezmoi, sheldon, and starship via Homebrew, copies `home/dot_c
 
 ---
 
-## `renovate-triage.yml` — weekly Renovate triage
+## `renovate-gate.yml` / `renovate-review-action.yml` / `renovate-digest.yml` — the Renovate merge gate
 
-Runs on a `schedule` (every Monday at 00:00 UTC = 09:00 JST) and on `workflow_dispatch`, on `ubuntu-latest`. It runs [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) in automation mode (a `prompt` input, no `@claude` mention) to triage open Renovate PRs **read-only**: it collects them with `gh`, classifies each by risk / CI state / semver, analyzes the risky ones, then posts a consolidated summary comment to the Dependency Dashboard (issue #12) and a per-PR detail comment on each analyzed PR. The inlined prompt is written in Japanese so the posted comments are in Japanese (the same convention as agent definitions and the Fable orchestrator prompt).
+Renovate PRs merge unattended. These three workflows decide whether a given one may.
+The design — the classifier's verdict table, the three-layer fail-closed argument, how
+to approve or reject, and the ruleset that has to be created by hand in the GitHub UI —
+lives in [Renovate automation](../architecture/renovate-automation.md). What belongs
+here is the CI shape.
 
-The workflow **never merges** — merging stays local and human-approved via the `renovate-sweep` skill (`home/dot_agents/skills/renovate-sweep/SKILL.md`), the conceptual source of truth for the classification rules inlined in the prompt. Read-only is enforced by defense-in-depth: the job grants only `contents: read` + `issues: write` + `pull-requests: write` (no `contents: write`); the `--allowedTools` allowlist holds only read-only `gh` subcommands plus one create-only comment wrapper (`scripts/renovate-triage-comment.sh`, which posts a comment only to issue #12 or an open Renovate PR and never edits/deletes — covered by `tests/renovate_triage_comment.bats`); the agent has no arbitrary Bash (only read-only `gh` subcommands and the wrapper — no `echo`/`printenv`/`cat`); and the prompt treats all fetched data as untrusted and forbids emitting secrets. (The subprocess env scrub `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is intentionally not enabled: it hard-requires bubblewrap, which the action installs only in its `allowed_non_write_users` mode, so setting it made Claude Code fail to start.) Auth passes the job-scoped `github.token` explicitly (so the action does not fall back to an OIDC path needing `id-token: write`) and the `CLAUDE_CODE_OAUTH_TOKEN` repository secret (from `claude setup-token`); the action ref is SHA-pinned, `automerge: false` in Renovate, and tracked like every other `uses:`.
+**`renovate-gate.yml`** runs on every `pull_request` (`opened` / `synchronize` /
+`reopened`) and reports the `renovate-gate` commit status, registered as a required
+status check on `main`. It resolves authorship from the webhook payload rather than a
+`gh` call — an API failure has no safe answer, since "unknown means not Renovate"
+reports success on an unreviewed update while "unknown means Renovate" blocks human PRs
+during an outage. A PR that is not Renovate's gets `success` immediately, because a
+required check that never reports would leave every human PR at pending. Renovate's own
+PRs go through `scripts/renovate-gate-classify.sh` (shell only, no agent session) and
+only the ones it cannot positively clear reach
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action).
+The reporting step runs with `if: always()`, so a crashed or timed-out agent produces a
+`failure`, never a silent pass. Fork PRs are the one gap: GitHub hands them a read-only
+`GITHUB_TOKEN` that `permissions:` cannot widen, so the workflow explains that in the
+job summary instead of dying on a 403.
 
+**`renovate-review-action.yml`** runs on `pull_request_review`. Its **first** step
+checks the reviewer's collaborator permission — this repository is public, so anyone can
+submit an approving review and "a review exists" proves nothing. Every later step is
+gated on that result (`tests/files.bats` walks the steps to prove it, rather than
+checking that the condition merely appears somewhere).
+
+**`renovate-digest.yml`** runs weekly (Monday 00:00 UTC = 09:00 JST) and on
+`workflow_dispatch`, posting a catch-up digest to the Dependency Dashboard (issue #12).
+It holds no `statuses` permission: it must never be able to influence the gate.
+
+**The agent's write surface is structurally limited in all three.** It never gets
+arbitrary Bash — the `--allowedTools` allowlist holds read-only `gh` subcommands plus
+at most two wrappers: `scripts/renovate-gate-verdict.sh`, which writes one local JSON
+file and never touches the network, and the create-only
+`scripts/renovate-triage-comment.sh`, which comments only on issue #12 or an open
+Renovate PR and never edits or deletes. `scripts/renovate-gate-status.sh` — the script
+that actually reports the required status — is deliberately **absent** from every
+allowlist and is invoked only by workflow steps, so an agent cannot mark its own review
+as passing. `tests/files.bats` compares each allowlist against its expected set exactly;
+a denylist of known-bad strings would still pass a grant widened to `Bash(gh:*)`. There
+is no `issue_comment` trigger anywhere, because on a public repository that would take
+orders from anyone who can type in the comment box. The prompts treat all fetched data
+as untrusted and forbid emitting secrets. (The subprocess env scrub
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is intentionally not enabled: it hard-requires
+bubblewrap, which the action installs only in its `allowed_non_write_users` mode, so
+setting it made Claude Code fail to start.) Auth passes the job-scoped `github.token`
+explicitly — without it the action falls back to an OIDC exchange needing
+`id-token: write` — plus the `CLAUDE_CODE_OAUTH_TOKEN` repository secret (from
+`claude setup-token`). The action ref is SHA-pinned and tracked like every other
+`uses:`; a bump to it reaches the gate as a `digest` update, which the classifier always
+routes to agent review.
 ---
 
 ## Reusable workflows and SHA pinning
@@ -190,7 +238,7 @@ All workflows set `permissions: {}` at the top level and grant only the minimum 
 
 ### Renovate and ECC pinning
 
-`.github/renovate.json5` manages all dependency updates. A `customManager` regex bumps the ECC `version` and `commit` fields together in `.chezmoidata.toml`. A `packageRule` forces the ECC package to **never auto-merge** because ECC updates ship executable hook code that requires manual review. The 168-hour external refresh interval (`refreshPeriod`) on `.chezmoiexternal.toml` entries is separate from the Renovate bump.
+`.github/renovate.json5` manages all dependency updates. A `customManager` regex bumps the ECC `version` and `commit` fields together in `.chezmoidata.toml`. ECC updates ship executable hook code that runs in every agent session, and they never take the merge gate's deterministic fast lane: that lane is scoped to pins in `home/dot_config/mise/config.toml`, and ECC is pinned in `.chezmoidata.toml`. An agent reviews every bump regardless of how small the diff looks, and the rule needs no maintenance as the toolchain changes. (This replaced an `automerge: false` packageRule, which could only key on updateType and so could not tell an ECC bump apart from any other tagged release.) The 168-hour external refresh interval (`refreshPeriod`) on `.chezmoiexternal.toml` entries is separate from the Renovate bump.
 
 ---
 

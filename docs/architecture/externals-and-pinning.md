@@ -155,7 +155,7 @@ Within the period chezmoi serves the cached copy without a network request. Afte
 
 `renovate.json5` includes a `customManager` regex that matches the `version` and `commit` fields in `.chezmoidata.toml` and bumps them together as a single PR when a new ECC release tag appears.
 
-Critical policy: **ECC is never auto-merged.** A `packageRule` in `renovate.json5` sets `"automerge": false` for `affaan-m/ECC`. Every ECC bump must be reviewed manually because the ECC tarball contains executable hook scripts that run inside the agent harness.
+Critical policy: **every ECC bump is reviewed before it merges.** The ECC tarball contains executable hook scripts that run inside the agent harness, and the merge gate's fast lane is scoped to pins in `home/dot_config/mise/config.toml` — tools you invoke deliberately. ECC is pinned here in `.chezmoidata.toml`, so it never reaches that lane and an agent reviews every bump, whatever the diff looks like. The guarantee follows from *where the pin lives*, not from naming ECC anywhere: move a dependency into this file and it is reviewed automatically. (Until the merge gate landed this was an `automerge: false` packageRule in `renovate.json5`, which could only key on updateType and so could not tell an ECC release apart from any other tagged one — see [Renovate automation](renovate-automation.md).)
 
 The same pin-in-data / bump-via-Renovate pattern applies to `anthropics/skills` (`.skills.anthropic_commit`) and the Moralerspace font (`.versions.moralerspace_font`).
 
@@ -170,7 +170,7 @@ The same pin-in-data / bump-via-Renovate pattern applies to `anthropics/skills` 
 
 They can legitimately sit at different points in upstream history. `SKILL.md` is standalone markdown, so a lagging skill pin never breaks the installed CLI — at worst the skill text describes helpers slightly older than the ones installed. Both regexes are scoped to the `[phone_harness]` table so neither can latch onto a `version =` or `commit =` in a neighbouring one.
 
-Like ECC, **phone-harness is never auto-merged** — and for a stronger reason than the markdown-only skill archives. It ships executable Python that captures the screen and synthesises HID-level input on a real, unlocked phone, and its `SKILL.md` is precisely what steers an agent into doing so. Without an explicit `automerge: false`, a patch bump would ride the patch/pin automerge lane straight onto a device holding real accounts.
+Like ECC, **every phone-harness bump is reviewed before it merges** — and for a stronger reason than the markdown-only skill archives. It ships executable Python that captures the screen and synthesises HID-level input on a real, unlocked phone, and its `SKILL.md` is precisely what steers an agent into doing so. Both pins are covered, and neither by name: the PyPI release is pinned in `.chezmoidata.toml`, outside the fast lane's scope, and the `SKILL.md` digest is a `digest` update, which never takes that lane either. Scope is what carries the guarantee here — `update dependency phone-harness to v1.2.3` is shaped exactly like an ordinary CLI bump, so nothing about the *form* of the update would have stopped it reaching a device holding real accounts.
 
 ---
 

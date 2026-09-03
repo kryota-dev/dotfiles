@@ -17,7 +17,7 @@ echo "Average (${ITERATIONS} runs):"
 total=0
 for i in $(seq 1 "${ITERATIONS}"); do
   # Use zsh's built-in time format
-  elapsed=$( { /usr/bin/time zsh -i -c exit; } 2>&1 | grep real | awk '{print $1}' | sed 's/[^0-9.]//g' )
+  elapsed=$({ /usr/bin/time zsh -i -c exit; } 2>&1 | grep real | awk '{print $1}' | sed 's/[^0-9.]//g')
   if [ -n "$elapsed" ]; then
     total=$(echo "$total + $elapsed" | bc)
     printf "  Run %2d: %ss\n" "$i" "$elapsed"

@@ -134,7 +134,7 @@ Miscellaneous functional skills spanning databases, media conversion, and daily 
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
 
-All version-defining inputs live in `home/.chezmoidata.toml`. The external declarations in `.chezmoiexternal.toml` reference them as template variables — commits are never hardcoded in `.chezmoiexternal.toml` directly. Renovate tracks ECC release tags and bumps `[ecc].version` and `[ecc].commit` together; ECC updates are never auto-merged.
+All version-defining inputs live in `home/.chezmoidata.toml`. The external declarations in `.chezmoiexternal.toml` reference them as template variables — commits are never hardcoded in `.chezmoiexternal.toml` directly. Renovate tracks ECC release tags and bumps `[ecc].version` and `[ecc].commit` together; every ECC update is reviewed by an agent before it merges, because `scripts/renovate-gate-classify.sh` keeps `affaan-m/ecc` out of the deterministic fast lane (see [Renovate automation](../architecture/renovate-automation.md)).
 
 ---
 

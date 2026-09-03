@@ -29,6 +29,7 @@
 | [zsh 起動・プロンプト・シェルモジュール](architecture/shell-environment.ja.md) | `.zprofile` → `.zshrc` → sheldon 遅延ローディング、新しい `.zsh` モジュールの追加方法 |
 | [開発ツールチェーン: mise・Brewfile・git](architecture/dev-tooling.ja.md) | mise バージョンピン、`Brewfile` + `.brewfile-linux-exclude`、git 1Password 署名、グローバル gitleaks フック |
 | [Notifications: 自己ホスト ntfy over Tailscale](architecture/notifications.ja.md) | Claude Code フックイベント → ntfy サーバー（Docker、loopback のみ）→ tailnet デバイス。トピック、認証/ACL、セットアップとリカバリの手順 |
+| [Renovate 自動化: マージゲート](architecture/renovate-automation.ja.md) | 依存更新が無人でマージされる仕組み。決定論ゲート、required status check としてのエージェント審査、3 層の fail-closed 設計、ruleset の設定手順 |
 
 ### エージェント
 
