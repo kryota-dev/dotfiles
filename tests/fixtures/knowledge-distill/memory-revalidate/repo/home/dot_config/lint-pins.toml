@@ -1,0 +1,8 @@
+# fixture 用の lint ツールピン。
+#
+# ファイル名が `mise/config.toml` ではないのは、.github/renovate.json5 の mise
+# manager が `'/home/dot_config/mise/config\.toml/'` という**アンカー無し**の
+# 正規表現でパスを拾うため、fixture 配下の同名パスも依存として扱われるから。
+[tools]
+shellcheck = "0.0.0"
+shfmt = "0.0.0"

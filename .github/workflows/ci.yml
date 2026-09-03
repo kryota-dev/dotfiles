@@ -148,9 +148,17 @@ jobs:
         # silently depending on the image's contents. shellcheck is deliberately not
         # in this list: the apt build is unpinned, and the step below installs the
         # same pinned build the Lint job uses. unzip unpacks the pinned Deno release.
+        #
+        # python3 runs the knowledge-distill memory-revalidate checker and its bats
+        # suite (#631). It is declared for the same reason jq is -- the image ships
+        # it, but tests/knowledge_distill_memory_revalidate.bats deliberately fails
+        # rather than skipping when python3 is absent, so an image change must show
+        # up here rather than as a suddenly-red suite. The version is not pinned: the
+        # script is stdlib-only and targets 3.9+, unlike shellcheck/shfmt/deno whose
+        # *rules* differ between builds.
         run: |
           sudo apt-get update
-          sudo apt-get install -y bats zsh jq unzip
+          sudo apt-get install -y bats zsh jq unzip python3
 
       # tests/shellcheck.bats runs shellcheck unconditionally and tests/brew_launcher.bats
       # runs it when present, both with the exact flags `make lint` uses. Without the pin

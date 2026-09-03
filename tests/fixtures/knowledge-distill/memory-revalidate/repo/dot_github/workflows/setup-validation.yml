@@ -1,0 +1,20 @@
+# fixture 用のダミーワークフロー。
+#
+# コミット上のディレクトリ名が `.github` ではなく `dot_github` なのは、
+# リポジトリ自身のワークフロー linter（actionlint / ghalint / zizmor / ls-lint）が
+# パス glob `**/.github/workflows/*.yml` で走査するため、fixture を本物の
+# ワークフローとして拾ってしまうから（実際に zizmor の excessive-permissions で
+# CI が落ちた）。bats がテスト実行時に `.github/workflows/` へ展開する。
+name: Setup Validation (fixture)
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - run: echo macos
+  ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ubuntu

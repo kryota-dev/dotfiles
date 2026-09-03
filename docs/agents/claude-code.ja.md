@@ -28,6 +28,7 @@
 - [CLV2 オブザーバー配線](#clv2-オブザーバー配線)
 - [朝次レーダーのスケジュール実行](#朝次レーダーのスケジュール実行)
 - [改善候補キュー](#改善候補キュー)
+- [auto-memory の再検証](#auto-memory-の再検証)
 - [レビューサブエージェント](#レビューサブエージェント)
 - [r06 ワークアカウント](#r06-ワークアカウント)
 - [環境変数リファレンス](#環境変数リファレンス)
@@ -463,6 +464,38 @@ Issue kryota-dev/dotfiles#501（#473 のサブ issue）: ECC 継続的改善ル�
 - **provenance のみを持つ。** 候補が持つ account 情報は `evidence_accounts`（根拠がどのアカウント由来か）だけです。どのアカウントに影響する変更かは、採用後の planning で判断します。
 
 このキューを埋める週次 evaluator（#506）と、読み取って提示する完了時の経路（#507）は別の変更です。キューは単体で動作します（`agent-improvement upsert` に候補を流し込めば、採用・延期・見送り・Issue 化の一巡をどちらも無しに検証できます）。
+
+---
+
+## auto-memory の再検証
+
+Issue kryota-dev/dotfiles#631: [auto memory](https://code.claude.com/docs/en/memory#auto-memory) は Claude 自身が書き、毎セッションの冒頭で読み込まれますが、数か月前に書かれた内容が今も正しいかを誰も確認していませんでした。読み取り専用の監査で 4 件の腐敗が見つかっています —— 記述が実態からずれていた 2 件（後の PR で廃止された `make` target、その後拡張された CI キャッシュパス）と、`~/AGENTS.md` の恒久ルールと重複していた 2 件です。古いメモリは無いより悪く、存在しないコマンドを自信を持って案内させます。
+
+`knowledge-distill` に **Phase 0.5** を追加し、既存の memory ディレクトリを再検証します。Phase 0 の健全性診断の直後、**Phase 1 の縮退終了より前**に走ります。狙う腐敗は、その週に CLV2 instinct がいくつ溜まったかとは無関係に進むためです。
+
+| 構成要素 | パス | 役割 |
+|---|---|---|
+| 検査スクリプト | `home/dot_agents/skills/knowledge-distill/scripts/memory-revalidate.py` → `~/.agents/skills/knowledge-distill/scripts/` | Python 3（標準ライブラリのみ）。フェーズ全体が 1 コマンド |
+| フェーズ定義 | `home/dot_agents/skills/knowledge-distill/SKILL.md` | 実行位置、出力の読み方、提案止まりである旨 |
+| 週次への配線 | `home/dot_claude/executable_knowledge-distill-radar.sh` | `--allowedTools` にフルパスで許可（[通知](../architecture/notifications.ja.md#週次-knowledge-distill-配信-368)） |
+| fixture とテスト | `tests/fixtures/knowledge-distill/memory-revalidate/`, `tests/knowledge_distill_memory_revalidate.bats` | 合成 memory ディレクトリ上で監査 4 件をすべて再現 |
+
+**6 つのチェック。** 腐敗は 2 形。参照先が動いた／消えた場合と、恒久ルールに吸収された場合です。公式ガイダンスは既に「CLAUDE.md が言っていることは記録しない」と述べているので、後者はそのルールが事後に破れた状態にあたります。
+
+| id | 見るもの | 形 |
+|---|---|---|
+| `path-exists` | コードスパン中のリポジトリ相対パスが今も解決するか | 参照先の移動 |
+| `make-target` | コードスパン中の `make <target>` が Makefile にあるか | 参照先の移動 |
+| `pr-reference` | `#N` / `<owner>/<repo>#N` が GitHub 上に実在するか | 参照先の移動 |
+| `staleness` | 参照先の最終コミットが memory 自身の日付より新しいか | 参照先の移動 |
+| `rule-duplication` | CLAUDE.md / AGENTS.md の節が既に同じことを書いていないか | ルールへの吸収 |
+| `memory-index-size` | `MEMORY.md` が 200 行 / 25KB の読み込み上限に収まるか | 索引の切り捨て |
+
+**「検査できなかった」は「問題なし」ではありません。** 各チェックは `checked` / `findings` / `unchecked` / `reasons` を別々に報告するので、「0 件中 finding 0」と「12 件中 finding 0」はレポート上で別の行になり、同じ安心できるゼロには見えません。`unchecked` は設計上対象外にした候補（絶対パス、ブレース展開、ディレクトリを伴わないファイル名）を理由付きで保持し、`reasons` はチェック自体が走れなかったこと（`gh` が無い、git リポジトリでない、ルールファイルが無い）を保持します。終了コードは両者を別ビットに分けます: `0` clean、`1` finding あり、`2` 実行不能あり、`3` 両方、`64` 引数エラー、`70` 内部エラー。チェック内の想定外の例外は握り潰さず `inconclusive` に写像するので、壊れたチェックが正常なチェックのふりをすることはありません。
+
+**検出器自身は、無言でスキップする検索を使いません。** `rg` の再帰と `grep -rI` は、gitignore 対象のファイルと生 NUL バイトを含むファイルを何も出力せずに飛ばすため、重複検出が黙って 0 件を返す経路になります。memory ディレクトリは `os.scandir` で列挙し、ルールファイルは明示パスで直読みし、NUL バイトを含むファイルはそれに関わるチェックを（見えなくするのではなく）`inconclusive` にします。起動する外部コマンドは `git` と `gh` だけで、常に引数リスト（シェルを介さない）で呼び、memory 由来の値は渡す前に検証します。
+
+**読み取り専用・提案のみ。** memory ディレクトリへは一切書き込まず（実行前後でディレクトリをバイト単位で比較するテストがあります）、finding は memory の散文を引用せずに報告します（ファイル名・行番号・見つかった参照・判定理由まで）。memory の修正・削除はユーザーの判断のままで、skill の他の昇華提案と同じ扱いです。意味的な問い —— その学びがまだ有効か、書かれた解除条件が満たされたか —— は意図的に人に残しています。
 
 ---
 

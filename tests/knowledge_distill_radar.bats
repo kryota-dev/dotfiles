@@ -91,6 +91,31 @@ run_fn() {
   [ "$status" -ne 0 ]
 }
 
+@test "allowlist grants the Phase 0.5 memory-revalidate script by full path only (#631)" {
+  local allowed_tools_line skill_dir
+  allowed_tools_line="$(grep '^ALLOWED_TOOLS=' "$WRAPPER")"
+  skill_dir="${HOME_DIR}/dot_agents/skills/knowledge-distill"
+  # A command that is not on the allowlist is denied silently in a headless run, so a
+  # phase written into SKILL.md but missing from here is indistinguishable from a phase
+  # that does not exist -- the same class of failure as #491 (a phase that never ran).
+  [[ "$allowed_tools_line" == *'Bash(python3 ~/.agents/skills/knowledge-distill/scripts/memory-revalidate.py:*)'* ]]
+  # Full path only: widening to a bare `python3` prefix would turn the read-mostly
+  # allowlist into arbitrary script execution.
+  [[ "$allowed_tools_line" != *'Bash(python3:*)'* ]]
+  # The granted script must actually exist in source, and SKILL.md must invoke that same
+  # path -- otherwise the grant outlives the phase (or vice versa) without anything failing.
+  [ -f "${skill_dir}/scripts/memory-revalidate.py" ]
+  grep -qF 'scripts/memory-revalidate.py' "${skill_dir}/SKILL.md"
+  # The headless prompt has to name the phase, or claude has no reason to run it.
+  grep -qF 'Phase 0.5' "$WRAPPER"
+  # `Bash(<full path>:*)` constrains the command NAME only -- everything after it is
+  # unvalidated. --memory-dir / --repo / --rules / --config-dir all take arbitrary paths,
+  # so a prompt injection carried in an instinct or a session summary could widen what the
+  # weekly run reads, and the allowlist would not object. The prompt has to pin the
+  # argument list and say so.
+  grep -qF -- '--memory-dir / --repo / --rules / --config-dir は付けないでください' "$WRAPPER"
+}
+
 @test "token hygiene: no -H/--header Authorization, no set -x, token via -K" {
   run grep -E -- '(-H|--header)["'"'"'[:space:]]*"?Authorization' "$WRAPPER"
   [ "$status" -ne 0 ]
