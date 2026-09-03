@@ -1,0 +1,488 @@
+#!/usr/bin/env bats
+
+# knowledge-distill Phase 0.5: auto-memory 再検証スクリプト
+# (home/dot_agents/skills/knowledge-distill/scripts/memory-revalidate.py, #631).
+#
+# 監査で見つかった 4 件（参照先の実体が消えた 2 件・恒久ルールに吸収されて存在意義が消えた
+# 2 件）を fixture 上で再現できることが、この suite の一次目的である。あわせて、腐敗検出器が
+# 静かに壊れる 2 経路 ——「検査できなかった」が「問題なし」へ写像されること、および生 NUL
+# バイトで無言スキップすること —— を機械で塞ぐ。
+#
+# ネットワークには触れない: PR 番号の実在確認は `--github off` か、PATH 先頭に置いた gh
+# スタブでのみ行う。
+
+load helpers/setup
+
+FIXTURE="${REPO_ROOT}/tests/fixtures/knowledge-distill/memory-revalidate"
+SCRIPT="${HOME_DIR}/dot_agents/skills/knowledge-distill/scripts/memory-revalidate.py"
+
+# fixture repo のコミット日時。memory 側の `modified` を挟むように前後へ振り分けて、
+# staleness の再現が実行時刻や mtime に依存しないようにする（fixture の memory は
+# 2026-06-21 / 2026-06-25 / 2026-08-31）。
+BASE_COMMIT_DATE='2026-01-05T00:00:00+09:00'
+CI_TOUCH_COMMIT_DATE='2026-08-30T00:00:00+09:00'
+
+_git() {
+  git -c user.name=bats -c user.email=bats@example.invalid -c commit.gpgsign=false "$@"
+}
+
+# fixture を $BATS_TEST_TMPDIR へ複製し、日時を固定した 2 コミットの git リポジトリにする。
+# 2 コミット目は CI ワークフローだけを触るので、「memory が書かれたあとに参照先が変わった」
+# 状態がその 1 ファイルにだけ生じる。
+setup() {
+  WS="${BATS_TEST_TMPDIR}/ws"
+  mkdir -p "$WS"
+  cp -R "${FIXTURE}/memory" "${FIXTURE}/rules" "${FIXTURE}/repo" "${WS}/"
+  (
+    cd "${WS}/repo" || exit 1
+    git init -q -b main
+    # この使い捨てリポジトリにはフックを持たせない。開発者の global core.hooksPath
+    # （gitleaks 等）を継ぐと、テストの成否と所要時間が手元の設定に依存してしまう。
+    # `--no-verify` ではなくリポジトリ設定で表現するのは、フックの迂回ではなく
+    # 「このリポジトリにはフックが無い」という状態そのものを作るため。
+    mkdir -p "${BATS_TEST_TMPDIR}/no-hooks"
+    git config core.hooksPath "${BATS_TEST_TMPDIR}/no-hooks"
+    _git add -A
+    GIT_AUTHOR_DATE="$BASE_COMMIT_DATE" GIT_COMMITTER_DATE="$BASE_COMMIT_DATE" \
+      _git commit -q -m base
+    printf '\n# memory が書かれたあとに触られた\n' >>.github/workflows/setup-validation.yml
+    _git add -A
+    GIT_AUTHOR_DATE="$CI_TOUCH_COMMIT_DATE" GIT_COMMITTER_DATE="$CI_TOUCH_COMMIT_DATE" \
+      _git commit -q -m touch-ci
+  ) >/dev/null
+}
+
+# 既定の引数でスクリプトを走らせる（JSON）。追加引数は末尾に足せる。
+revalidate() {
+  run python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --format json "$@"
+}
+
+# チェック 1 件を JSON から取り出す。
+check_json() {
+  jq -c --arg id "$1" '.checks[] | select(.id == $id)' <<<"$output"
+}
+
+# gh スタブを作り、そのディレクトリのパスを返す。#373 だけ 404、それ以外は成功。
+make_gh_stub() {
+  local dir="${BATS_TEST_TMPDIR}/stub"
+  mkdir -p "$dir"
+  cat >"${dir}/gh" <<'EOF'
+#!/bin/bash
+case "$*" in
+*"issues/373"*)
+  echo "gh: Not Found (HTTP 404)" >&2
+  exit 1
+  ;;
+*) exit 0 ;;
+esac
+EOF
+  chmod +x "${dir}/gh"
+  printf '%s\n' "$dir"
+}
+
+@test "script exists and compiles (python3 is required, never skipped)" {
+  [ -f "$SCRIPT" ]
+  # ツールが無いと自分を飛ばすガードは、このリポジトリが明示的に禁じている失敗形
+  # （Makefile の lint-console 参照）。python3 が無ければ skip ではなく fail させる。
+  command -v python3 >/dev/null 2>&1 || {
+    echo "python3 not found; this guard does not skip itself"
+    false
+  }
+  # cfile を明示して、ソースの隣に __pycache__ を作らせない。
+  run python3 -c 'import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)' \
+    "$SCRIPT" "${BATS_TEST_TMPDIR}/memory-revalidate.pyc"
+  [ "$status" -eq 0 ]
+}
+
+# --- 監査で見つかった 4 件の再現 -------------------------------------------
+
+@test "乖離 1: 廃止された make target (\`make dump-brewfile\`) を finding として報告する" {
+  revalidate --github off
+  local c
+  c="$(check_json make-target)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '.checked' <<<"$c")" -ge 1 ]
+  [ "$(jq -r '[.findings[] | select(.subject == "make dump-brewfile")] | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '.findings[0].memory_file' <<<"$c")" = "MEMORY.md" ]
+  [ "$(jq -r '.findings[0].line' <<<"$c")" -gt 0 ]
+}
+
+@test "乖離 2: memory より後に変更された参照先を staleness の finding として報告する" {
+  revalidate --github off
+  local c
+  c="$(check_json staleness)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '[.findings[] | select(.subject == ".github/workflows/setup-validation.yml")] | length' <<<"$c")" -eq 1 ]
+  # 日付の出所を必ず併記する（mtime 由来か frontmatter 由来かで証拠の強さが違う）。
+  [[ "$(jq -r '.findings[0].reason' <<<"$c")" == *"frontmatter-modified"* ]]
+  # memory より前のコミットしか無いファイルは finding にしない。
+  [ "$(jq -r '[.findings[] | select(.subject | contains("mise"))] | length' <<<"$c")" -eq 0 ]
+}
+
+@test "重複 2 件: 恒久ルールが同じことを書いている topic file を報告する" {
+  revalidate --github off
+  local c
+  c="$(check_json rule-duplication)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '.findings | length' <<<"$c")" -eq 2 ]
+  [ "$(jq -r '[.findings[] | select(.memory_file == "verify-reviewer-findings.md")] | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '[.findings[] | select(.memory_file == "public-repo-no-client-names.md")] | length' <<<"$c")" -eq 1 ]
+  # 証拠は「どのルールファイルのどの節か」まで。memory 本文は載せない。
+  [[ "$(jq -r '[.findings[] | select(.memory_file == "verify-reviewer-findings.md")][0].subject' <<<"$c")" == *"レビュー指摘の検証"* ]]
+  [[ "$(jq -r '[.findings[] | select(.memory_file == "public-repo-no-client-names.md")][0].subject' <<<"$c")" == *"公開物への記載禁止"* ]]
+}
+
+@test "陰性対照: 重複していない topic file は finding にならず、スコアは記録される" {
+  revalidate --github off
+  local c
+  c="$(check_json rule-duplication)"
+  [ "$(jq -r '[.findings[] | select(.memory_file == "fresh-note.md")] | length' <<<"$c")" -eq 0 ]
+  # 「判定した」ことが見えるように、閾値未満でも最高スコアを notes に残す。
+  [ "$(jq -r '[.notes[] | select(startswith("fresh-note.md"))] | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 3 ]
+}
+
+@test "path-exists: 消えたパスを finding にし、陰性対照のパスは finding にしない" {
+  revalidate --github off
+  local c
+  c="$(check_json path-exists)"
+  [ "$(jq -r '[.findings[] | select(.subject == "home/dot_local/bin/executable_removed-tool")] | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '[.findings[] | select(.subject | contains("mise"))] | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '.checked' <<<"$c")" -ge 4 ]
+}
+
+# --- 「検査できなかった」と「問題なし」の分離 -------------------------------
+
+@test "各チェックが checked / findings / unchecked / reasons を独立に持つ" {
+  revalidate --github off
+  # 6 チェックすべてが揃っていること（チェックが静かに消えるのを防ぐ）。
+  [ "$(jq -r '.checks | length' <<<"$output")" -eq 6 ]
+  local id
+  for id in path-exists make-target pr-reference staleness rule-duplication memory-index-size; do
+    local c
+    c="$(check_json "$id")"
+    [ -n "$c" ]
+    jq -e 'has("checked") and has("findings") and has("unchecked") and has("reasons")' <<<"$c" >/dev/null
+  done
+}
+
+@test "断定できない候補は finding ではなく unchecked として必ず列挙される" {
+  revalidate --github off
+  local c
+  c="$(check_json path-exists)"
+  # 絶対パス / ホーム相対は「存在しない」と断定できないので finding にしない。
+  [ "$(jq -r '[.unchecked[] | select(.subject == "~/Library/Caches/Homebrew")] | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '[.findings[] | select(.subject == "~/Library/Caches/Homebrew")] | length' <<<"$c")" -eq 0 ]
+  # 先頭セグメントがリポジトリに無いものも同様。
+  [ "$(jq -r '[.unchecked[] | select(.reason | contains("先頭セグメント"))] | length' <<<"$c")" -ge 1 ]
+  # 理由が空の unchecked を作らない（「なぜ見なかったか」が必ず残る）。
+  [ "$(jq -r '[.unchecked[] | select(.reason == "")] | length' <<<"$c")" -eq 0 ]
+}
+
+@test "--github=off は ok ではなく inconclusive になる" {
+  revalidate --github off
+  local c
+  c="$(check_json pr-reference)"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '.reasons | length' <<<"$c")" -ge 1 ]
+  [[ "$(jq -r '.reasons[0]' <<<"$c")" == *"--github=off"* ]]
+}
+
+@test "gh が PATH に無ければ inconclusive（--github=on ならその旨も残す）" {
+  local empty="${BATS_TEST_TMPDIR}/empty-bin"
+  mkdir -p "$empty"
+  # git / python3 は必要なので、gh だけを外した PATH を作れない環境では意味がないが、
+  # ここでは `command -v gh` が失敗する PATH をスクリプトに与えられれば十分。
+  run env PATH="${empty}:/usr/bin:/bin" python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --format json --github on
+  [ "$status" -eq 3 ]
+  local c
+  c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [[ "$(jq -r '.reasons[0]' <<<"$c")" == *"--github=on"* ]]
+}
+
+@test "gh が 404 を返した参照は finding、引けた参照は checked に数える" {
+  local stub
+  stub="$(make_gh_stub)"
+  (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
+  run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --format json --github auto
+  local c
+  c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 3 ]
+  [ "$(jq -r '.findings | length' <<<"$c")" -eq 1 ]
+  [ "$(jq -r '.findings[0].subject' <<<"$c")" = "#373" ]
+  [ "$(jq -r '.reasons | length' <<<"$c")" -eq 0 ]
+}
+
+@test "gh の 404 以外の失敗は finding ではなく unchecked + reason になる" {
+  local stub="${BATS_TEST_TMPDIR}/stub-fail"
+  mkdir -p "$stub"
+  printf '%s\n' '#!/bin/bash' 'echo "gh: HTTP 403 rate limit exceeded" >&2' 'exit 1' >"${stub}/gh"
+  chmod +x "${stub}/gh"
+  (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
+  run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --format json --github auto
+  local c
+  c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [ "$(jq -r '.findings | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '.unchecked | length' <<<"$c")" -ge 1 ]
+  [ "$(jq -r '.reasons | length' <<<"$c")" -ge 1 ]
+}
+
+@test "生 NUL バイトを含む memory は inconclusive にし、その中の参照を finding にしない" {
+  # ripgrep 再帰と Claude Code の Grep/Glob はこの手のファイルを無言でスキップする。
+  # ここで沈黙すると、腐敗検出器が「0 件」を返して壊れていることに誰も気づけない。
+  printf -- '---\nname: nul-note\n---\n\nNUL\000 bytes `home/definitely-gone.md`\n' \
+    >"${WS}/memory/nul-note.md"
+  revalidate --github off
+  local c
+  c="$(check_json path-exists)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '[.reasons[] | select(contains("nul-bytes"))] | length' <<<"$c")" -ge 1 ]
+  # 読めなかったファイルの中身は走査していないので、そこにある参照を finding にしてはならない。
+  [ "$(jq -r '[.findings[] | select(.subject | contains("definitely-gone"))] | length' <<<"$c")" -eq 0 ]
+  # 読めなかったこと自体は memory_files にも残る。
+  [ "$(jq -r '[.memory_files[] | select(.name == "nul-note.md")][0].error' <<<"$output")" = "nul-bytes" ]
+}
+
+@test "UTF-8 としてデコードできない memory も inconclusive になる" {
+  printf -- '---\nname: bad\n---\n\n\xff\xfe not utf-8\n' >"${WS}/memory/bad-encoding.md"
+  revalidate --github off
+  [ "$(jq -r '[.memory_files[] | select(.name == "bad-encoding.md")][0].error' <<<"$output")" = "decode-error" ]
+  [ "$(jq -r '[.checks[] | select(.id == "path-exists")][0].reasons | map(select(contains("decode-error"))) | length' <<<"$output")" -ge 1 ]
+}
+
+# --- MEMORY.md の読み込み上限 ----------------------------------------------
+
+@test "MEMORY.md が 200 行を超えたら finding" {
+  {
+    printf -- '---\nname: MEMORY\nmodified: 2026-08-31T09:00:00+09:00\n---\n\n'
+    for i in $(seq 1 250); do printf -- '- entry %s\n' "$i"; done
+  } >"${WS}/memory/MEMORY.md"
+  revalidate --github off
+  local c
+  c="$(check_json memory-index-size)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 1 ]
+  [[ "$(jq -r '.findings[0].reason' <<<"$c")" == *"超過"* ]]
+}
+
+@test "MEMORY.md が 25KB を超えたら finding（行数が上限内でも）" {
+  {
+    printf -- '---\nname: MEMORY\nmodified: 2026-08-31T09:00:00+09:00\n---\n\n'
+    for i in $(seq 1 50); do
+      printf -- '- '
+      head -c 700 /dev/zero | tr '\0' 'x'
+      printf -- '\n'
+    done
+  } >"${WS}/memory/MEMORY.md"
+  local lines bytes
+  lines=$(wc -l <"${WS}/memory/MEMORY.md")
+  bytes=$(wc -c <"${WS}/memory/MEMORY.md")
+  [ "$lines" -le 200 ]
+  [ "$bytes" -gt 25000 ]
+  revalidate --github off
+  [ "$(jq -r '[.checks[] | select(.id == "memory-index-size")][0].status' <<<"$output")" = "finding" ]
+}
+
+@test "MEMORY.md が上限の 90% に達したら接近を finding として知らせる" {
+  {
+    printf -- '---\nname: MEMORY\nmodified: 2026-08-31T09:00:00+09:00\n---\n\n'
+    for i in $(seq 1 190); do printf -- '- entry %s\n' "$i"; done
+  } >"${WS}/memory/MEMORY.md"
+  revalidate --github off
+  local c
+  c="$(check_json memory-index-size)"
+  [ "$(jq -r .status <<<"$c")" = "finding" ]
+  [[ "$(jq -r '.findings[0].reason' <<<"$c")" == *"到達"* ]]
+}
+
+# --- 終了コード -------------------------------------------------------------
+
+@test "終了コードは finding(bit0) と inconclusive(bit1) を別ビットで表す" {
+  # fixture そのままなら finding も inconclusive（--github off）もある → 3
+  revalidate --github off
+  [ "$status" -eq 3 ]
+  [ "$(jq -r '.summary.exit_code' <<<"$output")" -eq 3 ]
+
+  # gh スタブをすべて成功させれば inconclusive が消え、finding だけが残る → 1
+  local stub="${BATS_TEST_TMPDIR}/stub-ok"
+  mkdir -p "$stub"
+  printf '%s\n' '#!/bin/bash' 'exit 0' >"${stub}/gh"
+  chmod +x "${stub}/gh"
+  (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
+  run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --format json --github auto
+  [ "$status" -eq 1 ]
+}
+
+@test "腐敗が無く実行不能も無ければ 0 で終わる" {
+  local clean="${BATS_TEST_TMPDIR}/clean-memory"
+  mkdir -p "$clean"
+  cp "${WS}/memory/fresh-note.md" "${clean}/"
+  cat >"${clean}/MEMORY.md" <<'EOF'
+---
+name: MEMORY
+modified: 2026-08-31T09:00:00+09:00
+---
+
+# Project Memory
+
+- lint ツールのピンは `home/dot_config/mise/config.toml`
+EOF
+  run python3 "$SCRIPT" --memory-dir "$clean" --repo "${WS}/repo" \
+    --rules "${WS}/rules/CLAUDE.md" --format json --github off
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '[.checks[] | select(.status != "ok")] | length' <<<"$output")" -eq 0 ]
+  # 「0 件中 finding 0」と「N 件中 finding 0」が区別できること。
+  [ "$(jq -r '[.checks[] | select(.id == "path-exists")][0].checked' <<<"$output")" -ge 1 ]
+}
+
+@test "memory ディレクトリが無ければ全チェックが inconclusive（exit 2）" {
+  run python3 "$SCRIPT" --memory-dir "${BATS_TEST_TMPDIR}/nope" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --format json --github off
+  [ "$status" -eq 2 ]
+  [ "$(jq -r '[.checks[] | select(.status == "inconclusive")] | length' <<<"$output")" -eq 6 ]
+  [ "$(jq -r '.summary.findings' <<<"$output")" -eq 0 ]
+}
+
+@test "引数エラーは 64（inconclusive の 2 と衝突させない）" {
+  run python3 "$SCRIPT" --format yaml
+  [ "$status" -eq 64 ]
+}
+
+@test "ルールファイルが 1 つも無ければ rule-duplication は ok ではなく inconclusive" {
+  run python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${BATS_TEST_TMPDIR}/no-such-rules.md" --format json --github off
+  local c
+  c="$(jq -c '.checks[] | select(.id == "rule-duplication")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '[.reasons[] | select(contains("存在しない"))] | length' <<<"$c")" -ge 1 ]
+}
+
+# --- 読み取り専用 -----------------------------------------------------------
+
+@test "memory ディレクトリへ書き込まない" {
+  local before after
+  before="$(cd "${WS}/memory" && find . -type f -exec shasum {} + | sort)"
+  revalidate --github off
+  after="$(cd "${WS}/memory" && find . -type f -exec shasum {} + | sort)"
+  [ "$before" = "$after" ]
+  # 新規ファイル（一時ファイル・キャッシュ等）も作らせない。
+  [ "$(find "${WS}/memory" -mindepth 1 | wc -l | tr -d ' ')" -eq 4 ]
+}
+
+# --- 報告 -------------------------------------------------------------------
+
+@test "text 出力は状態表と 4 セクション、および報告のみである旨を含む" {
+  run python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --format text --github off
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"| チェック | 状態 | 検査 | finding | 未検査 | 実行不能 |"* ]]
+  [[ "$output" == *"### finding"* ]]
+  [[ "$output" == *"### 未検査"* ]]
+  [[ "$output" == *"### 実行不能"* ]]
+  [[ "$output" == *"報告のみ"* ]]
+  [[ "$output" == *"意味的な判定"* ]]
+}
+
+@test "報告に memory 本文を転記しない" {
+  run python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --format text --github off
+  [ "$status" -eq 3 ]
+  # 重複が検出された memory の本文にしか無い言い回しが、レポートへ流れ出ていないこと。
+  ! grep -qF '確認用サブエージェントの要約' <<<"$output"
+  ! grep -qF '検索インデックスに残り' <<<"$output"
+}
+
+# --- 定数と不変条件の固定 ---------------------------------------------------
+
+@test "閾値はすべて名前付き定数として定義されている" {
+  local name
+  for name in MEMORY_INDEX_MAX_LINES MEMORY_INDEX_MAX_BYTES MEMORY_INDEX_WARN_RATIO \
+    DUPLICATE_SHINGLE_SIZE DUPLICATE_CONTAINMENT_THRESHOLD DUPLICATE_MIN_SHINGLES \
+    PR_NUMBER_MAX PR_REFERENCE_MAX_QUERIES GIT_LOG_MAX_QUERIES SUBPROCESS_TIMEOUT_SECONDS; do
+    grep -qE "^${name} = " "$SCRIPT" || {
+      echo "named constant missing: ${name}"
+      false
+    }
+  done
+  # 公式仕様の値そのもの（200 行 / 25KB）。片方だけ書き換わる drift を止める。
+  grep -qxF 'MEMORY_INDEX_MAX_LINES = 200' "$SCRIPT"
+  grep -qxF 'MEMORY_INDEX_MAX_BYTES = 25_000' "$SCRIPT"
+}
+
+@test "外部コマンドを shell 経由で起動しない" {
+  # memory 由来の文字列がコマンド行として解釈される経路を作らない（#631 PRD AC-041）。
+  ! grep -qF 'shell=True' "$SCRIPT"
+  ! grep -qF 'os.system' "$SCRIPT"
+  ! grep -qF 'os.popen' "$SCRIPT"
+}
+
+@test "起動する外部コマンドは git と gh だけ（ripgrep 再帰の無言スキップ経路を作らない）" {
+  # `rg` の再帰と `grep -rI` は gitignore 対象と生 NUL バイトを含むファイルを、エラーも
+  # 警告も出さずに飛ばす。腐敗検出器がそれを踏むと、壊れていることが「0 件」に化ける。
+  #
+  # 本文の grep ではなく AST を見るのは、この skill 自身の docstring が禁止対象として
+  # `rg` / `grep -rI` に言及しており、文字列一致では散文と実装を区別できないから
+  # （散文で禁止を説明したら guard が落ちる、では guard が育たない）。
+  run python3 - "$SCRIPT" <<'PY'
+import ast
+import sys
+
+CALLS = {"run_command", "run", "Popen", "check_output", "check_call", "call"}
+names = set()
+
+
+def head_of(node):
+    """argv リテラルの先頭要素（コマンド名）を返す。"""
+    if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+        head = node.elts[0]
+        if isinstance(head, ast.Constant) and isinstance(head.value, str):
+            return head.value
+    return None
+
+
+tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())
+for node in ast.walk(tree):
+    # 直接 argv リテラルを渡している呼び出し。
+    if isinstance(node, ast.Call):
+        func = node.func
+        label = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+        if label in CALLS:
+            for arg in node.args:
+                name = head_of(arg)
+                if name:
+                    names.add(name)
+    # `argv = [...]` に組み立ててから渡している呼び出し。
+    if isinstance(node, ast.Assign):
+        if any(isinstance(t, ast.Name) and t.id == "argv" for t in node.targets):
+            name = head_of(node.value)
+            if name:
+                names.add(name)
+
+if not names:
+    sys.stderr.write("no external command literals found; the extractor likely broke\n")
+    raise SystemExit(1)
+print(" ".join(sorted(names)))
+PY
+  [ "$status" -eq 0 ]
+  [ "$output" = "gh git" ]
+}

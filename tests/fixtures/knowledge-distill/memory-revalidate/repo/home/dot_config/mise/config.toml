@@ -1,0 +1,4 @@
+# fixture 用の mise ピン。
+[tools]
+shellcheck = "0.0.0"
+shfmt = "0.0.0"
