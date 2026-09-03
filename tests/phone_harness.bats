@@ -217,7 +217,7 @@ _phone_harness_pin() {
   }
 }
 
-@test "phone-harness: Renovate tracks both pins and never auto-merges them" {
+@test "phone-harness: Renovate tracks both pins and routes both to agent review" {
   local renovate="${REPO_ROOT}/.github/renovate.json5"
 
   # Two datasources, because the CLI (PyPI release) and SKILL.md (git commit)

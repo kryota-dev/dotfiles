@@ -3112,23 +3112,71 @@ _gate_decision() {
   done
 }
 
-@test "renovate gate: the agent's allowlist excludes every state-changing gh path" {
+# Extract the Bash(...) rules from a workflow's --allowedTools line, one per line,
+# sorted. Comparing the whole SET is what makes this an allowlist assertion: a
+# denylist of known-bad strings still passes when someone widens the grant to
+# `Bash(gh:*)`, which permits every one of those strings again.
+_allowed_bash_rules() {
+  grep -F -- '--allowedTools' "$1" | grep -oE 'Bash\([^)]*\)' | sort
+}
+
+@test "renovate gate: the agent's Bash allowlist matches the expected set exactly" {
   local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
   [ -f "$w" ]
-  local allowlist
-  allowlist="$(grep -F -- '--allowedTools' "$w")"
-  [ -n "$allowlist" ]
-  # The agent may read, and may write only through the two wrappers. Anything that
-  # merges, closes, reviews, edits or reaches the raw API would let it act on its
-  # own judgement instead of recording it.
-  local forbidden
-  for forbidden in 'gh pr merge' 'gh pr close' 'gh pr review' 'gh pr edit' \
-    'gh issue comment' 'gh api' 'gh search'; do
-    ! grep -qF "$forbidden" <<<"$allowlist" || {
-      echo "renovate-gate.yml allowlists '${forbidden}'"
-      false
-    }
-  done
+  local expected
+  expected="$(printf '%s\n' \
+    'Bash(./scripts/renovate-gate-verdict.sh:*)' \
+    'Bash(./scripts/renovate-triage-comment.sh:*)' \
+    'Bash(gh pr checks:*)' \
+    'Bash(gh pr diff:*)' \
+    'Bash(gh pr list:*)' \
+    'Bash(gh pr view:*)' \
+    'Bash(scripts/renovate-gate-verdict.sh:*)' \
+    'Bash(scripts/renovate-triage-comment.sh:*)' | sort)"
+  local actual
+  actual="$(_allowed_bash_rules "$w")"
+  [ "$actual" = "$expected" ] || {
+    echo "renovate-gate.yml allowlist drifted."
+    diff <(echo "$expected") <(echo "$actual") || true
+    false
+  }
+}
+
+@test "renovate review action: the agent's Bash allowlist matches the expected set exactly" {
+  local w="${REPO_ROOT}/.github/workflows/renovate-review-action.yml"
+  local expected actual
+  expected="$(printf '%s\n' \
+    'Bash(./scripts/renovate-gate-verdict.sh:*)' \
+    'Bash(./scripts/renovate-triage-comment.sh:*)' \
+    'Bash(gh pr checks:*)' \
+    'Bash(gh pr diff:*)' \
+    'Bash(gh pr list:*)' \
+    'Bash(gh pr view:*)' \
+    'Bash(scripts/renovate-gate-verdict.sh:*)' \
+    'Bash(scripts/renovate-triage-comment.sh:*)' | sort)"
+  actual="$(_allowed_bash_rules "$w")"
+  [ "$actual" = "$expected" ] || {
+    echo "renovate-review-action.yml allowlist drifted."
+    diff <(echo "$expected") <(echo "$actual") || true
+    false
+  }
+}
+
+@test "renovate digest: the agent's Bash allowlist matches the expected set exactly" {
+  local w="${REPO_ROOT}/.github/workflows/renovate-digest.yml"
+  local expected actual
+  expected="$(printf '%s\n' \
+    'Bash(./scripts/renovate-triage-comment.sh:*)' \
+    'Bash(gh pr diff:*)' \
+    'Bash(gh pr list:*)' \
+    'Bash(gh pr view:*)' \
+    'Bash(scripts/renovate-triage-comment.sh:*)' | sort)"
+  actual="$(_allowed_bash_rules "$w")"
+  [ "$actual" = "$expected" ] || {
+    echo "renovate-digest.yml allowlist drifted."
+    diff <(echo "$expected") <(echo "$actual") || true
+    false
+  }
 }
 
 @test "renovate gate: the agent cannot report its own status" {
@@ -3174,9 +3222,29 @@ _gate_decision() {
 @test "renovate gate: a missing verdict is reported as a failure" {
   # "No error" must never be read as "approved": if the agent dies without writing
   # a verdict, the reporting step still runs and fails the check.
+  #
+  # Assert what the branch DOES, not merely that it exists -- flipping its status
+  # argument to `success` would leave both of those strings in place.
   local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
   grep -qF 'if: always()' "$w"
-  grep -qF 'if [ ! -s "$VERDICT_FILE" ]; then' "$w"
+  local branch
+  branch="$(awk '/if \[ ! -s "\$VERDICT_FILE" \]; then/ { on = 1 }
+                 on { print }
+                 on && /^[[:space:]]*fi$/ { exit }' "$w")"
+  [ -n "$branch" ] || {
+    echo "no missing-verdict branch found in renovate-gate.yml"
+    false
+  }
+  grep -qE 'renovate-gate-status\.sh "\$HEAD_SHA" failure' <<<"$branch" || {
+    echo "the missing-verdict branch does not report a failure status:"
+    echo "$branch"
+    false
+  }
+  # AC-009: the owner is told, even when the agent produced nothing to tell them.
+  grep -qF 'renovate-triage-comment.sh' <<<"$branch" || {
+    echo "the missing-verdict branch does not notify the owner"
+    false
+  }
 }
 
 @test "renovate gate: non-Renovate pull requests get an immediate success" {
@@ -3185,6 +3253,64 @@ _gate_decision() {
   local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
   grep -qF 'Approve non-Renovate pull requests immediately' "$w"
   grep -qE "is_renovate != 'true'" "$w"
+}
+
+@test "renovate gate: authorship comes from the webhook payload, not from a gh call" {
+  # A `gh` lookup can fail, and both ways of resolving that failure are wrong:
+  # "unknown means not Renovate" reports success on an unreviewed update, while
+  # "unknown means Renovate" blocks human PRs during an API outage. The payload
+  # cannot fail, so the ambiguous state does not exist.
+  local w
+  for w in renovate-gate renovate-review-action; do
+    local f="${REPO_ROOT}/.github/workflows/${w}.yml"
+    grep -qF 'github.event.pull_request.user.login' "$f" || {
+      echo "${w}.yml does not resolve authorship from the webhook payload"
+      false
+    }
+    grep -qE "RENOVATE_WEBHOOK_LOGIN: 'renovate\[bot\]'" "$f" || {
+      echo "${w}.yml does not pin the webhook spelling of the Renovate login"
+      false
+    }
+    # The step that decides routing must not depend on a network call.
+    local block
+    block="$(awk '/- name: Resolve authorship/ { on = 1 } on { print }
+                  on && /^      - / && !/- name: Resolve authorship/ { exit }' "$f")"
+    ! grep -qF 'gh pr view' <<<"$block" || {
+      echo "${w}.yml resolves authorship with a gh call that can fail"
+      false
+    }
+  done
+  # The classifier keeps the other spelling as an independent second check.
+  grep -qE "^readonly RENOVATE_LOGIN='app/renovate'\$" \
+    "${REPO_ROOT}/scripts/renovate-gate-classify.sh"
+}
+
+@test "renovate gate: a fork PR is explained rather than left on an unexplained 403" {
+  # Fork PRs get a read-only GITHUB_TOKEN that `permissions:` cannot widen, so the
+  # status simply cannot be posted. Say so instead of dying on the API error.
+  local w="${REPO_ROOT}/.github/workflows/renovate-gate.yml"
+  grep -qF 'github.event.pull_request.head.repo.fork' "$w"
+  grep -qF 'Explain that a fork PR cannot be gated' "$w"
+  grep -qE "is_fork != 'true'" "$w"
+}
+
+@test "renovate gate: the classifier compares the old version, not just the new one" {
+  # A title carries only the new version, so shape alone cannot separate a patch
+  # bump from a major one. The old version is read out of the diff.
+  local c="${REPO_ROOT}/scripts/renovate-gate-classify.sh"
+  grep -qF 'gh pr diff' "$c"
+  grep -qF 'old_major' "$c"
+  grep -qF 'new_major' "$c"
+}
+
+@test "CI runs on every workflow change, so a required check can always report" {
+  # A Renovate PR that bumps an action pin inside another workflow changes only
+  # that file. With a narrower paths filter Lint and Test never ran on it, and a
+  # required check that never runs never reports -- the PR could not be merged.
+  local ci="${REPO_ROOT}/.github/workflows/ci.yml"
+  # The pattern deliberately omits the leading "- ": grep reads an argument
+  # starting with a dash as an option, whatever the -F.
+  [ "$(grep -cF "'.github/**'" "$ci")" -eq 2 ]
 }
 
 @test "renovate review action: the permission check is the first step" {
@@ -3205,10 +3331,39 @@ _gate_decision() {
 
 @test "renovate review action: every later step is gated on the permission result" {
   local w="${REPO_ROOT}/.github/workflows/renovate-review-action.yml"
-  # The authorship step is the only one allowed to depend on perm directly; every
-  # other step depends on authorship, which itself depends on perm.
-  grep -qE "steps\.perm\.outputs\.allowed == 'true'" "$w"
-  # The checkout must not run before authorship is known.
+  # Asserting that the condition appears *somewhere* is not enough -- a new step
+  # with no `if:` at all would still pass that. Walk the steps and require every
+  # one after the first to carry a condition that chains back to the permission
+  # check (directly, or through the authorship step which is itself gated on it).
+  local steps_block
+  steps_block="$(awk '/^    steps:/ { on = 1; next } on { print }' "$w")"
+  local idx=0 step_has_if=0 step_started=0 line
+  while IFS= read -r line; do
+    case "$line" in
+      '      - '*)
+        if [ "$step_started" -eq 1 ] && [ "$idx" -gt 1 ] && [ "$step_has_if" -eq 0 ]; then
+          echo "step #${idx} in renovate-review-action.yml has no gating condition"
+          false
+        fi
+        idx=$((idx + 1))
+        step_started=1
+        step_has_if=0
+        ;;
+      *'steps.perm.outputs.allowed'* | *'steps.author.outputs.is_renovate'*)
+        step_has_if=1
+        ;;
+    esac
+  done <<<"$steps_block"
+  # The final step is checked after the loop ends.
+  if [ "$idx" -gt 1 ] && [ "$step_has_if" -eq 0 ]; then
+    echo "the last step in renovate-review-action.yml has no gating condition"
+    false
+  fi
+  [ "$idx" -ge 5 ] || {
+    echo "only ${idx} steps found; the walk did not cover the workflow"
+    false
+  }
+  # The checkout must not run before the permission check.
   local checkout_line perm_line
   perm_line="$(grep -n 'id: perm' "$w" | cut -d: -f1)"
   checkout_line="$(grep -n 'actions/checkout' "$w" | cut -d: -f1)"
@@ -3232,10 +3387,14 @@ _gate_decision() {
   # On a public repo an issue_comment trigger takes orders from anyone who can type
   # in the comment box. The authenticated instruction channel is pull_request_review
   # plus the permission check.
+  # Match the token anywhere in the file, not just as a standalone YAML key:
+  # `on: [pull_request, issue_comment]` and a quoted key are both valid spellings
+  # that a key-anchored pattern would wave through. Comments are stripped first so
+  # prose about the decision (which this repo has plenty of) does not trip it.
   local f
-  for f in "${REPO_ROOT}"/.github/workflows/renovate-*.yml; do
-    ! grep -qE '^\s*issue_comment:' "$f" || {
-      echo "$(basename "$f") triggers on issue_comment"
+  for f in "${REPO_ROOT}"/.github/workflows/*.yml; do
+    ! sed 's/#.*$//' "$f" | grep -qE '\bissue_comment\b' || {
+      echo "$(basename "$f") references issue_comment outside a comment"
       false
     }
   done
