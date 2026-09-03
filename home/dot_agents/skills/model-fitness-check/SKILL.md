@@ -105,7 +105,7 @@ model と effort は**それぞれ独立に**「現在 ≥ 要求」を判定し
 ## model の検出
 
 1. **主経路**: セッションの system-prompt に埋め込まれた model identity（自己申告。「You are powered by ...」等）を読む。
-   **主経路が Fable と解決したら、副経路の cross-check はスキップする**（floor 判定を pass にするだけで、判定は終了せず over-provision パスに進む —— Fable も over-provision ゲートの対象だから）。`cldf` 系は `--model claude-fable-5` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
+   **主経路が Fable と解決したら、副経路の cross-check はスキップする**（floor 判定を pass にするだけで、判定は終了せず over-provision パスに進む —— Fable も over-provision ゲートの対象だから）。`cldf` 系は `--model claude-fable-5-1` を argv で渡す（`home/dot_config/zsh/claude.zsh` の `_claude_fable`）ため settings.json とは**構造的に必ず乖離**し、cross-check は常に偽陽性になる。
 2. **副経路（cross-check）**: **主経路が Fable 以外のときのみ実行する**。`~/.claude/settings.json` の `model` を Read で読む（`cld-r06` セッションでも同じパスでよい —— `~/.claude-r06/settings.json` は `~/.claude/settings.json` への symlink であり、両アカウントは 1 つの settings.json を共有する。chezmoi source: `dot_claude-r06/symlink_settings.json.tmpl`）。これは `/model` によるセッション内変更を反映しない可能性があるため、**主経路と乖離したら silent に解決せず surface する**（どちらが有効かを user に提示して確認）。
 
 ### 正規化ルール

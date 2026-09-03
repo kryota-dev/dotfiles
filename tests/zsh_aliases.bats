@@ -277,7 +277,7 @@ EOF
 
 # ---------- residual zsh helpers in claude.zsh ----------
 
-@test "claude.zsh: _claude_fable pins claude-fable-5 and skips the prompt when absent" {
+@test "claude.zsh: _claude_fable pins claude-fable-5-1 and skips the prompt when absent" {
   run zsh -fc "
     export HOME='$BATS_TEST_TMPDIR'
     source '${HOME_DIR}/dot_config/zsh/claude.zsh'
@@ -285,7 +285,7 @@ EOF
     _claude_fable \"\$HOME/.claude\"
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|$BATS_TEST_TMPDIR/.claude|--model claude-fable-5" ]
+  [ "$output" = "claude|$BATS_TEST_TMPDIR/.claude|--model claude-fable-5-1" ]
 }
 
 @test "claude.zsh: _claude_fable appends the orchestrator prompt file when readable" {
@@ -298,7 +298,7 @@ EOF
     _claude_fable \"\$HOME/.claude\"
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|--model claude-fable-5 --append-system-prompt-file $BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md" ]
+  [ "$output" = "claude|--model claude-fable-5-1 --append-system-prompt-file $BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md" ]
 }
 
 @test "claude.zsh: _claude_fable passes the caller's own flags through before the fable flags" {
@@ -309,7 +309,7 @@ EOF
     _claude_fable \"\$HOME/.claude\" --resume
   "
   [ "$status" -eq 0 ]
-  [ "$output" = "claude|--resume --model claude-fable-5" ]
+  [ "$output" = "claude|--resume --model claude-fable-5-1" ]
 }
 
 @test "claude.zsh: cldf/cldf-r06 wire the fable orchestrator per account" {

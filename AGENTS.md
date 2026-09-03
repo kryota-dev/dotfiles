@@ -21,7 +21,7 @@ Written artifacts in this repository follow one of two rules:
 - Code review comments — matches the agent definition files' system prompts, which already steer Japanese-speaking review output (see below)
 - Agent skill files (`SKILL.md`) and their script comments — except `agent-browser`, which stays English: it is an upstream-synced discovery stub whose specialized skills are fetched live via `agent-browser skills get <name>` rather than vendored (see `home/AGENTS.md.tmpl:19`)
 - Agent definition files (`home/dot_claude/agents/*.md`) — their system prompts steer Japanese-speaking review output
-- The Fable 5 orchestrator system prompt (`home/dot_claude/fable-orchestrator-prompt.md`) — appended to Fable 5 sessions launched via `cldf` / `cldf-r06`, so it must steer Japanese-speaking session output
+- The Fable orchestrator system prompt (`home/dot_claude/fable-orchestrator-prompt.md`) — appended to Fable sessions launched via `cldf` / `cldf-r06`, so it must steer Japanese-speaking session output
 - The global agent instructions deployed from this repo (`home/AGENTS.md.tmpl`, `home/dot_claude/CLAUDE.md`, `home/.chezmoitemplates/coding-standards.md`)
 
 Note: Conversational responses to the user remain in Japanese as specified in the global `~/AGENTS.md`.

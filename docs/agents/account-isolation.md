@@ -38,7 +38,7 @@ These are the user-facing entry points. `claude`/`cld` and `codex`/`cdx` all res
 | `claude` / `cld` | Claude Code | Personal (fill-gaps) | Runs the mise-managed `claude` binary with the per-account env set; keeps an already-set `CLAUDE_CONFIG_DIR` (so a hook-spawned child stays on its parent session's account), else defaults to `~/.claude` |
 | `cld-r06` | Claude Code | Work (r06) | Same wrapper; `CLAUDE_CONFIG_DIR` forced to `~/.claude-r06` unconditionally (override) |
 | `claude-config` | Claude Code | Personal | zsh helper: disables the ECC config-protection gate, then calls the `claude` wrapper; for intentional config edits |
-| `cldf` | Claude Code | Personal | zsh helper: calls the `claude` wrapper with `--model claude-fable-5` and the [Fable 5 orchestrator prompt](#fable-5-orchestrator-cldf-family) — main session runs on Fable 5, delegates execution to Sonnet subagents |
+| `cldf` | Claude Code | Personal | zsh helper: calls the `claude` wrapper with `--model claude-fable-5-1` and the [Fable orchestrator prompt](#fable-orchestrator-cldf-family) — main session runs on Fable 5.1, delegates execution to Sonnet subagents |
 | `cldf-r06` | Claude Code | Work (r06) | `cldf` on the r06 account |
 | `codex` / `cdx` | Codex CLI | Follows `CLAUDE_CONFIG_DIR` (fill-gaps) | Runs the brew-managed `codex` binary with `--profile shared` injected unless argv already carries `--profile`; `CODEX_HOME` follows `CLAUDE_CONFIG_DIR` when set (`~/.codex-r06` for a `.claude-r06` dir, else `~/.codex`), otherwise respects an explicit `CODEX_HOME` or defaults to `~/.codex` |
 | `cdx-r06` | Codex CLI | Work (r06) | Same wrapper; `CODEX_HOME` forced to `~/.codex-r06` unconditionally (override); `--profile shared` still injected |
@@ -47,16 +47,33 @@ For the personal account, `claude` and `cld` are literally the same file reached
 
 ---
 
-## Fable 5 orchestrator (`cldf` family)
+## Fable orchestrator (`cldf` family)
 
-The `cldf` / `cldf-r06` aliases start Claude Code in an **orchestrator configuration**: the main session runs on `claude-fable-5` for overview / planning / synthesis, and task execution is steered into Sonnet subagents. They wrap the `claude` wrapper (same account-isolation environment as bare `claude`/`cld`) with a thin `_claude_fable` helper that:
+The `cldf` / `cldf-r06` aliases start Claude Code in an **orchestrator configuration**: the main session runs on `claude-fable-5-1` for overview / planning / synthesis, and task execution is steered into Sonnet subagents. They wrap the `claude` wrapper (same account-isolation environment as bare `claude`/`cld`) with a thin `_claude_fable` helper that:
 
-- pins the main model to the full ID `--model claude-fable-5` (not the `fable` alias, so the delegation prompt's Sonnet-5-era guidance and the main model generation never silently drift apart), and
+- pins the main model to the full ID `--model claude-fable-5-1` (not the `fable` alias, so the delegation prompt's Sonnet-5-era guidance and the main model generation never silently drift apart — the alias now [resolves to Fable 5.1](https://code.claude.com/docs/en/model-config) and would move on its own at the next generation). The flag is what makes the pin stick without opening the picker: Claude Code [resolves the main model](https://code.claude.com/docs/en/model-config) as in-session `/model` > `--model` > `ANTHROPIC_MODEL` > a `model` value in settings > organization default > `ANTHROPIC_DEFAULT_MODEL`, so `--model` beats a default previously saved with `/model`. And
 - points at `home/dot_claude/fable-orchestrator-prompt.md` (deployed to `~/.claude/fable-orchestrator-prompt.md`) via `--append-system-prompt-file <path>` when the file is readable. The path (not the content) is passed to the CLI, which reads the file at process start — this keeps the prompt body out of argv even as the prompt grows. When the file is absent (before `chezmoi apply` or after manual removal) the session still starts, just without the orchestrator prompt.
 
 The prompt file is deliberately kept at `~/.claude/…` and read by both accounts via that absolute path — same "default account dir shared across accounts" precedent as `hooks-fork/`.
 
-`CLAUDE_CODE_SUBAGENT_MODEL` is deliberately **not** set. That environment variable outranks per-invocation `model` params and agent frontmatter, which would collapse the "escalate a hard verification to Fable" escape hatch. The orchestrator prompt steers subagent model choice instead (default `model: sonnet`, upgrade to `fable` only for hard verification, note that `subagent_type: "fork"` always inherits the parent model).
+`CLAUDE_CODE_SUBAGENT_MODEL` is deliberately **not** set, but the reason is not the one this document used to give. Claude Code [resolves a subagent's model](https://code.claude.com/docs/en/sub-agents) in this order since v2.1.251:
+
+1. the per-spawn `model` parameter,
+2. the agent definition's `model:` frontmatter (`inherit` means the main conversation's model),
+3. `CLAUDE_CODE_SUBAGENT_MODEL`,
+4. the main conversation's model.
+
+Before v2.1.251 the variable came first and overrode both the per-spawn parameter and the frontmatter, so setting it really would have collapsed the "escalate a hard verification to Fable" escape hatch. It is now only a **default**, so setting it would no longer close that path.
+
+It is still left unset, for a different reason: its reach is too narrow to justify a second place that declares the subagent default. The variable only applies to spawns that carry neither a frontmatter `model:` nor a per-spawn `model`, and:
+
+- every agent in `home/dot_claude/agents/` already pins `model: sonnet` in its frontmatter, and rule 2 beats rule 3, so none of them are affected;
+- of the built-ins, the docs put `general-purpose` in scope ("the `CLAUDE_CODE_SUBAGENT_MODEL` model if you set one and nothing assigns a model another way, otherwise the main conversation's model");
+- but `Explore` and `Plan` inherit the main conversation's model, and the docs state that "setting `CLAUDE_CODE_SUBAGENT_MODEL` by itself doesn't change the model the built-in Explore and Plan subagents run on".
+
+Splitting "the subagent default" across the orchestrator prompt and an environment variable would mean keeping the two in sync forever, so the prompt stays the single source (default `model: sonnet`, upgrade to `fable` only for hard verification, `subagent_type: "fork"` always inherits the parent model). The trade-off is that a spawn which omits `model` inherits Fable, so the prompt tells the orchestrator to pass `model` explicitly — the only lever that reaches `Explore` and `Plan`.
+
+v2.1.257 added [`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`](https://code.claude.com/docs/en/env-vars), which restores the old override-everything behaviour for subagents, teammates, and workflow agents, "the built-in Explore and Plan definitions included". It is left unset for the original reason: setting it *would* close the escalation path.
 
 Source: `home/dot_config/zsh/claude.zsh` (`_claude_fable` helper, which sets `CLAUDE_CONFIG_DIR` explicitly and calls the `claude` wrapper).
 

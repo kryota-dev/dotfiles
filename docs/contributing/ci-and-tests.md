@@ -87,7 +87,7 @@ Behavioral regression guard for the unified claude/codex launcher wrapper script
 - **Fail-loud.** Both wrappers exit non-zero with a diagnostic message when the real binary cannot be resolved, rather than silently doing nothing.
 - **Codex account selection.** `codex`/`cdx` follow `CLAUDE_CONFIG_DIR` (including the case where a mismatched inherited `CODEX_HOME` must not leak across accounts — the cross-account leak #345 closes); `cdx-r06` overrides `CODEX_HOME` unconditionally; an explicit `CODEX_HOME` is respected only when no `CLAUDE_CONFIG_DIR` is in scope.
 - **`--profile shared` injection.** Injected only when argv carries no `--profile`/`-p` flag (all forms: `--profile x`, `--profile=x`, `-p x`, `-px`); a `--profile` substring inside a prompt argument does not falsely suppress injection; the scan stops at a literal `--`; the flag is always inserted ahead of any subcommand (`exec`, `exec review`).
-- **Residual zsh helpers.** `_claude_fable` (pins `claude-fable-5`, appends the orchestrator prompt file when readable, passes the caller's own flags through before the fable flags), `cldf`/`cldf-r06` (wire the Fable orchestrator per account), and `claude-config` (prefixes the hook opt-out and pins the default account) are driven with `zsh -fc` sourcing `claude.zsh`, as before.
+- **Residual zsh helpers.** `_claude_fable` (pins `claude-fable-5-1`, appends the orchestrator prompt file when readable, passes the caller's own flags through before the fable flags), `cldf`/`cldf-r06` (wire the Fable orchestrator per account), and `claude-config` (prefixes the hook opt-out and pins the default account) are driven with `zsh -fc` sourcing `claude.zsh`, as before.
 
 ### `tests/skill_provenance.bats`
 

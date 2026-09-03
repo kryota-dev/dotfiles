@@ -21,13 +21,28 @@
 #   ECC_DISABLED_HOOKS_EXTRA=pre:config-protection cld-r06
 alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection CLAUDE_CONFIG_DIR="$HOME/.claude" claude'
 
-# Fable 5 orchestrator: run the main session on Fable 5 and steer task execution into Sonnet
+# Fable orchestrator: run the main session on Fable 5.1 and steer task execution into Sonnet
 # subagents via the orchestrator system prompt. The model is pinned to the full ID (not the
 # "fable" alias) so the prompt's Sonnet-5-era delegation checklist and the main model generation
-# cannot silently drift apart — update both together when the model generation changes.
-# CLAUDE_CODE_SUBAGENT_MODEL is deliberately NOT set: it outranks per-invocation model params and
-# agent frontmatter, which would kill the "escalate a hard verification to fable" path; the
-# orchestrator prompt steers subagent model choice instead. The prompt file is shared with the r06
+# cannot silently drift apart — update both together when the model generation changes. The flag
+# is what makes this work without touching the picker: Claude Code resolves the main model as
+# /model in-session > --model > ANTHROPIC_MODEL > a model value in settings > organization default
+# > ANTHROPIC_DEFAULT_MODEL, so --model beats a default saved with /model (#626).
+# CLAUDE_CODE_SUBAGENT_MODEL is still deliberately NOT set, though the reason changed: it used to
+# outrank everything, and 2.1.251 demoted it to a default. Claude Code >= 2.1.251 resolves a
+# subagent's model as per-spawn model param > the agent definition's model: frontmatter ("inherit"
+# means the main conversation's model) > CLAUDE_CODE_SUBAGENT_MODEL > the main conversation's
+# model. Setting it to sonnet would therefore no longer kill the "escalate a hard verification to
+# fable" path, but its reach is small enough not to be worth a second place that declares the
+# subagent default: it applies only to spawns carrying neither a frontmatter model: nor a per-spawn
+# model, and every agent in home/dot_claude/agents/ already pins model: sonnet. Among the built-ins
+# the docs put general-purpose in that set, while Explore and Plan inherit the main conversation's
+# model and are explicitly documented as unchanged by the variable on its own. Keeping the default
+# in both the orchestrator prompt and an env var would mean syncing the two forever, so the prompt
+# stays the single place (#627). 2.1.257 added CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, which restores
+# the old override-everything behaviour (Explore and Plan included); it is left unset so an
+# explicit model: fable on a hard verification still wins.
+# The prompt file is shared with the r06
 # account via an absolute path (same precedent as hooks-fork); when it is absent (before chezmoi
 # apply or after manual removal) the session still starts, just without the orchestrator prompt.
 # The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
@@ -43,7 +58,7 @@ _claude_fable() {
   local home_dir="$1"
   shift
   local prompt_file="$HOME/.claude/fable-orchestrator-prompt.md"
-  local -a fable_flags=(--model claude-fable-5)
+  local -a fable_flags=(--model claude-fable-5-1)
   if [[ -r "$prompt_file" ]]; then
     fable_flags+=(--append-system-prompt-file "$prompt_file")
   fi
