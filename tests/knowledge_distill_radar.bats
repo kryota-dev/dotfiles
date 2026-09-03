@@ -187,7 +187,6 @@ run_fn() {
 }
 
 @test "same-week guard skips a second run within the same ISO week" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local tmp
   tmp="$(_mktemp_dir)"
   trap 'rm -rf "$tmp"' EXIT
@@ -199,7 +198,6 @@ run_fn() {
 }
 
 @test "main(): healthy pipeline publishes the plain HEADLINE and stamps the week" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-healthy"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy" \
     "${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal"
@@ -218,6 +216,11 @@ printf '# Knowledge Distill\n\n昇華提案 4件。\n' >"$report"
 echo "HEADLINE: 昇華提案 4件 / instinct 12件"
 EOF
   chmod +x "${home}/.local/launchers/claude"
+  # Report Darwin so main() gets past its LaunchAgent platform guard: the CI
+  # Bats job runs on ubuntu-latest, and skipping there left these paths
+  # verified only on a developer's Mac (#643).
+  printf '%s\n' '#!/bin/bash' 'echo Darwin' >"${home}/.local/launchers/uname"
+  chmod +x "${home}/.local/launchers/uname"
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
@@ -238,7 +241,6 @@ EOF
 }
 
 @test "main(): dry pipeline is flagged explicitly regardless of claude's own wording" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-dry"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy" \
     "${home}/.local/share/ecc-homunculus-default/projects/proj1/instincts/personal"
@@ -254,6 +256,11 @@ printf '# Knowledge Distill (degraded)\n\ninstinct 蓄積不足。\n' >"$report"
 echo "HEADLINE: 縮退終了"
 EOF
   chmod +x "${home}/.local/launchers/claude"
+  # Report Darwin so main() gets past its LaunchAgent platform guard: the CI
+  # Bats job runs on ubuntu-latest, and skipping there left these paths
+  # verified only on a developer's Mac (#643).
+  printf '%s\n' '#!/bin/bash' 'echo Darwin' >"${home}/.local/launchers/uname"
+  chmod +x "${home}/.local/launchers/uname"
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
@@ -272,7 +279,6 @@ EOF
 }
 
 @test "main(): instincts dir does not exist yet (zero accumulated) -> dry, does not abort under pipefail" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-no-instincts-dir"
   # Deliberately do NOT create .local/share/ecc-homunculus-default/projects:
   # this is the exact "zero instincts accumulated" case the precheck's `|| true`
@@ -286,6 +292,11 @@ printf '# Knowledge Distill (degraded)\n\ninstinct 蓄積なし。\n' >"$report"
 echo "HEADLINE: 縮退終了"
 EOF
   chmod +x "${home}/.local/launchers/claude"
+  # Report Darwin so main() gets past its LaunchAgent platform guard: the CI
+  # Bats job runs on ubuntu-latest, and skipping there left these paths
+  # verified only on a developer's Mac (#643).
+  printf '%s\n' '#!/bin/bash' 'echo Darwin' >"${home}/.local/launchers/uname"
+  chmod +x "${home}/.local/launchers/uname"
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
@@ -452,11 +463,15 @@ EOF
 }
 
 @test "main(): a failed run notifies attention priority 5 and leaves no stamp" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-fail"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
   printf '%s\n' '#!/bin/bash' 'exit 1' >"${home}/.local/launchers/claude"
   chmod +x "${home}/.local/launchers/claude"
+  # Report Darwin so main() gets past its LaunchAgent platform guard: the CI
+  # Bats job runs on ubuntu-latest, and skipping there left these paths
+  # verified only on a developer's Mac (#643).
+  printf '%s\n' '#!/bin/bash' 'echo Darwin' >"${home}/.local/launchers/uname"
+  chmod +x "${home}/.local/launchers/uname"
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
@@ -473,7 +488,6 @@ EOF
 }
 
 @test "main(): claude exits 0 but writes no report file -> treated as failure, no stamp" {
-  [ "$(uname)" = "Darwin" ] || skip "main() is Darwin-only (uname guard exits early)"
   local home="${BATS_TEST_TMPDIR}/home-no-report"
   mkdir -p "${home}/.local/launchers" "${home}/.config/ntfy"
   # Exits 0 and prints a HEADLINE, but never writes the report file -- this is
@@ -481,6 +495,11 @@ EOF
   # from the claude-exit-1 path covered by the test above.
   printf '%s\n' '#!/bin/bash' 'echo "HEADLINE: ok"' >"${home}/.local/launchers/claude"
   chmod +x "${home}/.local/launchers/claude"
+  # Report Darwin so main() gets past its LaunchAgent platform guard: the CI
+  # Bats job runs on ubuntu-latest, and skipping there left these paths
+  # verified only on a developer's Mac (#643).
+  printf '%s\n' '#!/bin/bash' 'echo Darwin' >"${home}/.local/launchers/uname"
+  chmod +x "${home}/.local/launchers/uname"
   cp "${STUB_DIR}/curl" "${home}/.local/launchers/curl"
   cp "$ENV_FILE" "${home}/.config/ntfy/notify-env"
   chmod 600 "${home}/.config/ntfy/notify-env"
