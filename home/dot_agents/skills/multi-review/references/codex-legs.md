@@ -38,6 +38,17 @@ codex 自身の flag 説明も同じ前提に立つ —— `--dangerously-bypass
 **外側に sandbox が無い環境でこれを指定しない。** そこでは封じ込めがゼロになる。判定は
 「今このプロセスは `fh session` の子か」であって、「codex を速く動かしたいか」ではない。
 
+#### 外側の有無は `ps` からは読めない
+
+`ps` に出るのは codex の argv だけで外側は写らない。**このフラグを見ただけで逸脱と判断しない**
+（「レビュー leg がサンドボックス無しで走っている」と誤報告された実例がある）。手掛かりは
+codex の行ではなく祖先の `claude -p` の起動行にある。
+
+**祖先を辿るなら判定コマンド自身を PID で除外する。** `ps -p <pid> -o command=` には呼び出し側の
+argv も写るため、照合パターンを argv に載せたまま `$$` から辿ると**自分にマッチして「外側あり」を
+返す**（実測）。**外れる向きが「使ってよい」側＝fail-open** なので省略できない。穴と回避形の SSOT は
+`wave-orchestrator` の SKILL.md「生存判定の 7 つの穴」（穴 5・穴 6）。
+
 - **generalist**: `review --base origin/<base>`（primary）。base 取得不可なら `${DIFF}` 埋め込み heredoc（fallback）。effort=xhigh（standard/large）/ high（trivial/small）。
 - **specialist**: heredoc = 「agent `.md` 本文（frontmatter 除去）+ 対象説明 + 差分取得コマンド（`--repo` 明示）+ 作業ディレクトリ絶対パス + 棄却台帳（+ spec-context）」。effort=high。
 - 親は **`$RESULT_leg` のみ Read**。`$STREAM_leg`（JSONL）は観測用で親コンテキストに載せない。
