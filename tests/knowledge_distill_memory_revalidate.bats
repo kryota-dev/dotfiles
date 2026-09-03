@@ -88,6 +88,65 @@ EOF
   printf '%s\n' "$dir"
 }
 
+# --- subprocess タイムアウト経路の踏み方（#645） ----------------------------
+#
+# ## なぜ production 側に `--timeout` を足さないのか
+#
+# #631 / #641 のレビューで「`SUBPROCESS_TIMEOUT_SECONDS` のタイムアウト経路が未テスト」と
+# 指摘され、#641 では注入点の追加を見送った。本 suite でもその判断を維持する。理由は 3 つ:
+#
+# 1. **user 向けオプションとして正当化できない。** このスクリプトは週次 routine から
+#    報告のみの目的で走り、外部コマンドは `git` と `gh` だけ。遅い側（ネットワーク）は
+#    `--github off` で丸ごと切れるし、速い側（`git log`）に 20 秒を超える待ちを許したい
+#    運用要求は無い。「テストのために CLI を広げる」だけの旗になる。
+# 2. **旗を足すと production 側の検証責務が増える。** 値域（正の有限数）の検証と、その
+#    検証自体のテストが要る。守りたい性質（タイムアウト時に inconclusive へ倒れる）に対して
+#    釣り合わない。
+# 3. **足さなくても経路を踏める。** 下の `make_timeout_driver` が、スクリプトを
+#    **ファイルパスからモジュールとして読み込み**、`SUBPROCESS_TIMEOUT_SECONDS` を
+#    差し替えてから `main()` を呼ぶ。production のコードは 1 行も変わらない。
+#
+# ## このドライバが依存している production の性質
+#
+# `run_command` が `timeout=SUBPROCESS_TIMEOUT_SECONDS` を**呼び出し時にモジュール
+# グローバルから引く**こと。定数が名前付きで存在すること自体は「閾値はすべて名前付き定数
+# として定義されている」が既に固定しており、ここで新しい結合を作ってはいない。
+# ドライバは `raise SystemExit(mod.main(argv))` で本体の `__main__` と同じ形を取るので、
+# 終了コードの意味（bit0=finding / bit1=inconclusive）もそのまま検証できる。
+make_timeout_driver() {
+  local driver="${BATS_TEST_TMPDIR}/timeout_driver.py"
+  cat >"$driver" <<'EOF'
+"""memory-revalidate.py を import し、subprocess タイムアウトを縮めて main() を呼ぶ。
+
+argv: <script> <timeout_seconds> [スクリプトへ渡す引数...]
+"""
+import importlib.util
+import sys
+
+# import は既定でソースの隣に __pycache__ を書く。上の py_compile ガードが cfile を
+# 明示しているのと同じ理由で、リポジトリ内へ生成物を残さない。
+sys.dont_write_bytecode = True
+
+script, timeout, forwarded = sys.argv[1], float(sys.argv[2]), sys.argv[3:]
+spec = importlib.util.spec_from_file_location("memory_revalidate_under_test", script)
+module = importlib.util.module_from_spec(spec)
+# `@dataclass` は定義中に `sys.modules[cls.__module__]` を引くので、exec_module より
+# 前に登録しておかないと AttributeError で読み込みに失敗する。
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+module.SUBPROCESS_TIMEOUT_SECONDS = timeout
+raise SystemExit(module.main(forwarded))
+EOF
+  printf '%s\n' "$driver"
+}
+
+# ドライバに渡すタイムアウト（秒）。スタブ側は 30 秒眠るので確実に踏み抜ける一方、
+# 同じ定数はスタブしていない**本物の** git 呼び出し（`ls-files` / `rev-parse` /
+# `remote`）にも掛かる。fixture リポジトリは 2 コミットで、それらは実測 10ms 台に収まる
+# ため、0.5 秒は 30 倍以上の余裕がある。0.05 秒まで詰めると本物の git 側が偶発的に
+# タイムアウトし、テストが別の理由で赤くなる。
+TIMEOUT_UNDER_TEST=0.5
+
 @test "script exists and compiles (python3 is required, never skipped)" {
   [ -f "$SCRIPT" ]
   # ツールが無いと自分を飛ばすガードは、このリポジトリが明示的に禁じている失敗形
@@ -328,6 +387,64 @@ EOF
   [ "$(jq -r '.findings | length' <<<"$c")" -eq 0 ]
   [ "$(jq -r '.unchecked | length' <<<"$c")" -ge 1 ]
   [ "$(jq -r '.reasons | length' <<<"$c")" -ge 1 ]
+}
+
+@test "gh がタイムアウトしたら finding ではなく inconclusive + exit bit 2 になる" {
+  # 403 の一つ上のテストと同じ着地（unchecked + reason）を通るが、理由の文言だけが違う。
+  # 「応答したが失敗した」と「応答が返らなかった」を報告上も区別できることを固定する。
+  local driver stub="${BATS_TEST_TMPDIR}/stub-slow-gh"
+  driver="$(make_timeout_driver)"
+  mkdir -p "$stub"
+  # `exec` で bash 自身を置き換える。タイムアウト時に kill されるのが sleep 本体になり、
+  # 孤児の sleep がテスト終了後まで残らない。
+  printf '%s\n' '#!/bin/bash' 'exec sleep 30' >"${stub}/gh"
+  chmod +x "${stub}/gh"
+  (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
+  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github auto
+  # 検査不能は bit1。finding の有無（bit0）とは独立に立つ。
+  [ "$((status & 2))" -eq 2 ]
+  local c
+  c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  # 引けなかった参照が finding（＝「実在しない」の断定）へ化けないこと。
+  [ "$(jq -r '.findings | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '[.unchecked[] | select(.reason == "gh がタイムアウトした")] | length' <<<"$c")" -ge 1 ]
+  [ "$(jq -r '[.reasons[] | select(contains("gh がタイムアウトした"))] | length' <<<"$c")" -ge 1 ]
+  # ドライバは import 経由なので、放っておくとソースの隣に __pycache__ を残す。
+  [ ! -e "$(dirname "$SCRIPT")/__pycache__" ]
+}
+
+@test "git log がタイムアウトしたら staleness が inconclusive + exit bit 2 になる" {
+  local driver real_git stub="${BATS_TEST_TMPDIR}/stub-slow-git"
+  driver="$(make_timeout_driver)"
+  real_git="$(command -v git)"
+  mkdir -p "$stub"
+  # `log` だけを遅くする。`rev-parse` / `ls-files` / `remote` は本物へ委譲しないと、
+  # staleness が冒頭の probe 段階で落ちて last_commit_iso まで届かない。
+  cat >"${stub}/git" <<EOF
+#!/bin/bash
+for arg in "\$@"; do
+  if [ "\$arg" = "log" ]; then exec sleep 30; fi
+done
+exec "${real_git}" "\$@"
+EOF
+  chmod +x "${stub}/git"
+  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" \
+    --memory-dir "${WS}/memory" --repo "${WS}/repo" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
+    --format json --github off
+  [ "$((status & 2))" -eq 2 ]
+  local c
+  c="$(jq -c '.checks[] | select(.id == "staleness")' <<<"$output")"
+  [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
+  # 「乖離 2」で本来 finding になる参照が、日付を引けないまま finding へ落ちないこと。
+  [ "$(jq -r '.findings | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '.checked' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '[.unchecked[] | select(.reason == "git log がタイムアウトした")] | length' <<<"$c")" -ge 1 ]
+  [ "$(jq -r '[.reasons[] | select(contains("git log がタイムアウトした"))] | length' <<<"$c")" -ge 1 ]
 }
 
 @test "生 NUL バイトを含む memory は inconclusive にし、その中の参照を finding にしない" {
