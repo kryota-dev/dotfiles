@@ -32,7 +32,7 @@ Contributors should run `make test` locally before pushing — it chains the sam
 
 All tests live under `tests/` and are run together via `bats tests/*.bats`. The helper `tests/helpers/setup.bash` defines `REPO_ROOT` and `HOME_DIR` (= `<repo>/home`) for every test file.
 
-It also defines `_mktemp_dir`, and every test must take its scratch directory from there rather than calling `mktemp -d` directly: macOS's `mktemp` consults `TMPDIR` only when given a template, so a bare call lands in `/var/folders/…/T` and fails under a sandboxed session, turning the whole suite red for reasons unrelated to the change under test. `tests/tmpdir_policy.bats` enforces this mechanically (#642).
+It also defines `_mktemp_dir`, and every test must take its scratch directory from there rather than calling `mktemp -d` directly: macOS's `mktemp` consults `TMPDIR` only when given an explicit template — `-t` and the no-argument form both resolve through `_CS_DARWIN_USER_TEMP_DIR` instead — so a bare call lands in `/var/folders/…/T` and fails under a sandboxed session, turning the whole suite red for reasons unrelated to the change under test. `tests/tmpdir_policy.bats` enforces this mechanically (#642). A second test in that file applies the same rule to the `home/` paths a sandboxed session executes — the chezmoi lifecycle scripts and the curated skill bodies. Those files cannot share a bats helper, so what is enforced there is the explicit template itself rather than the helper (#648).
 
 ### `tests/files.bats`
 

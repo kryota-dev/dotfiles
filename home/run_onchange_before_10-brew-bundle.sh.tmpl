@@ -55,7 +55,7 @@ eval "$("$BREW_BIN" shellenv)"
 echo "Running brew bundle (Linux: filtering incompatible formulas)..."
 SOURCE_BREWFILE="{{ .chezmoi.sourceDir }}/dot_Brewfile"
 EXCLUDE="{{ .chezmoi.sourceDir }}/../.brewfile-linux-exclude"
-FILTERED_BREWFILE=$(mktemp)
+FILTERED_BREWFILE=$(mktemp "${TMPDIR:-/tmp}/brew-bundle-filtered.XXXXXX")
 grep -E '^(tap |brew )' "$SOURCE_BREWFILE" | grep -v -E -f "$EXCLUDE" >"$FILTERED_BREWFILE"
 BREWFILE="$FILTERED_BREWFILE"
 {{ else -}}
@@ -92,7 +92,7 @@ fi
 # makes the pipeline carry brew bundle's status rather than tee's. Piping brew's output does not
 # break the sudo password prompt that cask installs trigger: sudo(8) reads the password from the
 # user's terminal rather than from stdin, and stdin is left attached here either way.
-BUNDLE_LOG=$(mktemp)
+BUNDLE_LOG=$(mktemp "${TMPDIR:-/tmp}/brew-bundle-log.XXXXXX")
 bundle_status=0
 "$BREW_BIN" bundle --no-upgrade --file="$BREWFILE" 2>&1 | tee "$BUNDLE_LOG" || bundle_status=$?
 

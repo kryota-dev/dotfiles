@@ -95,7 +95,7 @@ GraphQL で取得し、jq パイプで即座に絞り込む。解決済み・返
 
 ```bash
 MY_LOGIN=$(gh api user --jq .login)
-TMP_THREADS=$(mktemp)
+TMP_THREADS=$(mktemp "${TMPDIR:-/tmp}/rrl-threads.XXXXXX")
 
 gh api graphql -f query='{
   repository(owner: "{owner}", name: "{repo}") {
@@ -177,8 +177,8 @@ review body には 2 種類あるが、**いずれも取得対象とする**:
 
 ```bash
 MY_LOGIN=$(gh api user --jq .login)
-TMP_REVIEWS=$(mktemp)
-TMP_REPLIED=$(mktemp)
+TMP_REVIEWS=$(mktemp "${TMPDIR:-/tmp}/rrl-reviews.XXXXXX")
+TMP_REPLIED=$(mktemp "${TMPDIR:-/tmp}/rrl-replied.XXXXXX")
 
 # Step 1: body が空でない review を取得（種別を問わず常に取得）
 gh api repos/{owner}/{repo}/pulls/{PR番号}/reviews --paginate --jq '
@@ -242,8 +242,8 @@ CI ワークフローは、レビュー結果を **marker 付きの Issue commen
 
 ```bash
 MY_LOGIN=$(gh api user --jq .login)
-TMP_CI=$(mktemp)
-TMP_CI_REPLIED=$(mktemp)
+TMP_CI=$(mktemp "${TMPDIR:-/tmp}/rrl-ci.XXXXXX")
+TMP_CI_REPLIED=$(mktemp "${TMPDIR:-/tmp}/rrl-ci-replied.XXXXXX")
 
 # Step 1: marker 付き Issue comment を取得
 gh api repos/{owner}/{repo}/issues/{PR番号}/comments --paginate --jq '
@@ -489,11 +489,19 @@ CI レビューコメントもスレッドではないため、Issue comment と
 
 ```bash
 # CI コメント（github-actions）へは @ メンションを付けない（4-2 参照）。本文に他の @ が含まれ得るため一時ファイル経由で投稿する（4-3 参照）
+CI_REPLY=$(mktemp "${TMPDIR:-/tmp}/rrl-ci-reply.XXXXXX")
+trap 'rm -f "$CI_REPLY"' EXIT
+
+# 本文を先に書き出す。末尾の marker は返信済み判定のキーなので必ず含める
+cat >"$CI_REPLY" <<'REPLY_EOF'
+{返信内容}
+
+<!-- ci-review-reply: {commentId}@{updatedAt} -->
+REPLY_EOF
+
 gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
   --method POST \
-  -F body=@/tmp/ci-reply.txt
-# /tmp/ci-reply.txt の末尾に必ず次の marker を含める:
-#   <!-- ci-review-reply: {commentId}@{updatedAt} -->
+  -F body=@"$CI_REPLY"
 ```
 
 ### 4-1b. 人間レビュアーへの返信内容のユーザー承認
@@ -561,7 +569,7 @@ review body への返信は Issue comment として投稿する。hidden marker 
 
 ### 4-3. 返信時の注意事項
 
-- **`@` を含む body の投稿**: `gh api` の `-F` フラグでは `@` で始まる値がファイル参照として解釈される。返信内容に `@` メンションを含む場合は、一時ファイルに書き出してから `-F body=@/tmp/reply.txt` で渡すこと
+- **`@` を含む body の投稿**: `gh api` の `-F` フラグでは `@` で始まる値がファイル参照として解釈される。返信内容に `@` メンションを含む場合は、一時ファイルに書き出してから `-F body=@"$REPLY_FILE"` で渡すこと（`REPLY_FILE=$(mktemp "${TMPDIR:-/tmp}/rrl-reply.XXXXXX")`。`/tmp` 直書きは sandbox 下で拒否される）
 - **ローカルのみのドキュメントを根拠にしない**: `.spec-workflow/`, `.claude/` 等のパスは PR コメントの根拠として不適切。GitHub 上で閲覧可能なファイルのみ参照する
 - **コードの実際の挙動を根拠にする**: `api-error-handle.ts:44` のように具体的なファイルと行番号で根拠を示す
 - **前回回答済みの場合**: 前回の返信 URL を引用して重複を避ける

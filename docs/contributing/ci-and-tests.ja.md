@@ -32,7 +32,7 @@ CI はローカルの `make` コマンドを忠実に反映しています。CI 
 
 すべてのテストは `tests/` 以下にあり、`bats tests/*.bats` でまとめて実行されます。ヘルパー `tests/helpers/setup.bash` がすべてのテストファイル向けに `REPO_ROOT` と `HOME_DIR`（= `<repo>/home`）を定義します。
 
-同ヘルパーは `_mktemp_dir` も定義しており、テストは一時ディレクトリを `mktemp -d` の直接呼び出しではなく必ずこのヘルパーから取得します。macOS の `mktemp` はテンプレートを与えたときにしか `TMPDIR` を参照しないため、ベア呼び出しは `/var/folders/…/T` を掴んで sandbox 配下のセッションでは失敗し、変更と無関係にスイート全体が赤くなります。この規約は `tests/tmpdir_policy.bats` が機械的に強制します（#642）。
+同ヘルパーは `_mktemp_dir` も定義しており、テストは一時ディレクトリを `mktemp -d` の直接呼び出しではなく必ずこのヘルパーから取得します。macOS の `mktemp` は明示的なテンプレートを与えたときにしか `TMPDIR` を参照せず（`-t` と引数なしの形はいずれも `_CS_DARWIN_USER_TEMP_DIR` を経由します）、ベア呼び出しは `/var/folders/…/T` を掴んで sandbox 配下のセッションでは失敗し、変更と無関係にスイート全体が赤くなります。この規約は `tests/tmpdir_policy.bats` が機械的に強制します（#642）。同ファイルの 2 本目のテストは、sandbox 配下のセッションが実行する `home/` のパス（chezmoi ライフサイクルスクリプトと curated skill 本文）へ同じ規則を適用します。これらのファイルは bats のヘルパーを共有できないため、そこで強制されるのはヘルパー経由ではなく明示的なテンプレートそのものです（#648）。
 
 ### `tests/files.bats`
 
