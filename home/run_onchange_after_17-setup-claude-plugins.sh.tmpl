@@ -82,7 +82,7 @@ if [ "${#plugins[@]}" -eq 0 ]; then
   exit 0
 fi
 
-settings_snapshot="$(mktemp)"
+settings_snapshot="$(mktemp "${TMPDIR:-/tmp}/claude-plugins-settings.XXXXXX")"
 
 restore_settings() {
   # Undo the CLI's rewrite. Written through the existing path so the file keeps its inode. Guarded on
