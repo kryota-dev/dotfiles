@@ -45,7 +45,14 @@ allowlist** であり、差分の小ささを根拠にはしない。
 | `update …/claude-code-action action to v1.0.214` | `needs-agent` | 長期トークンを握って CI で走る |
 | `update dependency java to v25` | `needs-agent` | 3 桁 semver ではない major |
 | `update deno monorepo to v2.8.3` | `needs-agent` | グループ更新であり単一の名前付き依存ではない |
+| `update dependency somelib to v3.0.0`（`2.9.0` から） | `needs-agent` | メジャー更新。タイトルだけでは分からないため旧バージョンを差分から読む |
+| `update dependency npm:agent-browser to v0.36.0`（`0.35.2` から） | `needs-agent` | semver 上、`0.x` のマイナー更新は破壊的変更を許す |
 | 解釈不能なもの、`gh` の呼び出し失敗 | `needs-agent` | 判定不能は決して「安全」ではない |
+
+**タイトルだけでは patch と major を区別できない。** Renovate のタイトルは新バージョンしか
+含まないため、`to v3.0.0` と `to v2.99.0` は同じ形である。分類器は差分の削除行
+（`-gh = "2.98.0"`）から旧バージョンを読んでメジャー番号を比較し、読み取れなければ
+エージェントへ回す。
 
 **1 行の差分は、変更が小さい証拠にならない。** このリポジトリが digest で pin して
 いる skill アーカイブは、リリース工程を一切持たない upstream の `main` を追従して
@@ -128,7 +135,10 @@ required status check は一度だけ手で設定する。これが無いと、�
 5. **Target branches**: 既定ブランチ（`main`）を追加
 6. **Rules**: **Require status checks to pass** を有効化し、次を追加する:
    - `renovate-gate` — ゲート本体
-   - `Lint`, `Test` — 決定論ゲートが意図的に読まない CI ジョブ
+   - `Lint`, `Test` — 決定論ゲートが意図的に読まない CI ジョブ。必須化して安全なのは
+     `ci.yml` が `.github/**` を監視しているためで、他のワークフロー内の action pin だけを
+     更新する Renovate PR でもこれらが走る。フィルタが狭いと、そうした PR は永久にマージ
+     できなくなる（走らないチェックは報告されないため）
    - `CodeQL`, `GitGuardian Security Checks` — 任意。理由は同じ
 7. **Require branches to be up to date before merging** は**オフ**のままにする。
    有効にすると `main` が動くたびに Renovate が全 PR をリベースすることになり、
@@ -136,6 +146,23 @@ required status check は一度だけ手で設定する。これが無いと、�
 
 確認方法: 任意の pull request を開き、チェック一覧に `renovate-gate` が現れ、
 Renovate 以外の PR では `success` を報告することを確かめる。
+
+## このゲートが覆えない唯一のケース: fork からの pull request
+
+fork からの `pull_request` で起動したワークフローは **read-only** の `GITHUB_TOKEN` を
+受け取り、`permissions:` ブロックでは広げられない（GitHub 公式: 「Run workflows from fork
+pull requests — using a `GITHUB_TOKEN` with read-only permission, and with no access to
+secrets」）。したがって `renovate-gate` は fork PR に status を付けられず、status を必須に
+した時点でその PR は pending のまま残る。
+
+`renovate-gate.yml` はこれを検出し、説明のない 403 で落ちる代わりにジョブサマリーへ理由を
+書き出す。fork の貢献をマージするには、手動で status を付けるか、このリポジトリ内の
+ブランチへ載せ替える。
+
+これは解決ではなく受容である。解決するなら `workflow_run` で起動する 2 本目のワークフローに
+なる（base リポジトリのコンテキストで write 権限を持って走り、fork の head SHA に status を
+報告できる）。fork からの貢献が日常になれば作る価値があるが、個人の dotfiles リポジトリでは
+そうならない。
 
 ## 導入順序
 

@@ -168,12 +168,54 @@ macOS ジョブは `~/.config/ghostty/config` も確認します。
 
 ---
 
-## `renovate-triage.yml` — 週次 Renovate トリアージ
+## `renovate-gate.yml` / `renovate-review-action.yml` / `renovate-digest.yml` — Renovate マージゲート
 
-`schedule`（毎週月曜日 00:00 UTC = 09:00 JST）と `workflow_dispatch` で、`ubuntu-latest` 上で実行されます。[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) を automation モード（`prompt` 入力を渡し、`@claude` メンション不要）で実行し、open な Renovate PR を **read-only** でトリアージします。`gh` で PR を収集し、リスク / CI 状態 / semver で分類し、要注意のものを分析したうえで、Dependency Dashboard（Issue #12）に統合サマリーコメントを、分析対象の各 PR に個別詳細コメントを投稿します。インラインした prompt は日本語で記述しており、投稿されるコメントも日本語になります（agent 定義や Fable orchestrator prompt と同じ規約）。
+Renovate PR は無人でマージされる。この 3 本が、その可否を決める。設計そのもの — 分類器の
+判定表、3 層の fail-closed、承認・却下の操作、GitHub UI で手作業で作る ruleset — は
+[Renovate 自動化](../architecture/renovate-automation.ja.md) にある。ここに置くのは CI としての形。
 
-このワークフローは**決してマージしません** — マージは `renovate-sweep` skill（`home/dot_agents/skills/renovate-sweep/SKILL.md`。プロンプトにインラインした分類ルールの概念的な source of truth）経由でローカル・人間承認のまま行われます。read-only は多層防御で担保します: ジョブは `contents: read` + `issues: write` + `pull-requests: write` のみを付与し（`contents: write` なし）、`--allowedTools` の allowlist には読み取り専用の `gh` サブコマンドと、作成専用のコメント wrapper（`scripts/renovate-triage-comment.sh`。Issue #12 か open な Renovate PR にのみコメントを作成し、編集・削除はしない。`tests/renovate_triage_comment.bats` で検証）1 つだけを含めます。エージェントは任意の Bash を持たず（読み取り専用の `gh` サブコマンドと wrapper のみ。`echo`/`printenv`/`cat` 等は不可）、プロンプトは取得データを信頼せずシークレットの出力を禁止します。（subprocess env scrub `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は意図的に無効です: bubblewrap を必須とし、action は `allowed_non_write_users` モードでしかインストールしないため、設定すると Claude Code が起動に失敗しました。）認証は job スコープの `github.token` を明示的に渡し（`id-token: write` を要する OIDC 経路へのフォールバックを避ける）、`CLAUDE_CODE_OAUTH_TOKEN` リポジトリシークレット（`claude setup-token` で発行）を使用します。アクションの ref は他のすべての `uses:` と同様に SHA ピン + Renovate で `automerge: false` + 追跡されます。
+**`renovate-gate.yml`** は全 `pull_request`（`opened` / `synchronize` / `reopened`）で走り、
+`main` の required status check として登録された `renovate-gate` commit status を報告する。
+作者判定は `gh` の呼び出しではなく webhook payload から行う —— API の失敗には安全な答えが
+無いからだ。「不明は Renovate ではない」とすれば未審査の更新に success を報告し、「不明は
+Renovate」とすれば障害中に人間の PR を塞ぐ。Renovate 以外の PR には即座に `success` を返す。
+報告されない required check は、人間の PR を永久に pending に置いてしまうためである。
+Renovate の PR は `scripts/renovate-gate-classify.sh`（シェルのみ・エージェント不使用）を通り、
+機械的に判定しきれないものだけが
+[`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) に届く。
+報告ステップは `if: always()` で走るので、エージェントがクラッシュ・タイムアウトしても
+`failure` になり、黙って通ることはない。唯一の穴は fork PR で、GitHub が渡す
+`GITHUB_TOKEN` は read-only に固定され `permissions:` では広げられないため、403 で落ちる
+代わりにその旨をジョブサマリーに出す。
 
+**`renovate-review-action.yml`** は `pull_request_review` で走る。**最初の**ステップで
+レビュアーの collaborator 権限を確認する —— このリポジトリは public なので誰でも approve を
+送信でき、「レビューが存在する」ことは何も証明しないからだ。以降の全ステップはその結果で
+gate される（`tests/files.bats` は条件がどこかに現れることではなく、ステップを走査して
+各ステップに条件があることを検証する）。
+
+**`renovate-digest.yml`** は週次（月曜 00:00 UTC = 09:00 JST）と `workflow_dispatch` で走り、
+Dependency Dashboard（Issue #12）にキャッチアップ用のダイジェストを投稿する。`statuses`
+権限を持たない —— ゲートに影響を与えられてはならないため。
+
+**エージェントの書き込み面は 3 本すべてで構造的に限定される。** 任意の Bash は与えられない。
+`--allowedTools` に載るのは読み取り専用の `gh` サブコマンドと、最大 2 本のラッパーだけ:
+ローカル JSON を 1 つ書くだけでネットワークに触れない `scripts/renovate-gate-verdict.sh` と、
+Issue #12 か open な Renovate PR にのみコメントを作成し編集・削除をしない
+`scripts/renovate-triage-comment.sh`。required status を実際に報告する
+`scripts/renovate-gate-status.sh` は**意図的にどの allowlist にも入れず**、ワークフローの
+ステップからのみ呼ぶ。エージェントが自分のレビューを合格にできないのはこのためである。
+`tests/files.bats` は各 allowlist を期待集合と完全一致で照合する —— 既知の悪い文字列の
+denylist では、`Bash(gh:*)` のように広げられた許可を通してしまうからだ。`issue_comment`
+トリガーはどこにも無い。public リポジトリでは、コメント欄に入力できる誰からでも指示を
+受け取ることになる。プロンプトは取得したデータをすべて信頼できないものとして扱い、
+シークレットの出力を禁じる。（subprocess env scrub `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` は
+意図的に無効: bubblewrap を必須とし、action は `allowed_non_write_users` モードでしか
+インストールしないため、設定すると Claude Code が起動に失敗した。）認証は job スコープの
+`github.token` を明示的に渡し（渡さないと `id-token: write` を要する OIDC 経路へ落ちる）、
+`CLAUDE_CODE_OAUTH_TOKEN` リポジトリシークレット（`claude setup-token` で発行）を使う。
+action の ref は他の `uses:` と同様 SHA ピン + Renovate 追跡で、その更新は `digest` 更新として
+ゲートに届き、分類器は常にエージェント審査へ回す。
 ---
 
 ## 再利用可能ワークフローと SHA ピン
@@ -190,7 +232,7 @@ macOS ジョブは `~/.config/ghostty/config` も確認します。
 
 ### Renovate と ECC ピニング
 
-`.github/renovate.json5` がすべての依存関係の更新を管理します。`customManager` の正規表現が `.chezmoidata.toml` の ECC `version` と `commit` フィールドを一緒に更新します。`packageRule` によって ECC パッケージは**自動マージ禁止**です — ECC の更新は実行可能なフックコードを含むため、手動レビューが必要です。`.chezmoiexternal.toml` エントリの 168 時間の外部更新間隔（`refreshPeriod`）は Renovate のバンプとは別です。
+`.github/renovate.json5` がすべての依存関係の更新を管理します。`customManager` の正規表現が `.chezmoidata.toml` の ECC `version` と `commit` フィールドを一緒に更新します。ECC の更新は全エージェントセッションで走る実行可能なフックコードを配布するため、マージゲートの決定論的な fast lane には決して乗りません。`scripts/renovate-gate-classify.sh` が `affaan-m/ecc` を always-review リストに明示しており、差分の大きさに依らず必ずエージェントが審査します（`automerge: false` の packageRule を置き換えたもの。設定側は updateType しか見られませんでした）。`.chezmoiexternal.toml` エントリの 168 時間の外部更新間隔（`refreshPeriod`）は Renovate のバンプとは別です。
 
 ---
 

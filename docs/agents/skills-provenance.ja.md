@@ -134,7 +134,7 @@
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
 
-すべてのバージョン定義インプットは `home/.chezmoidata.toml` に集約されています。`.chezmoiexternal.toml` の external 宣言はテンプレート変数としてこれらを参照します — コミット SHA が `.chezmoiexternal.toml` に直接ハードコードされることはありません。Renovate が ECC のリリースタグを追跡し、`[ecc].version` と `[ecc].commit` を同時にバンプします；ECC の更新は自動マージされません。
+すべてのバージョン定義インプットは `home/.chezmoidata.toml` に集約されています。`.chezmoiexternal.toml` の external 宣言はテンプレート変数としてこれらを参照します — コミット SHA が `.chezmoiexternal.toml` に直接ハードコードされることはありません。Renovate が ECC のリリースタグを追跡し、`[ecc].version` と `[ecc].commit` を同時にバンプします；ECC の更新は必ずマージ前にエージェントが審査します（`scripts/renovate-gate-classify.sh` が `affaan-m/ecc` を決定論的な fast lane から外しているため。[Renovate 自動化](../architecture/renovate-automation.ja.md) 参照）。
 
 ---
 

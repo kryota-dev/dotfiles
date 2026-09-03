@@ -47,7 +47,14 @@ of the update**, not a risk score, and never on how small the diff looks.
 | `update …/claude-code-action action to v1.0.214` | `needs-agent` | Runs in CI holding a long-lived token |
 | `update dependency java to v25` | `needs-agent` | Bare major, no three-part semver |
 | `update deno monorepo to v2.8.3` | `needs-agent` | Grouped update, not a single named dependency |
+| `update dependency somelib to v3.0.0` (from `2.9.0`) | `needs-agent` | Major bump — the title alone cannot show this, so the old version is read from the diff |
+| `update dependency npm:agent-browser to v0.36.0` (from `0.35.2`) | `needs-agent` | Under semver a `0.x` minor bump may break |
 | Anything unparsable, or a failed `gh` call | `needs-agent` | Unclassifiable is never "safe" |
+
+**The title alone cannot tell a patch bump from a major one.** Renovate titles carry only
+the new version, so `to v3.0.0` and `to v2.99.0` are the same shape. The classifier reads
+the old version out of the diff's removed line (`-gh = "2.98.0"`) and compares majors; if
+it cannot read one, the PR goes to the agent.
 
 **A one-line diff is not evidence of a small change.** The skill archives this
 repository pins by digest track upstream `main` with no release step at all, and
@@ -133,13 +140,33 @@ its verdict and nothing acts on it.
 5. **Target branches**: add the default branch (`main`)
 6. **Rules**: enable **Require status checks to pass**, then add:
    - `renovate-gate` — the gate itself
-   - `Lint`, `Test` — the CI jobs the classifier deliberately does not read
+   - `Lint`, `Test` — the CI jobs the classifier deliberately does not read. These are
+     safe to require because `ci.yml` watches `.github/**`: a Renovate PR that only bumps
+     an action pin inside another workflow still runs them. A narrower filter would leave
+     such a PR permanently unmergeable, since a check that never runs never reports.
    - `CodeQL`, `GitGuardian Security Checks` — optional, same reasoning
 7. Leave **Require branches to be up to date before merging** *off*. Turning it on
    makes Renovate rebase every PR whenever `main` moves, which stalls auto-merge.
 
 To verify: open any pull request and confirm `renovate-gate` appears in its checks
 and reports `success` for a non-Renovate PR.
+
+## The one case this gate cannot cover: fork pull requests
+
+A workflow triggered by a `pull_request` from a fork receives a **read-only**
+`GITHUB_TOKEN`, and the `permissions:` block cannot widen it ("Run workflows from fork
+pull requests — using a `GITHUB_TOKEN` with read-only permission, and with no access to
+secrets"). So `renovate-gate` cannot post its status on a fork PR at all, and once the
+status is required, such a PR stays at pending.
+
+`renovate-gate.yml` detects this and writes an explanation to the job summary rather than
+failing on an unexplained 403. To merge a fork contribution you either report the status
+by hand, or move the change onto a branch in this repository.
+
+This is accepted rather than solved. The fix would be a second workflow triggered by
+`workflow_run`, which runs in the base repository's context with write permissions and
+can report the status for the fork's head SHA. That is worth building if fork
+contributions ever become routine here; for a personal dotfiles repository they are not.
 
 ## Rollout order
 
