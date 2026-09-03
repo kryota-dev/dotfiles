@@ -209,11 +209,72 @@ topic (no dedicated topic was added).
   injection carried in an instinct or a memory could otherwise widen what the
   weekly run reads without the allowlist objecting.
   `tests/knowledge_distill_radar.bats` asserts the prompt still says so.
+- **Budget** (#643): `--max-turns` is
+  <!-- FACT:knowledge-distill-max-turns -->80<!-- /FACT --> and the watchdog
+  fires at <!-- FACT:knowledge-distill-timeout-seconds -->1200<!-- /FACT -->
+  seconds. Both are sized from measurement rather than raised until the symptom
+  stopped. Across the three failed runs whose session transcripts survived,
+  throughput was 10.3–10.8 seconds per tool call; the two runs that died on
+  `--max-turns` reached turn 50 at 523 s and 539 s with the work unfinished; the
+  one run that batched its calls (1.93 per turn) got 58 calls done in 597 s and
+  was killed by the watchdog instead; and the single success took 589 s of the
+  600 s budget — 1.8 % of headroom. So 50 turns and 600 seconds were the same
+  wall: 50 serialized turns consume essentially the whole 600 s, which meant the
+  watchdog documented as a guard *on top of* `--max-turns` had quietly become
+  the primary limit, and which one fired was decided by whether the agent
+  happened to batch its calls that week. 80 turns at ~10.5 s is roughly 840 s,
+  inside 1200 s, so `--max-turns` is the cost ceiling again. The other half of
+  the fix is on the prompt: it still forbids joining commands with `;` or `&&`
+  (the allowlist is prefix-matched per command) but now says explicitly that
+  this is a rule about the shell, not a limit of one Bash call per turn.
+- **Run history** (#643): every attempt appends one JSON object to
+  `${XDG_STATE_HOME:-~/.local/state}/knowledge-distill-radar/runs.jsonl`
+  (directory 0700, file 0600, trimmed to the most recent 200 records) carrying
+  the ISO week, a machine-readable `status`, the exit code, the attempt number,
+  the elapsed seconds, and — when an envelope survives — `num_turns` and the
+  run's own `subtype`. `num_turns` is the number that had to be excavated from
+  session transcripts before the limits above could be sized at all; it is in
+  the record from now on. `status` is one of `ok`, `max_turns`, `timeout`,
+  `api_error`, `exec_error`, `no_report`, `no_claude`, and `decided_by` names
+  which signal chose it. The primary signals are the exit code and claude's
+  stderr, both observed directly in the production log across all four failures;
+  `--output-format json` is read for enrichment only, because its envelope
+  carries no `type` field and a watchdog kill leaves no envelope at all (#526).
+  Naming the deciding signal follows the convention #526 settled on for the same
+  ambiguity in frontier-harness — an envelope and an exit code do not always
+  agree, and collapsing them produces a reason that contradicts its own status.
+  The library is `home/dot_claude/job-runlog.sh` → `~/.claude/job-runlog.sh`,
+  sourced rather than executed (0644, no `executable_` prefix) and deliberately
+  job-agnostic: callers pass their own history file, so morning-radar,
+  macos-defaults-drift and #644's staleness reading can reuse it without it
+  learning any labels. Only knowledge-distill is wired to it today.
+- **Retry** (#643): a failure classified `api_error` is retried once after 60
+  seconds; nothing else is. Of the four consecutive failures exactly one was
+  transient — 08-07 died on `ENOTFOUND` at 18:12:57, a coalesced fire on wake,
+  before the network had come up. Re-running a run that exhausted its budget
+  would spend the week's budget twice to die in the same place. Both attempts
+  are recorded.
 - **Notification**: on success, `claude-attention` receives the `HEADLINE` at
   priority 3 (default), prefixed with `[縮退]` and the instinct count when the
-  precheck found a dry pipeline. Error paths (claude missing / timeout /
-  non-zero exit / report file missing) publish at priority 5, the same
-  convention morning-radar uses for errors.
+  precheck found a dry pipeline, and with `[復旧]` when the previous recorded
+  run had failed. Error paths (claude missing / timeout / non-zero exit / report
+  file missing) publish at priority 5, the same convention morning-radar uses
+  for errors. Two things are added to the line that a single notification cannot
+  be read without (#643): when the same `status` has now failed in two or more
+  distinct weeks it is prefixed `[N週連続/status]`, and when the last *success*
+  is more than 14 days old the age is appended. The streak is counted in
+  scheduled slots rather than records, so a retry writing two records for one
+  week is not reported as two weeks. Both individual failures did notify before
+  #643 — what nobody could see was that four weeks in a row had gone the same
+  way. When the run log itself is unavailable the notification says so rather
+  than passing for a normal week; a record that is quietly absent is
+  indistinguishable from a week that never ran, the same class of failure as
+  #491.
+
+  What this does *not* detect: the staleness reading is only taken while the job
+  is running, so it answers "has not succeeded lately", not "has not fired at
+  all". A LaunchAgent that never fires needs an outside poller, which #506's
+  scheduling work is where that belongs.
 
 Smoke test (publish the current week's report on demand):
 

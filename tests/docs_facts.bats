@@ -451,3 +451,52 @@ _assert_lifecycle_scripts_documented() {
     done < <(grep -oE "FACT:${marker}[^0-9]*[0-9]+" "$f" | grep -oE '[0-9]+$')
   done
 }
+
+@test "docs_facts: every <!-- FACT:knowledge-distill-max-turns --> marker matches the wrapper" {
+  # The value a reader acts on lives in the wrapper; the docs restate it with the
+  # measurement that justifies it. Pinning them together keeps the justification
+  # attached to a number that is still true (#643).
+  local actual
+  actual="$(grep -oE '^MAX_TURNS=[0-9]+' "${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh" | grep -oE '[0-9]+$')"
+  [ -n "$actual" ] || {
+    echo "sanity: knowledge-distill-radar.sh has no MAX_TURNS= assignment — the pin moved"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:knowledge-distill-max-turns is $val but the wrapper sets $actual"
+        false
+      }
+    done < <(grep -oE 'FACT:knowledge-distill-max-turns[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:knowledge-distill-max-turns' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:knowledge-distill-max-turns markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
+
+@test "docs_facts: every <!-- FACT:knowledge-distill-timeout-seconds --> marker matches the wrapper" {
+  local actual
+  actual="$(grep -oE '^TIMEOUT_SECONDS="\$\{KNOWLEDGE_DISTILL_RADAR_TIMEOUT_SECONDS:-[0-9]+\}"' "${HOME_DIR}/dot_claude/executable_knowledge-distill-radar.sh" | grep -oE '[0-9]+')"
+  [ -n "$actual" ] || {
+    echo "sanity: knowledge-distill-radar.sh has no TIMEOUT_SECONDS default — the watchdog moved"
+    false
+  }
+  local found=0 f val
+  while IFS= read -r f; do
+    while IFS= read -r val; do
+      found=1
+      [ "$val" = "$actual" ] || {
+        echo "${f#"${REPO_ROOT}/"}: FACT:knowledge-distill-timeout-seconds is $val but the wrapper defaults to $actual"
+        false
+      }
+    done < <(grep -oE 'FACT:knowledge-distill-timeout-seconds[^0-9]*[0-9]+' "$f" | grep -oE '[0-9]+$')
+  done < <(grep -rlF 'FACT:knowledge-distill-timeout-seconds' "${DOCS_DIR}")
+  [ "$found" = 1 ] || {
+    echo "no FACT:knowledge-distill-timeout-seconds markers found under ${DOCS_DIR} — add them or drop this test"
+    false
+  }
+}
