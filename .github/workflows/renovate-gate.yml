@@ -55,10 +55,11 @@ env:
   # what makes the GitHub Slack app relay it, which is why this repo needs no
   # Slack webhook of its own.
   GATE_OWNER_HANDLE: kryota-dev
-  # Renovate's bot login as `gh` reports it. The webhook payload spells the same
-  # account `renovate[bot]`, so authorship is resolved through `gh` in one place
-  # rather than compared against two different spellings in two different files.
-  RENOVATE_LOGIN: app/renovate
+  # Renovate's bot login as it appears in the webhook payload. `gh` normalises the
+  # same account to `app/renovate`; scripts/renovate-gate-classify.sh checks that
+  # spelling independently, so the two are deliberate cross-checks rather than one
+  # value duplicated. tests/files.bats pins both.
+  RENOVATE_WEBHOOK_LOGIN: 'renovate[bot]'
 
 jobs:
   gate:
@@ -83,27 +84,53 @@ jobs:
       # Step 1 -- every PR gets a verdict, including PRs this gate does not judge.
       #
       # The status check is required on every pull request, so a human-authored PR
-      # that never receives this status would sit at pending forever. Resolve
-      # authorship through `gh` (not through github.event.pull_request.user.login)
-      # so the workflow and scripts/renovate-gate-classify.sh agree on what counts
-      # as a Renovate PR.
+      # that never receives this status would sit at pending forever.
+      #
+      # Authorship comes from the webhook payload, NOT from a `gh` call. An API
+      # lookup can fail, and every way of handling that failure is wrong: treating
+      # "unknown" as non-Renovate reports success and lets an unreviewed update
+      # merge, while treating it as Renovate blocks human PRs on an outage. The
+      # payload arrives with the event itself, so the ambiguous state does not
+      # exist. scripts/renovate-gate-classify.sh independently re-checks authorship
+      # via `gh` and falls to needs-agent when that fails, so the Renovate path is
+      # verified twice and neither check fails open.
       - name: Resolve authorship
         id: author
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
-          login="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json author --jq '.author.login' 2>/dev/null || echo '')"
-          echo "login=${login}" >>"$GITHUB_OUTPUT"
-          if [ "$login" = "$RENOVATE_LOGIN" ]; then
+          echo "pull request author: ${PR_AUTHOR} (fork: ${IS_FORK})"
+          if [ "$PR_AUTHOR" = "$RENOVATE_WEBHOOK_LOGIN" ]; then
             echo "is_renovate=true" >>"$GITHUB_OUTPUT"
           else
             echo "is_renovate=false" >>"$GITHUB_OUTPUT"
           fi
+          echo "is_fork=${IS_FORK}" >>"$GITHUB_OUTPUT"
+
+      # A fork PR cannot receive this status at all: GitHub hands workflows
+      # triggered from a fork a read-only GITHUB_TOKEN and the `permissions:` block
+      # above cannot grant write to it. Say so plainly instead of letting the next
+      # step die on an unexplained 403 -- the PR will sit at pending until a
+      # maintainer reports the status by hand or re-runs the work from a branch in
+      # this repository. See docs/architecture/renovate-automation.md.
+      - name: Explain that a fork PR cannot be gated
+        if: steps.author.outputs.is_fork == 'true'
+        run: |
+          {
+            echo "### renovate-gate はこの PR に status を付けられません"
+            echo
+            echo "fork からの pull request では \`GITHUB_TOKEN\` が read-only に固定され、"
+            echo "\`statuses: write\` を付与できません（GitHub の仕様）。"
+            echo "required status check は pending のまま残るため、マージにはメンテナが"
+            echo "手動で status を付けるか、このリポジトリ内のブランチへ載せ替える必要があります。"
+          } >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice::fork PR のため renovate-gate の status を報告できません。"
 
       - name: Approve non-Renovate pull requests immediately
-        if: steps.author.outputs.is_renovate != 'true'
+        if: >-
+          steps.author.outputs.is_renovate != 'true' &&
+          steps.author.outputs.is_fork != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           # The head sha, not github.sha: for pull_request events github.sha is the
@@ -117,7 +144,9 @@ jobs:
       # Step 2 -- the deterministic lane. Shell only, no agent session spent.
       - name: Classify deterministically
         id: classify
-        if: steps.author.outputs.is_renovate == 'true'
+        if: >-
+          steps.author.outputs.is_renovate == 'true' &&
+          steps.author.outputs.is_fork != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -220,11 +249,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           VERDICT_FILE: ${{ runner.temp }}/verdict.json
         run: |
+          # AC-009: the owner has to hear about every blocked PR, including the
+          # ones blocked because the agent never got far enough to say anything.
+          # Without this the gate would fail silently exactly when it failed
+          # unexpectedly.
           if [ ! -s "$VERDICT_FILE" ]; then
-            ./scripts/renovate-gate-status.sh "$HEAD_SHA" failure \
-              'エージェントが判定を記録せずに終了したため不合格として扱います'
+            reason='エージェントが判定を記録せずに終了したため不合格として扱います'
+            ./scripts/renovate-gate-status.sh "$HEAD_SHA" failure "$reason"
+            body="$(printf '%s\n' \
+              "@${GATE_OWNER_HANDLE} renovate-gate: ${reason}" \
+              "" \
+              "エージェントの実行が異常終了した可能性があります（タイムアウト・認証失敗など）。" \
+              "ワークフローのログを確認してください。" \
+              "内容に問題がなければ Approve で承認できます。")"
+            ./scripts/renovate-triage-comment.sh pr "$PR_NUMBER" "$body" || true
             exit 0
           fi
           result="$(jq -r '.result // ""' "$VERDICT_FILE")"

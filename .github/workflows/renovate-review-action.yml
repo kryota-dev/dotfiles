@@ -38,7 +38,10 @@ permissions: {}
 
 env:
   GATE_OWNER_HANDLE: kryota-dev
-  RENOVATE_LOGIN: app/renovate
+  # Webhook spelling of Renovate's bot account (`gh` normalises it to
+  # `app/renovate`). Resolved from the payload so an API outage cannot make an
+  # Approve silently do nothing. tests/files.bats pins both spellings.
+  RENOVATE_WEBHOOK_LOGIN: 'renovate[bot]'
 
 jobs:
   act:
@@ -72,16 +75,18 @@ jobs:
           esac
 
       # STEP 2 -- scope. Only Renovate PRs are governed by this gate.
+      #
+      # From the webhook payload, not a `gh` call: an API failure here would make
+      # an Approve quietly do nothing, which looks identical to the gate simply
+      # not having run yet.
       - name: Resolve authorship
         id: author
         if: steps.perm.outputs.allowed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
-          login="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json author --jq '.author.login' 2>/dev/null || echo '')"
-          if [ "$login" = "$RENOVATE_LOGIN" ]; then
+          echo "pull request author: ${PR_AUTHOR}"
+          if [ "$PR_AUTHOR" = "$RENOVATE_WEBHOOK_LOGIN" ]; then
             echo "is_renovate=true" >>"$GITHUB_OUTPUT"
           else
             echo "is_renovate=false" >>"$GITHUB_OUTPUT"
