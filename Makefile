@@ -26,7 +26,7 @@ lint:
 ## Format shell scripts with shfmt (writes .sh in place; .tmpl shown as diff only)
 fmt:
 	@echo "==> Formatting .sh files (shfmt -w)..."
-	@find home -name '*.sh' ! -name 'symlink_*' -exec shfmt -w -i 2 -ci {} +
+	@find home scripts -name '*.sh' ! -name 'symlink_*' -exec shfmt -w -i 2 -ci {} +
 	@echo "==> Checking .sh.tmpl files (must be fixed manually due to chezmoi {{ }} syntax)..."
 	@find home -name '*.sh.tmpl' ! -name 'symlink_*' | while read -r f; do \
 		diff=$$(sed '/{{/d' "$$f" | shfmt -d -i 2 -ci 2>&1) && true; \
