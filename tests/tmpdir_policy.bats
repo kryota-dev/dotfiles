@@ -16,9 +16,17 @@ load helpers/setup
 # Two paths are excluded because they necessarily spell the word out: setup.bash defines
 # the helper, and this file states the policy.
 @test "tests/ contains no bare mktemp -- scratch dirs go through _mktemp_dir (#642)" {
-  local hits
+  # git grep exits 1 for "no match" and >1 for a real failure (128 when $REPO_ROOT is not a
+  # repository). Collapsing both to 0 with `|| true` would let a scan that never ran report a
+  # clean tree -- the same silently-green failure this guard exists to prevent -- so the two
+  # are kept apart and only exit 1 is treated as "no violations".
+  local hits status=0
   hits="$(git -C "$REPO_ROOT" grep -n mktemp -- \
-    tests/ ':!tests/helpers/setup.bash' ':!tests/tmpdir_policy.bats' || true)"
+    tests/ ':!tests/helpers/setup.bash' ':!tests/tmpdir_policy.bats')" || status=$?
+  if [ "$status" -gt 1 ]; then
+    printf 'git grep failed (exit %s); the bare-mktemp policy was not verified\n' "$status" >&2
+    return 1
+  fi
 
   # git grep -n prints "path:lineno:content". Anchor the '#' to the start of the *content*
   # so only genuine comment lines are dropped -- counting comment lines as call sites is
@@ -36,9 +44,14 @@ load helpers/setup
     }
   ')"
 
+  # The remedy differs by what the caller needs, so name both: _mktemp_dir only makes
+  # directories, and pointing a file-scratch case at it would send the next contributor down
+  # a dead end.
   if [ -n "$violations" ]; then
-    printf 'bare mktemp in tests/; use _mktemp_dir from tests/helpers/setup.bash (#642):\n%s\n' \
-      "$violations" >&2
+    printf 'bare mktemp in tests/ (#642). Scratch directory: use _mktemp_dir from
+tests/helpers/setup.bash. Scratch file: pass an explicit template, e.g.
+mktemp "${TMPDIR:-/tmp}/<name>.XXXXXX" -- macOS honours TMPDIR only when given one.
+%s\n' "$violations" >&2
     return 1
   fi
 }
