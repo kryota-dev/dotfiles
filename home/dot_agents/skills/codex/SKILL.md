@@ -17,6 +17,8 @@ Codex CLI を使用してコードレビュー・分析を実行するスキル�
 
 本 skill は **Codex CLI 経由のレビュー・分析実行の Single Source of Truth**。`multi-review` skill から並列呼び出しされる場合も、本ファイルの実行コマンド・stdin パイプ問題への対処・プロンプトのルール・使用例に従う。multi-review 側で重複定義しない。
 
+**例外は `-s/--sandbox` の値だけ**（外側に sandbox があるかという実行環境に依存し、本 skill 単独では決まらない）。SSOT は [`multi-review/references/codex-legs.md`](../multi-review/references/codex-legs.md) の「`<SANDBOX_MODE>` は「外側に sandbox があるか」で決まる」節。「禁止事項」もこれを前提にしている。
+
 ## codex アカウントの選択（wrapper が自動注入、#345）
 
 bare `codex`/`cdx`/`cdx-r06` を叩けば、`~/.local/launchers/codex`（`cld`/`cld-r06` と同じく PATH 上の実ファイル）が起動中のアカウントに応じて `CODEX_HOME` と `--profile shared` を自動注入する。非対話 Bash（Claude の Bash ツール・hooks・launchd）でも PATH 上の wrapper がそのまま効くため、以前の「`CODEX_HOME` prelude をコマンド冒頭に前置する」対応は不要になった。
@@ -137,7 +139,8 @@ workspace-write 実行は **linked worktree 内でのみ**行う（main worktree
 
 ### 禁止事項
 
-- `danger-full-access` / `--yolo` / `--dangerously-bypass-approvals-and-sandbox` は **skill から一切使用しない**。必要に見える状況が生じたらフラグで回避せず、作業を止めて user にエスカレートする。
+- `--yolo` / `--dangerously-bypass-approvals-and-sandbox` は **skill から一切使用しない**。必要に見える状況が生じたらフラグで回避せず、作業を止めて user にエスカレートする。
+- `danger-full-access` は **外側に sandbox が無い環境では使用しない**（同じくエスカレートする）。**例外は `fh session` の子の中だけ**で、そこでは封じ込めを外側が担う。理由・実測・`ps` 誤読の罠は上記の codex-legs.md 節。**`ps` にこのフラグを見ただけで逸脱と判断しない**（誤報告の実例あり）。
 - `workspace-write` でも `<writable_root>/.git` / `.agents` / `.codex` は再帰的に read-only（Codex は commit / push / skill 定義変更ができない）。これは意図した設計であり、`--add-dir` 等で回避しない。コミットは親（Claude）が gitleaks hook + commit signing の通る経路で行う。
 - **plugin の `codex:codex-rescue` は skill / orchestration から一切起動しない**。`--profile` を通さず `CODEX_HOME` も伝播しないため **アカウント分離（個人 `~/.codex` / 業務 `~/.codex-r06`）が破れ**、さらに既定が write + `approval_policy: never` で本 skill の sandbox 契約の外に出る。skill からの Codex 起動は本 skill が定義する bash `codex exec --profile shared|agent` 経路のみとする。`codex-rescue` は user による ad-hoc な手動 rescue 専用。
 
