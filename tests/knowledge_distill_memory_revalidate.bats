@@ -33,6 +33,11 @@ setup() {
   WS="${BATS_TEST_TMPDIR}/ws"
   mkdir -p "$WS"
   cp -R "${FIXTURE}/memory" "${FIXTURE}/rules" "${FIXTURE}/repo" "${WS}/"
+  # コミット上は `dot_github`（chezmoi の綴り）で持ち、ここで本来のパスへ展開する。
+  # `.github/workflows/*.yml` の形でコミットすると、リポジトリ自身のワークフロー
+  # linter が fixture を本物のワークフローとして走査してしまう（下の
+  # 「fixture はリポジトリ全体を走査するツールに拾われるパスを作らない」参照）。
+  mv "${WS}/repo/dot_github" "${WS}/repo/.github"
   (
     cd "${WS}/repo" || exit 1
     git init -q -b main
@@ -56,7 +61,7 @@ setup() {
 revalidate() {
   run python3 "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format json "$@"
 }
 
@@ -119,7 +124,7 @@ EOF
   # 日付の出所を必ず併記する（mtime 由来か frontmatter 由来かで証拠の強さが違う）。
   [[ "$(jq -r '.findings[0].reason' <<<"$c")" == *"frontmatter-modified"* ]]
   # memory より前のコミットしか無いファイルは finding にしない。
-  [ "$(jq -r '[.findings[] | select(.subject | contains("mise"))] | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '[.findings[] | select(.subject | contains("lint-pins"))] | length' <<<"$c")" -eq 0 ]
 }
 
 @test "重複 2 件: 恒久ルールが同じことを書いている topic file を報告する" {
@@ -150,7 +155,7 @@ EOF
   local c
   c="$(check_json path-exists)"
   [ "$(jq -r '[.findings[] | select(.subject == "home/dot_local/bin/executable_removed-tool")] | length' <<<"$c")" -eq 1 ]
-  [ "$(jq -r '[.findings[] | select(.subject | contains("mise"))] | length' <<<"$c")" -eq 0 ]
+  [ "$(jq -r '[.findings[] | select(.subject | contains("lint-pins"))] | length' <<<"$c")" -eq 0 ]
   [ "$(jq -r '.checked' <<<"$c")" -ge 4 ]
 }
 
@@ -199,7 +204,7 @@ EOF
   # ここでは `command -v gh` が失敗する PATH をスクリプトに与えられれば十分。
   run env PATH="${empty}:/usr/bin:/bin" python3 "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --format json --github on
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github on
   [ "$status" -eq 3 ]
   local c
   c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
@@ -213,7 +218,7 @@ EOF
   (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
   run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format json --github auto
   local c
   c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
@@ -232,7 +237,7 @@ EOF
   (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
   run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --format json --github auto
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github auto
   local c
   c="$(jq -c '.checks[] | select(.id == "pr-reference")' <<<"$output")"
   [ "$(jq -r .status <<<"$c")" = "inconclusive" ]
@@ -325,7 +330,7 @@ EOF
   (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
   run env PATH="${stub}:${PATH}" python3 "$SCRIPT" \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format json --github auto
   [ "$status" -eq 1 ]
 }
@@ -342,10 +347,10 @@ modified: 2026-08-31T09:00:00+09:00
 
 # Project Memory
 
-- lint ツールのピンは `home/dot_config/mise/config.toml`
+- lint ツールのピンは `home/dot_config/lint-pins.toml`
 EOF
   run python3 "$SCRIPT" --memory-dir "$clean" --repo "${WS}/repo" \
-    --rules "${WS}/rules/CLAUDE.md" --format json --github off
+    --rules "${WS}/rules/CLAUDE.fixture.md" --format json --github off
   [ "$status" -eq 0 ]
   [ "$(jq -r '[.checks[] | select(.status != "ok")] | length' <<<"$output")" -eq 0 ]
   # 「0 件中 finding 0」と「N 件中 finding 0」が区別できること。
@@ -354,7 +359,7 @@ EOF
 
 @test "memory ディレクトリが無ければ全チェックが inconclusive（exit 2）" {
   run python3 "$SCRIPT" --memory-dir "${BATS_TEST_TMPDIR}/nope" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --format json --github off
+    --rules "${WS}/rules/AGENTS.fixture.md" --format json --github off
   [ "$status" -eq 2 ]
   [ "$(jq -r '[.checks[] | select(.status == "inconclusive")] | length' <<<"$output")" -eq 6 ]
   [ "$(jq -r '.summary.findings' <<<"$output")" -eq 0 ]
@@ -391,7 +396,7 @@ EOF
 
 @test "text 出力は状態表と 4 セクション、および報告のみである旨を含む" {
   run python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format text --github off
   [ "$status" -eq 3 ]
   [[ "$output" == *"| チェック | 状態 | 検査 | finding | 未検査 | 実行不能 |"* ]]
@@ -404,7 +409,7 @@ EOF
 
 @test "報告に memory 本文を転記しない" {
   run python3 "$SCRIPT" --memory-dir "${WS}/memory" --repo "${WS}/repo" \
-    --rules "${WS}/rules/AGENTS.md" --rules "${WS}/rules/CLAUDE.md" \
+    --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format text --github off
   [ "$status" -eq 3 ]
   # 重複が検出された memory の本文にしか無い言い回しが、レポートへ流れ出ていないこと。
@@ -427,6 +432,37 @@ EOF
   # 公式仕様の値そのもの（200 行 / 25KB）。片方だけ書き換わる drift を止める。
   grep -qxF 'MEMORY_INDEX_MAX_LINES = 200' "$SCRIPT"
   grep -qxF 'MEMORY_INDEX_MAX_BYTES = 25_000' "$SCRIPT"
+}
+
+@test "fixture はリポジトリ全体を走査するツールに拾われるパスを作らない" {
+  # 実際に踏んだ失敗: fixture が `.github/workflows/setup-validation.yml` を持っていた
+  # ため、リポジトリ自身のワークフロー linter（zizmor）がそれを本物のワークフローとして
+  # 走査し、excessive-permissions で CI が落ちた。
+  #
+  # 同じ形の地雷は他にもある。いずれも「リポジトリを模す」という fixture の目的と、
+  # 「パス glob で対象を決める」というツールの都合が正面衝突するために起きる:
+  #   - `.github/workflows/*.y?ml` -> actionlint / ghalint / zizmor / ls-lint
+  #   - `mise/config.toml`         -> .github/renovate.json5 の mise manager。パターンが
+  #                                   アンカー無しの正規表現なので部分一致で拾われる
+  #   - `CLAUDE.md` / `CLAUDE.local.md`
+  #                                -> Claude Code は cwd 配下のネストしたものを、その
+  #                                   ディレクトリを読んだ時点で「指示」として読み込む
+  #
+  # 追跡ファイルの列挙に git ls-files を使うのは house rule どおり（Grep / Glob は
+  # gitignore 対象と生 NUL バイトを含むファイルを無言で飛ばすため、網羅性の主張には
+  # 使わない）。ここでは検索対象がパス文字列そのものなので、その 2 経路は生じない。
+  local tracked offenders
+  tracked="$(git -C "$REPO_ROOT" ls-files tests/fixtures)"
+  [ -n "$tracked" ] || {
+    echo "git ls-files tests/fixtures が空: fixture が追跡されていないか、抽出が壊れている"
+    false
+  }
+  offenders="$(grep -E '(^|/)(\.github/workflows/[^/]*\.ya?ml|mise/config\.toml|CLAUDE\.md|CLAUDE\.local\.md)$' <<<"$tracked" || true)"
+  [ -z "$offenders" ] || {
+    echo "リポジトリ全体を走査するツールに拾われる fixture パス:"
+    printf '%s\n' "$offenders"
+    false
+  }
 }
 
 @test "外部コマンドを shell 経由で起動しない" {

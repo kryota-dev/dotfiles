@@ -6,7 +6,7 @@ metadata:
 modified: 2026-08-31T09:00:00+09:00
 ---
 
-この fixture では lint ツールのバージョンを `home/dot_config/mise/config.toml` に固定している。
+この fixture では lint ツールのバージョンを `home/dot_config/lint-pins.toml` に固定している。
 CI はそのピンを読み取って同じビルドを入れる。
 
 **Why:** ランナーイメージ同梱のビルドに暗黙依存すると、手元と CI で lint 結果が食い違い、
