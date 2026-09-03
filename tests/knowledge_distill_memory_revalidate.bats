@@ -103,49 +103,84 @@ EOF
 #    検証自体のテストが要る。守りたい性質（タイムアウト時に inconclusive へ倒れる）に対して
 #    釣り合わない。
 # 3. **足さなくても経路を踏める。** 下の `make_timeout_driver` が、スクリプトを
-#    **ファイルパスからモジュールとして読み込み**、`SUBPROCESS_TIMEOUT_SECONDS` を
-#    差し替えてから `main()` を呼ぶ。production のコードは 1 行も変わらない。
+#    **ファイルパスからモジュールとして読み込み**、`subprocess` を差し替えてから
+#    `main()` を呼ぶ。production のコードは 1 行も変わらない。
+#
+# ## なぜ `SUBPROCESS_TIMEOUT_SECONDS` をグローバルに書き換えないのか
+#
+# 定数を書き換えると、**狙っていない本物の呼び出しにも同じ短い予算が掛かる**。
+# `main()` は 1 回の実行で `git ls-files` / `git rev-parse` / `git remote get-url` /
+# `git log` を実際に起動しており、CI ランナーの負荷でそのどれかが偶発的に閾値を超えると、
+# 狙ったのとは別の理由文字列（「git を起動できず…」）で inconclusive になってテストが
+# 赤くなる。「タイムアウト経路が正しい」ことの検証失敗ではなく、環境ノイズによる false
+# negative でしかない。
+#
+# そこで**狙った argv だけ**に短いタイムアウトを差し込む。一致しない呼び出しは
+# production の `SUBPROCESS_TIMEOUT_SECONDS`（20 秒）のまま走るので、本物の git が
+# 巻き添えでタイムアウトすることが構造的に無くなる。
 #
 # ## このドライバが依存している production の性質
 #
-# `run_command` が `timeout=SUBPROCESS_TIMEOUT_SECONDS` を**呼び出し時にモジュール
-# グローバルから引く**こと。定数が名前付きで存在すること自体は「閾値はすべて名前付き定数
-# として定義されている」が既に固定しており、ここで新しい結合を作ってはいない。
-# ドライバは `raise SystemExit(mod.main(argv))` で本体の `__main__` と同じ形を取るので、
+# 外部コマンドを **`subprocess.run` に argv のリストで渡して起動する**こと。これは
+# 「外部コマンドを shell 経由で起動しない」「起動する外部コマンドは git と gh だけ」の
+# 2 つの AST ガードが既に固定している性質で、ここで新しい結合を作ってはいない
+# （`timeout=` をどう算出するかには依存しないので、将来デフォルト引数化されても効く）。
+# ドライバは `raise SystemExit(module.main(argv))` で本体の `__main__` と同じ形を取るので、
 # 終了コードの意味（bit0=finding / bit1=inconclusive）もそのまま検証できる。
 make_timeout_driver() {
   local driver="${BATS_TEST_TMPDIR}/timeout_driver.py"
   cat >"$driver" <<'EOF'
-"""memory-revalidate.py を import し、subprocess タイムアウトを縮めて main() を呼ぶ。
+"""memory-revalidate.py を import し、狙った外部コマンドだけ待ち時間を縮めて main() を呼ぶ。
 
-argv: <script> <timeout_seconds> [スクリプトへ渡す引数...]
+argv: <script> <timeout_seconds> <argv_token> [スクリプトへ渡す引数...]
+
+`<argv_token>` と完全一致する要素を argv に持つ起動だけへ `<timeout_seconds>` を差し込む。
+それ以外は production の既定（20 秒）のまま走らせる。
 """
 import importlib.util
+import subprocess
 import sys
 
 # import は既定でソースの隣に __pycache__ を書く。上の py_compile ガードが cfile を
 # 明示しているのと同じ理由で、リポジトリ内へ生成物を残さない。
 sys.dont_write_bytecode = True
 
-script, timeout, forwarded = sys.argv[1], float(sys.argv[2]), sys.argv[3:]
+script, timeout, token = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+forwarded = sys.argv[4:]
+
+
+class ScopedSubprocess:
+    """`token` を含む argv のときだけ timeout を差し替える subprocess の代理。
+
+    stdlib の `subprocess` モジュール自体を書き換えず、読み込んだモジュールが見る
+    `subprocess` だけを差し替える（影響範囲を字面で追えるようにする）。
+    """
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
+
+    def run(self, argv, **kwargs):
+        if token in list(argv):
+            kwargs["timeout"] = timeout
+        return subprocess.run(argv, **kwargs)
+
+
 spec = importlib.util.spec_from_file_location("memory_revalidate_under_test", script)
 module = importlib.util.module_from_spec(spec)
 # `@dataclass` は定義中に `sys.modules[cls.__module__]` を引くので、exec_module より
 # 前に登録しておかないと AttributeError で読み込みに失敗する。
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
-module.SUBPROCESS_TIMEOUT_SECONDS = timeout
+module.subprocess = ScopedSubprocess()
 raise SystemExit(module.main(forwarded))
 EOF
   printf '%s\n' "$driver"
 }
 
-# ドライバに渡すタイムアウト（秒）。スタブ側は 30 秒眠るので確実に踏み抜ける一方、
-# 同じ定数はスタブしていない**本物の** git 呼び出し（`ls-files` / `rev-parse` /
-# `remote`）にも掛かる。fixture リポジトリは 2 コミットで、それらは実測 10ms 台に収まる
-# ため、0.5 秒は 30 倍以上の余裕がある。0.05 秒まで詰めると本物の git 側が偶発的に
-# タイムアウトし、テストが別の理由で赤くなる。
-TIMEOUT_UNDER_TEST=0.5
+# 狙った 1 コマンドにだけ差し込む待ち時間（秒）。スタブは 30 秒眠るので確実に踏み抜ける。
+# 本物の git はこの予算の対象外（上記「なぜグローバルに書き換えないのか」）なので、
+# ホストの負荷に対する余裕を確保するために値を大きく取る必要はない。
+TIMEOUT_UNDER_TEST=0.2
 
 @test "script exists and compiles (python3 is required, never skipped)" {
   [ -f "$SCRIPT" ]
@@ -400,7 +435,9 @@ EOF
   printf '%s\n' '#!/bin/bash' 'exec sleep 30' >"${stub}/gh"
   chmod +x "${stub}/gh"
   (cd "${WS}/repo" && _git remote add origin git@github.com:kryota-dev/fixture-repo.git)
-  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" \
+  # 短い待ち時間を差し込むのは argv に `gh` を含む起動だけ。同じ実行の中で走る本物の
+  # git（`ls-files` / `rev-parse` / `remote get-url`）は 20 秒のまま巻き添えにしない。
+  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" gh \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
     --rules "${WS}/rules/AGENTS.fixture.md" --format json --github auto
   # 検査不能は bit1。finding の有無（bit0）とは独立に立つ。
@@ -432,7 +469,9 @@ done
 exec "${real_git}" "\$@"
 EOF
   chmod +x "${stub}/git"
-  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" \
+  # 短い待ち時間を差し込むのは argv に `log` を単独要素として含む起動だけ。同じ実行の
+  # 中で走る `ls-files` / `rev-parse` / `remote get-url` は 20 秒のまま巻き添えにしない。
+  run env PATH="${stub}:${PATH}" python3 "$driver" "$SCRIPT" "$TIMEOUT_UNDER_TEST" log \
     --memory-dir "${WS}/memory" --repo "${WS}/repo" \
     --rules "${WS}/rules/AGENTS.fixture.md" --rules "${WS}/rules/CLAUDE.fixture.md" \
     --format json --github off
@@ -445,6 +484,7 @@ EOF
   [ "$(jq -r '.checked' <<<"$c")" -eq 0 ]
   [ "$(jq -r '[.unchecked[] | select(.reason == "git log がタイムアウトした")] | length' <<<"$c")" -ge 1 ]
   [ "$(jq -r '[.reasons[] | select(contains("git log がタイムアウトした"))] | length' <<<"$c")" -ge 1 ]
+  [ ! -e "$(dirname "$SCRIPT")/__pycache__" ]
 }
 
 @test "生 NUL バイトを含む memory は inconclusive にし、その中の参照を finding にしない" {
