@@ -490,11 +490,18 @@ CI レビューコメントもスレッドではないため、Issue comment と
 ```bash
 # CI コメント（github-actions）へは @ メンションを付けない（4-2 参照）。本文に他の @ が含まれ得るため一時ファイル経由で投稿する（4-3 参照）
 CI_REPLY=$(mktemp "${TMPDIR:-/tmp}/rrl-ci-reply.XXXXXX")
+trap 'rm -f "$CI_REPLY"' EXIT
+
+# 本文を先に書き出す。末尾の marker は返信済み判定のキーなので必ず含める
+cat >"$CI_REPLY" <<'REPLY_EOF'
+{返信内容}
+
+<!-- ci-review-reply: {commentId}@{updatedAt} -->
+REPLY_EOF
+
 gh api repos/{owner}/{repo}/issues/{PR番号}/comments \
   --method POST \
   -F body=@"$CI_REPLY"
-# $CI_REPLY の末尾に必ず次の marker を含める:
-#   <!-- ci-review-reply: {commentId}@{updatedAt} -->
 ```
 
 ### 4-1b. 人間レビュアーへの返信内容のユーザー承認
