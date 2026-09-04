@@ -37,11 +37,34 @@ const POLICY_KEYS = new Set([
 // これは「何を承認しうるか」の上限であって、照合そのものではない（照合は下の
 // `matchCommand` がトークン化した完全一致で行う）。
 //
-// **引数の字集合はランナーごとに分ける。** 下の 2 本は「承認できる形」という同じ役目を持つが、
-// 通してよい引数の範囲が違う。1 本の alternation へ畳むと、片方のために広げた字集合が
-// もう片方にも効いてしまう。
+// **引数の字集合はランナーごとに分ける。** 下の 3 本は「承認できる形」という同じ役目を持つが、
+// 通してよい引数の範囲が違う。1 本の alternation へ畳むと、どれか 1 本のために広げた字集合が
+// 残りにも効いてしまう。
 const APPROVABLE_RUNNER_COMMAND =
-  /^(?:npm run|pnpm run|yarn run|bun run|uv run|pytest|go test|cargo test)(?: [A-Za-z0-9_./:@=-]+)+$/;
+  /^(?:npm run|pnpm run|yarn run|bun run|pytest|go test|cargo test)(?: [A-Za-z0-9_./:@=-]+)+$/;
+
+// `uv run` の引数は**スクリプト名 1 つだけ**に絞る。上の字集合を流用してはならない。
+//
+// 上のランナーは実行対象がリポジトリ側の定義（`package.json` の `scripts`）やテスト探索に閉じている。
+// `uv run` だけが性質が違い、**引数に書いた実行ファイルをそのまま起こす**。上の字集合には `/` と `.` が
+// あるので、そのまま流用すると `uv run /tmp/evil/payload` / `uv run ./payload` が承認できる形に入り、
+// 「このリポジトリのタスクランナーを走らせてよい」という承認の意味から外れる。`-` 始まりも同じで、
+// `uv run --script /tmp/x.py` / `uv run --with requests python` / `uv run --project /tmp/evil pytest` は
+// uv をリポジトリの**外**へ向ける —— `make -f` に対して行ったのと同じ狭め方をここでも行う。
+//
+// 先頭 1 文字を `[A-Za-z0-9_]` に固定すると `-` 始まり（オプション）と `.` 始まり（`./` や `../`）が
+// 閉じ、字集合から `/` を落とすとパスでの指定そのものが閉じる。`/` が無ければ途中から遡ることもできない
+// ので、`make` 側の `MAKE_TARGET_TRAVERSAL` に当たる検査はこの枝には要らない。リポジトリ直下のファイル名
+// （`uv run main.py`）は残るが、`/` を含まない以上それはこのリポジトリの持ち物であり、`make <target>` が
+// Makefile の recipe を指すのと同じ位置にある。
+//
+// **引数を 1 つに固定する（`+` でも `*` でもない）。** uv は `uv run <name>` を venv の bin → PATH の順で
+// 解決するため、bare name が `[project.scripts]` へ解決される保証は構文的には作れない（`npm run` は
+// `package.json` に無ければ失敗するが、`uv run` は PATH へ落ちる）。この残余は字集合では消せないので、
+// 代わりに**引数の個数**で上限を抑える —— PATH へ落ちて任意のバイナリに解決されたとしても、渡せる引数が
+// ゼロなら承認した文字列から離れた動きはできない。代償として `uv run pytest tests/` は承認できなくなるが、
+// `pytest tests/` は上の枝で従来どおり承認できる。
+const APPROVABLE_UV_RUN_COMMAND = /^uv run [A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 
 // `make` の引数は**ターゲット名だけ**に絞る。上の字集合を流用してはならない。
 //
@@ -83,6 +106,7 @@ const CAPABILITY_NAME = /^[a-z][a-z0-9._-]*$/;
 
 function isApprovableCommand(command) {
   if (APPROVABLE_RUNNER_COMMAND.test(command)) return true;
+  if (APPROVABLE_UV_RUN_COMMAND.test(command)) return true;
   return APPROVABLE_MAKE_COMMAND.test(command) && !MAKE_TARGET_TRAVERSAL.test(command);
 }
 
@@ -94,6 +118,14 @@ function isApprovableCommand(command) {
 function approvableRejectionReason(command) {
   if (/^make(?:\s|$)/.test(command)) {
     return "make can only be approved as `make <target>`; options, variable overrides, and `..` inside a target are not approvable";
+  }
+  // `uv run` を狭めたことで、以前は承認できた形（`uv run --with x pytest` / `uv run pytest tests/`）が
+  // 承認できなくなった。そういう行が残った `.harness/policy.json` は `normalizeManifest` で落ち、
+  // **その repository の manifest 全体**が空になる（実行は止まるが承認は広がらないので fail-closed の
+  // 向きは正しい）。復旧手順を理由文に含めるのは、`make` の理由文を分けたのと同じ判断 —— 何が起きたかは
+  // 分かるが次に何をすればいいか分からない、という状態を作らないため。
+  if (/^uv(?:\s|$)/.test(command)) {
+    return "uv can only be approved as `uv run <script>`, a single bare script name; options, paths, and arguments to the script are not approvable. Rewrite the entry in .harness/policy.json and re-run `fh onboard` to approve the corrected manifest";
   }
   return "only a project task runner command with arguments can be approved";
 }
