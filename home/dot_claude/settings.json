@@ -372,6 +372,18 @@
         ],
         "description": "Record hook payloads per session for wave-orchestrator so the parent can detect a stopped child without scraping the TUI (#437). Fail-open: no-op without jq or a writable state dir.",
         "id": "stop:wave-session-event"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/plaintext-ask-check.sh",
+            "timeout": 5
+          }
+        ],
+        "description": "Warn when a turn ends with a plain-text request for a decision and AskUserQuestion was never called in that turn (#616). Synchronous on purpose: async hook stdout is delivered later as a model-facing attachment, but this warning is for the user at turn end. Never blocks (always exit 0); reports status=ok/skipped/violation/error on stderr so a broken detector cannot look like zero findings.",
+        "id": "stop:plaintext-ask-check"
       }
     ],
     "StopFailure": [

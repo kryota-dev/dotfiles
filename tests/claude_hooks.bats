@@ -2,6 +2,12 @@
 
 load helpers/setup
 
+# The #616 cases below need `run --separate-stderr`: that detector's contract is that stdout
+# (the user-facing warning) and stderr (the machine-readable status) say different things, so
+# a combined capture could not tell "warned" from "could not evaluate". Flags on `run` require
+# bats >= 1.5.0 to be declared explicitly.
+bats_require_minimum_version 1.5.0
+
 # Guards for the Claude Code hook surface after the #496 reduction (sub-issue of #473).
 #
 # Why a dedicated file rather than more cases in files.bats: a hook that quietly comes back
@@ -285,12 +291,13 @@ MANIFEST
   _assert_manifest "retained hook" "$expected" "$actual"
 }
 
-@test "#496: the hook surface is exactly the 18 entries this change leaves behind" {
+@test "#496: the hook surface is exactly the 19 entries this change leaves behind" {
   _require_jq
   # The removed-id list guards against a hook coming back under its old id. This guards the
   # other direction: a hook arriving under a new id, or an id being wired twice. Together they
-  # make "the surface shrank to 18" a checked contract rather than a claim in the PR body.
+  # make "the surface is exactly this set" a checked contract rather than a claim in the PR body.
   # Adding or removing a hook is expected to update this list — that edit is the review signal.
+  # #496 left 18 entries behind; #616 added stop:plaintext-ask-check, bringing it to 19.
   local expected actual
   expected="$(
     cat <<'MANIFEST'
@@ -308,6 +315,7 @@ SessionStart	session:start
 Stop	stop:cost-tracker
 Stop	stop:desktop-notify
 Stop	stop:ntfy-notify
+Stop	stop:plaintext-ask-check
 Stop	stop:wave-session-event
 StopFailure	stopfailure:wave-session-event
 UserPromptSubmit	user-prompt-submit:prompt-conform-suggest
@@ -322,8 +330,8 @@ MANIFEST
   local total unique
   total="$(_hook_ids | grep -c .)"
   unique="$(_hook_ids | sort -u | grep -c .)"
-  [ "$total" = "18" ] || {
-    echo "expected 18 hook entries, found ${total}"
+  [ "$total" = "19" ] || {
+    echo "expected 19 hook entries, found ${total}"
     false
   }
   [ "$total" = "$unique" ] || {
@@ -477,4 +485,254 @@ MANIFEST
   done
   # auto-tmux-dev is retained, so its claim must stay.
   grep -qF 'auto-tmux-dev' "$md"
+}
+
+# ---------------------------------------------------------------------------
+# #616: the plain-text "asking for a decision" detector (stop:plaintext-ask-check)
+#
+# The detector's whole value is that it can tell three states apart: evaluated-and-clean,
+# evaluated-and-violating, and could-not-evaluate. A detector that returns silence for the
+# third state is indistinguishable from "no violations", which is the failure mode #616
+# exists to prevent — so the error paths are tested as first-class outcomes, not as edge
+# cases. stdout (user-facing JSON) and stderr (machine-readable status) are asserted
+# separately via `run --separate-stderr`.
+# ---------------------------------------------------------------------------
+
+PA_HOOK="${HOME_DIR}/dot_claude/executable_plaintext-ask-check.sh"
+PA_PROMPT_ID="835ed30b-6fea-4886-b00e-917807befe28"
+
+# A minimal transcript in the shape Claude Code actually writes: the turn-opening `user`
+# entry carries promptId (assistant entries carry null), and AskUserQuestion appears as an
+# ordinary tool_use. Both were confirmed against real transcripts in #616.
+_pa_write_transcript() {
+  local path="$1" mode="$2"
+  {
+    printf '%s\n' "{\"type\":\"user\",\"promptId\":\"${PA_PROMPT_ID}\",\"isSidechain\":false,\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}"
+    if [ "$mode" = "ask" ]; then
+      printf '%s\n' '{"type":"assistant","promptId":null,"isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","id":"t1","input":{}}]}}'
+    fi
+    printf '%s\n' '{"type":"assistant","promptId":null,"isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
+  } >"$path"
+}
+
+_pa_payload() {
+  local transcript="$1" message="$2" prompt_id="${3-$PA_PROMPT_ID}"
+  jq -n \
+    --arg tp "$transcript" \
+    --arg pid "$prompt_id" \
+    --arg msg "$message" \
+    '{session_id: "s", transcript_path: $tp, cwd: "/x", prompt_id: $pid,
+      permission_mode: "auto", hook_event_name: "Stop", stop_hook_active: false,
+      last_assistant_message: $msg, background_tasks: [], session_crons: []}'
+}
+
+# Every assertion below also depends on the hook never blocking, so the shared runner pins
+# exit 0 and the absence of the blocking keys in one place.
+_pa_run() {
+  run --separate-stderr bash "$PA_HOOK" <<<"$1"
+  [ "$status" -eq 0 ] || {
+    echo "hook exited ${status}; a Stop hook that is a warning must always exit 0"
+    false
+  }
+  if [ -n "$output" ]; then
+    printf '%s' "$output" | jq -e 'has("decision") or has("continue") or has("stopReason") | not' >/dev/null || {
+      echo "hook emitted a blocking key: ${output}"
+      false
+    }
+  fi
+}
+
+_pa_status_is() {
+  printf '%s\n' "$stderr" | grep -qE "^plaintext-ask-check: status=$1( |\$)" || {
+    echo "expected status=$1, got: ${stderr}"
+    false
+  }
+}
+
+@test "#616: the plaintext-ask hook is wired into Stop exactly once, synchronously" {
+  _require_jq
+  # Synchronous on purpose: async hook stdout is delivered later as a model-facing
+  # attachment, but this warning is for the user at turn end. "null" in the async column is
+  # the assertion — flipping it to true would silently change who sees the warning and when.
+  local expected actual
+  expected="$(
+    cat <<'MANIFEST'
+Stop	stop:plaintext-ask-check	*	$HOME/.claude/plaintext-ask-check.sh	null	5
+MANIFEST
+  )"
+  actual="$(_manifest_by_command "plaintext-ask-check")"
+  _assert_manifest "plaintext-ask-check" "$expected" "$actual"
+}
+
+@test "#616: the plaintext-ask hook script exists, is executable and parses" {
+  [ -x "$PA_HOOK" ]
+  bash -n "$PA_HOOK"
+}
+
+@test "#616 AC-001: a turn ending in a plain-text ask without AskUserQuestion warns" {
+  _require_jq
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "調査が終わりました。この方針で進めてよろしいですか？")"
+  _pa_status_is violation
+  printf '%s' "$output" | jq -e '.systemMessage | test("AskUserQuestion")' >/dev/null
+}
+
+@test "#616 AC-001: the ask is still found when an options list follows it" {
+  _require_jq
+  # The observed violation shape often puts the choices under the question, so the last
+  # non-empty line is "- B: ..." rather than the question. Scanning a tail window instead of
+  # the final line is what keeps this case detectable.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "$(printf 'A と B のどちらにしますか？\n\n- A: 速い\n- B: 安全')")"
+  _pa_status_is violation
+}
+
+@test "#616 AC-001: an English plain-text ask is detected too" {
+  _require_jq
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "I drafted the migration. Would you like me to apply it?")"
+  _pa_status_is violation
+}
+
+@test "#616 AC-002: no warning when AskUserQuestion was called in the same turn" {
+  _require_jq
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" ask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "選択に従って対応しました。この方針で進めてよろしいですか？")"
+  _pa_status_is ok
+  [ -z "$output" ]
+}
+
+@test "#616 AC-003: an ordinary report that merely sounds inquisitive is not flagged" {
+  _require_jq
+  # The tolerated error direction is "do not stop" — false negatives over false positives.
+  # These are the closings a normal report ends with; flagging them would make the warning
+  # noise and get the hook switched off.
+  local dir msg
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  for msg in \
+    "実装が完了しました。不明点があればお知らせください。" \
+    "テストは全て通りました。他に必要な作業があれば教えてください。" \
+    "レビュー指摘に対応しました。以上です。" \
+    "Done. Let me know if anything looks off."; do
+    _pa_run "$(_pa_payload "${dir}/t.jsonl" "$msg")"
+    _pa_status_is ok
+    [ -z "$output" ] || {
+      echo "false positive on: ${msg}"
+      false
+    }
+  done
+}
+
+@test "#616 AC-005: a mid-turn Stop with background work in flight is skipped" {
+  _require_jq
+  # #447: a parent that delegated to a subagent emits Stop mid-turn and resumes under the
+  # same prompt_id, so Stop does not mean the turn ended. background_tasks is the field the
+  # runtime documents for telling those two apart.
+  local dir payload
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  payload="$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？" \
+    | jq '.background_tasks = [{id: "task-1", status: "running"}]')"
+  _pa_run "$payload"
+  _pa_status_is skipped
+  [ -z "$output" ]
+}
+
+@test "#616 AC-006: a subagent Stop is skipped" {
+  _require_jq
+  local dir payload
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  payload="$(_pa_payload "${dir}/t.jsonl" "どうしますか？" | jq '.agent_id = "agent-1"')"
+  _pa_run "$payload"
+  _pa_status_is skipped
+  [ -z "$output" ]
+}
+
+@test "#616 AC-007: a re-entrant Stop (stop_hook_active) is skipped" {
+  _require_jq
+  local dir payload
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  payload="$(_pa_payload "${dir}/t.jsonl" "どうしますか？" | jq '.stop_hook_active = true')"
+  _pa_run "$payload"
+  _pa_status_is skipped
+  [ -z "$output" ]
+}
+
+@test "#616 AC-008: an unreadable transcript reports error, not silence" {
+  _require_jq
+  _pa_run "$(_pa_payload "/nonexistent/does-not-exist.jsonl" "この方針で進めてよろしいですか？")"
+  _pa_status_is error
+  # The user has to learn the detector could not decide; silence here would read as "clean".
+  printf '%s' "$output" | jq -e '.systemMessage | test("判定不能")' >/dev/null
+}
+
+@test "#616 AC-008: a prompt_id absent from the transcript reports error, not violation" {
+  _require_jq
+  # Falling back to "scan the whole file" would silently widen the window to other turns;
+  # calling it a violation would invent a finding. Neither is acceptable, so it is an error.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "どうしますか？" "11111111-2222-3333-4444-555555555555")"
+  _pa_status_is error
+}
+
+@test "#616 AC-008: an unparseable transcript line reports error, not silence" {
+  _require_jq
+  # Each line is parsed independently so one corrupt line cannot abort the scan — but it
+  # must not be swallowed either, because a dropped line could be the AskUserQuestion call.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" ask
+  printf 'this is not json\n' >>"${dir}/t.jsonl"
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "どうしますか？")"
+  _pa_status_is error
+}
+
+@test "#616 AC-008: a malformed payload reports error, not silence" {
+  _require_jq
+  _pa_run "not json at all"
+  _pa_status_is error
+}
+
+@test "#616 AC-008: a missing jq reports error rather than a silent no-op" {
+  # The sibling Stop hooks treat a missing jq as a silent no-op. This one must not: for a
+  # detector, "cannot evaluate" and "nothing found" have to be different values. The jq
+  # check runs before any other external command, so an empty PATH is enough to simulate it.
+  # bash is invoked by absolute path because env itself resolves the command through the PATH
+  # it was just handed, and an empty one would fail to find bash rather than fail to find jq.
+  local dir
+  dir="$(_mktemp_dir)"
+  run --separate-stderr env PATH="$dir" /bin/bash "$PA_HOOK" <<<'{"hook_event_name":"Stop"}'
+  [ "$status" -eq 0 ]
+  _pa_status_is error
+  printf '%s\n' "$stderr" | grep -qF 'reason=jq-unavailable'
+}
+
+@test "#616 AC-008: clean and could-not-evaluate are different values" {
+  _require_jq
+  # The regression this guards: someone "simplifies" an error branch into the ok branch, and
+  # from then on a broken detector looks exactly like a compliant session.
+  local dir clean broken
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  run --separate-stderr bash "$PA_HOOK" <<<"$(_pa_payload "${dir}/t.jsonl" "実装が完了しました。")"
+  clean="$stderr"
+  run --separate-stderr bash "$PA_HOOK" <<<"$(_pa_payload "/nonexistent/x.jsonl" "この方針で進めてよろしいですか？")"
+  broken="$stderr"
+  [ "$clean" != "$broken" ] || {
+    echo "clean and could-not-evaluate produced the same output: ${clean}"
+    false
+  }
 }
