@@ -46,7 +46,8 @@ This document covers the Claude Code harness configuration deployed by this dotf
 | `home/dot_claude/executable_wave-session-event.sh` | `~/.claude/wave-session-event.sh` (0755) |
 | `home/dot_claude/hooks-fork/prompt-conform-suggest.js` | `~/.claude/hooks-fork/prompt-conform-suggest.js` |
 | `home/dot_claude/agents/*.md` | `~/.claude/agents/*.md` |
-| `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md` (appended by `cldf`/`cldf-r06` via `--append-system-prompt-file`) |
+| `home/dot_claude/fable-orchestrator-prompt.md` | `~/.claude/fable-orchestrator-prompt.md` (requested by `cldf`/`cldf-r06` via `--append-system-prompt-file`; folded into the composite by the launcher) |
+| `home/dot_claude/ask-user-question-prompt.md` | `~/.claude/ask-user-question-prompt.md` (injected into **every** session by the launcher, #677) |
 | `home/dot_claude/symlink_skills.tmpl` | `~/.claude/skills -> ~/.agents/skills` (symlink) |
 | `home/dot_claude-r06/symlink_*.tmpl` | `~/.claude-r06/{settings.json,CLAUDE.md,statusline.sh,agents,commands,skills}` (symlinks) |
 
