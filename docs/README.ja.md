@@ -56,6 +56,7 @@
 |-------------|------|
 | [なぜこの設計なのか](explanation/design-rationale.ja.md) | 重要な設計判断: シングルアーカイブキャッシュ、タグでなく SHA ピン、config 共有/state 分離、sourced-not-exported シークレット、`make apply` なし |
 | [シークレットとアカウント分離の設計](explanation/secrets-and-isolation.ja.md) | `op://` 参照が apply 時に `0600` ファイルとしてレンダリングされる仕組み、runtime-graceful vs apply-strict、アカウント分離との合成 |
+| [平文で判断を仰いだまま終わる turn を検知する](explanation/plaintext-ask-detection.ja.md) | `Stop` hook のペイロードに実際に何が入っているか、`AskUserQuestion` の有無を確認するための turn の切り出し方、`Stop` がターンの終わりではない理由、「評価できなかった」を「異常なし」と別の値で表す理由 |
 
 ### 決定記録（ADR）
 

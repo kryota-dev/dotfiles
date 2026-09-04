@@ -56,6 +56,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 |-----|-------------|
 | [Why it's built this way](explanation/design-rationale.md) | Load-bearing WHYs: single-tarball caching, SHA-pin not tag, config-shared/state-isolated, sourced-not-exported secrets, no `make apply` |
 | [Secrets & account-isolation design](explanation/secrets-and-isolation.md) | How `op://` refs render to `0600` files at apply, runtime-graceful vs apply-strict, and how this composes with account isolation |
+| [Detecting a turn that ends by asking in plain text](explanation/plaintext-ask-detection.md) | What the `Stop` hook payload actually contains, how the turn is scoped to check for `AskUserQuestion`, why `Stop` is not the end of a turn, and why the detector reports "could not evaluate" separately from "clean" |
 
 ### Decisions
 
