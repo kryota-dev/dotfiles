@@ -824,8 +824,11 @@ PY
   # 同じ形の地雷は他にもある。いずれも「リポジトリを模す」という fixture の目的と、
   # 「パス glob で対象を決める」というツールの都合が正面衝突するために起きる:
   #   - `.github/workflows/*.y?ml` -> actionlint / ghalint / zizmor / ls-lint
-  #   - `mise/config.toml`         -> .github/renovate.json5 の mise manager。パターンが
-  #                                   アンカー無しの正規表現なので部分一致で拾われる
+  #   - `mise/config.toml`         -> Renovate の mise manager。.github/renovate.json5 側の
+  #                                   パターンは #646 でアンカー済みだが、ユーザー設定は
+  #                                   manager の既定値に「追加」されるだけで置き換えないため、
+  #                                   既定 glob `**/{,.}mise/config{,.*}.toml` が入れ子の
+  #                                   パスに一致し続ける（アンカーはこの経路を塞がない）
   #   - `CLAUDE.md` / `CLAUDE.local.md`
   #                                -> Claude Code は cwd 配下のネストしたものを、その
   #                                   ディレクトリを読んだ時点で「指示」として読み込む

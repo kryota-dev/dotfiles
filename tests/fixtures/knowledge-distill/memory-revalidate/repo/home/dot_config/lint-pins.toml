@@ -1,8 +1,12 @@
 # fixture 用の lint ツールピン。
 #
-# ファイル名が `mise/config.toml` ではないのは、.github/renovate.json5 の mise
-# manager が `'/home/dot_config/mise/config\.toml/'` という**アンカー無し**の
-# 正規表現でパスを拾うため、fixture 配下の同名パスも依存として扱われるから。
+# ファイル名が `mise/config.toml` ではないのは、その名前だと Renovate の mise
+# manager が fixture 配下の同名パスまで依存として拾いうるから。
+#
+# .github/renovate.json5 側のパターンは #646 でアンカー済みだが、それでは足りない。
+# ユーザーの managerFilePatterns は manager の既定値を置き換えず「追加」される
+# 仕様で、mise の既定 glob `**/{,.}mise/config{,.*}.toml` は入れ子のパスにも
+# 一致し続ける。だからこの回避はファイル名側で持つ必要がある（#641 / #646）。
 [tools]
 shellcheck = "0.0.0"
 shfmt = "0.0.0"
