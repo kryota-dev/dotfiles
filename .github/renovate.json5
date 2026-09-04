@@ -32,7 +32,8 @@
   // glob. It matches against fileList entries from `git ls-tree -r`, i.e.
   // repo-root-relative paths with no leading `/` or `./` -- so `^` anchors to the
   // repo root and every pattern here is written as a full `^...$` match. Without
-  // that anchor, `RegExp#test` matches anywhere in the string, so a pattern like
+  // that anchor the compiled regex (RE2 by default) matches anywhere in the path
+  // rather than the whole of it, so a pattern like
   // `/home/dot_config/mise/config\.toml/` also matches nested copies such as
   // tests/fixtures/.../repo/home/dot_config/mise/config.toml -- the fixture #641
   // added and then renamed away once we saw Renovate could read it as a real

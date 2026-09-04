@@ -2992,36 +2992,60 @@ _gate_decision() {
 
 @test "renovate: every managerFilePatterns entry anchors its regex to the repo root (#646)" {
   local r="${REPO_ROOT}/.github/renovate.json5"
-  # Renovate resolves managerFilePatterns against fileList entries from
-  # `git ls-tree -r <branch>`, i.e. repo-root-relative paths with no leading
-  # `/` or `./` (lib/util/git/index.ts getFileList, lib/workers/repository/
-  # extract/file-match.ts getMatchingFiles). A slash-delimited entry is
-  # interpreted as a regex, not a glob (lib/util/string-match.ts
-  # isRegexMatch/parseRegexMatch), and `RegExp#test` matches anywhere in the
-  # string unless anchored. An unanchored pattern therefore matches nested
-  # copies too -- e.g. tests/fixtures/.../home/dot_config/mise/config.toml,
-  # the fixture #641 added and renamed away once we saw Renovate could read it
-  # as a real dependency (#646). So every slash-delimited entry here must be a
-  # full `^...$` match against the repo-root-relative path.
+  # Renovate resolves managerFilePatterns against repo-root-relative paths with
+  # no leading `/` or `./` (the fileList comes from `git ls-tree -r`), and a
+  # slash-delimited entry is a regex rather than a glob. The regex is compiled
+  # and tested against the whole path, so without `^`/`$` it matches anywhere in
+  # the string -- an unanchored pattern picks up nested copies too, e.g.
+  # tests/fixtures/.../home/dot_config/mise/config.toml, the fixture #641 added
+  # and renamed away once we saw Renovate could read it as a real dependency
+  # (#646). So every slash-delimited entry must be a full `^...$` match.
+  # Reference: https://docs.renovatebot.com/configuration-options/#managerfilepatterns
+  #
+  # The extraction below is deliberately strict rather than lenient: this test
+  # only earns its keep if an entry it fails to understand is a failure, not a
+  # silent skip. So it rejects the inline-array form, refuses to close the block
+  # on anything but a lone `]` (a pattern may legitimately contain `]`, e.g. a
+  # character class), and fails on any in-block line that is not a comment, a
+  # blank, or a quoted string.
   local patterns
   patterns="$(awk '
-    /managerFilePatterns:[[:space:]]*\[/ { in_block = 1; next }
-    in_block && /\]/ { in_block = 0; next }
+    /^[[:space:]]*managerFilePatterns:[[:space:]]*\[[[:space:]]*$/ { in_block = 1; next }
+    !in_block && /managerFilePatterns:/ && $0 !~ /^[[:space:]]*\/\// {
+      print "inline managerFilePatterns array is not supported by this test: " $0 > "/dev/stderr"
+      exit 2
+    }
+    in_block && /^[[:space:]]*\][[:space:]]*,?[[:space:]]*$/ { in_block = 0; next }
     in_block { print }
-  ' "$r")"
+    END { if (in_block) { print "unterminated managerFilePatterns array" > "/dev/stderr"; exit 3 } }
+  ' "$r")" || {
+    echo "managerFilePatterns extraction failed on $r (see stderr above)"
+    false
+  }
   [ -n "$patterns" ] || {
     echo "extracted zero managerFilePatterns entries from $r -- extraction is broken"
     false
   }
   local count=0
-  local line entry
+  local line entry trimmed
   while IFS= read -r line; do
-    # Trim surrounding whitespace and a trailing comma, then strip the outer
-    # JSON5 single quotes to get the raw string Renovate sees.
-    entry="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*,\{0,1\}[[:space:]]*$//' <<<"$line")"
-    entry="${entry#\'}"
-    entry="${entry%\'}"
-    [ -n "$entry" ] || continue
+    trimmed="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' <<<"$line")"
+    # Blank lines and comment-only lines are valid inside a JSON5 array.
+    case "$trimmed" in
+      '' | //*) continue ;;
+    esac
+    # Unwrap the JSON5 string to get the raw value Renovate sees. Both quote
+    # styles are accepted, as is a trailing comma and a trailing line comment.
+    # A line that matches neither form is a hard failure, so that a formatting
+    # change cannot quietly move an entry out of this test's reach.
+    entry="$(sed -n \
+      -e "s|^[[:space:]]*'\(.*\)'[[:space:]]*,\{0,1\}[[:space:]]*\(//.*\)\{0,1\}\$|\1|p" \
+      -e "s|^[[:space:]]*\"\(.*\)\"[[:space:]]*,\{0,1\}[[:space:]]*\(//.*\)\{0,1\}\$|\1|p" \
+      <<<"$line")"
+    [ -n "$entry" ] || {
+      echo "unparsable managerFilePatterns line in $r: ${line}"
+      false
+    }
     count=$((count + 1))
     case "$entry" in
       /*)
