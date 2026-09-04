@@ -186,6 +186,25 @@ _skill_is_external() {
   }
 }
 
+@test "skill provenance: ax is external, not curated or unmanaged" {
+  # ax (yusukebe/ax) ships skills/ax/SKILL.md with valid discovery frontmatter, so it is
+  # fetched verbatim as a file external — same pattern as phone-harness and eli5 above.
+  # The external's table name is [".agents/skills/ax/SKILL.md"], which
+  # _skill_is_external() matches via its subpath pattern; renaming the table would
+  # silently demote the skill to `unmanaged` (a policy violation the runtime check only
+  # warns about). Unlike those two, ax has a companion CLI in this repo — pinned as a
+  # mise tool, not installed by this external — and the pins are kept in lockstep by
+  # tests/ax.bats.
+  _skill_is_external ax || {
+    echo "ax is not recognised as external (see .chezmoiexternal.toml)"
+    false
+  }
+  [ ! -e "${HOME_DIR}/dot_agents/skills/ax" ] || {
+    echo "ax must not be vendored in source; it is fetched as an external"
+    false
+  }
+}
+
 @test "skill provenance: no skill is both curated and external" {
   local dir name
   for dir in "${HOME_DIR}/dot_agents/skills"/*/; do

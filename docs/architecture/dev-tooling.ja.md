@@ -16,11 +16,14 @@
 
 `home/dot_config/mise/config.toml` の `[tools]` ブロックが、全ピン済みランタイムと CLI バージョンの SSOT です。Renovate が各ピンを自動バンプし、変更があると次回の `chezmoi apply` で `run_onchange_after_12-setup-mise` が再トリガーされます。**権威ある最新のバージョン一覧はそのファイルを参照してください。**
 
-ブロックには以下の3カテゴリのエントリがあります（例示のみ; 権威ある最新一覧は `config.toml` を参照）:
+ブロックには以下の4カテゴリのエントリがあります（例示のみ; 権威ある最新一覧は `config.toml` を参照）。後ろの3つはいずれも「mise レジストリにエントリがない」ケースであり、成果物の実際の取得元で区別されます:
 
 - **ランタイム言語** — 正確なバージョンにピン（例: `node`、`python`、`ruby`、`go`、`deno`、`rust`）
 - **レジストリ解決可能な CLI ツール** — ベアキーを使用（例: `gh`、`gitleaks`、`shellcheck`、`starship`、`tmux`）
-- **npm バックの CLI** — mise レジストリにエントリがなく、`"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`）
+- **npm バックの CLI** — `"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`）
+- **GitHub リリースバックの CLI** — `"github:<owner>/<repo>"` キー形式を使用（例: `"github:yusukebe/ax"`）。mise は checksum を検証し、**リリースに添付されていれば** GitHub artifact attestations と SLSA provenance も検証します。ただし attestation の検証は gate ではなく best-effort です（添付が無いリリースは `NoAttestations` =「エラーではない。ツールが持っていないだけ」として扱われ、checksum のみでインストールされます。必須化には `mise.lock` が要りますが本リポジトリでは使っていません）。upstream のタグが先頭に `v` を持つ場合は inline table に `version_prefix = "v"` が必要です（mise は `v` を落とした形で解決し、Renovate の mise manager も同じオプションを読んで `extractVersion` を組み立てます）
+
+`"ubi:<owner>/<repo>"` 形式のエントリも 1 件だけ残っています（`"ubi:googleworkspace/cli"`）。**新規追加はしないでください**: mise 2026.4 は ubi backend が非推奨で 2027.1.0 で削除されると警告し、代わりに github backend を案内します。
 
 ### `[settings]` ブロック
 
@@ -38,7 +41,7 @@ ruby.compile = false
 
 ### ツールの追加方法
 
-- **mise を優先**: 正確なバージョンを指定して `[tools]` にツールを追加する。レジストリで解決可能なツールはベアキー、npm のみのツールは `"npm:<pkg>"` を使用。
+- **mise を優先**: 正確なバージョンを指定して `[tools]` にツールを追加する。レジストリで解決可能なツールはベアキー、それ以外は backend を明示する（npm パッケージは `"npm:<pkg>"`、GitHub リリースの成果物は `"github:<owner>/<repo>"`。非推奨の `"ubi:"` は使わない）。
 - **GUI アプリとカスクには Brewfile**: macOS の `.app` バンドルや App Store アプリは `dot_Brewfile` に追加する（mise ではなく）。
 - **ピンは意図的にバンプする**: mise はバージョン範囲を使用しない。`home/dot_config/mise/config.toml` をバンプすると次回の `chezmoi apply` で `run_onchange_after_12-setup-mise.sh.tmpl` が再トリガーされ、`mise install` が再実行される。
 

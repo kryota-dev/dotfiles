@@ -219,6 +219,23 @@
     url = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/{{ .eli5.commit }}/eli5/skills/eli5/SKILL.md"
     refreshPeriod = "168h"
 
+# ax agent skill — https://github.com/yusukebe/ax (skills/ax/SKILL.md)
+# Third instance of the single-file external pattern above: upstream ships the
+# name / description frontmatter skill discovery needs, so it is fetched verbatim
+# instead of being wrapped in a curated skill that would go stale. Pinned to
+# [ax].commit (a full SHA) in .chezmoidata.toml.
+#
+# Unlike phone-harness and eli5, this skill DOES have a companion CLI in this repo —
+# but it is not installed from here. `ax` itself is a mise tool
+# ("github:yusukebe/ax" in home/dot_config/mise/config.toml), pinned to the same
+# release; see the [ax] comment in .chezmoidata.toml for why the two must move
+# together. Fetching the markdown on Linux too is harmless and keeps this file free
+# of an OS branch (the CLI is installed on both platforms anyway).
+[".agents/skills/ax/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/yusukebe/ax/{{ .ax.commit }}/skills/ax/SKILL.md"
+    refreshPeriod = "168h"
+
 # Moralerspace font (macOS only)
 # Version is defined in .chezmoidata.toml [versions.moralerspace_font]
 {{ if eq .chezmoi.os "darwin" -}}

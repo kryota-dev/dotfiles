@@ -196,6 +196,53 @@
       packageNameTemplate: 'https://github.com/anthropics/claude-plugins-community',
       currentValueTemplate: 'main',
     },
+    {
+      // ax skill (skills/ax/SKILL.md), fetched as a file external from [ax].commit.
+      // github-tags rather than the git-refs form used by the skills above: ax has real
+      // release tags, and the SKILL.md pin must land on the same release as the CLI pin
+      // in the mise config, not on whatever `main` happens to be. Shaped like the [ecc]
+      // manager — one regex capturing version and commit together, so a bump moves both
+      // in a single hunk. Scoped to the [ax] table so it cannot latch onto a `version =`
+      // or `commit =` in a neighbouring one.
+      customType: 'regex',
+      managerFilePatterns: [
+        '/^home/\\.chezmoidata\\.toml$/',
+      ],
+      matchStrings: [
+        '\\[ax\\][\\s\\S]*?version\\s*=\\s*"(?<currentValue>[^"]+)"[\\s\\S]*?commit\\s*=\\s*"(?<currentDigest>[a-f0-9]+)"',
+      ],
+      depNameTemplate: 'yusukebe/ax',
+      packageNameTemplate: 'yusukebe/ax',
+      datasourceTemplate: 'github-tags',
+      extractVersionTemplate: '^v(?<version>.+)$',
+    },
+  ],
+  packageRules: [
+    {
+      // NOT an automerge lane. The four automerge packageRules this file used to carry
+      // were deleted when the merge gate landed (see the automerge comment at the top),
+      // and nothing here revives them — this rule only decides how updates are BATCHED.
+      //
+      // ax ships two artifacts from one upstream release, pinned in two files: the CLI
+      // in home/dot_config/mise/config.toml (read by the built-in mise manager) and
+      // skills/ax/SKILL.md via [ax] in home/.chezmoidata.toml (read by the custom manager
+      // above). tests/ax.bats asserts the two versions agree, so a bump that arrived as
+      // two PRs would make BOTH of them red — each one half-applies the update — and
+      // neither could merge alone. Grouping them onto one branch is what keeps that
+      // assertion comfortable to live with. tests/ax.bats also asserts this rule still
+      // exists, because deleting it would not break anything until the next ax release.
+      //
+      // It is not a guarantee, though: the two managers read different datasources
+      // (github-releases for the built-in mise manager, github-tags for the one above), so
+      // nothing forces them to detect a release in the same run. If they ever split, the
+      // CLI-only half is a one-file +1/-1 diff — the exact shape the merge gate's fast
+      // lane accepts. What stops it is the required check, not the gate: that branch fails
+      // tests/ax.bats and `Test` is required on main, so it cannot reach automerge.
+      matchPackageNames: [
+        'yusukebe/ax',
+      ],
+      groupName: 'ax',
+    },
   ],
   mise: {
     // Anchored full-match regex; see the customManagers comment above for why.

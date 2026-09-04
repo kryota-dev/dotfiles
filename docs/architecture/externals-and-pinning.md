@@ -20,11 +20,12 @@
 | `aside` slash command | `affaan-m/ECC` | `file` | 1 |
 | phone-harness skill | `ShawnPana/phone-harness` | `file` | 1 |
 | eli5 skill | `anthropics/claude-plugins-community` | `file` | 1 |
+| ax skill | `yusukebe/ax` | `file` | 1 |
 | Moralerspace font (macOS only) | `yuru7/moralerspace` | `archive` | 1 |
 
-Total declared entries: <!-- FACT:external-static-entry-count -->25<!-- /FACT --> static entries (17 + 1 + 2 + 1 + 1 + 1 + 1 + 1) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. The static count is asserted against `.chezmoiexternal.toml` by `tests/docs_facts.bats` — it had drifted before being pinned (drawio and supabase were added as externals while this total stayed behind).
+Total declared entries: <!-- FACT:external-static-entry-count -->26<!-- /FACT --> static entries (17 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1) plus the `range`-generated ECC skill entries (= length of `[ecc].skills`), so the total tracks the array automatically. The static count is asserted against `.chezmoiexternal.toml` by `tests/docs_facts.bats` — it had drifted before being pinned (drawio and supabase were added as externals while this total stayed behind).
 
-Cold-apply HTTP downloads are fewer than entries, because the unit of fetching is the **unique URL**, not the entry: the 17 Anthropic entries share one tarball, the 2 Supabase entries share another, and the ECC runtime shares its tarball with every `range`-generated ECC skill. That leaves one download each for Anthropic, drawio, Supabase, ECC, `aside.md`, phone-harness, eli5, and the font.
+Cold-apply HTTP downloads are fewer than entries, because the unit of fetching is the **unique URL**, not the entry: the 17 Anthropic entries share one tarball, the 2 Supabase entries share another, and the ECC runtime shares its tarball with every `range`-generated ECC skill. That leaves one download each for Anthropic, drawio, Supabase, ECC, `aside.md`, phone-harness, eli5, ax, and the font.
 
 ---
 
@@ -145,6 +146,7 @@ A moved tag cannot change the fetched bytes. The `refreshPeriod` controls how lo
 | ECC skills | `168h` (7 days) |
 | `aside` command | `168h` (7 days) |
 | phone-harness skill | `168h` (7 days) |
+| ax skill | `168h` (7 days) |
 | Moralerspace font | `672h` (28 days) |
 
 Within the period chezmoi serves the cached copy without a network request. After the period expires, the next `chezmoi apply` re-downloads (but fetches the same bytes if the SHA has not changed).
@@ -171,6 +173,23 @@ The same pin-in-data / bump-via-Renovate pattern applies to `anthropics/skills` 
 They can legitimately sit at different points in upstream history. `SKILL.md` is standalone markdown, so a lagging skill pin never breaks the installed CLI — at worst the skill text describes helpers slightly older than the ones installed. Both regexes are scoped to the `[phone_harness]` table so neither can latch onto a `version =` or `commit =` in a neighbouring one.
 
 Like ECC, **every phone-harness bump is reviewed before it merges** — and for a stronger reason than the markdown-only skill archives. It ships executable Python that captures the screen and synthesises HID-level input on a real, unlocked phone, and its `SKILL.md` is precisely what steers an agent into doing so. Both pins are covered, and neither by name: the PyPI release is pinned in `.chezmoidata.toml`, outside the fast lane's scope, and the `SKILL.md` digest is a `digest` update, which never takes that lane either. Scope is what carries the guarantee here — `update dependency phone-harness to v1.2.3` is shaped exactly like an ordinary CLI bump, so nothing about the *form* of the update would have stopped it reaching a device holding real accounts.
+
+### Two pins that must not drift: ax
+
+`ax` also carries two pins, and the table it lives in looks like `[phone_harness]` — but the reason is the opposite one, so do not read the drift tolerance above across to it.
+
+| Pin | What it governs | Datasource | Fetched by |
+|-----|-----------------|------------|------------|
+| `version` | the CLI (a GitHub release asset) | `github-releases`, via the built-in mise manager | `run_onchange_after_12-setup-mise.sh.tmpl` → `mise install`, from `"github:yusukebe/ax"` in the mise config |
+| `commit` | `skills/ax/SKILL.md` (a repo file) | `github-tags`, via a custom manager over `[ax]` | the `file` external in `.chezmoiexternal.toml` |
+
+phone-harness pins a PyPI release against a commit on a moving `main`: two genuinely independent datasources, so a lagging skill pin is harmless there. **ax's two pins come from the same release**, and ax is `v0.1.x` with no stable-API declaration, so a `SKILL.md` describing flags from a different version is a real hazard rather than a cosmetic lag. `tests/ax.bats` therefore asserts that `[ax].version` and the mise pin name the same version.
+
+The `yusukebe/ax` `packageRule` in `renovate.json5` gives both managers the same `groupName` so that a release arrives as a single PR. **That grouping is what makes the assertion comfortable to live with, not what makes it safe** — the two managers read different datasources (`github-releases` for the built-in mise manager, `github-tags` for the custom one), so nothing guarantees they always detect a release in the same Renovate run. `tests/ax.bats` asserts the group rule still exists, because deleting it breaks nothing until the next ax release.
+
+If they ever did split, the CLI-only half would be a one-file `+1/-1` diff — which is exactly the shape `scripts/renovate-gate-classify.sh` lets into the deterministic fast lane. **The backstop is the required check, not the gate**: that branch fails `tests/ax.bats`' version-skew assertion, and `Test` is a required status check on `main` alongside `Lint` and `renovate-gate`, so it cannot reach native automerge. Resolving it is a one-line manual sync of the other pin in the same branch, which an agent is doing anyway (an ax bump spans two files and never passes the fast lane's `file_count == 1`).
+
+The CLI pin lives in the mise config, which is the fast lane's scope — but an ax bump never takes that lane anyway: the grouped PR touches two files, and the classifier's fast lane requires a single-file `+1/-1` diff. Agent review is the right outcome here, since one PR moves both an executable binary and the skill text that steers an agent's web access.
 
 ---
 

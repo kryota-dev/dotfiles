@@ -73,6 +73,8 @@ A skill fetched this way is independent of whatever tool it drives. The `phone-h
 
 `eli5` (from `anthropics/claude-plugins-community`) follows the same pattern with no companion CLI at all — it is markdown-only, so `[eli5].commit` is its only pin. The one difference from `phone-harness` is the source path: `phone-harness` ships `SKILL.md` at its repo root, while `eli5` is a plugin whose skill lives under `eli5/skills/eli5/SKILL.md`, so the raw URL includes that subpath.
 
+`ax` (from `yusukebe/ax`) is the third instance, and the one where the independence above does **not** hold. Its `SKILL.md` lives at `skills/ax/SKILL.md`, and it does have a companion CLI in this repo — `ax` itself, pinned as a mise tool (`"github:yusukebe/ax"`), not installed by the external. Because both artifacts come from the *same* upstream release and ax is `v0.1.x` with no stable-API declaration, the two pins are kept in lockstep rather than allowed to drift: `[ax]` carries `version` alongside `commit`, `tests/ax.bats` asserts that `version` matches the mise pin, and a `groupName` rule in `renovate.json5` makes Renovate bump both in one PR. See [externals-and-pinning.md](../architecture/externals-and-pinning.md) for the full rationale.
+
 ### The never-both rule
 
 A skill name must never appear in **both** `home/dot_agents/skills/<name>/` (curated) and in the external declarations. chezmoi would attempt to deploy a directory from source and fetch an external to the same path, which produces a conflict. The provenance bats test asserts this for all curated skills against both the literal external headers and every element of `[ecc].skills`.
@@ -131,6 +133,7 @@ Miscellaneous functional skills spanning databases, media conversion, and daily 
 | supabase/agent-skills (`supabase`, `supabase-postgres-best-practices`) | 2 skills | `[skills].supabase_agent_skills_commit` in `.chezmoidata.toml` |
 | ShawnPana/phone-harness (`phone-harness`) | 1 skill (single file) | `[phone_harness].commit` in `.chezmoidata.toml` |
 | anthropics/claude-plugins-community (`eli5`) | 1 skill (single file) | `[eli5].commit` in `.chezmoidata.toml` |
+| yusukebe/ax (`ax`) | 1 skill (single file) | `[ax].commit` in `.chezmoidata.toml`, kept in lockstep with `[ax].version` |
 | ECC hook runtime (`ecc/scripts`) | 1 entry (not a skill) | same `[ecc].commit` |
 | ECC `aside` command | 1 entry (command, not skill) | same `[ecc].commit` |
 
@@ -177,6 +180,7 @@ Removing a file from the chezmoi source does not delete an already-deployed copy
 - `.chezmoiexternal.toml` declares at least one `[".agents/skills/..."]` external entry, and includes the ECC range block wired to `[ecc].commit`.
 - No skill name appears in both the curated source tree and the external declarations (never-both rule).
 - `phone-harness` resolves as `external` and is absent from the curated source tree — a guard on the single-file external's table name, whose only visible symptom otherwise would be a silent demotion to `unmanaged` (which the runtime check merely reports).
+- `ax` resolves as `external` and is absent from the curated source tree — the same table-name guard. Its cross-file relationships (CLI pin ↔ skill pin ↔ external shape ↔ Renovate grouping) are asserted separately in `tests/ax.bats`.
 - `home/AGENTS.md.tmpl` documents all five provenance categories.
 - Retired unmanaged skills (`agentcore`, `vercel-sandbox`, `patch-remote-control`, `find-skills`) are absent from source.
 - Orphaned `sdd-*` subagents are absent from `home/dot_claude/agents/`.
