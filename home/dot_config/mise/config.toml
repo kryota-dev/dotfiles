@@ -44,8 +44,14 @@ zoxide = "0.10.0"
 
 # github-backed CLIs (release assets pulled straight from GitHub, no registry entry).
 # Preferred over `ubi:` for new entries: mise 2026.4 warns that the ubi backend is
-# deprecated and removed in 2027.1.0, and the github backend additionally verifies the
-# checksum, GitHub artifact attestations and SLSA provenance on install.
+# deprecated and removed in 2027.1.0, and the github backend additionally checks GitHub
+# artifact attestations and SLSA provenance alongside the checksum.
+#
+# That extra check is best-effort, not a gate: mise treats a release with no attestations
+# as `VerificationStatus::NoAttestations` ("not an error, tool may not have them") and
+# falls back to the checksum alone. Making it mandatory needs a `mise.lock`, which this
+# repo does not have. v0.1.25 does ship attestations -- verified at install time -- but do
+# not read this entry as a guarantee that a future release will.
 #
 # ax is the agent-facing replacement for `curl` + a throwaway parsing script: it fetches,
 # reports structure (--outline / --locate) and extracts rows/tables, with token-shaped

@@ -21,7 +21,7 @@
 - **ランタイム言語** — 正確なバージョンにピン（例: `node`、`python`、`ruby`、`go`、`deno`、`rust`）
 - **レジストリ解決可能な CLI ツール** — ベアキーを使用（例: `gh`、`gitleaks`、`shellcheck`、`starship`、`tmux`）
 - **npm バックの CLI** — `"npm:<pkg>"` キー形式を使用（例: `"npm:agent-browser"`）
-- **GitHub リリースバックの CLI** — `"github:<owner>/<repo>"` キー形式を使用（例: `"github:yusukebe/ax"`）。mise がインストール時に checksum・GitHub artifact attestations・SLSA provenance を検証します。upstream のタグが先頭に `v` を持つ場合は inline table に `version_prefix = "v"` が必要です（mise は `v` を落とした形で解決し、Renovate の mise manager も同じオプションを読んで `extractVersion` を組み立てます）
+- **GitHub リリースバックの CLI** — `"github:<owner>/<repo>"` キー形式を使用（例: `"github:yusukebe/ax"`）。mise は checksum を検証し、**リリースに添付されていれば** GitHub artifact attestations と SLSA provenance も検証します。ただし attestation の検証は gate ではなく best-effort です（添付が無いリリースは `NoAttestations` =「エラーではない。ツールが持っていないだけ」として扱われ、checksum のみでインストールされます。必須化には `mise.lock` が要りますが本リポジトリでは使っていません）。upstream のタグが先頭に `v` を持つ場合は inline table に `version_prefix = "v"` が必要です（mise は `v` を落とした形で解決し、Renovate の mise manager も同じオプションを読んで `extractVersion` を組み立てます）
 
 `"ubi:<owner>/<repo>"` 形式のエントリも 1 件だけ残っています（`"ubi:googleworkspace/cli"`）。**新規追加はしないでください**: mise 2026.4 は ubi backend が非推奨で 2027.1.0 で削除されると警告し、代わりに github backend を案内します。
 

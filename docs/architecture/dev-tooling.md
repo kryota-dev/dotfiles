@@ -21,7 +21,7 @@ The block contains four categories of entries (examples; see `config.toml` for t
 - **Runtime languages** pinned to exact versions (e.g. `node`, `python`, `ruby`, `go`, `deno`, `rust`).
 - **Registry-resolvable CLI tools** using a bare key (e.g. `gh`, `gitleaks`, `shellcheck`, `starship`, `tmux`).
 - **npm-backed CLIs** using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`).
-- **GitHub-release-backed CLIs** using the `"github:<owner>/<repo>"` key form (e.g. `"github:yusukebe/ax"`). mise verifies the checksum, GitHub artifact attestations and SLSA provenance on install. Entries whose upstream tags carry a leading `v` need `version_prefix = "v"` in the inline table — mise resolves the stripped form, and Renovate's mise manager reads the same option to build its `extractVersion`.
+- **GitHub-release-backed CLIs** using the `"github:<owner>/<repo>"` key form (e.g. `"github:yusukebe/ax"`). mise verifies the checksum and, **when the release carries them**, GitHub artifact attestations and SLSA provenance. The attestation check is best-effort rather than a gate — a release with none is `NoAttestations` ("not an error, tool may not have them") and installs on the checksum alone; making it mandatory requires a `mise.lock`, which this repo does not use. Entries whose upstream tags carry a leading `v` need `version_prefix = "v"` in the inline table — mise resolves the stripped form, and Renovate's mise manager reads the same option to build its `extractVersion`.
 
 One legacy `"ubi:<owner>/<repo>"` entry also remains (`"ubi:googleworkspace/cli"`). **Do not add new ones**: mise 2026.4 warns that the ubi backend is deprecated and will be removed in 2027.1.0, and points at the github backend instead.
 
