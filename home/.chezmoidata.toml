@@ -224,7 +224,7 @@ ghq_user = "kryota-dev"
   #
   # Never auto-merged: an ax bump touches both an executable binary and skill text, and it
   # spans two files, so scripts/renovate-gate-classify.sh routes it to agent review.
-  version = "0.1.25"
+  version = "0.2.0"
   commit = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
 
 [ntfy]
