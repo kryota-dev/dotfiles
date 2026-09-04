@@ -57,6 +57,16 @@
 | [なぜこの設計なのか](explanation/design-rationale.ja.md) | 重要な設計判断: シングルアーカイブキャッシュ、タグでなく SHA ピン、config 共有/state 分離、sourced-not-exported シークレット、`make apply` なし |
 | [シークレットとアカウント分離の設計](explanation/secrets-and-isolation.ja.md) | `op://` 参照が apply 時に `0600` ファイルとしてレンダリングされる仕組み、runtime-graceful vs apply-strict、アカウント分離との合成 |
 
+### 決定記録（ADR）
+
+番号と日付を持つアーキテクチャ決定記録。各 ADR は決定・比較した選択肢・その決定を開き直す
+条件を述べる。ADR は**その時点の記録**であって生きたリファレンスではない。決定が変わったら、
+古い ADR を書き換えるのではなく新しい ADR を追加する。
+
+| ADR | 説明 |
+|-----|------|
+| [0001 — fh の承認チャネルは MCP permission-prompt tool を維持する](decisions/0001-fh-approval-channel.ja.md) | `PreToolUse` の `defer` と `PermissionRequest` hook が fh の承認チャネルを置き換えられない理由、各機構について検証できた事実、判断を開き直すトリガ |
+
 ---
 
 ## どこに何があるか
@@ -68,6 +78,7 @@
 | デプロイ済み `home/AGENTS.md.tmpl`、`home/dot_claude/CLAUDE.md` | **リポジトリなしで動く**自己完結したエージェント指示 | docs/ へのポインター — デプロイ済みファイルは自己完結でなければならない |
 | 各スキル `SKILL.md`（スキルディレクトリ内） | スキルの権威的リファレンス（目的・使い方・例） | 分類や「スキルの追加方法」— それは `docs/agents/skills-provenance.md` に記載 |
 | `docs/`（このツリー） | リポジトリ内で作業する人間と AI エージェント向けの深いリファレンス・ハウツー・解説 | README を複製するクイックスタート、リポジトリなしで動く必要があるコンテンツ |
+| `docs/decisions/` | 決定 1 件につき 1 本の日付付き ADR: 比較した選択肢、なぜそれを選んだか、何があれば開き直すか | 採用したものの動作メカニクス — それは ADR がリンクするリファレンスドキュメントに書く |
 
 ---
 
