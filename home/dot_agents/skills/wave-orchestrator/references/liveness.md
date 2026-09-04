@@ -103,6 +103,19 @@ session id 1 点で、そこは変わらない）。監視が落ちたら PID �
 1 件を引ける。**起動時 JSON を流したスクロールバックを失っても結末は残る** —— 並列で回すほどこれが
 効く。ただし `resumeKey` / `denials` は記録されないので、**session id は従来どおり起動時に控える**。
 
+### 検証件数も返る（#613）
+
+`verification_results` には `adapter_run_id` 列が最初から存在していた。欠けていたのはその列を書く
+実装だけで、そのため `fh session` の結果から検証へ辿る線がどこにも無かった。#613 が
+`fh session --gate` からそこへ書くようにしたので、記録は次を返すようになった。
+
+- 一覧（`fh runs --json`）: 各 run が `verification: {total, passed, failed, errored, skipped}` を持つ
+- 単体（`fh runs --run <adapterRunId> --json`）: `{run, verifications}`。2 つの形は決して重ならない
+
+**`--gate` は resume でも継承されない。** `session-command.mjs` は毎回 `readGates(flags)` で宣言を
+読み直し、`--capability` のように resume-key から前回値を引く経路（`inheritedCapabilityName`）を
+gate は持たない。宣言を渡さない resume は、完了条件を課さないまま `succeeded` になりうる。
+
 ## `succeeded` を「作業が完了した」と読まない理由（#573）
 
 `fh session` の `outcome` が表すのは**ターンがエラーなく完了したか**だけで、子が指示された gate
@@ -115,6 +128,22 @@ session id 1 点で、そこは変わらない）。監視が落ちたら PID �
 3 本とも `fh runs` の記録は `succeeded` / `exitCode: 0` で、**完走した子と外形が一致していた**。
 `denials` も空である（子は拒否されたのではなく、単に「やらなかった」ため）。
 
-harness の記録だけで判別できるようにするのは #573 の対象で、それまでは成果物側との二重確認が
-唯一の防御線である（当て方は [`verification.md`](verification.md)）。なお `pr-workflow` を非対話の
-子に走らせること自体の噛み合わなさは #585 で扱う。
+harness の記録だけで判別できるようにするのは #573 の対象だった。それが着地するまでは成果物側との
+二重確認が唯一の防御線で、当て方は [`verification.md`](verification.md) にある。なお `pr-workflow` を
+非対話の子に走らせること自体の噛み合わなさは #585 で扱う。
+
+## 記録側で判別できるようになった（#613 → #615）
+
+[実測] 2026-09-04 の wave 1（#630 / #619 / #646）は、子 3 本すべてに `--gate 'make test'` を宣言して
+起こした。3 本とも `fh runs` に
+`verification: {total: 1, passed: 1, failed: 0, errored: 0, skipped: 0}` が記録された。**`succeeded` の
+外形が一致していても「何本の完了条件を通したか」が記録から読める**ようになったということである。
+
+上の wave 4 本のうち 3 本（レビュー 0 件で `succeeded`）と同じことが起きても、今度は
+`verification` の `total` が 0 のまま残るので、**成果物を見に行く前に記録だけで分かる**。
+
+**harness 側に線を引いても、監視する側がその線を読まなければ検出は起きない。** #613 が引いたのは
+線だけで、`--gate` を宣言する呼び出し側は当時どこにも無かった（唯一の呼び出し側である本 skill に
+`--gate` も検証件数も書かれていなかった）。宣言と判定の規範を `SKILL.md` へ入れたのが #615 で、
+Phase 2 が宣言を担い、「成果物の検証」が件数を一次判定として読む。判定の当て方と、その件数が何を
+主張し何を主張しないかは [`verification.md`](verification.md)。
