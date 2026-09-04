@@ -282,6 +282,28 @@ load helpers/setup
   [ "$(cat "${ldir}/symlink_cdx-r06")" = "codex" ]
 }
 
+# #677 moved the "decisions go through AskUserQuestion" rule into a system prompt the claude
+# launcher injects, because CLAUDE.md did not hold it (#614 added it; three violations followed in
+# one session). The section stays in CLAUDE.md as well, so the sessions the launcher never reaches
+# — the IDE extension, the desktop app, any claude started without the wrapper — still carry the
+# rule. That leaves the same text in two files, which is exactly the kind of copy that rots
+# silently: the prompt is only read by the CLI at process start, so a divergence would never
+# surface as an error. This test is the mechanism that keeps them equal — edit one, it fails.
+@test "the ask-rule system prompt matches its CLAUDE.md section verbatim (#677)" {
+  local prompt="${HOME_DIR}/dot_claude/ask-user-question-prompt.md"
+  local claudemd="${HOME_DIR}/dot_claude/CLAUDE.md"
+  [ -f "$prompt" ]
+  local section
+  # From the heading to just before the next one. Command substitution strips the trailing
+  # newlines on both sides, so the two only differ if the text itself does.
+  section="$(awk '
+    /^## / { if (inside) exit; if ($0 == "## ユーザーに判断を求めるとき") inside = 1 }
+    inside { print }
+  ' "$claudemd")"
+  [ -n "$section" ]
+  [ "$section" = "$(cat "$prompt")" ]
+}
+
 @test "frontier-harness source files provide the global CLI and Antigravity policy" {
   local launcher="${HOME_DIR}/dot_local/bin/executable_frontier-harness"
   [ -f "$launcher" ]
