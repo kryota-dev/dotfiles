@@ -16,11 +16,14 @@ This document covers the non-AI developer tooling layer: mise as the version SSO
 
 The `[tools]` block in `home/dot_config/mise/config.toml` is the SSOT for every pinned runtime and CLI version. Renovate bumps each pin automatically, and any change re-triggers `run_onchange_after_12-setup-mise` on the next `chezmoi apply`. **Consult that file for the authoritative, current version list.**
 
-The block contains three categories of entries (examples; see `config.toml` for the authoritative, current list):
+The block contains four categories of entries (examples; see `config.toml` for the authoritative, current list). The last three are all "no mise registry entry" cases, distinguished by where the artifact actually comes from:
 
 - **Runtime languages** pinned to exact versions (e.g. `node`, `python`, `ruby`, `go`, `deno`, `rust`).
 - **Registry-resolvable CLI tools** using a bare key (e.g. `gh`, `gitleaks`, `shellcheck`, `starship`, `tmux`).
-- **npm-backed CLIs** without a mise registry entry, using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`).
+- **npm-backed CLIs** using the `"npm:<pkg>"` key form (e.g. `"npm:agent-browser"`).
+- **GitHub-release-backed CLIs** using the `"github:<owner>/<repo>"` key form (e.g. `"github:yusukebe/ax"`). mise verifies the checksum, GitHub artifact attestations and SLSA provenance on install. Entries whose upstream tags carry a leading `v` need `version_prefix = "v"` in the inline table — mise resolves the stripped form, and Renovate's mise manager reads the same option to build its `extractVersion`.
+
+One legacy `"ubi:<owner>/<repo>"` entry also remains (`"ubi:googleworkspace/cli"`). **Do not add new ones**: mise 2026.4 warns that the ubi backend is deprecated and will be removed in 2027.1.0, and points at the github backend instead.
 
 ### `[settings]` block
 
@@ -38,7 +41,7 @@ ruby.compile = false
 
 ### Adding a tool
 
-- **Prefer mise**: Add the tool to `[tools]` with an exact version. Registry-resolvable tools use a bare key; npm-only tools use `"npm:<pkg>"`.
+- **Prefer mise**: Add the tool to `[tools]` with an exact version. Registry-resolvable tools use a bare key; otherwise name the backend — `"npm:<pkg>"` for npm packages, `"github:<owner>/<repo>"` for GitHub release assets (not `"ubi:"`, which is deprecated).
 - **Use Brewfile for GUI apps and casks**: Apps that ship as macOS `.app` bundles or App Store apps belong in `dot_Brewfile`, not mise.
 - **Bump the pin deliberately**: mise does not use version ranges. Bumping `home/dot_config/mise/config.toml` re-triggers `run_onchange_after_12-setup-mise.sh.tmpl` on the next `chezmoi apply`, which runs `mise install` again.
 

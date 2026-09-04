@@ -42,6 +42,22 @@ zoxide = "0.10.0"
 # ubi-backed CLIs (no mise/aqua registry entry)
 "ubi:googleworkspace/cli" = { version = "0.22.5", exe = "gws" }
 
+# github-backed CLIs (release assets pulled straight from GitHub, no registry entry).
+# Preferred over `ubi:` for new entries: mise 2026.4 warns that the ubi backend is
+# deprecated and removed in 2027.1.0, and the github backend additionally verifies the
+# checksum, GitHub artifact attestations and SLSA provenance on install.
+#
+# ax is the agent-facing replacement for `curl` + a throwaway parsing script: it fetches,
+# reports structure (--outline / --locate) and extracts rows/tables, with token-shaped
+# output. Its companion Agent Skill is NOT installed here -- it is a chezmoi external
+# pinned to the same release in [ax] (home/.chezmoidata.toml), and tests/ax.bats asserts
+# the two pins carry the same version. Bump them together or that test fails.
+#
+# `version_prefix` strips the leading v from the upstream tag (v0.1.25 -> 0.1.25), which
+# is the form mise resolves. Renovate's mise manager reads the same option to build its
+# extractVersion, so dropping it would break version tracking as well as the install.
+"github:yusukebe/ax" = { version = "0.1.25", version_prefix = "v" }
+
 # npm-backed CLIs (no registry entry). agent-browser ships its specialized skills
 # (electron/slack/dogfood/...) via `agent-browser skills get`, so they are loaded at
 # runtime instead of being vendored; only the discovery stub is chezmoi-managed.
