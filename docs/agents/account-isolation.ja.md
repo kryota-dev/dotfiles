@@ -134,7 +134,13 @@ exec "$real" "$@"
 | フラグは**最初の positional より前**に置く必要がある — サブコマンドの後ろでは `error: unknown option` で abort し、前に置けば root コマンドが解析してサブコマンドは正常に動く | プログラム名直後に前置する。codex ラッパーが `--profile` に使っているのと同じグローバル位置。サブコマンド許可リストの恒久保守は不要 |
 | `--append-system-prompt` と `--append-system-prompt-file` は**排他**（`Cannot use both … Please use only one.`, exit 1） | 呼び出し側が content 形式で渡した場合も同じ合成ファイルへ畳む。**両方**渡された場合は両方をそのまま返し、何が誤りかはラッパーではなく CLI が決める |
 
-合成ファイルは `${XDG_CACHE_HOME:-~/.cache}/claude-launcher/` に content-addressed で置かれるため、入力が同じなら 1 ファイルに収束し、内容が変わらない限り書き込みは発生しません。
+合成ファイルは `${XDG_CACHE_HOME:-~/.cache}/claude-launcher/` に content-addressed で置かれ、名前は**書き込んだバイト列そのものの SHA-256** です。**既に非空のファイルがあっても再利用せず、毎回書き直します**。内容はこのリポジトリ上のファイル由来なのでパスは事前計算でき、同一 UID の別プロセス（侵害された hook / MCP サーバー / skill）が先にファイルを置ける以上、再利用すればそれが無検証でセッションの system prompt になってしまうからです。それでは規約を注入する意味そのものが失われます。`mv` は rename なので、symlink が置かれていてもエントリごと置換します。弱いダイジェストへのフォールバックはありません — `shasum` も `sha256sum` も無ければ、CRC32 で静かに名付ける代わりに abort します。
+
+さらに 3 点、明記しておきます:
+
+- **値を伴わない**フラグ（argv 末尾の `claude --append-system-prompt`）は、元の位置（末尾）に戻して CLI へ渡します。commander が `argument missing` を報告できるようにするためで、空プロンプトとして畳むとセッションが起動してしまいます — 設計上ここだけが沈黙ドロップになりかねない箇所でした。一方、値が**明示的に空**の場合は別扱いです（commander は受理して無視するため、「呼び出し側プロンプトなし」とみなして規約だけを注入します）。
+- argv 走査は他フラグの arity を**知りません**。そのため値がこれらのフラグ名と一致する入力（`claude -p '--append-system-prompt-file'`）はフラグとして誤認識され、次のトークンまで巻き込みます。フル arity テーブルは全オプションの追従が必要で、オプションが 1 つ増えるたびに drift するため、この制限は許容して明記する方針を採りました。codex ラッパーも同じ制限を持ちます。
+- `--append-system-prompt <text>` で渡した本文は、従来 argv とプロセスメモリにしか存在しませんでしたが、今はセッションより長生きする 0600 ファイルになります。現状この綴りを使う経路はありませんが、今後使う場合は短命な秘密情報を載せないこと。キャッシュに TTL 掃除を入れていないのは意図的です — content-addressed なので実在するプロンプトの種類数で上限が付き、起動ごとの掃除は「それらのファイルが変わったときにしか増えない集合」を抑えるために全セッションへコストを課すことになります。
 
 `--append-system-prompt-file` は**未文書**です（`.hideHelp()` により `claude --help` に現れない）。それでも依存してよいのは、肝心な一点で**沈黙しない**からです: 未知オプションは無視されずに exit 1 で abort し、読めないプロンプトファイルも同様に abort します。env 変数や user settings に代替経路はありません — `settings.appendSystemPrompt` は enterprise policyHelper の payload からのみ読まれ、それは管理者所有の managed settings に置かれます。
 

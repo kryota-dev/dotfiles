@@ -98,16 +98,34 @@ export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
 # read only from the enterprise policyHelper payload, which lives in admin-owned managed settings.
 # A missing rule file leaves argv untouched, so the session still starts before `chezmoi apply` —
 # the same trade-off _claude_fable already makes for the orchestrator prompt.
+#
+# One behaviour change worth naming: a prompt passed as --append-system-prompt <text> used to live
+# only in argv and process memory, and now lands in a 0600 file under the cache dir that outlives
+# the session. Nothing in this repository passes that spelling today, but anything that starts to
+# should not put short-lived secrets in it. The cache is content-addressed and therefore bounded by
+# the number of distinct prompts in play (today: the rule alone, and the rule folded with the fable
+# orchestrator prompt), so it is deliberately left without a TTL sweep — a per-launch prune would
+# cost every session to bound a set that only grows when those files change.
 ask_rule_file="$HOME/.claude/ask-user-question-prompt.md"
 if [ -r "$ask_rule_file" ]; then
   # Walk argv the way commander does: a bare "--" ends option parsing, "--flag value" and
   # "--flag=value" spell the same option, and the last occurrence wins. Kept arguments rotate to
   # the back of "$@" instead of into an array — macOS still ships bash 3.2, where expanding an
   # empty array under `set -u` is an error.
+  #
+  # Known limit: the scan does not know any other flag's arity, so a value that happens to equal
+  # one of these flag names (`claude -p '--append-system-prompt-file'`) is misread as a flag of its
+  # own, taking the following token with it. commander parses with arity and would not. A full
+  # arity table would have to track every claude option and would drift the moment one is added, so
+  # this is accepted and documented rather than fixed; the codex wrapper carries the same limit.
   caller_file=""
   caller_text=""
   saw_file=0
   saw_text=0
+  # "missing value" means the flag was the final token, which commander rejects with "argument
+  # missing". Distinguished from an explicitly empty value, which commander accepts and ignores.
+  file_missing_value=0
+  text_missing_value=0
   end_of_opts=0
   remaining=$#
   while [ "$remaining" -gt 0 ]; do
@@ -121,30 +139,40 @@ if [ -r "$ask_rule_file" ]; then
           ;;
         --append-system-prompt-file)
           saw_file=1
+          caller_file=""
+          file_missing_value=0
           if [ "$remaining" -gt 0 ]; then
             caller_file="$1"
             shift
             remaining=$((remaining - 1))
+          else
+            file_missing_value=1
           fi
           continue
           ;;
         --append-system-prompt-file=*)
           saw_file=1
           caller_file="${arg#*=}"
+          file_missing_value=0
           continue
           ;;
         --append-system-prompt)
           saw_text=1
+          caller_text=""
+          text_missing_value=0
           if [ "$remaining" -gt 0 ]; then
             caller_text="$1"
             shift
             remaining=$((remaining - 1))
+          else
+            text_missing_value=1
           fi
           continue
           ;;
         --append-system-prompt=*)
           saw_text=1
           caller_text="${arg#*=}"
+          text_missing_value=0
           continue
           ;;
       esac
@@ -152,47 +180,102 @@ if [ -r "$ask_rule_file" ]; then
     set -- "$@" "$arg"
   done
 
+  # Hand the caller's own spelling back whenever the CLI would reject it, instead of picking a
+  # winner the caller never chose: both flags at once is property 3, and a flag with no value is
+  # commander's "argument missing". A flag with an explicitly *empty* value is not in this set —
+  # commander accepts and ignores it, so it is treated below as "no caller prompt" and the rule
+  # still goes in. Restoring a valued flag prepends it; restoring a value-less one appends it, so
+  # the following token cannot become the value it did not have. (A value-less flag can only have
+  # been the final token, and a bare "--" before it would have stopped the scan, so appending
+  # cannot land it after one.)
+  passthrough=0
   if [ "$saw_file" -eq 1 ] && [ "$saw_text" -eq 1 ]; then
-    # Property 3: the CLI refuses this combination. Hand both back instead of picking a winner the
-    # caller never chose — the wrapper must not turn a loud error into a silent preference.
-    set -- --append-system-prompt "$caller_text" --append-system-prompt-file "$caller_file" "$@"
-  else
-    base_text=""
-    if [ "$saw_file" -eq 1 ]; then
-      # Also the path a bare trailing --append-system-prompt-file (no value) lands on: reported
-      # here rather than by commander, but with the same exit 1, never a dropped rule.
-      if [ ! -r "$caller_file" ]; then
-        echo "claude launcher: append system prompt file is not readable: $caller_file" >&2
-        exit 1
+    passthrough=1
+  fi
+  if [ "$file_missing_value" -eq 1 ] || [ "$text_missing_value" -eq 1 ]; then
+    passthrough=1
+  fi
+
+  if [ "$passthrough" -eq 1 ]; then
+    if [ "$saw_text" -eq 1 ]; then
+      if [ "$text_missing_value" -eq 1 ]; then
+        set -- "$@" --append-system-prompt
+      else
+        set -- --append-system-prompt "$caller_text" "$@"
       fi
-      base_text="$(cat "$caller_file")"
-    elif [ "$saw_text" -eq 1 ]; then
-      base_text="$caller_text"
+    fi
+    if [ "$saw_file" -eq 1 ]; then
+      if [ "$file_missing_value" -eq 1 ]; then
+        set -- "$@" --append-system-prompt-file
+      else
+        set -- --append-system-prompt-file "$caller_file" "$@"
+      fi
+    fi
+  else
+    if [ "$saw_file" -eq 1 ] && [ -n "$caller_file" ] && [ ! -r "$caller_file" ]; then
+      echo "claude launcher: append system prompt file is not readable: $caller_file" >&2
+      exit 1
     fi
 
-    if [ -n "$base_text" ]; then
+    fold=0
+    if [ "$saw_file" -eq 1 ] && [ -s "$caller_file" ]; then
+      fold=1
+    fi
+    if [ "$saw_text" -eq 1 ] && [ -n "$caller_text" ]; then
+      fold=1
+    fi
+
+    if [ "$fold" -eq 1 ]; then
       # Fold the caller's prompt and the rule into the single occurrence property 1 allows. The
       # rule goes LAST: #677 is about the rule being buried, and the tail of the system prompt is
-      # the salient end. Content-addressed, so concurrent launches with the same inputs converge on
-      # one file and an unchanged prompt costs no write at all.
-      composite_body="$(printf '%s\n\n%s' "$base_text" "$(cat "$ask_rule_file")")"
-      cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
-      mkdir -p "$cache_dir" 2>/dev/null || true
-      chmod 700 "$cache_dir" 2>/dev/null || true
-      if command -v shasum >/dev/null 2>&1; then
-        composite_key="$(printf '%s\n' "$composite_body" | shasum -a 256 | cut -d' ' -f1)"
+      # the salient end.
+      #
+      # Both reads are their own assignment so that `set -e` catches a file that vanished between
+      # the readability test and here. Nesting one inside the other would not: the inner
+      # substitution's failure does not fail the outer command, so the rule would drop out of the
+      # composite in silence — the exact failure mode this whole file exists to avoid.
+      if [ "$saw_file" -eq 1 ]; then
+        base_text="$(cat "$caller_file")"
       else
-        composite_key="$(printf '%s\n' "$composite_body" | cksum | tr -cd '0-9')"
+        base_text="$caller_text"
       fi
+      rule_text="$(cat "$ask_rule_file")"
+
+      # Create the leaf with -m so the mode is set at creation, closing the window a separate chmod
+      # would leave open. The parent is made separately because -m with -p only applies to the
+      # deepest component (SC2174), which would make the intent misleading here. An already
+      # existing dir keeps whatever mode it has; the composite itself is 0600 either way.
+      cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
+      mkdir -p "${cache_dir%/*}" 2>/dev/null || true
+      mkdir -m 700 "$cache_dir" 2>/dev/null || true
+      # mktemp failing (unwritable cache dir) aborts under `set -e`, which is the intended
+      # outcome: stopping beats starting a session that silently lost the rule.
+      composite_tmp="$(mktemp "$cache_dir/.append-system-prompt.XXXXXX")"
+      chmod 600 "$composite_tmp"
+      printf '%s\n\n%s\n' "$base_text" "$rule_text" >"$composite_tmp"
+
+      # Name the file after what was just written, so the key always describes the bytes on disk.
+      # No weaker digest fallback: a CRC32 name would be trivially collidable, and a wrapper that
+      # quietly downgrades the property it advertises is the thing this file refuses to be.
+      if command -v shasum >/dev/null 2>&1; then
+        composite_key="$(shasum -a 256 <"$composite_tmp" | cut -d' ' -f1)"
+      elif command -v sha256sum >/dev/null 2>&1; then
+        composite_key="$(sha256sum <"$composite_tmp" | cut -d' ' -f1)"
+      else
+        rm -f "$composite_tmp"
+        echo "claude launcher: neither shasum nor sha256sum is available to name the composite system prompt." >&2
+        exit 1
+      fi
+
+      # Always rename over the destination rather than reusing whatever non-empty file is already
+      # sitting at this path. The path is derived from content that lives in the repository, so it
+      # is predictable, and any same-UID process (a compromised hook, MCP server or skill) could
+      # have planted a file there first — a reused file would be read as the session's system
+      # prompt with no verification at all, defeating the point of injecting the rule. mv is a
+      # rename, so it replaces the entry itself even if a symlink was planted there. Writing every
+      # launch costs one small file; a poisoned prompt costs the rule.
       prompt_arg="$cache_dir/append-system-prompt-$composite_key.md"
-      if [ ! -s "$prompt_arg" ]; then
-        # mktemp failing (unwritable cache dir) aborts under `set -e`, which is the intended
-        # outcome: stopping beats starting a session that silently lost the rule.
-        composite_tmp="$(mktemp "$cache_dir/.append-system-prompt.XXXXXX")"
-        printf '%s\n' "$composite_body" >"$composite_tmp"
-        chmod 600 "$composite_tmp"
-        mv -f "$composite_tmp" "$prompt_arg"
-      fi
+      mv -f "$composite_tmp" "$prompt_arg"
     else
       prompt_arg="$ask_rule_file"
     fi

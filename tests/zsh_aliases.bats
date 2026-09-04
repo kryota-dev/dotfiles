@@ -196,11 +196,66 @@ EOF
   [ "$status" -eq 0 ]
   # Ahead of the caller's own arguments: after a subcommand the flag would abort the CLI.
   printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE --resume"
-  # The rule file is shared by absolute path across accounts, like the fable prompt (#345).
+  # The rule file is shared by absolute path across accounts, like the fable prompt (#345), so all
+  # four entry points must carry it — bare `cld` included, since that is the name hooks and
+  # launchd jobs reach the wrapper by.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/cld"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE"
   run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
     "$LDIR/cld-r06"
   [ "$status" -eq 0 ]
   printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE"
+}
+
+@test "claude wrapper: a repeated append flag resolves last-wins like the CLI (#677)" {
+  _launchers
+  _ask_rule
+  # This is the property the whole fold exists for: the CLI keeps only the last occurrence and
+  # drops the earlier one without a word. If the scan ever stopped at the first match instead, the
+  # wrapper would fold the wrong prompt and nothing else here would notice.
+  printf 'FIRST-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/first.md"
+  printf 'LAST-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/last.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/first.md" \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/last.md"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -cFx -- '[--append-system-prompt-file]')" -eq 1 ]
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'LAST-PROMPT-BODY' "$composite"
+  ! grep -qFx 'FIRST-PROMPT-BODY' "$composite"
+  # …and the last occurrence is also the one whose readability decides the exit, even when an
+  # earlier one would have been fine.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/first.md" \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/missing.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/missing.md"* ]]
+}
+
+@test "claude wrapper: hands a value-less append flag back to the CLI (#677)" {
+  _launchers
+  _ask_rule
+  # `claude --append-system-prompt` with nothing after it is an error the CLI reports as
+  # "option '--append-system-prompt <prompt>' argument missing". Folding it as an empty prompt
+  # would start the session instead — the one silent drop this wrapper would otherwise have.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume --append-system-prompt
+  [ "$status" -eq 0 ]
+  # Restored at the END, not the front: prepending it would hand it the next token as the value it
+  # never had, turning "argument missing" into a silently accepted prompt.
+  printf '%s\n' "$output" | grep -qFx 'ARGV=--resume --append-system-prompt'
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume --append-system-prompt-file
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx 'ARGV=--resume --append-system-prompt-file'
+  # An explicitly *empty* value is a different case: the CLI accepts and ignores it, so the wrapper
+  # treats it as "no caller prompt" and the rule still goes in rather than being passed through.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt= --resume
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE --resume"
 }
 
 @test "claude wrapper: leaves argv alone when the rule file is absent (#677)" {
@@ -258,6 +313,14 @@ EOF
   ! printf '%s\n' "$output" | grep -qFx -- '[--append-system-prompt]'
   composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
   grep -qFx 'CALLER-TEXT-BODY' "$composite"
+  grep -qFx 'ASK-RULE-BODY' "$composite"
+  # …and the content spelling has an equals form too, which the scan has to recognise separately.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt=EQUALS-TEXT-BODY -p hi
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qF -- '--append-system-prompt='
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'EQUALS-TEXT-BODY' "$composite"
   grep -qFx 'ASK-RULE-BODY' "$composite"
 }
 
@@ -332,6 +395,20 @@ EOF
   second="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
   [ "$first" = "$second" ]
   [ "$(find "$CACHE/claude-launcher" -name 'append-system-prompt-*.md' | wc -l)" -eq 1 ]
+  # A different input has to land on a different path with different content. Without this, a
+  # regression that made the key constant — every prompt colliding on one file — would still show
+  # "same input, one file" above and pass.
+  printf 'OTHER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/other.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/other.md"
+  [ "$status" -eq 0 ]
+  other="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  [ "$other" != "$first" ]
+  grep -qFx 'OTHER-PROMPT-BODY' "$other"
+  grep -qFx 'CALLER-PROMPT-BODY' "$first"
+  [ "$(find "$CACHE/claude-launcher" -name 'append-system-prompt-*.md' | wc -l)" -eq 2 ]
+  # No half-written temporaries left behind by the write-every-launch path.
+  [ "$(find "$CACHE/claude-launcher" -name '.append-system-prompt.*' | wc -l)" -eq 0 ]
 }
 
 @test "claude.zsh + wrapper: cldf keeps the whole fable prompt and gains the rule (#677)" {
@@ -339,22 +416,29 @@ EOF
   _ask_rule
   # The end-to-end pin for "the new injection does not break the existing one": _claude_fable
   # still passes its own --append-system-prompt-file, and the wrapper folds rather than replaces.
-  printf 'FABLE-ORCHESTRATOR-BODY\n' >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  # The fixture is multi-line on purpose — grepping one line would pass even if the fold dropped
+  # everything around it, and the real orchestrator prompt is 200+ lines.
+  printf 'FABLE-LINE-1\nFABLE-LINE-2\n\nFABLE-LINE-4\n' \
+    >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
   run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
     PATH="$LDIR:$PATH" zsh -fc "
       export HOME='$BATS_TEST_TMPDIR'
       source '${HOME_DIR}/dot_config/zsh/claude.zsh'
-      _claude_fable \"\$HOME/.claude\" --resume
+      _claude_fable \"\$HOME/.claude\" --resume 'two words' ''
     "
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -cFx -- '[--append-system-prompt-file]')" -eq 1 ]
   composite="$(printf '%s\n' "$output" | sed -n 's/.*--append-system-prompt-file \([^ ]*\).*/\1/p' | head -1)"
-  grep -qFx 'FABLE-ORCHESTRATOR-BODY' "$composite"
-  grep -qFx 'ASK-RULE-BODY' "$composite"
+  # Compare the whole composite, not a line of it: the orchestrator prompt must arrive intact and
+  # the rule must be last (the tail is the salient end — that is the point of #677).
+  printf 'FABLE-LINE-1\nFABLE-LINE-2\n\nFABLE-LINE-4\n\nASK-RULE-BODY\n' \
+    >"$BATS_TEST_TMPDIR/expected-composite.md"
+  cmp "$BATS_TEST_TMPDIR/expected-composite.md" "$composite"
   ! printf '%s\n' "$output" | grep -qF "$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
-  printf '%s\n' "$output" | grep -qFx -- '[--model]'
-  printf '%s\n' "$output" | grep -qFx -- '[claude-fable-5-1]'
-  printf '%s\n' "$output" | grep -qFx -- '[--resume]'
+  # …and the rest of argv survives in order, with word boundaries intact.
+  args="$(printf '%s\n' "$output" | sed -n '/^ARGC=/,$p' | tail -n +2)"
+  expected="$(printf '[--append-system-prompt-file]\n[%s]\n[--resume]\n[two words]\n[]\n[--model]\n[claude-fable-5-1]' "$composite")"
+  [ "$args" = "$expected" ]
 }
 
 # ---------- codex wrapper: account selection ----------

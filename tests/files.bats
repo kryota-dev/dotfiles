@@ -289,19 +289,30 @@ load helpers/setup
 # rule. That leaves the same text in two files, which is exactly the kind of copy that rots
 # silently: the prompt is only read by the CLI at process start, so a divergence would never
 # surface as an error. This test is the mechanism that keeps them equal — edit one, it fails.
-@test "the ask-rule system prompt matches its CLAUDE.md section verbatim (#677)" {
+@test "the ask-rule system prompt matches its CLAUDE.md section byte for byte (#677)" {
   local prompt="${HOME_DIR}/dot_claude/ask-user-question-prompt.md"
   local claudemd="${HOME_DIR}/dot_claude/CLAUDE.md"
   [ -f "$prompt" ]
-  local section
-  # From the heading to just before the next one. Command substitution strips the trailing
-  # newlines on both sides, so the two only differ if the text itself does.
-  section="$(awk '
+  # The section runs from its heading to just before the next one, which means it carries the
+  # blank line that separates it from that heading. Compare with cmp against a file rather than
+  # through command substitution: `$(...)` strips trailing newlines from *both* sides, so a
+  # comparison written that way passes while the two files differ by exactly that blank line —
+  # measured at 573 vs 572 bytes. Trimming that one line here is the only normalisation; every
+  # other byte has to match.
+  local extracted="${BATS_TEST_TMPDIR}/ask-rule-section.md"
+  awk '
     /^## / { if (inside) exit; if ($0 == "## ユーザーに判断を求めるとき") inside = 1 }
     inside { print }
-  ' "$claudemd")"
-  [ -n "$section" ]
-  [ "$section" = "$(cat "$prompt")" ]
+  ' "$claudemd" | awk '
+    { lines[NR] = $0 }
+    END {
+      last = NR
+      while (last > 0 && lines[last] == "") last--
+      for (i = 1; i <= last; i++) print lines[i]
+    }
+  ' >"$extracted"
+  [ -s "$extracted" ]
+  cmp "$extracted" "$prompt"
 }
 
 @test "frontier-harness source files provide the global CLI and Antigravity policy" {
