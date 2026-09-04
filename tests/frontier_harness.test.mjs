@@ -4415,11 +4415,35 @@ test("テーブル外 binary でも動的構築は照合を通さない", () => 
     'make -C "$DIR" lint',
     "go $CMD",
     'pytest "$TMPDIR/t"',
+    // 動的トークンが第 2 セグメント以降にある形。`analyzeShellCommand` が dynamic を
+    // continue より前で集約している理由がここにある（解釈を諦めたセグメントの動的構築を
+    // 落とさない）。既存の連結テストは静的な連結だけなのでこの規律を守れない。
+    "make lint; make $TARGET",
+    "make lint && make $(cat target)",
+    "make lint | make `cat target`",
   ]) {
     assert.equal(commandSegments(command), null, command);
+    // 理由文は「承認できる形でない」から「静的に解釈できない」へ変わる点が本変更の
+    // 唯一の観測可能な差分なので、部分一致ではなく完全一致で固定する。
+    assert.deepEqual(
+      matchCommand(command, approved),
+      { allowed: false, reason: "the command cannot be interpreted statically" },
+      command,
+    );
+  }
+
+  // エスケープ・単一引用符は展開されないので dynamic ではなく、セグメントは残る。
+  // 拒否されるのは「承認できる形でない」ほうの経路であることを固定する。
+  for (const command of ["make \\$TARGET", "make '$TARGET'"]) {
+    assert.notEqual(commandSegments(command), null, command);
     const match = matchCommand(command, approved);
     assert.equal(match.allowed, false, command);
-    assert.match(match.reason, /cannot be interpreted statically/, command);
+    assert.match(match.reason, /not in an approvable form/, command);
+  }
+
+  // 解析対象にならない入力も静かに通さない。
+  for (const command of ["", null, 42, {}]) {
+    assert.equal(commandSegments(command), null, String(command));
   }
 
   // 承認済みの静的な形は従来どおり通る（空白の揺れも含めて）。
@@ -4428,26 +4452,30 @@ test("テーブル外 binary でも動的構築は照合を通さない", () => 
 });
 
 test("動的構築の拒否を強めても承認済み manifest は無効化されない", () => {
-  // `.harness/policy.json` が実際に載せている 4 コマンド。1 件でも承認から落ちると
-  // manifest hash が変わり、承認済みの repository が丸ごと止まる。
+  // #624 時点でこのリポジトリの `.harness/policy.json` に載っていた 4 コマンドを写した
+  // fixture（実ファイルは gitignore 対象なので読まない。値が古くなったらここを更新する）。
+  // 1 件でも承認から落ちると manifest hash が変わり、承認済みの repository が丸ごと止まる。
   const commands = ["make lint", "make test", "make test-bats", "make fmt"];
-  for (const command of commands) {
-    assert.equal(manifestEntryRejection("commands", command), null, command);
-  }
-  const approved = approvedCommandSegments(commands);
-  for (const command of commands) {
-    assert.equal(matchCommand(command, approved).allowed, true, command);
-  }
-  // 他のランナーも同じ。承認できる形の字集合は `$` も backtick も含まないので、
-  // 承認可能な文字列は原理的に動的トークンを持ちえない。
-  for (const command of [
+  const runners = [
     "npm run test",
     "uv run pytest",
     "go test ./...",
     "cargo test --workspace",
-  ]) {
+  ];
+  for (const command of [...commands, ...runners]) {
     assert.equal(manifestEntryRejection("commands", command), null, command);
-    assert.notEqual(commandSegments(command), null, command);
+  }
+  // policy.json が無効化される実経路は `normalizeManifest`（1 件でも弾かれると manifest
+  // 全体が落ちる）なので、そこを通ることを直接確かめる。
+  assert.deepEqual(
+    normalizeManifest({ commands, domains: [], capabilities: [] }).commands,
+    commands,
+  );
+  // 照合側も承認済みの形を通し続ける。make 以外のランナーが落ちる退行を見逃さないよう、
+  // `manifestEntryRejection` だけでなく `matchCommand` の結果まで確認する。
+  const approved = approvedCommandSegments([...commands, ...runners]);
+  for (const command of [...commands, ...runners]) {
+    assert.equal(matchCommand(command, approved).allowed, true, command);
   }
 });
 
