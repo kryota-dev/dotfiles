@@ -4408,6 +4408,11 @@ test("uv run はスクリプト名 1 つの形だけを承認できる", () => {
     // `make <target>` が Makefile の recipe を指すのと同じ位置にある。
     "uv run main.py",
     "uv run task-1.2",
+    // 先頭文字クラスは `[A-Za-z0-9_]` であって `[A-Za-z]` ではない。長さ 1 も有効。
+    // この 2 本が無いと、先頭を英字だけに狭める退行と、引数を `+` へ広げる退行のうち
+    // 前者を許可例の側からは検出できない。
+    "uv run 1",
+    "uv run _",
   ]) {
     assert.equal(manifestEntryRejection("commands", command), null, command);
   }
@@ -4439,6 +4444,13 @@ test("uv run は引数に書いた実行ファイルの直接実行を承認で�
     // `uv` の他のサブコマンドはそもそも承認可能な形ではない。
     "uv pip install requests",
     "uv sync",
+    // 既存ランナーの字集合（`[A-Za-z0-9_./:@=-]`）との差分そのものを固定する。ここが無いと、
+    // うっかり上の字集合を流用し直す退行を拒否例の側から検出できない。`:` は
+    // `session-gate.mjs` の `parseGateDeclaration` が `<kind>:<command>` を最初の `:` で割る
+    // ため、字集合として重ならないほうが安全側に倒れる（`make` で同じ判断をしている）。
+    "uv run task:dev",
+    "uv run task@1",
+    "uv run task=value",
   ]) {
     const rejection = manifestEntryRejection("commands", command);
     assert.match(rejection ?? "", /uv run <script>/, command);
@@ -4526,10 +4538,13 @@ test("狭める前に承認された uv run を含む policy は manifest 全体
   const policyPath = path.join(directory, ".harness", "policy.json");
   // 狭める前の `fh onboard` が書き出しえた policy。`npm run test` 自体は今も承認可能だが、
   // 同じ manifest に載った `uv run --with requests python` が検証を落とすため巻き添えになる。
+  //
+  // **`domains` / `capabilities` を空にしない。** 空の fixture だと「commands だけを空にする」
+  // 誤実装でも下の deepEqual が通ってしまい、テスト名が主張している「manifest 全体」を実証できない。
   const manifest = {
     commands: ["npm run test", "uv run --with requests python"],
-    domains: [],
-    capabilities: [],
+    domains: ["example.com"],
+    capabilities: ["executor.default"],
   };
   writeJsonAtomic(
     policyPath,
@@ -4550,7 +4565,8 @@ test("狭める前に承認された uv run を含む policy は manifest 全体
   assert.equal(verified.integrity.ok, false);
   assert.match(verified.integrity.reason, /repository policy is invalid/);
   assert.match(verified.integrity.reason, /uv run <script>/);
-  assert.deepEqual(verified.manifest.commands, []);
+  // commands だけでなく 3 キーとも空であることを見る（`EMPTY_MANIFEST` が返っている）。
+  assert.deepEqual(verified.manifest, { commands: [], domains: [], capabilities: [] });
   // 巻き添えを具体的に固定する: 今も承認可能な `npm run test` まで gap になる。
   assert.equal(
     findManifestGaps({ manifest: verified.manifest, commands: ["npm run test"] }).length,

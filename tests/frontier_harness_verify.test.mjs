@@ -238,6 +238,38 @@ test("a permitted make target becomes argv, and every unapprovable make form is 
   }
 });
 
+test("a permitted uv run script becomes argv, and every unapprovable uv form is refused", () => {
+  // 承認側で `uv run` を `uv run <script>` へ狭めた（#619）。実行側は `manifestEntryRejection` を
+  // 共有しているので自動で追随するはずだが、**追随していることを固定するテストが無いと**、
+  // 実行側だけに別の分岐や正規化が入り込んだときに検出できない。`make`（#617）と同形で置く。
+  assert.deepEqual(checkCommandArgv("uv run pytest"), ["uv", "run", "pytest"]);
+  // 承認ゲートと同じ正規化を掛けるので、空白の揺れも同じ argv になる。
+  const approved = approvedCommandSegments(["uv run pytest"]);
+  for (const command of ["uv  run   pytest", "  uv run pytest  ", "uv\trun\tpytest"]) {
+    assert.equal(matchCommand(command, approved).allowed, true, `gate: ${command}`);
+    assert.deepEqual(checkCommandArgv(command), ["uv", "run", "pytest"], `argv: ${command}`);
+  }
+  // パス指定は実行対象をリポジトリの外へ向け、オプションは uv 自体を別のプロジェクト・別の
+  // 依存関係へ向ける。引数の個数を 1 に固定しているのも承認側と同じ。承認側で閉じたものが
+  // 実行側だけ通る、という抜けを作らない。
+  for (const command of [
+    "uv run /tmp/evil/payload",
+    "uv run ./payload",
+    "uv run scripts/build.py",
+    "uv run --script /tmp/x.py",
+    "uv run --with requests python",
+    "uv run pytest tests/",
+    "uv run",
+  ]) {
+    assert.throws(
+      () => checkCommandArgv(command),
+      { name: "TypeError", message: /approvable form/ },
+      command,
+    );
+  }
+});
+
+
 test("a binary that is not on PATH is a recorded outcome, not an exception", async () => {
   // 相対要素は候補にしない（POSIX の zero-length prefix は CWD を指す）。
   const outcome = await runDeterministicCheck({

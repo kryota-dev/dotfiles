@@ -721,10 +721,15 @@ granted. A `.harness/policy.json` still listing `uv run --with requests python` 
 validation, and the failure is not scoped to that entry: `normalizeManifest` rejects the manifest as
 a whole, so `fh run` sees an empty manifest with `policyIntegrity.ok: false` and every command in
 that repository — including ones that are still approvable — becomes a gap. The direction is
-fail-closed: execution stops and nothing is newly authorised. Recovery is to rewrite the entry in
-`.harness/policy.json` and run the onboarding ceremony again, which is what the rejection reason
-tells you to do. There is no migration that preserves the old approval, because what was approved is
-a form that is no longer approvable.
+fail-closed: execution stops and nothing is newly authorised.
+
+Recovery is to grant a fresh approval, which is what the rejection reason spells out: run
+`fh onboard --manifest <file>` with a corrected manifest — a bare `{commands, domains, capabilities}`
+object, *not* the policy envelope, which `normalizeManifest` refuses for its `version` key — and then
+approve it with `--approve --request <id>` from that review run. Approving rewrites
+`.harness/policy.json` outright, so editing the file by hand accomplishes nothing on its own: the
+approvals ledger, not the file, is what makes an approval current. There is no migration that
+preserves the old approval, because what was approved is a form that is no longer approvable.
 
 ## Review registry
 

@@ -641,8 +641,13 @@ command-line variable assignment は承認できないので、`make -f /tmp/evi
 その行だけではありません。`normalizeManifest` が manifest 全体を拒否するため、`fh run` から見えるのは
 `policyIntegrity.ok: false` の空 manifest で、そのリポジトリの**今も承認可能なコマンドまで含めて**すべてが
 gap になります。向きは fail-closed です —— 実行が止まるだけで、新たに何かが許可されることはありません。
-復旧手順は `.harness/policy.json` の該当行を書き直して onboarding の儀式をやり直すことで、拒否理由の文面が
-そう案内します。古い承認を保つ移行経路はありません。承認されていたのは、もはや承認できない形だからです。
+
+復旧は承認を取り直すことで、拒否理由の文面もそう案内します。`fh onboard --manifest <file>` に修正済みの
+manifest —— `{commands, domains, capabilities}` だけを持つ bare な object であって、policy の envelope では
+ありません（`version` キーを `normalizeManifest` が拒否します）—— を渡してレビューし、その実行が返した
+`--approve --request <id>` で承認します。承認が通れば `.harness/policy.json` は丸ごと上書きされるので、
+ファイルの手編集はそれ単体では何も達成しません。承認を「現に有効」にしているのはファイルではなく承認台帳
+だからです。古い承認を保つ移行経路はありません。承認されていたのは、もはや承認できない形だからです。
 
 ## review registry
 

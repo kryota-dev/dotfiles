@@ -124,8 +124,15 @@ function approvableRejectionReason(command) {
   // **その repository の manifest 全体**が空になる（実行は止まるが承認は広がらないので fail-closed の
   // 向きは正しい）。復旧手順を理由文に含めるのは、`make` の理由文を分けたのと同じ判断 —— 何が起きたかは
   // 分かるが次に何をすればいいか分からない、という状態を作らないため。
+  //
+  // **案内するのは onboarding の儀式であって、policy.json の手編集ではない。** `fh onboard --manifest`
+  // が読むのは `{commands, domains, capabilities}` だけを持つ bare manifest で、policy の envelope
+  // （`version` / `approvedAt` / `approvalHash` / `approvalId`）を渡すと `normalizeManifest` が
+  // unsupported key で落とす。しかも承認が通れば `onboard-commands.mjs` の `writeJsonAtomic` が
+  // policy.json を丸ごと上書きするので、手編集はそもそも要らない。儀式が 2 段階（レビュー →
+  // `--approve --request <id>`）である点まで書かないと「再実行」の一語では手順が伝わらない。
   if (/^uv(?:\s|$)/.test(command)) {
-    return "uv can only be approved as `uv run <script>`, a single bare script name; options, paths, and arguments to the script are not approvable. Rewrite the entry in .harness/policy.json and re-run `fh onboard` to approve the corrected manifest";
+    return "uv can only be approved as `uv run <script>`, a single bare script name; options, paths, and arguments to the script are not approvable. An approval granted before this narrowing has to be replaced: run `fh onboard --manifest <file>` with a corrected `{commands, domains, capabilities}` manifest and approve it with `--approve --request <id>`, which rewrites .harness/policy.json; editing that file by hand does not restore the approval";
   }
   return "only a project task runner command with arguments can be approved";
 }
