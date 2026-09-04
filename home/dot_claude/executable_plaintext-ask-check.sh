@@ -1,54 +1,65 @@
 #!/bin/bash
-# Claude Code Stop hook -> 平文で判断を仰いだまま turn を終えた違反の検知（kryota-dev/dotfiles#616）。
+# Claude Code Stop hook -> warn when a turn ends by asking for a decision in plain text
+# (kryota-dev/dotfiles#616).
 #
-# 何を見ているか（#616 で実機採取した Stop payload が根拠。docs/explanation/plaintext-ask-detection.md）:
-#   - last_assistant_message  応答本文。実装が「トランスクリプトを読まずに済ませるため」と説明する
-#                             フィールドで、末尾が判断を仰ぐ語句で終わっているかをここで見る。
+# What it reads, and why (the payload was captured on a real machine in #616; see
+# docs/explanation/plaintext-ask-detection.md):
+#   - last_assistant_message  The reply text. The runtime documents this field as existing so
+#                             hooks can avoid reading and parsing the transcript; stage 1 tests
+#                             its closing line for a decision-seeking phrase.
 #   - transcript_path / prompt_id
-#                             prompt_id は turn を開始した user エントリの promptId と一致する
-#                             （実データで確認済み）。そこから次のプロンプトまでの間に
-#                             AskUserQuestion の tool_use があるかを見て、「この turn でちゃんと
-#                             選択肢を出したか」を判定する。
-#   - background_tasks        空でなければ「session is done」ではなく「バックグラウンド待ちで
-#                             止まっている」。#447 の実測（サブエージェントへ委任した親は途中で
-#                             Stop を出し、同じ prompt_id のまま再開して AskUserQuestion を出す）を
-#                             ここで落とす。Stop はターンの終わりを意味しない。
+#                             prompt_id equals the promptId of the user entry that opened the
+#                             turn (verified against real transcripts). Everything from there
+#                             until the next prompt is this turn, and that is the window in
+#                             which AskUserQuestion either was or was not called.
+#   - background_tasks        A non-empty array means the session is paused waiting for
+#                             background work, not finished. #447 measured a parent that
+#                             delegated to a subagent emitting Stop mid-turn and resuming under
+#                             the same prompt_id: Stop is not the end of a turn.
 #
-# 誤検知の向き: 許容するのは「止めない側」＝ 見逃し。判断を仰ぐ語句は下の定数に明示列挙するだけで、
-# 「〜ですか？」のような一般形は入れない。報告や要約が問いかけ調で終わる通常のケースを止めないため。
+# Direction of error: the tolerated one is "do not stop" — a missed violation is acceptable, a
+# warning on an ordinary report is not. The phrase lists below are enumerated on purpose and
+# exclude general question forms, and position is part of the test (see match_decision_phrase).
 #
-# 沈黙する故障の禁止（#616 の要件）: 検知器が壊れたときに「違反 0 件」と同じ出力になってはならない。
-# stderr へ status=ok / skipped / violation / error を必ず 1 行出し、ok と error を別の値にする。
-# 語句が一致したのに検証できなかった場合はユーザー向けにも「判定できなかった」と表示する。
+# No silent failure (#616): a broken detector must not look like zero findings. Exactly one
+# status line — ok / skipped / violation / error — always goes to stderr, and ok and error are
+# different values. When a phrase matched but the turn could not be checked, the user is told
+# so as well.
 #
-# ブロックしない契約（同期 hook, timeout 5）: あらゆる経路で exit 0 を返し、decision:"block" も
-# continue:false も出力しない。これは blocking gate ではなく気付きのための警告である。
+# Never blocks (synchronous hook, timeout 5): every path exits 0 and nothing emits
+# decision:"block" or continue:false. This is a nudge, not a gate.
 #
-# なぜ async ではないか: async hook の stdout はモデル向け attachment として後から配送される
-# （実装の checkForNewResponses / responseAttachmentSent 経路）。ここで出したいのは turn 終了時点で
-# 利用者の画面に出る systemMessage であってモデルへの差し戻しではないので、同期エントリにする。
+# Why not async: an async hook's stdout is collected later and delivered as a model-facing
+# attachment (the runtime's checkForNewResponses / responseAttachmentSent path). The message
+# here is for the user at turn end, so the settings.json entry is synchronous.
 #
-# 応答本文はディスクに書かない。systemMessage に載せるのは一致した語句だけ。
+# The reply text is never written to disk; only the matched phrase reaches the systemMessage.
 set -euo pipefail
 
-# 末尾だけを見る。違反の形が「応答の末尾に平文で書いて待つ」であり、報告の途中に現れて本人が後段で
-# 答えている問いを拾わないため。
+# Only the tail of the reply is examined: the observed violation shape is a question written at
+# the very end, and looking further back would pick up questions the reply itself goes on to
+# answer.
 #
-# 単位が「バイト」ではなく「文字」なのは実測に基づく: バイトで切ると多バイト文字の途中で切れることが
-# あり、そうなると BSD/ugrep の `grep -F` は **その後ろにある完全な日本語語句すら一致しなくなる**
-# （LC_ALL=C でも同じ）。1200 バイトを超える応答は珍しくないので、これは検知が黙って落ちる経路だった。
-# bash の部分文字列展開は UTF-8 ロケールで文字単位に働き（bash 3.2 で確認済み）、境界を割らない。
+# The unit is characters rather than bytes, and that is load-bearing. A byte cut can land inside
+# a multi-byte character, and BSD/ugrep's `grep -F` then fails to match even a fully intact
+# Japanese phrase that follows the damaged bytes (measured; LC_ALL=C does not help). Replies
+# longer than the window are the common case, so a byte window failed silently on exactly the
+# turns this hook exists for. Bash substring expansion counts characters in a UTF-8 locale
+# (verified on bash 3.2) and never splits one.
 TAIL_SCAN_CHARS="${PLAINTEXT_ASK_TAIL_SCAN_CHARS:-400}"
-# 窓を極端に小さくすると、何も一致しなくなって「違反なし」に見える。他の失敗経路がすべて error に
-# 倒れるのにここだけ ok に倒れるのは、この hook の設計目標そのものへの反例なので下限を設けて弾く。
+# A window shrunk to nothing matches nothing and looks like a clean turn. Every other failure
+# mode here reports error, so leaving this one to report ok would be the single way to disable
+# the detector without a trace — the exact asymmetry this hook is built not to have.
 TAIL_SCAN_CHARS_MIN=40
-# これを超えるトランスクリプトは走査を諦める。諦めたことは error として必ず告げる（黙って ok にしない）。
-# 上限の根拠（実測）: 実トランスクリプトを連結した 417 MB の JSONL を下の jq 走査が 3.4 秒で処理した
-# （約 120 MB/s）。64 MiB なら約 0.55 秒で、hook の timeout 5 秒に対しておよそ 9 倍の余裕がある。
+# Transcripts past this size are not scanned, and giving up is reported as error rather than
+# quietly passing. The bound is measured: the jq scan below processed 417 MB of concatenated
+# real transcripts in 3.4 s (~120 MB/s), so 64 MiB is roughly 0.55 s — about nine times under
+# the hook's 5 s timeout.
 MAX_TRANSCRIPT_BYTES="${PLAINTEXT_ASK_MAX_TRANSCRIPT_BYTES:-67108864}"
 
-# 判断を仰ぐ語句（日本語）。bash の固定パターン照合なのでロケールにも外部コマンドにも依存しない。
-# 意図的に狭い。「お知らせください」「教えてください」のような通常の結びは入れない。
+# Decision-seeking phrases, Japanese. Matched with bash pattern matching, so this depends on
+# neither the locale nor an external command. Deliberately narrow: ordinary closings such as
+# "お知らせください" and "教えてください" are left out.
 DECISION_SEEKING_JA=(
   "よろしいですか"
   "よろしいでしょうか"
@@ -82,19 +93,22 @@ DECISION_SEEKING_JA=(
   "指定してください"
 )
 
-# 判断を仰ぐ語句（英語）。ASCII のみなので大文字小文字を無視した ERE で照合する。
+# Decision-seeking phrases, English. ASCII only, so a case-insensitive ERE is safe here.
 DECISION_SEEKING_EN='shall i (proceed|continue|go ahead)|should i (proceed|continue)|would you like me to|do you want me to|let me know (which|whether|if you)|which (one|option|approach) (do|would|should)'
 
-# 行末から取り除く「飾り」。閉じ括弧・閉じ引用符・空白まで。文末句読点はここには入れない
-# （英語の「? で終わるか」判定に必要なので、日本語側だけがあとから追加で剥がす）。
-# U+201D / U+2019 はバイト列で書く。リテラルの curly quote は shellcheck が SC1112
-# （タイプミスで混入した引用符）として弾くため。
+# Trailing ornaments stripped from a line: closing brackets, closing quotes and whitespace.
+# Sentence punctuation is deliberately NOT here — the English test needs to know whether the
+# line ends in "?", so only the Japanese test strips terminators on top of these.
+# U+201D and U+2019 are written as bytes because shellcheck flags literal curly quotes (SC1112)
+# as characters typed by mistake.
 TRAILING_DECORATIONS=(' ' $'\t' $'\r' '"' "'" '）' ')' '」' '』' '】' ']'
   $'\xe2\x80\x9d' $'\xe2\x80\x99')
-# 日本語側で追加に剥がす文末句読点。剥がしたあと「語句で終わっているか」を見る。
+# Sentence terminators the Japanese test strips in addition, before asking whether what is left
+# ends with a phrase.
 SENTENCE_TERMINATORS=('？' '?' '。' '.' '！' '!' '…')
 
-# status は必ず 1 行出す。ok と error が別の値であることが、この検知器が沈黙で壊れないための条件。
+# Exactly one status line, always. ok and error being distinguishable is what keeps this
+# detector from failing silently.
 emit_status() {
   printf 'plaintext-ask-check: status=%s reason=%s\n' "$1" "${2:--}" >&2
 }
@@ -103,7 +117,7 @@ emit_system_message() {
   jq -n --arg m "$1" '{systemMessage: $m}'
 }
 
-# 指定した接尾辞群を、変化しなくなるまで末尾から剥がす。
+# Strip the given suffixes from the end, repeatedly, until nothing changes.
 strip_suffixes() {
   local s="$1" prev="" p
   shift
@@ -116,10 +130,10 @@ strip_suffixes() {
   printf '%s' "$s"
 }
 
-# 応答が「問いで終わっている」かを見るための締めの 1 行を取り出す。
-# 末尾から空行と箇条書き・引用・表の行を捨てていき、最初に現れた通常の行を返す。観測された違反形は
-# 問いの「下」に選択肢を並べることが多く、最終行がそのまま `- B: ...` になるため、最終行をそのまま
-# 使うと取り落とす。
+# Find the closing line — the one that decides whether the reply ends by asking. Blank, list,
+# quote and heading lines are discarded from the bottom up: the observed violation shape puts
+# the choices *under* the question, so the literal last line is often `- B: ...` rather than
+# the ask, and taking it verbatim would miss the case this hook was written for.
 closing_line() {
   local text="$1" line
   while [ -n "$text" ]; do
@@ -143,12 +157,14 @@ closing_line() {
   return 1
 }
 
-# 締めの行が判断要求で「終わって」いれば、その語句を stdout に出して 0 を返す。
+# Print the phrase and return 0 when the closing line *ends* by asking for a decision.
 #
-# 位置を要求するのが要点。窓の中のどこかに語句があれば当てる形にすると、完了報告の中で
-# 「『この方針で進めてよろしいですか？』と尋ねた」と引用しただけで violation になる。
-# 日本語の語句は文末に来るので「文末句読点を剥がした行がその語句で終わること」を、英語の語句は
-# 文頭寄りに来るので「行が ? で終わること」を条件にする。
+# Requiring the position is the point. Matching a phrase anywhere in the window would flag a
+# completion report that merely quotes the question it once asked. Japanese phrases are
+# sentence-final, so the line must end with one once sentence punctuation is stripped; English
+# phrases are sentence-initial, so the line must end with "?" instead. That one rule is what
+# separates "Let me know if you want me to proceed?" from "Done. Let me know if you spot
+# anything else."
 match_decision_phrase() {
   local line="$1" phrase stripped hit
   stripped="$(strip_suffixes "$line" "${SENTENCE_TERMINATORS[@]}" "${TRAILING_DECORATIONS[@]}")"
@@ -172,12 +188,15 @@ match_decision_phrase() {
   return 1
 }
 
-# トランスクリプトを 1 パスで畳み、`<bad> <seen> <ask>` の 1 行にして返す。
+# Fold the transcript into one `<bad> <seen> <ask>` line in a single pass.
 #
-# 行ごとに独立に parse するので、壊れた 1 行が jq 全体を中断させて検知を静かに落とすことはない
-# （壊れた行は bad として必ず告げる）。窓は prompt_id が現れた行から**次のプロンプトの手前**まで。
-# turn の途中で返る tool_result エントリは同じ promptId を持つので窓を閉じない（実データで確認）。
-# 状態を畳むだけなので、走査中に保持するのは定数個の真偽値だけで、行数に比例して増えない。
+# Each line is parsed on its own, so one corrupt line cannot abort the scan and take the
+# detection down with it quietly — a corrupt line sets bad, which is reported. The window runs
+# from the line carrying prompt_id up to, but not including, the next prompt: tool_result
+# entries returned during the turn carry the same promptId and therefore do not close it
+# (verified against real transcripts), while a later well-behaved turn cannot reach back and
+# clear this one. Folding into a fixed set of booleans keeps memory constant no matter how
+# large or how corrupt the file is.
 scan_turn() {
   local transcript="$1" prompt_id="$2"
   jq -nRr --arg pid "$prompt_id" '
@@ -210,14 +229,15 @@ main() {
   local input fields ev active agent bgcount prompt_id transcript
   local msg tail_text line phrase verdict bad seen ask size
 
-  # jq が無い環境では判定できない。他の hook のような silent no-op にはしない —— 判定不能を
-  # 「違反 0 件」と同じ沈黙で表すことこそ、この検知器が禁じている故障だから。
+  # Without jq nothing can be decided. Unlike the sibling hooks this is not a silent no-op:
+  # expressing "cannot evaluate" as the same silence as "no violations" is precisely the
+  # failure this detector forbids.
   if ! command -v jq >/dev/null 2>&1; then
     emit_status error "jq-unavailable"
     return 0
   fi
 
-  # 窓の大きさが壊れていたら、何も一致しないのを「違反なし」と呼ばずに error として告げる。
+  # A broken window size is reported as error rather than allowed to masquerade as a clean turn.
   case "$TAIL_SCAN_CHARS" in
     '' | *[!0-9]*)
       emit_status error "invalid-tail-scan-chars"
@@ -241,8 +261,9 @@ main() {
     return 0
   fi
 
-  # 区切りに U+001F（unit separator）を使う。タブや空白は bash の IFS で連続分が 1 個に畳まれ、
-  # 空フィールドが詰まって以降の値が 1 つずつずれるため、空になりうる値の並びには使えない。
+  # U+001F (unit separator) is the delimiter. Tabs and spaces are IFS whitespace, which bash
+  # collapses in runs, so an empty field would vanish and shift every value after it by one —
+  # unusable for a sequence in which several fields can legitimately be empty.
   fields="$(printf '%s' "$input" | jq -j '
     (.hook_event_name // ""), "\u001f",
     ((.stop_hook_active // false) | tostring), "\u001f",
@@ -257,7 +278,7 @@ main() {
   fi
   IFS=$'\037' read -r ev active agent bgcount prompt_id transcript <<<"$fields" || true
 
-  # 以下は「評価対象外」であって「違反なし」ではない。理由を添えて skipped で抜ける。
+  # What follows is out of scope, which is not the same as "no violation" — each exit says why.
   if [ "$ev" != "Stop" ]; then
     emit_status skipped "not-stop-event"
     return 0
@@ -271,20 +292,21 @@ main() {
     return 0
   fi
   if [ "$bgcount" != "0" ]; then
-    # バックグラウンド待ちで止まっているだけ。turn はまだ終わっていない（#447）。
+    # Paused waiting for background work; the turn has not ended yet (#447).
     emit_status skipped "background-tasks-in-flight"
     return 0
   fi
 
   msg="$(printf '%s' "$input" | jq -r '.last_assistant_message // ""' 2>/dev/null || true)"
   if [ -z "$msg" ]; then
-    # tool 呼び出しだけで終わった turn など。本文が無ければ判定材料が無い。
+    # A turn that ended on tool calls alone, for instance. No text, nothing to judge.
     emit_status skipped "no-assistant-message"
     return 0
   fi
 
-  # 長さでクランプする。bash 3.2 の `${var: -N}` は N が文字列長を超えると **黙って空文字列を返す**
-  # （実測）。窓より短い応答がすべて「語句なし」に落ちる沈黙経路になるので、負の offset を渡さない。
+  # Clamp before slicing. Bash 3.2's `${var: -N}` returns the empty string when N exceeds the
+  # length instead of clamping (measured), which would drop every reply shorter than the window
+  # into "no phrase found" — another silent path to a clean-looking result.
   if [ "${#msg}" -gt "$TAIL_SCAN_CHARS" ]; then
     tail_text="${msg: -$TAIL_SCAN_CHARS}"
   else
@@ -299,16 +321,16 @@ main() {
     return 0
   fi
 
-  # ここから先はトランスクリプトを読む。締めの行が判断要求で終わっていたときだけなので、
-  # 通常の turn では走らない。
+  # Only now is the transcript read. Because the closing line rarely ends by asking, an
+  # ordinary turn never gets this far.
   if [ -z "$prompt_id" ]; then
     emit_status error "no-prompt-id"
     emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、payload に prompt_id が無く turn を特定できませんでした（判定不能であって違反なしではありません）。"
     return 0
   fi
-  # 読む前に、渡されたパスが素性のわかる通常ファイルであることを確かめる（姉妹 hook の
-  # wave-session-event.sh が session_id を UUID 検証してから使うのと同じ方針。ランタイムが
-  # 生成した値でも未検証の入力として扱う）。
+  # Check the path before reading it. The sibling hook wave-session-event.sh validates
+  # session_id as a UUID before putting it in a filename for the same reason: a value the
+  # runtime generated is still treated as untrusted input.
   case "$transcript" in
     *.jsonl) ;;
     *)
