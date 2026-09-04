@@ -327,6 +327,10 @@ provides that endpoint so a wave child can reach the user without a terminal: no
 screen, nothing sends keystrokes, and nothing has to guess whether a prompt is still
 unanswered — being called *is* the question, and the return value *is* the answer.
 
+Why this rather than a `PreToolUse` `defer` hook or a `PermissionRequest` hook, and what would
+change that answer, is recorded in
+[ADR 0001](../decisions/0001-fh-approval-channel.md).
+
 Wire it into a child session as its own MCP server, and keep the two hardening flags that make
 the channel a trust boundary rather than a suggestion:
 

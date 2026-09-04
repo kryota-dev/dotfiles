@@ -57,6 +57,21 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 | [Why it's built this way](explanation/design-rationale.md) | Load-bearing WHYs: single-tarball caching, SHA-pin not tag, config-shared/state-isolated, sourced-not-exported secrets, no `make apply` |
 | [Secrets & account-isolation design](explanation/secrets-and-isolation.md) | How `op://` refs render to `0600` files at apply, runtime-graceful vs apply-strict, and how this composes with account isolation |
 
+### Decisions
+
+Numbered, dated architecture decision records. Each one states a decision, the options weighed
+against it, and what would justify re-opening it. An ADR is a record of a moment, not a live
+reference — when the decision changes, add a new ADR rather than rewriting the old one.
+
+**ADR or [design rationale](explanation/design-rationale.md)?** Write an ADR when you compared
+named alternatives and explicitly rejected some of them, so the rejections and the conditions that
+would reverse them are worth keeping. Write a design-rationale section when there is one choice to
+justify and no formal rejection to record.
+
+| ADR | Description |
+|-----|-------------|
+| [0001 — Keep the MCP permission-prompt tool as fh's approval channel](decisions/0001-fh-approval-channel.md) | Why `PreToolUse` `defer` and the `PermissionRequest` hook do not replace fh's approval channel, what each was verified to do, and the triggers that would re-open the question |
+
 ---
 
 ## What goes where
@@ -68,6 +83,7 @@ This repo (`kryota-dev/dotfiles`) is a chezmoi-managed macOS-first dotfiles set 
 | Deployed `home/AGENTS.md.tmpl`, `home/dot_claude/CLAUDE.md` | Self-contained agent instructions that work on any machine **without the repo checked out** | Pointers into docs/ — deployed files must be self-sufficient |
 | Per-skill `SKILL.md` (inside each skill dir) | Authoritative per-skill reference (purpose, usage, examples) | Taxonomy or "how to add a skill" — that lives in `docs/agents/skills-provenance.md` |
 | `docs/` (this tree) | Deep on-demand reference, how-to, and explanation for humans and AI agents working IN the repo | Quick-start copy that duplicates README; content that must survive without the repo (use deployed files for that) |
+| `docs/decisions/` | One dated ADR per decision: the options weighed, why one won, and what would re-open it | Mechanics of how the chosen thing works — those belong in the reference doc the ADR links to |
 
 ---
 
