@@ -689,6 +689,48 @@ nothing else: `make test-node` still misses, `make lint; curl …` still splits 
 segment that no approval covers, and `/tmp/evil/make lint` is still refused for not being in
 an approvable form.
 
+### What `uv run` may be approved as
+
+`uv run` is approvable only as `uv run <script>` — exactly one argument, a bare script name
+starting with a letter, digit, or underscore and drawn from `[A-Za-z0-9_.-]`. Paths and options are
+not approvable, so `uv run /tmp/evil/payload`, `uv run ./payload`, `uv run scripts/build.py`,
+`uv run --script /tmp/x.py`, and `uv run --with requests python` are all rejected as not being in an
+approvable form. `uv run` on its own is rejected for the reason every other runner requires an
+argument.
+
+The narrowing is specific to `uv run` for the same kind of reason `make`'s is. Every other
+approvable runner dispatches to something the repository defines — `npm run test` to
+`package.json`, `pytest` and `go test` to test discovery. `uv run` is the one that executes
+whatever file its argument names, so the broad runner character set, which contains `/` and `.`,
+would put `uv run /tmp/evil/payload` inside the approvable grammar. Dropping `/` closes path-named
+execution outright, and since an argument cannot contain `/` it cannot climb out either — the `..`
+check `make` needs has no counterpart in this branch. A filename at the repository root
+(`uv run main.py`) still passes, and it sits where a `make` target does: `/`-free, therefore this
+repository's own.
+
+Exactly one argument is allowed, and that bound does work the character set cannot. `uv` resolves
+`uv run <name>` through the project environment's `bin` first and then `PATH`, so no syntactic rule
+can guarantee that a bare name reaches a `[project.scripts]` entry point the way `npm run` simply
+fails when `package.json` has no such script. The residual is a bare name resolving to a `PATH`
+binary; capping the argument count at one means such a binary is approvable only with no arguments
+of its own. The cost is that `uv run pytest tests/` is no longer approvable — `pytest tests/` still
+is, through the runner branch.
+
+**Existing approvals.** This narrowing invalidates approvals that were legitimate when they were
+granted. A `.harness/policy.json` still listing `uv run --with requests python` now fails
+validation, and the failure is not scoped to that entry: `normalizeManifest` rejects the manifest as
+a whole, so `fh run` sees an empty manifest with `policyIntegrity.ok: false` and every command in
+that repository — including ones that are still approvable — becomes a gap. The direction is
+fail-closed: execution stops and nothing is newly authorised.
+
+Recovery is to grant a fresh approval, which is what the rejection reason spells out: run
+`fh onboard --manifest <file>` with a corrected manifest — a bare `{commands, domains, capabilities}`
+object, *not* the policy envelope, which `normalizeManifest` refuses for its `version` key — and then
+approve it with `--approve --request <id>` from that review run. Approving rewrites
+`.harness/policy.json` outright, so editing the file by hand accomplishes nothing on its own: the
+approvals ledger, not the file, is what makes an approval current. There is no migration that
+preserves the old approval, because what was approved is a form that is no longer approvable.
+
 ## Review registry
 
 ```bash

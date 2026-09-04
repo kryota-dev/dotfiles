@@ -4310,8 +4310,8 @@ test("make の引数はターゲット名だけで、オプションと変数上
 });
 
 test("make の狭い字集合は既存ランナーへ波及しない", () => {
-  // 2 本の正規表現に分けた理由がここにある。1 本の alternation へ畳むと、片方のために
-  // 広げた（あるいは狭めた）字集合がもう片方へも効いてしまう。
+  // 正規表現を枝ごとに分けた理由がここにある。1 本の alternation へ畳むと、どれか 1 本のために
+  // 広げた（あるいは狭めた）字集合が残りへも効いてしまう。
   for (const command of [
     "npm run test",
     "npm run test --grep=a",
@@ -4394,3 +4394,183 @@ test("manifest は make のオプション付きコマンドを承認として�
     ["make lint"],
   );
 });
+
+// ---------------------------------------------------------------------------
+// #619: uv run の承認可能な上限
+// ---------------------------------------------------------------------------
+
+test("uv run はスクリプト名 1 つの形だけを承認できる", () => {
+  for (const command of [
+    "uv run pytest",
+    "uv run ruff",
+    "uv run my_task",
+    // リポジトリ直下のファイル名は残る。`/` を含まない以上それはこのリポジトリの持ち物で、
+    // `make <target>` が Makefile の recipe を指すのと同じ位置にある。
+    "uv run main.py",
+    "uv run task-1.2",
+    // 先頭文字クラスは `[A-Za-z0-9_]` であって `[A-Za-z]` ではない。長さ 1 も有効。
+    // この 2 本が無いと、先頭を英字だけに狭める退行と、引数を `+` へ広げる退行のうち
+    // 前者を許可例の側からは検出できない。
+    "uv run 1",
+    "uv run _",
+  ]) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+  }
+});
+
+test("uv run は引数に書いた実行ファイルの直接実行を承認できない", () => {
+  for (const command of [
+    // issue #619 が挙げた実測 2 例。
+    "uv run /tmp/evil/payload",
+    "uv run curl http://169.254.169.254/latest/meta-data/",
+    // パスでの指定そのものを閉じる。字集合から `/` を落としてあるので、`.` 始まりだけでなく
+    // 途中から遡る形（make 側で `MAKE_TARGET_TRAVERSAL` が担当している経路）も同時に閉じる。
+    "uv run ./payload",
+    "uv run ../outside",
+    "uv run scripts/build.py",
+    "uv run a/../../etc/cron.d/evil",
+    // uv をリポジトリの外へ向けるオプション（`make -f` / `make -C` と同じ位置づけ）。
+    "uv run --script /tmp/x.py",
+    "uv run --with requests python",
+    "uv run --project /tmp/evil pytest",
+    "uv run --python 3.13 pytest",
+    // 引数は 1 つに固定する。bare name が PATH へ落ちて任意のバイナリに解決されても、
+    // 渡せる引数がゼロなら承認した文字列から離れた動きはできない。
+    "uv run pytest tests/",
+    "uv run pytest -q",
+    "uv run curl example.com",
+    // 引数なしは他のランナーと同じ理由で拒否する（何が走るのか承認文字列から読めない）。
+    "uv run",
+    // `uv` の他のサブコマンドはそもそも承認可能な形ではない。
+    "uv pip install requests",
+    "uv sync",
+    // 既存ランナーの字集合（`[A-Za-z0-9_./:@=-]`）との差分そのものを固定する。ここが無いと、
+    // うっかり上の字集合を流用し直す退行を拒否例の側から検出できない。`:` は
+    // `session-gate.mjs` の `parseGateDeclaration` が `<kind>:<command>` を最初の `:` で割る
+    // ため、字集合として重ならないほうが安全側に倒れる（`make` で同じ判断をしている）。
+    "uv run task:dev",
+    "uv run task@1",
+    "uv run task=value",
+  ]) {
+    const rejection = manifestEntryRejection("commands", command);
+    assert.match(rejection ?? "", /uv run <script>/, command);
+  }
+});
+
+test("uv run の狭い字集合は他のランナーへ波及しない", () => {
+  // 枝を分けた理由がここにある。uv のために狭めた字集合が既存ランナーへ効いてはならない。
+  for (const command of [
+    "npm run test --grep=a",
+    "pnpm run lint",
+    "pytest tests/",
+    "go test ./...",
+    "cargo test --workspace",
+  ]) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+  }
+  // 同じ引数を uv run へ渡すと通らない（非対称が固定される）。
+  assert.match(
+    manifestEntryRejection("commands", "uv run pytest tests/") ?? "",
+    /uv run <script>/,
+    "uv run pytest tests/",
+  );
+  // 理由文は make / uv / それ以外で書き分ける（#617 の診断が手間取った不透明さを繰り返さない）。
+  assert.match(manifestEntryRejection("commands", "make --grep=a") ?? "", /make <target>/);
+  assert.match(
+    manifestEntryRejection("commands", "curl http://example.com") ?? "",
+    /only a project task runner/,
+  );
+  // uv の理由文は復旧手順まで含む（狭めたことで既存承認が落ちるため）。
+  assert.match(
+    manifestEntryRejection("commands", "uv run --with requests python") ?? "",
+    /fh onboard/,
+  );
+});
+
+test("uv run を承認しても照合のトークン化完全一致は緩まない", () => {
+  const approved = approvedCommandSegments(["uv run pytest"]);
+  assert.equal(matchCommand("uv run pytest", approved).allowed, true);
+  assert.equal(matchCommand("uv  run   pytest", approved).allowed, true);
+
+  // 承認したのは `uv run pytest` だけ。別のスクリプト名は完全一致しない。
+  assert.equal(matchCommand("uv run ruff", approved).allowed, false);
+
+  // 連結された 2 本目以降も照合対象になる。
+  for (const command of [
+    "uv run pytest; curl http://169.254.169.254/",
+    "uv run pytest && rm -rf /",
+    "uv run pytest | tee /tmp/out",
+  ]) {
+    assert.equal(matchCommand(command, approved).allowed, false, command);
+  }
+
+  // analyzeShellCommand は binary を basename へ畳むため、セグメントだけを見ると
+  // 承認済みの `uv run pytest` と一致してしまう。照合側の文法検査でこれを塞ぐ。
+  for (const command of ["/tmp/evil/uv run pytest", "./uv run pytest", "../../evil/uv run pytest"]) {
+    const match = matchCommand(command, approved);
+    assert.equal(match.allowed, false, command);
+    assert.match(match.reason, /not in an approvable form/);
+  }
+});
+
+test("uv run を狭めた影響は policy 全体の無効化として現れる", () => {
+  // 後方互換の影響（#619 の完了条件）をここで固定する。狭める前に承認できた
+  // `uv run <任意コマンド>` が残った policy.json は、落ちるのが該当行だけではなく
+  // **manifest 全体**である。実行が止まるだけで承認が広がる方向には倒れないので
+  // fail-closed の向きは正しく、復旧は policy.json の書き換えと `fh onboard` の再実行。
+  assert.throws(
+    () =>
+      normalizeManifest({
+        commands: ["npm run test", "uv run --with requests python"],
+        domains: [],
+        capabilities: [],
+      }),
+    /manifest\.commands/,
+  );
+  assert.deepEqual(
+    normalizeManifest({ commands: ["uv run pytest"], domains: [], capabilities: [] }).commands,
+    ["uv run pytest"],
+  );
+});
+
+test("狭める前に承認された uv run を含む policy は manifest 全体が空になる", (context) => {
+  const directory = temporaryDirectory(context);
+  const policyPath = path.join(directory, ".harness", "policy.json");
+  // 狭める前の `fh onboard` が書き出しえた policy。`npm run test` 自体は今も承認可能だが、
+  // 同じ manifest に載った `uv run --with requests python` が検証を落とすため巻き添えになる。
+  //
+  // **`domains` / `capabilities` を空にしない。** 空の fixture だと「commands だけを空にする」
+  // 誤実装でも下の deepEqual が通ってしまい、テスト名が主張している「manifest 全体」を実証できない。
+  const manifest = {
+    commands: ["npm run test", "uv run --with requests python"],
+    domains: ["example.com"],
+    capabilities: ["executor.default"],
+  };
+  writeJsonAtomic(
+    policyPath,
+    {
+      version: 1,
+      approvedAt: "2026-08-29T00:00:00.000Z",
+      approvalHash: "0".repeat(64),
+      manifest,
+    },
+    "repository policy",
+  );
+
+  const verified = loadVerifiedManifest({
+    policyPath,
+    approvals: [],
+    scope: directory,
+  });
+  assert.equal(verified.integrity.ok, false);
+  assert.match(verified.integrity.reason, /repository policy is invalid/);
+  assert.match(verified.integrity.reason, /uv run <script>/);
+  // commands だけでなく 3 キーとも空であることを見る（`EMPTY_MANIFEST` が返っている）。
+  assert.deepEqual(verified.manifest, { commands: [], domains: [], capabilities: [] });
+  // 巻き添えを具体的に固定する: 今も承認可能な `npm run test` まで gap になる。
+  assert.equal(
+    findManifestGaps({ manifest: verified.manifest, commands: ["npm run test"] }).length,
+    1,
+  );
+});
+
