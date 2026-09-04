@@ -229,8 +229,15 @@
       // above). tests/ax.bats asserts the two versions agree, so a bump that arrived as
       // two PRs would make BOTH of them red — each one half-applies the update — and
       // neither could merge alone. Grouping them onto one branch is what keeps that
-      // assertion satisfiable. tests/ax.bats also asserts this rule still exists, because
-      // deleting it would not break anything until the next ax release.
+      // assertion comfortable to live with. tests/ax.bats also asserts this rule still
+      // exists, because deleting it would not break anything until the next ax release.
+      //
+      // It is not a guarantee, though: the two managers read different datasources
+      // (github-releases for the built-in mise manager, github-tags for the one above), so
+      // nothing forces them to detect a release in the same run. If they ever split, the
+      // CLI-only half is a one-file +1/-1 diff — the exact shape the merge gate's fast
+      // lane accepts. What stops it is the required check, not the gate: that branch fails
+      // tests/ax.bats and `Test` is required on main, so it cannot reach automerge.
       matchPackageNames: [
         'yusukebe/ax',
       ],

@@ -185,7 +185,9 @@ ECC と同様に **phone-harness の更新も必ずマージ前に審査され�
 
 phone-harness は PyPI リリースと可動 `main` 上のコミットという、本当に独立した 2 つのデータソースを pin しているので、スキル側の pin が遅れても無害です。**ax の 2 つの pin は同一リリース由来**であり、しかも ax は `v0.1.x` で安定 API の宣言がありません。別バージョンのフラグを説明する `SKILL.md` は、見た目上の遅れではなく実害になりえます。そのため `tests/ax.bats` が `[ax].version` と mise の pin が同じバージョンを指すことを検証します。
 
-この検証が成立し続けるのは、Renovate が 2 つを 1 単位でバンプするからです。`renovate.json5` の `yusukebe/ax` の `packageRule` が両 manager に同じ `groupName` を与えるため、リリースは単一 PR として届きます。2 つに割れると、各 PR は更新を半分だけ適用した状態になって検証が赤くなり、どちらも単独でマージできません。この group ルールの存在自体も `tests/ax.bats` が検証します。削除しても次の ax リリースまで何も壊れないからです。
+`renovate.json5` の `yusukebe/ax` の `packageRule` が両 manager に同じ `groupName` を与えるため、リリースは単一 PR として届きます。**ただしグルーピングは「この検証と共存しやすくする」ものであって、「安全を担保する」ものではありません** —— 2 つの manager は datasource が異なり（mise 組み込み manager は `github-releases`、custom manager は `github-tags`）、同じ Renovate 実行で必ず同時に検出される保証はないからです。この group ルールの存在自体は `tests/ax.bats` が検証します。削除しても次の ax リリースまで何も壊れないからです。
+
+万一 2 つに割れた場合、CLI 側だけの PR は 1 ファイル `+1/-1` の差分になり、これは `scripts/renovate-gate-classify.sh` が決定論的 fast lane に通す形そのものです。**防御線はゲートではなく必須チェックの側にあります**: そのブランチは `tests/ax.bats` の版一致アサーションで落ち、`Test` は `Lint` / `renovate-gate` と並んで main の必須ステータスチェックなので、native automerge には到達しません。解消は同一ブランチでもう一方の pin を 1 行揃えるだけで、ax の更新 PR は 2 ファイルに跨り fast lane の `file_count == 1` を満たさないため、いずれにせよエージェント審査が入ります。
 
 CLI の pin は fast lane の対象範囲である mise 設定にありますが、ax の更新がその lane に乗ることはありません。グループ化された PR は 2 ファイルに跨り、分類器の fast lane は 1 ファイル `+1/-1` の差分を要求するからです。1 つの PR が実行バイナリと、エージェントの web アクセスを導くスキル本文の両方を動かす以上、エージェント審査に落ちるのが正しい結果です。
 
