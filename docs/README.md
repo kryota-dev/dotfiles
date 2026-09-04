@@ -63,6 +63,11 @@ Numbered, dated architecture decision records. Each one states a decision, the o
 against it, and what would justify re-opening it. An ADR is a record of a moment, not a live
 reference — when the decision changes, add a new ADR rather than rewriting the old one.
 
+**ADR or [design rationale](explanation/design-rationale.md)?** Write an ADR when you compared
+named alternatives and explicitly rejected some of them, so the rejections and the conditions that
+would reverse them are worth keeping. Write a design-rationale section when there is one choice to
+justify and no formal rejection to record.
+
 | ADR | Description |
 |-----|-------------|
 | [0001 — Keep the MCP permission-prompt tool as fh's approval channel](decisions/0001-fh-approval-channel.md) | Why `PreToolUse` `defer` and the `PermissionRequest` hook do not replace fh's approval channel, what each was verified to do, and the triggers that would re-open the question |

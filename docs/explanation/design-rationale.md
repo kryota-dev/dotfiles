@@ -6,6 +6,8 @@
 
 This document explains the load-bearing design decisions behind the repo — the WHYs that don't surface naturally in the how-to docs. Each section names a decision, explains the problem it solves, and links to the reference doc that covers the mechanics.
 
+A decision that came out of weighing named alternatives, where the rejected options and the conditions that would reverse the choice are worth keeping, gets its own dated record under [`docs/decisions/`](../README.md#decisions) instead of a section here.
+
 ---
 
 ## Single-tarball caching over N individual downloads

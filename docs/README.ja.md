@@ -63,6 +63,11 @@
 条件を述べる。ADR は**その時点の記録**であって生きたリファレンスではない。決定が変わったら、
 古い ADR を書き換えるのではなく新しい ADR を追加する。
 
+**ADR と[設計判断の解説](explanation/design-rationale.ja.md)のどちらに書くか。** 名前の付いた
+代替案を比較し、そのいくつかを明示的に却下した判断は ADR に書く（却下した理由と、それを覆す
+条件を残す価値があるため）。選択肢が 1 つでその理由づけだけがある judgement は design-rationale
+に書く。
+
 | ADR | 説明 |
 |-----|------|
 | [0001 — fh の承認チャネルは MCP permission-prompt tool を維持する](decisions/0001-fh-approval-channel.ja.md) | `PreToolUse` の `defer` と `PermissionRequest` hook が fh の承認チャネルを置き換えられない理由、各機構について検証できた事実、判断を開き直すトリガ |

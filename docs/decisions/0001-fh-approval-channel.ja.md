@@ -1,8 +1,8 @@
 # ADR 0001: fh の承認チャネルは MCP permission-prompt tool を維持する
 
-← [ドキュメント目次](../README.ja.md)
-
 🌐 English (canonical): [0001-fh-approval-channel.md](0001-fh-approval-channel.md)
+
+← [ドキュメント目次](../README.ja.md)
 
 | | |
 |---|---|
@@ -55,13 +55,23 @@ grep -a -b -o -F 'tool_deferred' "$(mise which claude)" | head
 **3. 公開 changelog**（`anthropics/claude-code` の `CHANGELOG.md`）。挙動が導入されたリリースを確認する。
 
 Codex 側にはさらに強い情報源がある —— pin 済みの CLI が自分自身のプロトコルスキーマを生成できる。
-本リポジトリのランチャーは `--profile` を注入し `app-server` に拒否されるため、実バイナリを直接呼ぶ:
+ここで唯一、本リポジトリの `codex` ランチャーを迂回する必要があるコマンドである: ランチャーは
+argv に `--profile` が無いとき `--profile shared` を注入するが、`app-server` は `--profile` 自体を
+拒否する。Apple Silicon だけでなく両方の Homebrew prefix で動くよう、**ランチャー自身と同じ方法で**
+実バイナリを解決する:
 
 ```bash
 codex --version
-/opt/homebrew/bin/codex app-server generate-json-schema --out "$OUTDIR"
+CODEX_BIN="${CODEX_LAUNCHER_BIN:-$(ls /opt/homebrew/bin/codex /usr/local/bin/codex 2>/dev/null | head -1)}"
+OUTDIR="$(mktemp -d)"
+"$CODEX_BIN" app-server generate-json-schema --out "$OUTDIR"
 grep -o '"[a-z][a-zA-Z]*/[A-Za-z/]*"' "$OUTDIR/ServerRequest.json" | sort -u
 ```
+
+ランチャーの迂回は、スキーマを書き出すだけのこの読み取り専用コマンド 1 本に限定される。
+**一般化してはならない。** `codex exec` のような実行系サブコマンドを `--profile` 無しで呼ぶと、
+[Codex CLI ハーネス設定](../agents/codex.ja.md) が「既知のギャップがある」と述べている
+ガバナンスされていない権限経路に乗ることになる。
 
 この ADR が挙げるツールのバージョン（Claude Code 2.1.259、Codex CLI 0.150.1）は、**何をいつ
 確認したか**の記録である。日付付きの判断記録における出所情報であって、本リポジトリが他所で

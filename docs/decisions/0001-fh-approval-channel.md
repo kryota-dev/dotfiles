@@ -1,8 +1,8 @@
 # ADR 0001: Keep the MCP permission-prompt tool as fh's approval channel
 
-← [Docs index](../README.md)
-
 🌐 日本語: [0001-fh-approval-channel.ja.md](0001-fh-approval-channel.ja.md)
+
+← [Docs index](../README.md)
 
 | | |
 |---|---|
@@ -56,14 +56,23 @@ grep -a -b -o -F 'tool_deferred' "$(mise which claude)" | head
 introduced a behaviour.
 
 For the Codex side there is a stronger source still: the pinned CLI generates its own protocol
-schema. Invoke the real binary rather than this repo's launcher, which injects `--profile` and is
-rejected by `app-server`:
+schema. This is the one command here that has to reach past this repo's `codex` launcher: the
+launcher injects `--profile shared` whenever argv carries no `--profile`, and `app-server` rejects
+`--profile` outright. Resolve the real binary the way the launcher itself does, so the command
+works on both Homebrew prefixes rather than only on Apple Silicon:
 
 ```bash
 codex --version
-/opt/homebrew/bin/codex app-server generate-json-schema --out "$OUTDIR"
+CODEX_BIN="${CODEX_LAUNCHER_BIN:-$(ls /opt/homebrew/bin/codex /usr/local/bin/codex 2>/dev/null | head -1)}"
+OUTDIR="$(mktemp -d)"
+"$CODEX_BIN" app-server generate-json-schema --out "$OUTDIR"
 grep -o '"[a-z][a-zA-Z]*/[A-Za-z/]*"' "$OUTDIR/ServerRequest.json" | sort -u
 ```
+
+Going around the launcher is scoped to this one read-only introspection command, which dumps a
+schema and does nothing else. **Do not generalise it.** Calling an execution subcommand such as
+`codex exec` without `--profile` lands on the ungoverned permission path that
+[Codex CLI harness config](../agents/codex.md) describes as having known gaps.
 
 The tool versions named in this ADR (Claude Code 2.1.259, Codex CLI 0.150.1) record *what was
 checked and when*. They are provenance for a dated decision record, not pins that this repo
