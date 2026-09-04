@@ -73,6 +73,8 @@
 
 `eli5`（`anthropics/claude-plugins-community` 由来）も同じパターンに従いますが、対応する CLI は一切ありません — markdown のみなので、ピンは `[eli5].commit` の 1 つだけです。`phone-harness` との違いはソースパスです：`phone-harness` はリポジトリルートに `SKILL.md` を配置していますが、`eli5` はプラグインであり、スキル本体は `eli5/skills/eli5/SKILL.md` に置かれているため、raw URL にそのサブパスが含まれます。
 
+`ax`（`yusukebe/ax` 由来）は 3 例目であり、上記の「独立性」が**成り立たない**ケースです。`SKILL.md` は `skills/ax/SKILL.md` にあり、対応する CLI がこのリポジトリに存在します — `ax` 本体であり、mise ツール（`"github:yusukebe/ax"`）として pin されています（external がインストールするわけではありません）。2 つの成果物が*同一*の upstream リリース由来であり、かつ ax は `v0.1.x` で安定 API の宣言がないため、2 つの pin は drift を許さず lockstep に保ちます。`[ax]` は `commit` に加えて `version` を持ち、`tests/ax.bats` が `version` と mise の pin の一致を検証し、`renovate.json5` の `groupName` ルールが Renovate に両者を 1 PR でバンプさせます。詳しい根拠は [externals-and-pinning.ja.md](../architecture/externals-and-pinning.ja.md) を参照してください。
+
 ### 重複禁止ルール
 
 スキル名は `home/dot_agents/skills/<name>/`（curated）と external 宣言の**両方**に同時に存在してはなりません。chezmoi がソースからのディレクトリデプロイと同じパスへの external フェッチを同時に試み、コンフリクトが発生します。プロベナンス bats テストは、すべての curated スキルについてリテラルの external ヘッダーと `[ecc].skills` の全要素に対してこれを検証します。
@@ -131,6 +133,7 @@
 | supabase/agent-skills（`supabase`、`supabase-postgres-best-practices`） | 2 スキル | `.chezmoidata.toml` の `[skills].supabase_agent_skills_commit` |
 | ShawnPana/phone-harness（`phone-harness`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[phone_harness].commit` |
 | anthropics/claude-plugins-community（`eli5`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[eli5].commit` |
+| yusukebe/ax（`ax`） | 1 スキル（単一ファイル） | `.chezmoidata.toml` の `[ax].commit`（`[ax].version` と lockstep） |
 | ECC フックランタイム（`ecc/scripts`） | 1 エントリ（スキルではない） | 同じ `[ecc].commit` |
 | ECC `aside` コマンド | 1 エントリ（コマンド、スキルではない） | 同じ `[ecc].commit` |
 
@@ -177,6 +180,7 @@ chezmoi ソースからファイルを削除しても既にデプロイされた
 - `.chezmoiexternal.toml` が少なくとも 1 つの `[".agents/skills/..."]` external エントリを宣言し、`[ecc].commit` に紐付けられた ECC range ブロックを含む。
 - どのスキル名も curated ソースツリーと external 宣言の両方に同時に現れない（重複禁止ルール）。
 - `phone-harness` が `external` と判定され、curated ソースツリーに存在しない — 単一ファイル external のテーブル名を守るガード。これが崩れても表に出る症状は `unmanaged` への静かな降格だけであり（ランタイムチェックは報告するのみ）、他に気づく手段がない。
+- `ax` が `external` と判定され、curated ソースツリーに存在しない — 同じテーブル名のガード。ファイルを跨いだ関係（CLI の pin ↔ skill の pin ↔ external の形状 ↔ Renovate のグルーピング）は `tests/ax.bats` が別途検証する。
 - `home/AGENTS.md.tmpl` が 5 つのプロベナンスカテゴリすべてを記載している。
 - 廃止された unmanaged スキル（`agentcore`、`vercel-sandbox`、`patch-remote-control`、`find-skills`）がソースに存在しない。
 - 孤立した `sdd-*` サブエージェントが `home/dot_claude/agents/` に存在しない。

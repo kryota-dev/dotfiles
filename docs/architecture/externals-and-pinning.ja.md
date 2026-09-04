@@ -20,11 +20,12 @@
 | `aside` スラッシュコマンド | `affaan-m/ECC` | `file` | 1 |
 | phone-harness スキル | `ShawnPana/phone-harness` | `file` | 1 |
 | eli5 スキル | `anthropics/claude-plugins-community` | `file` | 1 |
+| ax スキル | `yusukebe/ax` | `file` | 1 |
 | Moralerspace フォント（macOS のみ） | `yuru7/moralerspace` | `archive` | 1 |
 
-宣言エントリ総数: <!-- FACT:external-static-entry-count -->25<!-- /FACT --> 件の静的エントリ（17 + 1 + 2 + 1 + 1 + 1 + 1 + 1）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。静的エントリ数は `tests/docs_facts.bats` が `.chezmoiexternal.toml` と突き合わせて検証します（pin 化する前に実際に drift していました。drawio と supabase が external として追加されたのに、この総数が取り残されていました）。
+宣言エントリ総数: <!-- FACT:external-static-entry-count -->26<!-- /FACT --> 件の静的エントリ（17 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + 1）と `range` 生成の ECC スキルエントリ（= `[ecc].skills` の長さ）の合計であり、配列に追随して自動的に変化します。静的エントリ数は `tests/docs_facts.bats` が `.chezmoiexternal.toml` と突き合わせて検証します（pin 化する前に実際に drift していました。drawio と supabase が external として追加されたのに、この総数が取り残されていました）。
 
-コールド apply での HTTP ダウンロード回数はエントリ数より少なくなります。取得の単位がエントリではなく**ユニークな URL** だからです。17 件の Anthropic エントリは 1 つのタールボールを共有し、2 件の Supabase エントリも別の 1 つを共有し、ECC ランタイムは `range` 生成の全 ECC スキルとタールボールを共有します。結果として Anthropic / drawio / Supabase / ECC / `aside.md` / phone-harness / eli5 / フォントそれぞれ 1 回ずつになります。
+コールド apply での HTTP ダウンロード回数はエントリ数より少なくなります。取得の単位がエントリではなく**ユニークな URL** だからです。17 件の Anthropic エントリは 1 つのタールボールを共有し、2 件の Supabase エントリも別の 1 つを共有し、ECC ランタイムは `range` 生成の全 ECC スキルとタールボールを共有します。結果として Anthropic / drawio / Supabase / ECC / `aside.md` / phone-harness / eli5 / ax / フォントそれぞれ 1 回ずつになります。
 
 ---
 
@@ -145,6 +146,7 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 | ECC スキル | `168h`（7 日） |
 | `aside` コマンド | `168h`（7 日） |
 | phone-harness スキル | `168h`（7 日） |
+| ax スキル | `168h`（7 日） |
 | Moralerspace フォント | `672h`（28 日） |
 
 期間内は chezmoi がネットワークリクエストなしにキャッシュコピーを返します。期間が切れると、次の `chezmoi apply` で再ダウンロードします（SHA が変わっていなければ同じバイト列を取得します）。
@@ -171,6 +173,21 @@ SHA は `home/.chezmoidata.toml` の `[ecc].commit` で定義されています�
 両者は upstream 履歴上の別地点にあってかまいません。`SKILL.md` は独立した markdown なので、スキル側の pin が遅れていてもインストール済みの CLI が壊れることはなく、最悪でもスキル本文が実際より少し古いヘルパーを説明するだけです。2 つの正規表現はいずれも `[phone_harness]` テーブルにスコープされており、隣接テーブルの `version =` / `commit =` を掴むことはありません。
 
 ECC と同様に **phone-harness の更新も必ずマージ前に審査されます**。しかもその理由は markdown のみのスキルアーカイブより強いものです。phone-harness は、実機のロック解除された端末の画面をキャプチャし HID レベルの入力を合成する実行可能な Python を配布し、その `SKILL.md` こそがエージェントをその操作へ導くものだからです。2 つの pin はどちらも覆われており、しかもどちらも名指しではありません。PyPI リリースは fast lane の対象外である `.chezmoidata.toml` に pin され、`SKILL.md` の digest は `digest` 更新としてやはりその lane に乗りません。保証を担っているのは**対象範囲**です —— `update dependency phone-harness to v1.2.3` は通常の CLI 更新と形が完全に同一であり、更新の*形*だけでは実アカウントを保持した端末への到達を止められないからです。
+
+### ズレてはいけない 2 つの pin: ax
+
+`ax` も 2 つの pin を持ち、テーブルの見た目は `[phone_harness]` と同じです。**しかし理由は逆**なので、上の drift 許容をそのまま持ち込まないでください。
+
+| pin | 対象 | データソース | 取得元 |
+|-----|------|------------|--------|
+| `version` | CLI（GitHub リリースの成果物） | `github-releases`（mise 組み込み manager 経由） | `run_onchange_after_12-setup-mise.sh.tmpl` → `mise install`（mise 設定の `"github:yusukebe/ax"`） |
+| `commit` | `skills/ax/SKILL.md`（リポジトリ内のファイル） | `github-tags`（`[ax]` にスコープした custom manager 経由） | `.chezmoiexternal.toml` の `file` external |
+
+phone-harness は PyPI リリースと可動 `main` 上のコミットという、本当に独立した 2 つのデータソースを pin しているので、スキル側の pin が遅れても無害です。**ax の 2 つの pin は同一リリース由来**であり、しかも ax は `v0.1.x` で安定 API の宣言がありません。別バージョンのフラグを説明する `SKILL.md` は、見た目上の遅れではなく実害になりえます。そのため `tests/ax.bats` が `[ax].version` と mise の pin が同じバージョンを指すことを検証します。
+
+この検証が成立し続けるのは、Renovate が 2 つを 1 単位でバンプするからです。`renovate.json5` の `yusukebe/ax` の `packageRule` が両 manager に同じ `groupName` を与えるため、リリースは単一 PR として届きます。2 つに割れると、各 PR は更新を半分だけ適用した状態になって検証が赤くなり、どちらも単独でマージできません。この group ルールの存在自体も `tests/ax.bats` が検証します。削除しても次の ax リリースまで何も壊れないからです。
+
+CLI の pin は fast lane の対象範囲である mise 設定にありますが、ax の更新がその lane に乗ることはありません。グループ化された PR は 2 ファイルに跨り、分類器の fast lane は 1 ファイル `+1/-1` の差分を要求するからです。1 つの PR が実行バイナリと、エージェントの web アクセスを導くスキル本文の両方を動かす以上、エージェント審査に落ちるのが正しい結果です。
 
 ---
 

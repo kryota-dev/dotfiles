@@ -198,6 +198,35 @@ ghq_user = "kryota-dev"
   # ride the pin-automerge lane into prompt-injected skill content.
   commit = "a727be1c7bd6064419b6f60d71993a19198adc17"
 
+[ax]
+  # ax — https://github.com/yusukebe/ax ("the AI-era curl"). MIT, local, zero-key.
+  # The agent-facing replacement for `curl` piped into a throwaway parsing script.
+  #
+  # TWO pins, like [phone_harness] above — but for the opposite reason, so do not copy
+  # that table's drift tolerance across:
+  #   version — the CLI, pinned in home/dot_config/mise/config.toml as
+  #             "github:yusukebe/ax". Mirrored here because Renovate has to bump both
+  #             artifacts as one unit (see the groupName rule in renovate.json5), and
+  #             mirroring it is what lets tests/ax.bats check they agree.
+  #   commit  — the upstream commit .chezmoiexternal.toml reads skills/ax/SKILL.md from.
+  #             A full SHA, not the tag: a release tag can be force-moved upstream, and
+  #             this file becomes skill text that steers an agent's web access, so the
+  #             ref it is fetched from must be immutable (same reasoning as drawio /
+  #             supabase / eli5 — a compromised upstream must not reach prompt-injected
+  #             skill content through a plain `chezmoi apply`).
+  #
+  # phone-harness pins a PyPI release and a commit on a moving `main`: two genuinely
+  # independent datasources, so a lagging skill pin there is harmless. ax's two pins come
+  # from the SAME release, and ax is v0.1.x with no stable-API declaration, so a skill
+  # describing flags from a different version is a real hazard. `commit` below must be the
+  # commit that `version`'s tag points at; tests/ax.bats enforces the version half of that
+  # (the commit half needs the network, so it is left to the grouped Renovate bump).
+  #
+  # Never auto-merged: an ax bump touches both an executable binary and skill text, and it
+  # spans two files, so scripts/renovate-gate-classify.sh routes it to agent review.
+  version = "0.1.25"
+  commit = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
+
 [ntfy]
   # Self-hosted ntfy notification server (kryota-dev/dotfiles#337).
   # SSOT for every ntfy constant except the Docker image tag, which lives
