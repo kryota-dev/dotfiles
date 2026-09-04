@@ -49,7 +49,7 @@ services:
     # nginx and fronted by `tailscale serve --https=8443` (a PORT proxy, which
     # does work on macOS). Read-only mount; loopback-only (never all interfaces).
     # Image tag pinned literally for the Renovate regex manager, same as ntfy.
-    image: nginx:1.31-alpine@sha256:a9ae6f6d078d477e21323310498e5196cb2b7c0aedd9e07b7306612077227d7c
+    image: nginx:1.31-alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3
     restart: unless-stopped
     ports:
       - "127.0.0.1:{{ .ntfy.brief_port }}:80"
