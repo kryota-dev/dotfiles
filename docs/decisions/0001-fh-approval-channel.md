@@ -280,24 +280,29 @@ client owning thread and turn lifecycles — a far larger change than a capabili
 sealed-argv verification and a provider-specific startup health check, not merely a capability
 value. That belongs in its own issue.
 
+**This section is the starting point for that issue, not a passing observation.** Whoever opens it
+should not have to re-derive the schema check: the method list above, the absence of
+`thread/queue/add` from the pinned schema, and the distinction between the `codex exec` transport
+and Codex as a whole are the inputs it needs. Filing the issue is a separate decision and is not
+made here.
+
 ## How the open choices were settled
 
 This ADR was written in a non-interactive session, so the choices it rests on were put to the
 approval channel described above rather than asked in a terminal. Recording how each was settled
 matters here, because the channel is also the subject of the decision.
 
-Confirmed through the approval channel:
+All three were confirmed through the approval channel:
 
 1. **The conclusion** — keep the current channel and record revisit triggers, rather than adopting
    `defer` (Option C) or the hybrid (Option D).
 2. **The location and format** — a new numbered ADR under `docs/decisions/`, rather than a section
    in `design-rationale.md` or a page under `docs/explanation/`. The repository had no prior ADR
    convention, so this establishes one.
-
-Taken on its recommended default and **not** separately confirmed:
-
-3. **The Codex scope** — record the verification result and note that following up belongs in a
-   separate issue, without creating that issue and without touching the capability declaration.
+3. **The Codex scope** — keep the verification result as the explicit starting point for a future
+   app-server issue, and file no issue here. The first draft of this ADR had settled this one on a
+   weaker default (record the result, mention that following up belongs elsewhere); review pushed
+   it to say so explicitly, which is why the section above now names itself as that starting point.
 
 One process note, since it is evidence about the channel this ADR is deciding on: the first
 escalation raised here — a single request carrying three questions at once — came back
