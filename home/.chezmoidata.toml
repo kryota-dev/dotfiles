@@ -181,7 +181,7 @@ ghq_user = "kryota-dev"
   # Neither is ever auto-merged — this ships executable code that captures the
   # screen and synthesises input on a real device (see renovate.json5 packageRules).
   version = "0.2.0"
-  commit = "c7df02ed0eff1cf863aced7aaaed700c82a5da43"
+  commit = "6e47f24cd1d6110e9c72dc2bfe559d2ec709e56d"
 
 [eli5]
   # eli5 skill — https://github.com/anthropics/claude-plugins-community/tree/main/eli5
@@ -225,7 +225,7 @@ ghq_user = "kryota-dev"
   # Never auto-merged: an ax bump touches both an executable binary and skill text, and it
   # spans two files, so scripts/renovate-gate-classify.sh routes it to agent review.
   version = "0.1.25"
-  commit = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
+  commit = "6e47f24cd1d6110e9c72dc2bfe559d2ec709e56d"
 
 [ntfy]
   # Self-hosted ntfy notification server (kryota-dev/dotfiles#337).
