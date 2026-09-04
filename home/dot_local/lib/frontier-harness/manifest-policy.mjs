@@ -201,8 +201,16 @@ export function manifestHash(manifest) {
 // 照合対象になる（`npm run test; curl …` の `curl …` が承認済みに無ければ不一致）。
 // 静的に解釈できない場合（動的構築・ネストシェル）は null を返し、呼び出し側が拒否へ倒す。
 export function commandSegments(command) {
-  const { candidates, ambiguous } = analyzeShellCommand(command);
-  if (ambiguous) return null;
+  const { candidates, ambiguous, dynamic } = analyzeShellCommand(command);
+  // `dynamic` を併せて見るのは allowlist 側だけである（理由は approval-command.mjs の
+  // `analyzeShellCommand` の説明）。escalation 側と違ってここは人を呼ばないので、
+  // 「実行時に組み立てられる語がある」というだけで拒否してよい。
+  //
+  // **この 1 語が無いと、動的構築を落としているのは下の `manifestEntryRejection` の
+  // 字集合になる。** `APPROVABLE_*` は `$` も backtick も含まないため結果は同じだが、
+  // それは「承認できる形か」を見た副作用であって、静的解釈の契約による拒否ではない。
+  // 字集合や一致判定を将来緩めたときに動的構築が黙って通らないよう、独立した層として持つ。
+  if (ambiguous || dynamic) return null;
   const segments = candidates.slice(1);
   return segments.length > 0 ? segments : null;
 }

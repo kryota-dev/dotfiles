@@ -123,6 +123,19 @@ const GLOBAL_OPTIONS = Object.freeze({
 // いる」ことを解釈不能として扱う。`echo "$(date)"` のように subcommand の概念が無い
 // コマンドまで巻き込むと、引数の置換を使う日常的な操作がすべてエスカレートしてしまい、
 // 無人 wave の目的そのものを損なう。
+//
+// **帰属基準は「escalation ルールが subcommand ごと名指しする binary であること」**で
+// あって、「第 1 引数が何を実行するか決めること」ではない。ここが立てる ambiguous が
+// 防ぐのは「subcommand を読み違えて deny ルールを見逃す」ことだけなので、その binary を
+// subcommand 込みで名指すルールが 1 本も無ければ、防ぐ対象そのものが存在しない。
+// approval-rules-baseline.mjs との同期は tests/frontier_harness_approval.test.mjs が
+// 機械検査する（`<binary> <subcommand>` 形のルールが名指す binary は全てここに載る）。
+//
+// この基準により `make` / `go` / `pytest` は**入れない**。manifest が承認しうる runner
+// （manifest-policy.mjs の `APPROVABLE_*`）ではあるが baseline ルールが名指ししないので、
+// 足しても見逃しうるルールは増えないまま `make -C "$DIR" lint` / `pytest -k "$PAT"` が
+// 同期問い合わせに変わるだけになる。承認済みコマンドとの照合を fail-closed に保つ役目は、
+// この集合ではなく `analyzeShellCommand` が返す `dynamic` が担う（分業の理由は同関数の doc）。
 const SUBCOMMAND_DISPATCHED_BINARIES = new Set([
   ...Object.keys(GLOBAL_OPTIONS),
   "alembic",
@@ -293,6 +306,13 @@ function binaryName(text) {
 // 「読み飛ばしてよいか」を判断できないので、諦めて ambiguous を返す。
 function skipGlobalOptions(binary, tokens) {
   const table = GLOBAL_OPTIONS[binary];
+  // 表が無い binary には読み飛ばすべき global option が無いものとして、そのまま返す。
+  //
+  // **ここでトークンの dynamic を検査しないのは意図的である**（分業の理由は
+  // `analyzeShellCommand` の doc。要点は「ここを倒すと `cat "$TMPDIR/x"` のような日常操作
+  // まで escalation 側の同期問い合わせに変わる」「allowlist 側の fail-closed は別に返す
+  // `dynamic` が担保する」の 2 つ）。`commandSegments` / `matchCommand` の一致判定を触る
+  // ときは、この分業を壊していないかを確かめること。
   if (!table) return { rest: tokens, ambiguous: null };
   let index = 0;
   while (index < tokens.length) {
@@ -336,13 +356,32 @@ function expandShortClusters(tokens) {
 
 // 照合候補を作る。戻り値の `candidates` は「生文字列 + 正規化した各セグメント」で、
 // ルールはこのいずれかに一致すれば escalate になる（候補を増やす方向にしか働かない）。
+//
+// **`ambiguous` と `dynamic` を分けているのは、呼び出し元 2 つで安全な向きが逆だから。**
+// （この分業の説明はここが canonical。`SUBCOMMAND_DISPATCHED_BINARIES` と
+// `skipGlobalOptions` のコメントはここを参照する側なので、直すならまずここを直すこと。）
+//
+//   - escalation（approval-rules.mjs の `classifyToolCall`）… ambiguous は user への同期
+//     問い合わせになる。増やすと、誰も見ていない wave の子がそこで止まる。
+//   - allowlist（manifest-policy.mjs の `commandSegments`）… 解釈不能なら照合を拒否する。
+//     増やしても止まるのは未承認のコマンドだけで、人は呼ばれない。
+//
+// 1 つのフラグで両方を制御すると、片側を安全にしたぶん他方が壊れる。そこで
+// `ambiguous`（＝ どのルールが当たるべきか判定できない）は escalation 側だけが読み、
+// `dynamic`（＝ トークンのどこかが実行時に組み立てられる）は allowlist 側だけが読む。
+// `dynamic` は binary のテーブルに一切依存しないので、表に載らない binary であっても
+// 承認済みコマンドとの照合は fail-closed になる。
 export function analyzeShellCommand(command) {
   if (typeof command !== "string" || command.length === 0) {
-    return { candidates: [], ambiguous: null };
+    return { candidates: [], ambiguous: null, dynamic: false };
   }
   const candidates = [command];
   let ambiguous = null;
+  let dynamic = false;
   for (const tokens of tokenize(command)) {
+    // 下の分岐は解釈を諦めた時点で continue するので、`dynamic` はそれより前に立てる。
+    // 後ろに置くと「諦めたセグメントの動的構築」だけが漏れる。
+    if (tokens.some((token) => token.dynamic)) dynamic = true;
     const [head, ...rest] = tokens;
     if (head.dynamic) {
       ambiguous ??= AMBIGUOUS_DYNAMIC;
@@ -366,5 +405,5 @@ export function analyzeShellCommand(command) {
     const words = expandShortClusters(skipped.rest.map((token) => token.text));
     candidates.push([binary, ...words].join(" "));
   }
-  return { candidates, ambiguous };
+  return { candidates, ambiguous, dynamic };
 }

@@ -315,6 +315,141 @@ test("an unrecognized global option makes the command ambiguous", () => {
   assert.equal(analyzeShellCommand("git status").ambiguous, null);
 });
 
+// ---------------------------------------------------------------------------
+// #624: テーブル外 binary の動的構築引数
+// ---------------------------------------------------------------------------
+
+test("動的構築の報告は binary のテーブルに依存しない", () => {
+  // `make` / `go` / `pytest` / `echo` はいずれも GLOBAL_OPTIONS にも
+  // SUBCOMMAND_DISPATCHED_BINARIES にも無い。それでも「静的に解釈できない」ことだけは
+  // 呼び出し側へ届ける（どう扱うかは呼び出し側が方向ごとに決める）。
+  for (const command of [
+    "make $(cat /tmp/injected)",
+    "make $TARGET",
+    "make ${TARGET}",
+    "make `cat /tmp/injected`",
+    'make -C "$DIR" lint',
+    "go $CMD",
+    'pytest "$TMPDIR/t"',
+    'echo "$(date)" >> log.txt',
+  ]) {
+    assert.equal(analyzeShellCommand(command).dynamic, true, command);
+  }
+  // 静的に読み切れるものは dynamic にしない。
+  for (const command of [
+    "make lint",
+    "go test ./...",
+    "npm run test",
+    "sudo ls",
+    "git status",
+  ]) {
+    assert.equal(analyzeShellCommand(command).dynamic, false, command);
+  }
+  // `${IFS}` は単語区切りとして展開するので動的構築ではない。ここを dynamic に倒すと
+  // 難読化の正規化（`git${IFS}push${IFS}--force` → git-force-push）が効かなくなる。
+  assert.equal(
+    analyzeShellCommand("git${IFS}push${IFS}--force origin main").dynamic,
+    false,
+  );
+  // エスケープされた `$` / backtick と単一引用符は、bash では展開されないので動的構築
+  // ではない。ここを true に倒すと「安全側」に見えて実は日常操作を止める方向へ効くので、
+  // false であることを明示的に固定する。
+  for (const command of [
+    "make \\$TARGET",
+    'make "\\$TARGET"',
+    "make \\`cat /tmp/x\\`",
+    "make '$TARGET'",
+  ]) {
+    assert.equal(analyzeShellCommand(command).dynamic, false, command);
+  }
+  // 解析対象にならない入力でも戻り値の形は揃える。
+  for (const command of ["", null, undefined, 42, {}, []]) {
+    assert.equal(analyzeShellCommand(command).dynamic, false, String(command));
+  }
+});
+
+test("dynamic は ambiguous と独立で、escalation 側の判定を変えない", () => {
+  // テーブル外 binary の動的構築は dynamic だけが立ち、ambiguous は立たない。
+  const analysis = analyzeShellCommand("make $(cat /tmp/injected)");
+  assert.equal(analysis.dynamic, true);
+  assert.equal(analysis.ambiguous, null);
+  // 逆に、ネストシェルは ambiguous だが動的構築ではない。2 つは包含関係にない。
+  const nested = analyzeShellCommand("sudo ls");
+  assert.equal(nested.ambiguous, AMBIGUOUS_NESTED_SHELL);
+  assert.equal(nested.dynamic, false);
+  // テーブルに載る binary の dispatch 位置は従来どおり ambiguous でもある。
+  const tabled = analyzeShellCommand("git $(printf x) origin/main");
+  assert.equal(tabled.ambiguous, AMBIGUOUS_DYNAMIC);
+  assert.equal(tabled.dynamic, true);
+
+  // escalation（deny リスト）側は ambiguous だけを見る。dynamic を足したことで同期
+  // 問い合わせが 1 件も増えていないことを固定する —— 増やせば無人 wave が止まる。
+  for (const command of [
+    "make $TARGET",
+    "make $(cat /tmp/injected)",
+    'make -C "$DIR" lint',
+    "go $CMD",
+    'pytest "$TMPDIR/t"',
+    'echo "$(date)" >> log.txt',
+    'git commit -m "$(cat msg.txt)"',
+    'cat "$TMPDIR/x"',
+    'node "$TMPDIR/p.mjs"',
+  ]) {
+    assert.equal(classifyBash(command).decision, "allow", command);
+  }
+
+  // allow 側だけを見ていると「escalate すべきものが escalate しなくなる」退行を捕まえ
+  // られない。動的構築を含みつつ escalate する 2 経路（具体ルールに当たる／opaque へ落ちる）
+  // を rule.id まで固定する。
+  assert.equal(
+    classifyBash('git push --force "$(cat ref)"').rule.id,
+    "git-force-push",
+  );
+  assert.equal(
+    classifyBash('git --not-a-real-global-option "$X"').rule.id,
+    "opaque-command",
+  );
+});
+
+test("escalation ルールが subcommand ごと名指しする binary は必ず dispatch 表に載る", () => {
+  // `SUBCOMMAND_DISPATCHED_BINARIES` の帰属基準（approval-command.mjs のコメント）を
+  // 機械検査する。baseline に `<binary> <subcommand>` 形のルールを足したのに表への
+  // 追加を忘れると、subcommand が動的に組み立てられたときに ambiguous が立たず、
+  // **escalation 側だけが静かに fail-open へ倒れる**。この漏れは人に聞かずに実行される
+  // ので気づく契機が無い（approval-rules.mjs 冒頭が述べている非対称そのもの）。
+  //
+  // 抽出対象は「binary の alternation の直後に `[\s-]+`（subcommand への区切り）が続く」
+  // パターンに限る。`commandFlagPattern` で作るフラグ照合だけのルール（curl / wget /
+  // http / xh）は subcommand を取らないので、この不変条件の対象外。
+  const DISPATCHED = /\(\?:\[\\w\.~\/-\]\*\/\)\?\(\?:([^)]+)\)\[\\s-\]\+/g;
+  const binaries = new Set();
+  for (const rule of BASELINE_APPROVAL_RULES) {
+    if (typeof rule.pattern !== "string") continue;
+    for (const match of rule.pattern.matchAll(DISPATCHED)) {
+      for (const name of match[1].split("|")) {
+        if (/^[a-z][a-z0-9-]*$/.test(name)) binaries.add(name);
+      }
+    }
+  }
+  // 抽出そのものが空振りしていたら不変条件は無意味になるので、下限を置く。
+  assert.ok(binaries.size >= 30, `抽出できた binary が少なすぎる: ${binaries.size}`);
+  for (const binary of binaries) {
+    assert.equal(
+      analyzeShellCommand(`${binary} $SUB`).ambiguous,
+      AMBIGUOUS_DYNAMIC,
+      `${binary} は baseline が subcommand ごと名指ししているのに dispatch 表に無い`,
+    );
+  }
+
+  // 逆向き: `make` / `go` / `pytest` は manifest が承認しうる runner だが baseline が
+  // 名指ししないので、意図的に表へ入れていない（入れると日常形が同期問い合わせに変わる）。
+  // 承認済みコマンドとの照合を fail-closed に保つのは `dynamic` の側の仕事。
+  for (const binary of ["make", "go", "pytest"]) {
+    assert.equal(analyzeShellCommand(`${binary} $SUB`).ambiguous, null, binary);
+    assert.equal(analyzeShellCommand(`${binary} $SUB`).dynamic, true, binary);
+  }
+});
+
 test("the risk vocabulary contains every value the shipped config escalates on", () => {
   const config = JSON.parse(
     readFileSync("home/dot_config/frontier-harness/config.json", "utf8"),
