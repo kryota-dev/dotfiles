@@ -73,4 +73,131 @@ export ECC_OBSERVER_MAX_TURNS="${ECC_OBSERVER_MAX_TURNS:-100}"
 export EXA_API_KEY="${EXA_API_KEY:-}"
 export FIRECRAWL_API_KEY="${FIRECRAWL_API_KEY:-}"
 
+# Append-system-prompt normalisation (#677). The "ask with AskUserQuestion instead of trailing a
+# plain-text question" rule is injected as a system prompt rather than left in CLAUDE.md, where it
+# did not hold (#614 added it; #677 measured three violations in one session). It goes in the
+# wrapper, not in claude.zsh, because this is the one file every entry point reaches — interactive
+# zsh, hooks, launchd, frontier-harness child sessions, Claude's own Bash tool (#345).
+#
+# Four measured properties of claude 2.1.259 shape the code below:
+#   1. --append-system-prompt-file is NOT repeatable. It is declared .argParser(String), so a later
+#      occurrence silently replaces an earlier one (passing two missing paths A then B reports only
+#      B). A wrapper that merely appended its own flag would be overridden without a word by a
+#      caller passing its own — which _claude_fable does for cldf. Layering is impossible; we fold.
+#   2. The flag has to go BEFORE the first positional. After a subcommand it aborts with "error:
+#      unknown option"; before it, the root command parses it and the subcommand still runs
+#      (`claude --append-system-prompt-file <missing> mcp list` succeeds, so the root action — the
+#      only thing that reads the file — never runs). Hence the prepend, and hence no subcommand
+#      allowlist to maintain forever.
+#   3. --append-system-prompt and --append-system-prompt-file are mutually exclusive ("Cannot use
+#      both ... Please use only one.", exit 1).
+#   4. The flag is undocumented (.hideHelp(), absent from `claude --help`), but depending on it is
+#      safe because its removal is LOUD: an unknown option aborts with exit 1 instead of being
+#      ignored, and a missing prompt file aborts too. Neither degrades silently.
+# There is no env var or user-settings equivalent to fall back on: settings' appendSystemPrompt is
+# read only from the enterprise policyHelper payload, which lives in admin-owned managed settings.
+# A missing rule file leaves argv untouched, so the session still starts before `chezmoi apply` —
+# the same trade-off _claude_fable already makes for the orchestrator prompt.
+ask_rule_file="$HOME/.claude/ask-user-question-prompt.md"
+if [ -r "$ask_rule_file" ]; then
+  # Walk argv the way commander does: a bare "--" ends option parsing, "--flag value" and
+  # "--flag=value" spell the same option, and the last occurrence wins. Kept arguments rotate to
+  # the back of "$@" instead of into an array — macOS still ships bash 3.2, where expanding an
+  # empty array under `set -u` is an error.
+  caller_file=""
+  caller_text=""
+  saw_file=0
+  saw_text=0
+  end_of_opts=0
+  remaining=$#
+  while [ "$remaining" -gt 0 ]; do
+    arg="$1"
+    shift
+    remaining=$((remaining - 1))
+    if [ "$end_of_opts" -eq 0 ]; then
+      case "$arg" in
+        --)
+          end_of_opts=1
+          ;;
+        --append-system-prompt-file)
+          saw_file=1
+          if [ "$remaining" -gt 0 ]; then
+            caller_file="$1"
+            shift
+            remaining=$((remaining - 1))
+          fi
+          continue
+          ;;
+        --append-system-prompt-file=*)
+          saw_file=1
+          caller_file="${arg#*=}"
+          continue
+          ;;
+        --append-system-prompt)
+          saw_text=1
+          if [ "$remaining" -gt 0 ]; then
+            caller_text="$1"
+            shift
+            remaining=$((remaining - 1))
+          fi
+          continue
+          ;;
+        --append-system-prompt=*)
+          saw_text=1
+          caller_text="${arg#*=}"
+          continue
+          ;;
+      esac
+    fi
+    set -- "$@" "$arg"
+  done
+
+  if [ "$saw_file" -eq 1 ] && [ "$saw_text" -eq 1 ]; then
+    # Property 3: the CLI refuses this combination. Hand both back instead of picking a winner the
+    # caller never chose — the wrapper must not turn a loud error into a silent preference.
+    set -- --append-system-prompt "$caller_text" --append-system-prompt-file "$caller_file" "$@"
+  else
+    base_text=""
+    if [ "$saw_file" -eq 1 ]; then
+      # Also the path a bare trailing --append-system-prompt-file (no value) lands on: reported
+      # here rather than by commander, but with the same exit 1, never a dropped rule.
+      if [ ! -r "$caller_file" ]; then
+        echo "claude launcher: append system prompt file is not readable: $caller_file" >&2
+        exit 1
+      fi
+      base_text="$(cat "$caller_file")"
+    elif [ "$saw_text" -eq 1 ]; then
+      base_text="$caller_text"
+    fi
+
+    if [ -n "$base_text" ]; then
+      # Fold the caller's prompt and the rule into the single occurrence property 1 allows. The
+      # rule goes LAST: #677 is about the rule being buried, and the tail of the system prompt is
+      # the salient end. Content-addressed, so concurrent launches with the same inputs converge on
+      # one file and an unchanged prompt costs no write at all.
+      composite_body="$(printf '%s\n\n%s' "$base_text" "$(cat "$ask_rule_file")")"
+      cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-launcher"
+      mkdir -p "$cache_dir" 2>/dev/null || true
+      chmod 700 "$cache_dir" 2>/dev/null || true
+      if command -v shasum >/dev/null 2>&1; then
+        composite_key="$(printf '%s\n' "$composite_body" | shasum -a 256 | cut -d' ' -f1)"
+      else
+        composite_key="$(printf '%s\n' "$composite_body" | cksum | tr -cd '0-9')"
+      fi
+      prompt_arg="$cache_dir/append-system-prompt-$composite_key.md"
+      if [ ! -s "$prompt_arg" ]; then
+        # mktemp failing (unwritable cache dir) aborts under `set -e`, which is the intended
+        # outcome: stopping beats starting a session that silently lost the rule.
+        composite_tmp="$(mktemp "$cache_dir/.append-system-prompt.XXXXXX")"
+        printf '%s\n' "$composite_body" >"$composite_tmp"
+        chmod 600 "$composite_tmp"
+        mv -f "$composite_tmp" "$prompt_arg"
+      fi
+    else
+      prompt_arg="$ask_rule_file"
+    fi
+    set -- --append-system-prompt-file "$prompt_arg" "$@"
+  fi
+fi
+
 exec "$real" "$@"
