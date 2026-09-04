@@ -1900,16 +1900,9 @@ PY
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 
-  # 代替判定（--gate / verification.total）は #615 の領分。#617 待ちでブロック中なので
-  # 先回りして書かない（書くと 2 箇所目の SSOT になる）。references/ 側も含めて見る。
-  local f
-  for f in "$SKILL_MD" "${REFS}"/*.md; do
-    run grep -c -e '--gate' -e 'verification\.total' "$f"
-    [ "$output" -eq 0 ] || {
-      echo "#615 の領分の記述が $(basename "$f") にある"
-      false
-    }
-  done
+  # 代替判定（--gate / 連結された検証件数）は #615 が着地させた。ここにあった「先回りして
+  # 書かない」禁止アサーションは役目を終えたので撤去し、代わりに下の #615 節が「規範として
+  # 書かれていること」を検査する。
 }
 
 @test "#610 回帰: SKILL.md が byte budget を超えていない" {
@@ -1920,11 +1913,135 @@ PY
   # 分割直後は 84,499 B。予算はそこに約 4% の余白を足した値で、規範の追加で超えたときは
   # 「その記述は規範か、references/ へ移すべき根拠か」を確認したうえで意図的に更新する。
   # #539 が legacy 節（32,778 B）を撤去すれば大きく下回るので、下限は課さない。
+  #
+  # #615 で 88,194 B へ増えた（+3,695 B）。増分の内訳は Phase 2「起動する」の --gate 宣言規範と
+  # コマンド形、「成果物の検証」の判定表の作り替えと fail-closed の受け皿で、実測・事故の経緯は
+  # references/{liveness,verification}.md 側へ書いた（下の #615 節が両方を検査する）。増分が
+  # 規範であることを確認したうえで、同じ約 4% の余白の取り方で 92,000 B へ更新する。
   local size
   size=$(wc -c < "$SKILL_MD")
-  [ "$size" -le 88000 ] || {
-    echo "SKILL.md が byte budget を超えた: ${size} B > 88000 B"
+  [ "$size" -le 92000 ] || {
+    echo "SKILL.md が byte budget を超えた: ${size} B > 92000 B"
     echo "増分が根拠なら references/ へ移す。規範なら予算を意図的に更新すること。"
+    false
+  }
+}
+
+# ---------------------------------------------------------------------------
+# #615 回帰: wave の完了条件を --gate で宣言し、gate 通過を harness の記録から判定する
+#
+# #613 が `fh session --gate` を追加し `fh runs` が run ごとの検証件数を返すようにしたが、
+# 唯一の呼び出し側である本 skill にはどちらも書かれておらず、--gate は呼び出し側のない機能
+# だった。以下は「宣言（Phase 2）」と「判定（成果物の検証）」の両方が規範として残ることを見る。
+# 宣言が無いと検証件数 0 が「通していない」と「課していない」に割れて判定が成立しないので、
+# 2 つは片方だけでは意味を成さない。
+# ---------------------------------------------------------------------------
+
+@test "#615 回帰: Phase 2 が wave の完了条件を --gate で宣言している" {
+  # SKILL.md 全体への grep では「成果物の検証」節に --gate があるだけで通ってしまう。
+  # 起動の節を切り出し、コマンド形と 4 つの規範がその節の中にあることを見る。
+  run python3 - "$SKILL_MD" <<'PY'
+import re
+import sys
+
+REQUIRED = [
+    # そのまま使うコマンド形に載っていること（規範だけ書いて形が無いと使われない）。
+    ("--gate", "起動コマンド形に --gate が無い"),
+    # 宣言を必須にする規範。これが緩むと検証件数 0 の意味が割れて判定が成立しない。
+    ("宣言せずに子を起こさない", "宣言を必須とする規範が無い"),
+    # 承認境界。未承認の宣言は子を起こす前に落ちる（fail-closed であることを書く）。
+    ("exit 2 で止まる", "未承認の宣言が exit 2 で止まることが書かれていない"),
+    # kind の語彙と本数上限。そのまま使える形であること。
+    ("<kind>:<command>", "gate の種別の書き方が無い"),
+    # resume は継承しない。渡し忘れると完了条件を課さないまま succeeded になる。
+    ("継承されない", "resume で --gate が継承されないことが書かれていない"),
+    # 判定側（fh runs --run）へ渡す値。控えないと一次判定を引けない。
+    ("adapterRunId", "adapterRunId を控える指示が無い"),
+    # 件数の一致を見るので、宣言本数を控える必要がある。
+    ("宣言した本数を控える", "宣言本数を控える規範が無い"),
+]
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^### 起動する$.*?(?=^#{2,4} )", src, re.S | re.M)
+if not m:
+    print("「起動する」節が見つからない")
+    raise SystemExit
+
+section = m.group(0)
+for needle, message in REQUIRED:
+    if needle not in section:
+        print(message)
+
+# コマンド形そのもの（```sh フェンス）に載っていること。散文で言及するだけにしない。
+fences = re.findall(r"```sh\n(.*?)```", section, re.S)
+if not any("fh session launch" in f and "--gate" in f for f in fences):
+    print("fh session launch のコマンド形に --gate が無い")
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#615 回帰: 成果物の検証が連結された検証件数を一次判定にしている" {
+  run python3 - "$SKILL_MD" <<'PY'
+import re
+import sys
+
+REQUIRED = [
+    # 記録側から引くコマンド形。成果物側の gh だけで判定する形へ戻らないこと。
+    ("fh runs --run", "fh runs --run のコマンド形が無い"),
+    ("一次判定", "検証件数が一次判定だと書かれていない"),
+    # 「total > 0」で満足すると、8 本宣言して 1 本しか連結されなかった run が通る。
+    ("宣言した本数と**一致**", "宣言本数との一致を条件にしていない"),
+    # 0 件の読み方。「gate が無かった」と読むと #573 の沈黙する故障がそのまま残る。
+    ("「1 本も通して", "total 0 の読み方が書かれていない"),
+    # 信号 1 は gate とは別の事実を見るので残す（gate に gh は載らない）。
+    ("--json reviews", "レビュー件数の信号が判定表から消えた"),
+    # 信号 2 は判定から外す。ただし理由ごと消さない（#610 側が rebase 警告を別に見る）。
+    ("判定に使わない", "committedDate を判定に使わない旨が無い"),
+    ("補助信号としても残さない", "信号 2 を補助としても残さない理由が無い"),
+    # 一次判定へ格上げした以上、緑の gate が主張しないことも併記する。書かないと
+    # 「gate コマンドの定義を書き換えた子」という同じ形の fail-open を作り直すことになる。
+    ("緑の gate を「変更が検証された」と読まない", "緑の gate の限界が書かれていない"),
+    # fail-closed の受け皿。宣言できない / 引けないときに通過を推定しない。
+    ("gate を宣言できない、または記録を引けないときは", "判定不能時の受け皿が無い"),
+]
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^### 成果物の検証$.*?(?=^#{2,3} )", src, re.S | re.M)
+if not m:
+    print("「成果物の検証」節が見つからない")
+    raise SystemExit
+
+section = m.group(0)
+for needle, message in REQUIRED:
+    if needle not in section:
+        print(message)
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#615 回帰: 根拠は references 側にあり、SKILL.md へ実測を貼っていない" {
+  # #610 が引いた線（SKILL.md = 規範 / references = 根拠）を #615 の追記でも守る。
+  grep -qF '記録側で判別できるようになった' "${REFS}/liveness.md"
+  # wave 1 の実測（issue 番号と件数）は references 側にだけ置く。
+  grep -qF '#630' "${REFS}/liveness.md"
+  grep -qF 'total: 1, passed: 1' "${REFS}/liveness.md"
+  # resume で継承されない機序（readGates / inheritedCapabilityName）も根拠側。
+  grep -qF 'inheritedCapabilityName' "${REFS}/liveness.md"
+
+  # 信号 2 を補助としても残さなかった判断と、その代替案を棄却した理由。
+  grep -qF '信号 (2) を補助としても残さなかった理由' "${REFS}/verification.md"
+  grep -qF '限定になっていない' "${REFS}/verification.md"
+  # 件数が主張しないこと（gate コマンドの定義を書き換えられる）。
+  grep -qF 'verification.total > 0' "${REFS}/verification.md"
+  # gh を gate に載せられない理由。信号 1 が gate に吸収されないことの根拠。
+  grep -qF 'APPROVABLE_COMMAND' "${REFS}/verification.md"
+
+  # SKILL.md 側には実測を貼らない（貼ると #610 が塞いだ再肥大の経路が開く）。
+  run grep -cF '#630' "$SKILL_MD"
+  [ "$output" -eq 0 ] || {
+    echo "wave 1 の実測が SKILL.md に流入している"
     false
   }
 }

@@ -254,14 +254,29 @@ CLAUDE_CONFIG_DIR="$HOME/<親の profile ディレクトリ>" fh session launch 
   --label "<識別子>" \
   --session-id "$(uuidgen | tr 'A-Z' 'a-z')" \
   --worktree "<ワークツリーの絶対パス>" \
-  --prompt-file "<プロンプトの絶対パス>"
+  --prompt-file "<プロンプトの絶対パス>" \
+  --gate "<そのリポジトリの承認済みチェック>"
 ```
 
 - `--capability` は既定 `session.child`。**tier に応じて明示的に選ぶ**（下記）。floor を下回る
   capability を選ばない。
 - `--sandbox` は既定 `workspace-write`（子は自分のワークツリーへ書く）。
 - `--worktree` は**承認境界そのもの**でもある。別リポジトリを指せば「そのリポジトリの承認」が問われる。
-- 完走すると JSON が出る。`resumeKey` / `status` / `initHealth` / `denials` を控える。
+- 完走すると JSON が出る。`resumeKey` / `status` / `initHealth` / `denials` / `adapterRunId` を控える
+  （`adapterRunId` は「成果物の検証」で `fh runs --run` に渡す）。
+
+**`--gate` でその wave の完了条件を宣言する。宣言せずに子を起こさない。** 宣言の無い run は連結された
+検証結果が 0 件になり、**「gate を通していない」と「gate を課していない」が記録上で区別できなくなる**
+——「成果物の検証」の一次判定はこの件数を読むので、宣言を省くとその判定ごと成立しなくなる。
+
+- **載せられるのは承認済みのタスクランナーコマンドだけである。** 未承認の宣言は**子を起こす前に
+  exit 2 で止まる**ので、数時間走ったあとで「その gate は承認されていない」と分かる形にはならない。
+  `gh pr view ...` のような検査はこの形に載らない。**gate で代替せず別の信号として見る**（「成果物の検証」）。
+- **種別を前置できる**（`<kind>:<command>`）。語彙は `test` / `typecheck` / `lint` / `browser` /
+  `performance` / `security` で、省略時は `test`。**繰り返して複数宣言でき**（上限 8 本）、直列に走る。
+- **`fh session resume` でも必ず渡す。継承されない。** `--capability` と違い resume-key から元の宣言を
+  引く経路が無いので、**渡し忘れた resume は完了条件を課さないまま `succeeded` になる**。
+- **宣言した本数を控える。** 「成果物の検証」は件数の**一致**を見るので、本数が分からないと判定できない。
 
 **子の stderr をファイルへ残さない。** 子の生の stderr はそのまま継承されるので、会話内容を含みうる前提で
 扱う。ペインで覗くのはよいが `> child.log 2>&1` のように永続化しない。
@@ -293,7 +308,9 @@ cd <ワークツリー> && fh onboard --manifest <manifest.json> --approve --req
 adapter run が走っていないかを見る。重複投入は最悪の事故（gate を経ない無断マージ）の入口である。
 
 → 根拠: [`references/launch.md`](references/launch.md)（`accountScope` が解決されない劣化、sealed
-invocation、policy コピーが通らない機序、`--from-gaps` が候補を落とす機序、`pnpm install` の実測）
+invocation、policy コピーが通らない機序、`--from-gaps` が候補を落とす機序、`pnpm install` の実測）、
+[`references/verification.md`](references/verification.md)（宣言を必須にする理由と、宣言した完了条件が
+記録へ連結される機序）
 
 #### capability を tier で選ぶ
 
@@ -492,8 +509,8 @@ PID も捨て、パターン照合の形で組み直す。
 
 **`succeeded` を「作業が完了した」と読まない**（#573）。`outcome` が表すのは**ターンがエラーなく完了
 したか**だけで、子が指示された gate を 1 度も通していなくても `succeeded` / `exitCode: 0` になる。
-**結末の確認を `fh runs` の status で終わらせず**、指示した gate を実際に通ったかを成果物の側から
-確かめる（「成果物の検証」節）。`pr-workflow` を非対話の子に走らせること自体の噛み合わなさは #585。
+**結末の確認を `fh runs` の status で終わらせず**、同じ run に連結された検証結果の件数と、成果物の側の
+両方で確かめる（「成果物の検証」節）。`pr-workflow` を非対話の子に走らせること自体の噛み合わなさは #585。
 
 → 根拠: [`references/liveness.md`](references/liveness.md)（7 つの穴それぞれの実測、argv マッチが両方向に
 外れる理由、レビュー 0 件で `succeeded` になった wave 3 本の実測）
@@ -981,20 +998,37 @@ exit 1 かどうかを見る。`PENDING_CONFIRM` で入力欄をクリアしな�
 **問い方を 1 つ足す。「直ったか」ではなく「そこに着けるか」。** 受け入れ条件を、実装した層ではなく
 **利用者の到達経路**で言い直す。
 
-**具体例: 子が指示した gate を通ったかは、成果物の 2 点で引ける。**
+**具体例: 子が指示した gate を通ったかは、まず harness の記録から引く。** Phase 2 で `--gate` を
+宣言してあるので、その結末は run へ連結されている。`adapterRunId` は起動時 JSON で控えた値を使う。
 
-| 見るもの | 何の証拠か | 単独での弱点 |
+```sh
+fh runs --run "<adapterRunId>" --json | jq '{status: .run.status, verifications}'
+```
+
+| 見るもの | 何の証拠か | 使い方 |
 |---|---|---|
-| `gh pr view <n> --json reviews` が **0** | レビューが投稿されていない**直接の証拠** | 投稿形式に依存する（同じ波でも 1〜10 とばらついた） |
-| 全コミットの `committedDate` が **PR 作成時刻より前** | PR 作成後に 1 度もコミットしていない = 指摘対応が回っていない | **レビューが 0 件だった場合にも成立する**。さらに **rebase で無効化される**（下記） |
+| 連結された検証結果の件数（一覧なら各 run の `verification` の `total` / `passed` / `failed` / `errored` / `skipped`） | **宣言した完了条件が実際に走って通ったか。**コミット時刻にも投稿形式にも依存しない | **一次判定。** `total` が Phase 2 で宣言した本数と**一致**し、その全部が `passed` のときだけ gate 通過と読む |
+| `gh pr view <n> --json reviews` が **0** | レビューが投稿されていない**直接の証拠** | **併用。** gate に載るのは承認済みのタスクランナーコマンドだけで、レビューが回ったかは見ていない。0 件は未通過の証拠になるが、1 件以上は通過の証明にならない（投稿形式に依存する。同じ波でも 1〜10 とばらついた） |
+| 全コミットの `committedDate` | ~~PR 作成後にコミットしたか~~ | **判定に使わない**（下記） |
 
-**片方だけを根拠にしない。** 2 つ揃って初めて「レビューを通していない」と言える。
+**`total: 0` を「gate が無かった」と読まない。** Phase 2 で宣言は必須なので、0 は**「1 本も通して
+いない」**である。`status: "succeeded"` が意味するのは「ターンがエラーなく終わった」だけで、指示した
+gate を通ったことではない。
+
+**緑の gate を「変更が検証された」と読まない。** 主張できるのは**「harness が承認済みコマンドを走らせて
+0 が返った」**までである。判定は終了コードだけを見るので、**gate コマンドの定義そのもの（`Makefile` /
+`package.json`）を書き換えた子は全 `passed` を出せる**。緑を見たら、その定義が差分で変わっていないかを
+併せて見る。
 
 **rebase 済みの PR では信号 2 を根拠に使わない。** `committedDate` は committer date で、`git rebase` は
 replay した全コミットにこれを打ち直す。よって base 追従で rebase した PR は**全コミットが「PR 作成後」に
-見え、信号 2 は常に偽になる** —— 2 信号の AND が崩れ、判定は**「対応した」側（fail-open）へ倒れる**。
-rebase したという理由だけで検査が無言で通るので、この場合は通過を推定せず、**判定不能として user へ
-上げる。**
+見え、信号 2 は常に偽になる** —— 判定は**「対応した」側（fail-open）へ倒れる**。rebase したという理由
+だけで検査が無言で通る。**補助信号としても残さない**: AND に組めば rebase 済み PR で他の信号まで殺し、
+OR に組めば単独で通過を作れるので、限定した使い方が構成できない。
+
+**gate を宣言できない、または記録を引けないときは、通過を推定せず判定不能として user へ上げる。**
+承認済みのタスクランナーが無いリポジトリでは `--gate` を 1 本も宣言できず、そのとき残るのは信号 1
+だけなので gate 通過は言えない。
 
 **この問いに Leader が毎回答えられるとは限らない**（実機・サインイン・本番データが要る）。
 **答えられないなら、答えられないと言って user へ渡す** —— 利用者の到達経路が結果を左右しうる変更では、
@@ -1002,7 +1036,8 @@ rebase したという理由だけで検査が無言で通るので、この場�
 規約が 1 つ増えるだけである。
 
 → 根拠: [`references/verification.md`](references/verification.md)「5 項目を満たしても取れない欠陥」
-「子が gate を通ったかを引く 2 信号と、その弱点」
+「子が gate を通ったかをどう引くか」、[`references/liveness.md`](references/liveness.md)「記録側で
+判別できるようになった」
 
 ### 中断と再開
 
