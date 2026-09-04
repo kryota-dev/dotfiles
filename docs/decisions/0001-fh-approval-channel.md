@@ -271,20 +271,29 @@ client owning thread and turn lifecycles — a far larger change than a capabili
 sealed-argv verification and a provider-specific startup health check, not merely a capability
 value. That belongs in its own issue.
 
-## Assumptions recorded without user confirmation
+## How the open choices were settled
 
-This ADR was written in a non-interactive session. The approval gate that would normally have
-settled the open choices reached its waiting limit and returned `denied automatically`, so no
-person answered them. Three decisions were therefore taken on their recommended defaults and are
-recorded here so they can be reversed in review rather than discovered later:
+This ADR was written in a non-interactive session, so the choices it rests on were put to the
+approval channel described above rather than asked in a terminal. Recording how each was settled
+matters here, because the channel is also the subject of the decision.
+
+Confirmed through the approval channel:
 
 1. **The conclusion** — keep the current channel and record revisit triggers, rather than adopting
-   `defer` or adopting Option D.
+   `defer` (Option C) or the hybrid (Option D).
 2. **The location and format** — a new numbered ADR under `docs/decisions/`, rather than a section
    in `design-rationale.md` or a page under `docs/explanation/`. The repository had no prior ADR
    convention, so this establishes one.
+
+Taken on its recommended default and **not** separately confirmed:
+
 3. **The Codex scope** — record the verification result and note that following up belongs in a
    separate issue, without creating that issue and without touching the capability declaration.
+
+One process note, since it is evidence about the channel this ADR is deciding on: the first
+escalation raised here — a single request carrying three questions at once — came back
+`denied automatically` at its waiting limit, while later single-topic escalations were answered
+normally. That is one observation, not a diagnosis, and it is recorded rather than explained.
 
 ## Sources
 
