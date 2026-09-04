@@ -70,8 +70,9 @@ synthetic fixtures:
 2. `AskUserQuestion` appears as an ordinary `tool_use` block on an `assistant` entry, with
    `isSidechain: false` for the main agent.
 
-So the detector's second stage is: project the transcript to markers, and ask whether an
-`AskUserQuestion` marker appears at or after the turn's opening marker.
+So the detector's second stage is: scan from the turn's opening entry, stop at the next prompt,
+and ask whether an `AskUserQuestion` call appeared in between. Closing the window at the next
+prompt is what stops a later, well-behaved turn from clearing an earlier violation.
 
 ## `Stop` does not mean the turn ended
 
@@ -93,23 +94,45 @@ the phrase list.
 [`home/dot_claude/executable_plaintext-ask-check.sh`](../../home/dot_claude/executable_plaintext-ask-check.sh),
 wired as `stop:plaintext-ask-check`.
 
-**Stage 1 — cheap, runs on every turn.** Look only at a tail window of
-`last_assistant_message` (`TAIL_SCAN_BYTES`, about 400 Japanese characters) and test it against
-an explicitly enumerated list of decision-seeking phrases. A tail window rather than the final
-line, because the observed violation shape often puts the choices *under* the question, which
-would leave `- B: ...` as the last line.
+**Stage 1 — cheap, runs on every turn.** Take a tail window of `last_assistant_message`
+(`TAIL_SCAN_CHARS`, 400 characters), reduce it to the *closing line*, and test that line
+against an explicitly enumerated list of decision-seeking phrases. Everything here is bash
+string matching; on an ordinary turn the hook spends four external processes in total.
+
+The closing line is found by discarding blank, list, quote and heading lines from the bottom
+up. The observed violation shape often puts the choices *under* the question, so the literal
+last line is frequently `- B: ...` rather than the ask.
+
+**The window is measured in characters, not bytes.** Cutting by bytes can land inside a
+multi-byte character, and BSD/ugrep's `grep -F` then fails to match even a fully intact
+Japanese phrase that follows the damaged bytes (measured; `LC_ALL=C` does not help). Replies
+longer than the window are the common case, so a byte window made the detector fail silently
+on exactly the turns it was built for. Bash's substring expansion counts characters in a UTF-8
+locale, so it never splits one. Note that `${var: -N}` returns the *empty string* when `N`
+exceeds the string's length rather than clamping (measured on bash 3.2), so the length has to
+be clamped before the expansion — another silent-zero path if it is not.
 
 **Stage 2 — only when stage 1 matched.** Read the transcript and decide whether
 `AskUserQuestion` was called in this turn. Because stage 1 almost never matches, an ordinary
-turn never pays for the transcript scan.
+turn never pays for the transcript scan, and a test pins that by pointing a non-matching case
+at an unreadable transcript path.
 
-### The phrase list is deliberately narrow
+### The phrase list is deliberately narrow, and position is part of the test
 
 The tolerated direction of error is "do not stop": missing a violation is acceptable, warning
 on an ordinary report is not — a noisy detector gets switched off, and then it protects
 nothing. So the list enumerates concrete decision-seeking closings and excludes general
-question forms and the ordinary closings a report ends with. The list is a named constant in
-the script, and the false-positive cases are pinned in `tests/claude_hooks.bats`.
+question forms and the ordinary closings a report ends with.
+
+Matching the phrase *anywhere* in the window is not enough either: a completion report that
+quotes the question it once asked would be flagged. The detector requires the reply to **end**
+by asking. Japanese phrases are sentence-final, so the closing line must end with one once
+sentence punctuation is stripped; English phrases are sentence-initial, so the closing line
+must end with `?`. That single rule is what separates "Let me know if you want me to proceed?"
+from "Done. Let me know if you spot anything else."
+
+The list is a named constant in the script, and the false-positive cases are pinned in
+`tests/claude_hooks.bats`.
 
 ### Three-valued output, so a broken detector cannot look clean
 
@@ -122,11 +145,21 @@ readable line to stderr:
 | `ok` | — | Evaluated. No violation. |
 | `skipped` | — | Out of scope (mid-turn `Stop`, subagent, re-entrant, no reply text). |
 | `violation` | `{"systemMessage": …}` | Detected. |
-| `error` | `{"systemMessage": …}` when stage 1 already matched | **Could not evaluate** (no jq, unreadable transcript, unparseable line, `prompt_id` not found). |
+| `error` | `{"systemMessage": …}` when stage 1 already matched | **Could not evaluate** (no jq, misconfigured scan window, unparseable payload, `transcript_path` that is not a readable `.jsonl`, transcript over the size cap, unparseable line, `prompt_id` not in the transcript). |
 
-`ok` and `error` are different values, and a test asserts that they stay different. Where the
-sibling `Stop` hooks treat a missing `jq` as a silent no-op, this one reports `error`: for a
-detector, "cannot evaluate" is not "nothing found".
+`ok` and `error` are different values, and tests assert both that they stay different and that
+each error branch reports its own reason. Where the sibling `Stop` hooks treat a missing `jq`
+as a silent no-op, this one reports `error`: for a detector, "cannot evaluate" is not "nothing
+found".
+
+The scan window is validated for the same reason. Setting it to zero would make nothing match
+and produce a clean-looking `ok` — the one way to disable the detector without leaving a
+trace. Every other failure mode already reported `error`, so this one does too.
+
+The transcript is scanned in a single `jq` pass that folds the file into three booleans, so
+memory stays constant no matter how large or how corrupt the file is. Measured throughput on
+concatenated real transcripts is about 120 MB/s (417 MB in 3.4 s), which puts the 64 MiB cap
+at roughly 0.55 s — about nine times under the hook's 5 s timeout.
 
 The exit code is always 0. This is a warning, not a gate: it emits no `decision`, `continue`
 or `stopReason`, and a test pins that.

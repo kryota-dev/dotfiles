@@ -504,6 +504,10 @@ PA_PROMPT_ID="835ed30b-6fea-4886-b00e-917807befe28"
 # A minimal transcript in the shape Claude Code actually writes: the turn-opening `user`
 # entry carries promptId (assistant entries carry null), and AskUserQuestion appears as an
 # ordinary tool_use. Both were confirmed against real transcripts in #616.
+#   ask       — AskUserQuestion was called inside the turn
+#   noask     — it was not
+#   next-turn — it was not, but a LATER turn (different promptId) does call it. The window has
+#               to close at the next prompt, or that later call would excuse this turn.
 _pa_write_transcript() {
   local path="$1" mode="$2"
   {
@@ -512,6 +516,10 @@ _pa_write_transcript() {
       printf '%s\n' '{"type":"assistant","promptId":null,"isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","id":"t1","input":{}}]}}'
     fi
     printf '%s\n' '{"type":"assistant","promptId":null,"isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}'
+    if [ "$mode" = "next-turn" ]; then
+      printf '%s\n' '{"type":"user","promptId":"11111111-2222-3333-4444-555555555555","isSidechain":false,"message":{"role":"user","content":[{"type":"text","text":"next"}]}}'
+      printf '%s\n' '{"type":"assistant","promptId":null,"isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","id":"t2","input":{}}]}}'
+    fi
   } >"$path"
 }
 
@@ -526,8 +534,9 @@ _pa_payload() {
       last_assistant_message: $msg, background_tasks: [], session_crons: []}'
 }
 
-# Every assertion below also depends on the hook never blocking, so the shared runner pins
-# exit 0 and the absence of the blocking keys in one place.
+# Cases that go through this runner also get exit 0 and the absence of the blocking keys pinned
+# in one place. The two cases below that call `run` directly (missing jq, clean-vs-error) assert
+# their own exit status instead.
 _pa_run() {
   run --separate-stderr bash "$PA_HOOK" <<<"$1"
   [ "$status" -eq 0 ] || {
@@ -542,9 +551,25 @@ _pa_run() {
   fi
 }
 
+# Extract every status line and require exactly one, equal to the expected value. A "contains"
+# check would pass a hook that emitted both status=ok and status=violation, which is precisely
+# the ambiguity AC-008 exists to forbid.
 _pa_status_is() {
-  printf '%s\n' "$stderr" | grep -qE "^plaintext-ask-check: status=$1( |\$)" || {
-    echo "expected status=$1, got: ${stderr}"
+  local statuses
+  statuses="$(printf '%s\n' "$stderr" | sed -n 's/^plaintext-ask-check: status=\([^ ]*\) .*/\1/p')"
+  [ "$statuses" = "$1" ] || {
+    echo "expected exactly one status=$1, got: ${stderr}"
+    false
+  }
+}
+
+# Same, but also pins the reason — used where the reason is the point of the case (which error
+# path was taken, or that the cheap path exited before touching the transcript).
+_pa_status_reason_is() {
+  local line
+  line="$(printf '%s\n' "$stderr" | sed -n 's/^plaintext-ask-check: \(status=.*\)$/\1/p')"
+  [ "$line" = "status=$1 reason=$2" ] || {
+    echo "expected exactly 'status=$1 reason=$2', got: ${stderr}"
     false
   }
 }
@@ -735,4 +760,152 @@ MANIFEST
     echo "clean and could-not-evaluate produced the same output: ${clean}"
     false
   }
+}
+
+@test "#616 AC-001: the ask is found in a reply longer than the byte window" {
+  _require_jq
+  # Regression for a silent false negative found in review: the tail window used to be cut by
+  # bytes, and a cut that lands inside a multi-byte character makes BSD/ugrep's `grep -F` miss
+  # even a fully intact Japanese phrase after it (measured; LC_ALL=C does not help). Replies
+  # over the window are the common case, so this failed quietly on real turns.
+  local dir long
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  long="$(printf 'あ%.0s' $(seq 1 800))"
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "$(printf '%s\nこの方針で進めてよろしいですか？' "$long")")"
+  _pa_status_is violation
+}
+
+@test "#616 AC-003: a long ordinary report is not flagged either" {
+  _require_jq
+  local dir long
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  long="$(printf 'あ%.0s' $(seq 1 800))"
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "$(printf '%s\n実装が完了しました。' "$long")")"
+  _pa_status_is ok
+  [ -z "$output" ]
+}
+
+@test "#616 AC-003: quoting the phrase inside a finished report is not a violation" {
+  _require_jq
+  # The detector requires the reply to *end* by asking. Matching the phrase anywhere in the
+  # window would flag a completion report that merely quotes the question it once asked.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "「この方針で進めてよろしいですか？」と尋ねた記録を残しました。実装は完了です。")"
+  _pa_status_is ok
+  [ -z "$output" ]
+}
+
+@test "#616 AC-003: an English closing that is not a question is not a violation" {
+  _require_jq
+  # "Let me know if you ..." is in the phrase list because it can end a turn by asking, but as
+  # an ordinary sign-off it does not. The trailing "?" is what separates the two.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "Done. Let me know if you spot anything else.")"
+  _pa_status_is ok
+  [ -z "$output" ]
+}
+
+@test "#616 AC-002: an AskUserQuestion in a LATER turn does not excuse this turn" {
+  _require_jq
+  # prompt_id correlates a prompt with everything up to the next prompt. If the scan window ran
+  # to end-of-file instead of stopping at the next prompt, a later well-behaved turn would
+  # silently clear an earlier violation.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" next-turn
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？")"
+  _pa_status_is violation
+}
+
+@test "#616: the cheap path does not touch the transcript at all" {
+  _require_jq
+  # The hook is synchronous and runs at every turn end, so the design contract is that a reply
+  # which does not end by asking never reaches the transcript scan. Pointing at a path that
+  # cannot be read makes any such read observable: it would surface as an error status.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_run "$(_pa_payload "${dir}/definitely-absent.jsonl" "実装が完了しました。")"
+  _pa_status_reason_is ok no-decision-seeking-phrase
+  [ -z "$output" ]
+}
+
+@test "#616 AC-008: each could-not-evaluate path reports its own reason" {
+  _require_jq
+  # One case per error branch. Bundling them would let a refactor collapse two branches into
+  # one and still pass, which is how a detector quietly loses the ability to say why it failed.
+  local dir payload
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+
+  # transcript_path present but not a transcript
+  _pa_run "$(_pa_payload "/etc/hosts" "この方針で進めてよろしいですか？")"
+  _pa_status_reason_is error transcript-not-jsonl
+
+  # prompt_id missing from the payload entirely
+  payload="$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？" | jq 'del(.prompt_id)')"
+  _pa_run "$payload"
+  _pa_status_reason_is error no-prompt-id
+
+  # transcript larger than the cap
+  run --separate-stderr env PLAINTEXT_ASK_MAX_TRANSCRIPT_BYTES=1 bash "$PA_HOOK" \
+    <<<"$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？")"
+  [ "$status" -eq 0 ]
+  _pa_status_reason_is error transcript-too-large
+
+  # empty stdin
+  _pa_run ""
+  _pa_status_reason_is error empty-payload
+}
+
+@test "#616 AC-008: a scan window configured to nothing is an error, not a clean turn" {
+  _require_jq
+  # Every other failure mode reports error. If shrinking the window silently produced "no
+  # phrase found", it would be the one way to disable the detector without leaving a trace —
+  # the exact asymmetry this hook is meant not to have.
+  local dir
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+  run --separate-stderr env PLAINTEXT_ASK_TAIL_SCAN_CHARS=0 bash "$PA_HOOK" \
+    <<<"$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？")"
+  [ "$status" -eq 0 ]
+  _pa_status_reason_is error invalid-tail-scan-chars
+}
+
+@test "#616: events other than Stop and turns with no reply text are skipped" {
+  _require_jq
+  local dir payload
+  dir="$(_mktemp_dir)"
+  _pa_write_transcript "${dir}/t.jsonl" noask
+
+  payload="$(_pa_payload "${dir}/t.jsonl" "この方針で進めてよろしいですか？" | jq '.hook_event_name = "SubagentStop"')"
+  _pa_run "$payload"
+  _pa_status_reason_is skipped not-stop-event
+
+  _pa_run "$(_pa_payload "${dir}/t.jsonl" "")"
+  _pa_status_reason_is skipped no-assistant-message
+}
+
+@test "#616 AC-009: the four pre-existing Stop hooks keep their exact wiring" {
+  _require_jq
+  # The surface manifest above only pins event and id, so it would accept this change quietly
+  # narrowing a matcher, flipping an async flag or repointing a command on one of the hooks it
+  # promised not to touch. wave-session-event has its own guard; this covers the other three
+  # plus it, so all four are structurally pinned.
+  local expected actual
+  expected="$(
+    cat <<'MANIFEST'
+Stop	stop:cost-tracker	*	$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:cost-tracker scripts/hooks/cost-tracker.js minimal,standard,strict	true	10
+Stop	stop:desktop-notify	*	$HOME/.claude/ecc-hook.sh scripts/hooks/run-with-flags.js stop:desktop-notify scripts/hooks/desktop-notify.js standard,strict	true	10
+Stop	stop:ntfy-notify	*	$HOME/.claude/ntfy-notify.sh	true	10
+Stop	stop:wave-session-event	*	$HOME/.claude/wave-session-event.sh	true	10
+MANIFEST
+  )"
+  actual="$(_manifest_by_ids stop:cost-tracker stop:desktop-notify stop:ntfy-notify stop:wave-session-event)"
+  _assert_manifest "pre-existing Stop hooks" "$expected" "$actual"
 }

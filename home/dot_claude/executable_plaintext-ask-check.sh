@@ -6,8 +6,9 @@
 #                             フィールドで、末尾が判断を仰ぐ語句で終わっているかをここで見る。
 #   - transcript_path / prompt_id
 #                             prompt_id は turn を開始した user エントリの promptId と一致する
-#                             （実データで確認済み）。そこから後ろに AskUserQuestion の tool_use が
-#                             あるかを見て「この turn でちゃんと選択肢を出したか」を判定する。
+#                             （実データで確認済み）。そこから次のプロンプトまでの間に
+#                             AskUserQuestion の tool_use があるかを見て、「この turn でちゃんと
+#                             選択肢を出したか」を判定する。
 #   - background_tasks        空でなければ「session is done」ではなく「バックグラウンド待ちで
 #                             止まっている」。#447 の実測（サブエージェントへ委任した親は途中で
 #                             Stop を出し、同じ prompt_id のまま再開して AskUserQuestion を出す）を
@@ -31,13 +32,22 @@
 set -euo pipefail
 
 # 末尾だけを見る。違反の形が「応答の末尾に平文で書いて待つ」であり、報告の途中に現れて本人が後段で
-# 答えている問いを拾わないため。行単位ではなくバイト単位なのは、「どちらにしますか？」の直後に
-# 選択肢の箇条書きが続く形（最終行が "- B: ..." になる）を取り落とさないため。日本語でおよそ 400 字。
-TAIL_SCAN_BYTES="${PLAINTEXT_ASK_TAIL_SCAN_BYTES:-1200}"
+# 答えている問いを拾わないため。
+#
+# 単位が「バイト」ではなく「文字」なのは実測に基づく: バイトで切ると多バイト文字の途中で切れることが
+# あり、そうなると BSD/ugrep の `grep -F` は **その後ろにある完全な日本語語句すら一致しなくなる**
+# （LC_ALL=C でも同じ）。1200 バイトを超える応答は珍しくないので、これは検知が黙って落ちる経路だった。
+# bash の部分文字列展開は UTF-8 ロケールで文字単位に働き（bash 3.2 で確認済み）、境界を割らない。
+TAIL_SCAN_CHARS="${PLAINTEXT_ASK_TAIL_SCAN_CHARS:-400}"
+# 窓を極端に小さくすると、何も一致しなくなって「違反なし」に見える。他の失敗経路がすべて error に
+# 倒れるのにここだけ ok に倒れるのは、この hook の設計目標そのものへの反例なので下限を設けて弾く。
+TAIL_SCAN_CHARS_MIN=40
 # これを超えるトランスクリプトは走査を諦める。諦めたことは error として必ず告げる（黙って ok にしない）。
+# 上限の根拠（実測）: 実トランスクリプトを連結した 417 MB の JSONL を下の jq 走査が 3.4 秒で処理した
+# （約 120 MB/s）。64 MiB なら約 0.55 秒で、hook の timeout 5 秒に対しておよそ 9 倍の余裕がある。
 MAX_TRANSCRIPT_BYTES="${PLAINTEXT_ASK_MAX_TRANSCRIPT_BYTES:-67108864}"
 
-# 判断を仰ぐ語句（日本語）。固定文字列照合なのでロケールに依存しない。
+# 判断を仰ぐ語句（日本語）。bash の固定パターン照合なのでロケールにも外部コマンドにも依存しない。
 # 意図的に狭い。「お知らせください」「教えてください」のような通常の結びは入れない。
 DECISION_SEEKING_JA=(
   "よろしいですか"
@@ -50,7 +60,6 @@ DECISION_SEEKING_JA=(
   "どちらにしましょうか"
   "どちらがよいですか"
   "どちらが良いですか"
-  "どちらを選び"
   "どうしますか"
   "どうしましょうか"
   "どうされますか"
@@ -74,7 +83,16 @@ DECISION_SEEKING_JA=(
 )
 
 # 判断を仰ぐ語句（英語）。ASCII のみなので大文字小文字を無視した ERE で照合する。
-DECISION_SEEKING_EN='shall i (proceed|continue|go ahead)|should i (proceed|continue)|would you like me to|do you want me to|let me know (which|whether|if you)|which (one|option|approach) (do|would|should)|(proceed|continue)\?[[:space:]]*$'
+DECISION_SEEKING_EN='shall i (proceed|continue|go ahead)|should i (proceed|continue)|would you like me to|do you want me to|let me know (which|whether|if you)|which (one|option|approach) (do|would|should)'
+
+# 行末から取り除く「飾り」。閉じ括弧・閉じ引用符・空白まで。文末句読点はここには入れない
+# （英語の「? で終わるか」判定に必要なので、日本語側だけがあとから追加で剥がす）。
+# U+201D / U+2019 はバイト列で書く。リテラルの curly quote は shellcheck が SC1112
+# （タイプミスで混入した引用符）として弾くため。
+TRAILING_DECORATIONS=(' ' $'\t' $'\r' '"' "'" '）' ')' '」' '』' '】' ']'
+  $'\xe2\x80\x9d' $'\xe2\x80\x99')
+# 日本語側で追加に剥がす文末句読点。剥がしたあと「語句で終わっているか」を見る。
+SENTENCE_TERMINATORS=('？' '?' '。' '.' '！' '!' '…')
 
 # status は必ず 1 行出す。ok と error が別の値であることが、この検知器が沈黙で壊れないための条件。
 emit_status() {
@@ -85,48 +103,112 @@ emit_system_message() {
   jq -n --arg m "$1" '{systemMessage: $m}'
 }
 
-# 末尾に判断を仰ぐ語句があれば、その語句を stdout に出して 0 を返す。
-match_decision_phrase() {
-  local tail_text="$1" phrase hit
-  for phrase in "${DECISION_SEEKING_JA[@]}"; do
-    if printf '%s' "$tail_text" | grep -qF -- "$phrase"; then
-      printf '%s' "$phrase"
-      return 0
+# 指定した接尾辞群を、変化しなくなるまで末尾から剥がす。
+strip_suffixes() {
+  local s="$1" prev="" p
+  shift
+  while [ "$s" != "$prev" ]; do
+    prev="$s"
+    for p in "$@"; do
+      s="${s%"$p"}"
+    done
+  done
+  printf '%s' "$s"
+}
+
+# 応答が「問いで終わっている」かを見るための締めの 1 行を取り出す。
+# 末尾から空行と箇条書き・引用・表の行を捨てていき、最初に現れた通常の行を返す。観測された違反形は
+# 問いの「下」に選択肢を並べることが多く、最終行がそのまま `- B: ...` になるため、最終行をそのまま
+# 使うと取り落とす。
+closing_line() {
+  local text="$1" line
+  while [ -n "$text" ]; do
+    line="${text##*$'\n'}"
+    line="$(strip_suffixes "$line" "${TRAILING_DECORATIONS[@]}")"
+    case "$line" in
+      '') ;;
+      '- '* | '* '* | '+ '* | '>'* | '|'* | '#'*) ;;
+      [0-9]'. '* | [0-9][0-9]'. '*) ;;
+      *)
+        printf '%s' "$line"
+        return 0
+        ;;
+    esac
+    if [ "$text" = "${text##*$'\n'}" ]; then
+      text=""
+    else
+      text="${text%$'\n'*}"
     fi
   done
-  hit="$(printf '%s' "$tail_text" | grep -oiE -- "$DECISION_SEEKING_EN" | head -n 1 || true)"
-  if [ -n "$hit" ]; then
-    printf '%s' "$hit"
-    return 0
-  fi
   return 1
 }
 
-# トランスクリプトを 3 種のマーカー列へ射影する。行ごとに独立に parse するので、壊れた 1 行が
-# jq 全体を中断させて検知を静かに落とすことはない（壊れた行は BAD として必ず告げる）。
-scan_turn_markers() {
+# 締めの行が判断要求で「終わって」いれば、その語句を stdout に出して 0 を返す。
+#
+# 位置を要求するのが要点。窓の中のどこかに語句があれば当てる形にすると、完了報告の中で
+# 「『この方針で進めてよろしいですか？』と尋ねた」と引用しただけで violation になる。
+# 日本語の語句は文末に来るので「文末句読点を剥がした行がその語句で終わること」を、英語の語句は
+# 文頭寄りに来るので「行が ? で終わること」を条件にする。
+match_decision_phrase() {
+  local line="$1" phrase stripped hit
+  stripped="$(strip_suffixes "$line" "${SENTENCE_TERMINATORS[@]}" "${TRAILING_DECORATIONS[@]}")"
+  for phrase in "${DECISION_SEEKING_JA[@]}"; do
+    case "$stripped" in
+      *"$phrase")
+        printf '%s' "$phrase"
+        return 0
+        ;;
+    esac
+  done
+  case "$line" in
+    *'?')
+      hit="$(printf '%s' "$line" | grep -m 1 -oiE -- "$DECISION_SEEKING_EN" || true)"
+      if [ -n "$hit" ]; then
+        printf '%s' "$hit"
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
+# トランスクリプトを 1 パスで畳み、`<bad> <seen> <ask>` の 1 行にして返す。
+#
+# 行ごとに独立に parse するので、壊れた 1 行が jq 全体を中断させて検知を静かに落とすことはない
+# （壊れた行は bad として必ず告げる）。窓は prompt_id が現れた行から**次のプロンプトの手前**まで。
+# turn の途中で返る tool_result エントリは同じ promptId を持つので窓を閉じない（実データで確認）。
+# 状態を畳むだけなので、走査中に保持するのは定数個の真偽値だけで、行数に比例して増えない。
+scan_turn() {
   local transcript="$1" prompt_id="$2"
-  jq -Rr --arg pid "$prompt_id" '
-    if test("^[[:space:]]*$") then empty
-    else
-      (try fromjson catch null) as $e
-      | if $e == null then "BAD"
-        elif (($e.promptId // "") == $pid) then "PROMPT"
-        elif ($e.type == "assistant"
-              and ($e.isSidechain != true)
-              and (($e.message.content // []) | type == "array")
-              and (($e.message.content // [])
-                   | any(.type == "tool_use" and .name == "AskUserQuestion")))
-          then "ASK"
-        else empty
-        end
-    end
+  jq -nRr --arg pid "$prompt_id" '
+    reduce inputs as $line (
+      {bad: false, seen: false, closed: false, ask: false};
+      if .closed then .
+      else
+        ($line | try fromjson catch null) as $e
+        | if $e == null then
+            (if ($line | test("^[[:space:]]*$")) then . else .bad = true end)
+          elif (.seen | not) then
+            (if (($e.promptId // "") == $pid) then .seen = true else . end)
+          elif (($e.promptId // null) != null and $e.promptId != $pid) then
+            .closed = true
+          elif ($e.type == "assistant"
+                and ($e.isSidechain != true)
+                and (($e.message.content // []) | type == "array")
+                and (($e.message.content // [])
+                     | any(.type == "tool_use" and .name == "AskUserQuestion"))) then
+            .ask = true
+          else .
+          end
+      end
+    )
+    | "\(.bad) \(.seen) \(.ask)"
   ' "$transcript" 2>/dev/null
 }
 
 main() {
   local input fields ev active agent bgcount prompt_id transcript
-  local msg tail_text phrase markers size
+  local msg tail_text line phrase verdict bad seen ask size
 
   # jq が無い環境では判定できない。他の hook のような silent no-op にはしない —— 判定不能を
   # 「違反 0 件」と同じ沈黙で表すことこそ、この検知器が禁じている故障だから。
@@ -134,6 +216,24 @@ main() {
     emit_status error "jq-unavailable"
     return 0
   fi
+
+  # 窓の大きさが壊れていたら、何も一致しないのを「違反なし」と呼ばずに error として告げる。
+  case "$TAIL_SCAN_CHARS" in
+    '' | *[!0-9]*)
+      emit_status error "invalid-tail-scan-chars"
+      return 0
+      ;;
+  esac
+  if [ "$TAIL_SCAN_CHARS" -lt "$TAIL_SCAN_CHARS_MIN" ]; then
+    emit_status error "invalid-tail-scan-chars"
+    return 0
+  fi
+  case "$MAX_TRANSCRIPT_BYTES" in
+    '' | *[!0-9]*)
+      emit_status error "invalid-max-transcript-bytes"
+      return 0
+      ;;
+  esac
 
   input="$(cat 2>/dev/null || true)"
   if [ -z "$input" ]; then
@@ -183,19 +283,41 @@ main() {
     return 0
   fi
 
-  tail_text="$(printf '%s' "$msg" | tail -c "$TAIL_SCAN_BYTES")"
-  if ! phrase="$(match_decision_phrase "$tail_text")"; then
+  # 長さでクランプする。bash 3.2 の `${var: -N}` は N が文字列長を超えると **黙って空文字列を返す**
+  # （実測）。窓より短い応答がすべて「語句なし」に落ちる沈黙経路になるので、負の offset を渡さない。
+  if [ "${#msg}" -gt "$TAIL_SCAN_CHARS" ]; then
+    tail_text="${msg: -$TAIL_SCAN_CHARS}"
+  else
+    tail_text="$msg"
+  fi
+  if ! line="$(closing_line "$tail_text")"; then
+    emit_status ok "no-closing-line"
+    return 0
+  fi
+  if ! phrase="$(match_decision_phrase "$line")"; then
     emit_status ok "no-decision-seeking-phrase"
     return 0
   fi
 
-  # ここから先はトランスクリプトを読む。語句が一致したときだけなので、通常の turn では走らない。
+  # ここから先はトランスクリプトを読む。締めの行が判断要求で終わっていたときだけなので、
+  # 通常の turn では走らない。
   if [ -z "$prompt_id" ]; then
     emit_status error "no-prompt-id"
     emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、payload に prompt_id が無く turn を特定できませんでした（判定不能であって違反なしではありません）。"
     return 0
   fi
-  if [ -z "$transcript" ] || [ ! -r "$transcript" ]; then
+  # 読む前に、渡されたパスが素性のわかる通常ファイルであることを確かめる（姉妹 hook の
+  # wave-session-event.sh が session_id を UUID 検証してから使うのと同じ方針。ランタイムが
+  # 生成した値でも未検証の入力として扱う）。
+  case "$transcript" in
+    *.jsonl) ;;
+    *)
+      emit_status error "transcript-not-jsonl"
+      emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、transcript_path が想定の形式ではなく確認できませんでした（判定不能であって違反なしではありません）。"
+      return 0
+      ;;
+  esac
+  if [ ! -f "$transcript" ] || [ ! -r "$transcript" ]; then
     emit_status error "transcript-unreadable"
     emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、トランスクリプトを読めず AskUserQuestion の有無を確認できませんでした（判定不能であって違反なしではありません）。"
     return 0
@@ -207,18 +329,19 @@ main() {
     return 0
   fi
 
-  markers="$(scan_turn_markers "$transcript" "$prompt_id" || true)"
-  if printf '%s\n' "$markers" | grep -qx 'BAD'; then
+  verdict="$(scan_turn "$transcript" "$prompt_id" || true)"
+  read -r bad seen ask <<<"${verdict:-}" || true
+  if [ "${bad:-}" = "true" ]; then
     emit_status error "transcript-unparseable-line"
     emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、トランスクリプトに解釈できない行があり確認できませんでした（判定不能であって違反なしではありません）。"
     return 0
   fi
-  if ! printf '%s\n' "$markers" | grep -qx 'PROMPT'; then
+  if [ "${seen:-}" != "true" ]; then
     emit_status error "prompt-not-in-transcript"
     emit_system_message "plaintext-ask-check: 末尾に「${phrase}」を検出しましたが、この turn をトランスクリプト上で特定できませんでした（判定不能であって違反なしではありません）。"
     return 0
   fi
-  if printf '%s\n' "$markers" | awk '/^PROMPT$/ { seen = 1 } seen && /^ASK$/ { found = 1 } END { exit found ? 0 : 1 }'; then
+  if [ "${ask:-}" = "true" ]; then
     emit_status ok "askuserquestion-used"
     return 0
   fi
