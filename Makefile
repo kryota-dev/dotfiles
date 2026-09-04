@@ -7,14 +7,18 @@ all: help
 # Linting & formatting
 # ========================================
 
+# The find patterns cover .sh/.sh.tmpl plus the two extension-less executable_ trees:
+# home/dot_local/bin (CLI entry points) and home/dot_local/launchers (the per-account wrappers).
+# The launchers were outside the net until #677 gave one of them non-trivial argv handling; all
+# three already passed, so widening the pattern cost nothing and closed the gap.
 ## Run shellcheck, shfmt check, and zsh syntax check
 lint:
 	@echo "==> Running shellcheck..."
-	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
+	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' -o -path 'home/dot_local/launchers/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shellcheck --shell=bash --exclude=SC1091,SC2034,SC2086,SC2317,SC2329 - || exit 1; \
 	done
 	@echo "==> Running shfmt check..."
-	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
+	@find home scripts \( -name '*.sh' -o -name '*.sh.tmpl' -o -path 'home/dot_local/bin/executable_*' -o -path 'home/dot_local/launchers/executable_*' \) ! -name 'symlink_*' | while read -r f; do \
 		sed '/{{/d' "$$f" | shfmt -d -i 2 -ci || exit 1; \
 	done
 	@echo "==> Checking zsh syntax..."

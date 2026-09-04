@@ -48,10 +48,16 @@ alias claude-config='ECC_DISABLED_HOOKS_EXTRA=pre:config-protection CLAUDE_CONFI
 # The prompt is passed via --append-system-prompt-file (path) instead of --append-system-prompt
 # (content) so the prompt body stays out of argv — the CLI reads the file at process start,
 # avoiding argv-length and control-char concerns as the prompt grows. The two flags are mutually
-# exclusive: Claude Code >= 2.1.185 aborts with "Cannot use both ... Please use only one." The base
-# claude wrapper deliberately injects neither, so this helper can layer --append-system-prompt-file
-# on top of it; a wrapper that injected its own --append-system-prompt would have to inline the
-# prompt instead (the retired phone-control wrapper needed exactly that separate path, #331).
+# exclusive: Claude Code >= 2.1.185 aborts with "Cannot use both ... Please use only one."
+# The base claude wrapper used to inject neither, so this helper could simply add its own flag.
+# That stopped being true in #677, which injects the AskUserQuestion rule from the wrapper (the one
+# file every entry point reaches, not just interactive zsh). Layering is not what happens there,
+# because it cannot: --append-system-prompt-file is not repeatable and a later occurrence silently
+# replaces an earlier one, so the wrapper strips whatever this helper passes and folds it together
+# with the rule into a single composite file. The line below is therefore unchanged and still
+# correct — the wrapper reads it as input rather than being overridden by it. Anything that starts
+# passing --append-system-prompt (content) instead goes through the same fold, so the retired
+# phone-control wrapper's separate inline path (#331) would no longer be needed.
 # CLAUDE_CONFIG_DIR is set here (the wrapper keeps an explicit value via fill-gaps) so the fable
 # session lands on the right account; the wrapper injects the rest of the per-account env.
 _claude_fable() {

@@ -54,6 +54,8 @@ The `cldf` / `cldf-r06` aliases start Claude Code in an **orchestrator configura
 - pins the main model to the full ID `--model claude-fable-5-1` (not the `fable` alias, so the delegation prompt's Sonnet-5-era guidance and the main model generation never silently drift apart — the alias now [resolves to Fable 5.1](https://code.claude.com/docs/en/model-config) and would move on its own at the next generation). The flag is what makes the pin stick without opening the picker: Claude Code [resolves the main model](https://code.claude.com/docs/en/model-config) as in-session `/model` > `--model` > `ANTHROPIC_MODEL` > a `model` value in settings > organization default > `ANTHROPIC_DEFAULT_MODEL`, so `--model` beats a default previously saved with `/model`. And
 - points at `home/dot_claude/fable-orchestrator-prompt.md` (deployed to `~/.claude/fable-orchestrator-prompt.md`) via `--append-system-prompt-file <path>` when the file is readable. The path (not the content) is passed to the CLI, which reads the file at process start — this keeps the prompt body out of argv even as the prompt grows. When the file is absent (before `chezmoi apply` or after manual removal) the session still starts, just without the orchestrator prompt.
 
+Since #677 that flag no longer reaches the CLI as written: the wrapper strips it and folds the orchestrator prompt together with the AskUserQuestion rule into one composite file (see [Append-system-prompt normalisation](#append-system-prompt-normalisation) below). `cldf` still gets the whole orchestrator prompt — a test pins that end to end — it just arrives concatenated rather than alone.
+
 The prompt file is deliberately kept at `~/.claude/…` and read by both accounts via that absolute path — same "default account dir shared across accounts" precedent as `hooks-fork/`.
 
 `CLAUDE_CODE_SUBAGENT_MODEL` is deliberately **not** set, but the reason is not the one this document used to give. Claude Code [resolves a subagent's model](https://code.claude.com/docs/en/sub-agents) in this order since v2.1.251:
@@ -116,8 +118,33 @@ Key properties:
 - The homunculus slug is derived from the config-dir basename in the same three branches `run_onchange_after_14` uses: `.claude` → `default`, `.claude-*` → the suffix, anything else → strip a leading dot.
 - `EXA_API_KEY` and `FIRECRAWL_API_KEY` are sourced by the wrapper itself from `~/.config/zsh/claude-secrets.zsh` (a 0600 file rendered from 1Password at `chezmoi apply` time) — but only when the caller has not already decided the key (even to an empty value), which is what lets `morning-radar` opt out of web search by exporting an empty `EXA_API_KEY`. `claude.zsh` no longer sources this file itself.
 - `real` is resolved via `mise which claude` (not via PATH, which would just re-resolve this same wrapper), so the pin-correct mise-managed binary always runs; `CLAUDE_LAUNCHER_BIN` overrides this for tests. If the real binary cannot be resolved, the wrapper fails loudly (exit 127) instead of silently running the wrong binary.
+- Since #677 the wrapper also rewrites argv before `exec`ing — the one place it is not purely additive. See below.
 
 Source: `home/dot_local/launchers/executable_claude`.
+
+### Append-system-prompt normalisation
+
+The rule that decisions go through `AskUserQuestion` lives in `home/dot_claude/ask-user-question-prompt.md` (deployed to `~/.claude/ask-user-question-prompt.md`) and is injected as a **system prompt**, not as instructions. #614 put it in `CLAUDE.md` and it did not hold — #677 measured three violations in a single session — so #677 moved the authority to the system prompt. It is injected here, in the wrapper, rather than in `claude.zsh`, because this is the one file every entry point reaches: interactive zsh, hooks, launchd jobs, frontier-harness child sessions, Claude's own Bash tool.
+
+Three measured properties of the CLI (claude 2.1.259) decide the shape:
+
+| Property | Consequence |
+| --- | --- |
+| `--append-system-prompt-file` is **not repeatable** — it is declared `.argParser(String)`, so a later occurrence silently replaces an earlier one | The wrapper cannot layer its flag on top of a caller's. It **folds**: it strips the caller's occurrence, concatenates that prompt with the rule into one file, and passes the single occurrence the CLI allows. |
+| The flag must sit **before the first positional** — after a subcommand the CLI aborts with `error: unknown option`, before it the root command parses it and the subcommand still runs | The flag is prepended right after the program name, the same global position the codex wrapper uses for `--profile`. No subcommand allowlist to maintain. |
+| `--append-system-prompt` and `--append-system-prompt-file` are **mutually exclusive** (`Cannot use both … Please use only one.`, exit 1) | A caller's content-form prompt is folded into the composite file too. A caller that passes *both* gets both handed straight back, so the CLI — not the wrapper — decides what is wrong. |
+
+The composite is content-addressed under `${XDG_CACHE_HOME:-~/.cache}/claude-launcher/`, named after a SHA-256 of the bytes just written. It is **rewritten on every launch rather than reused when a non-empty file already sits at that path**: the content comes from files in this repository, so the path is predictable, and any same-UID process — a compromised hook, MCP server or skill — could plant a file there first. A reused file would become the session's system prompt with nothing verifying it, which would defeat the point of injecting the rule at all. `mv` is a rename, so it replaces the entry even if a symlink was planted. There is no weaker digest fallback: without `shasum` or `sha256sum` the launcher aborts rather than quietly naming files by CRC32.
+
+Two further behaviours are worth naming:
+
+- A flag with **no value** (`claude --append-system-prompt` at the end of argv) is handed back to the CLI, appended where it was, so commander still reports `argument missing`. Folding it as an empty prompt would start the session instead — the one silent drop the design would otherwise have. A flag with an explicitly *empty* value is different: commander accepts and ignores it, so the launcher treats it as "no caller prompt" and injects the rule alone.
+- The argv scan does **not** know any other flag's arity, so a value that happens to equal one of these flag names (`claude -p '--append-system-prompt-file'`) is misread as a flag and takes the following token with it. A full arity table would have to track every option and would drift the moment one is added, so this limit is accepted and documented. The codex wrapper carries the same one.
+- A prompt passed as `--append-system-prompt <text>` used to live only in argv and process memory; it now lands in a 0600 file that outlives the session. Nothing here passes that spelling today, but anything that starts to should not put short-lived secrets in it. The cache has no TTL sweep on purpose — being content-addressed, it is bounded by the number of distinct prompts in play, and a per-launch prune would cost every session to bound a set that only grows when those files change.
+
+`--append-system-prompt-file` is **undocumented** — `.hideHelp()` keeps it out of `claude --help`. Depending on it is nevertheless safe in the one way that matters: its removal would be *loud*. An unknown option aborts with exit 1 rather than being ignored, as does a prompt file that cannot be read. Nothing here degrades into silence. There is no env var or user-settings alternative to fall back on: `settings.appendSystemPrompt` is read only from the enterprise policyHelper payload, which lives in admin-owned managed settings.
+
+**This closes only half of what #616 set out to fix.** The system prompt is read at session start just as `CLAUDE.md` is, so a rule written *during* a session still does not bind that session. What changes is authority and prominence — which is the half that matters if the rule was ignored because it was buried in a large `CLAUDE.md`.
 
 ---
 

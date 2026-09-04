@@ -21,10 +21,13 @@ _launchers() {
   # keep the runner's account and the "no inherited account" assertions would see it — and a real
   # EXA/FIRECRAWL key would leak into the output. Tests that need an inherited value pass it
   # explicitly via `env`. In CI these are unset already, so this is a no-op there.
+  # XDG_CACHE_HOME is in the list for a different reason than the rest: the #677 composite
+  # append-system-prompt file is written under it, so an inherited value would send test writes
+  # into the developer's real cache. Tests that exercise the composite pass it explicitly.
   unset CLAUDE_CONFIG_DIR CODEX_HOME EXA_API_KEY FIRECRAWL_API_KEY \
     ECC_AGENT_DATA_HOME CLV2_HOMUNCULUS_DIR GATEGUARD_STATE_DIR ECC_MCP_HEALTH_STATE_PATH \
     ECC_OBSERVER_TIMEOUT_SECONDS OBSERVER_ACTIVE_HOURS_START OBSERVER_ACTIVE_HOURS_END \
-    ECC_OBSERVER_MAX_TURNS ECC_DISABLED_HOOKS_EXTRA
+    ECC_OBSERVER_MAX_TURNS ECC_DISABLED_HOOKS_EXTRA XDG_CACHE_HOME
   LDIR="$BATS_TEST_TMPDIR/launchers"
   mkdir -p "$LDIR"
   cp "$HOME_DIR/dot_local/launchers/executable_claude" "$LDIR/claude"
@@ -44,8 +47,22 @@ for v in CLAUDE_CONFIG_DIR ECC_AGENT_DATA_HOME CLV2_HOMUNCULUS_DIR GATEGUARD_STA
   printf '%s=%s\n' "$v" "${!v-}"
 done
 printf 'ARGV=%s\n' "$*"
+# ARGV is a "$*" join, which cannot tell one spaced argument from two. The argc + one-line-per
+# -argument form below pins the word boundaries the #677 argv rewrite has to preserve. Both are
+# emitted so the assertions that predate it keep matching on ARGV alone.
+printf 'ARGC=%s\n' "$#"
+for a in "$@"; do printf '[%s]\n' "$a"; done
 STUBEOF
   chmod +x "$STUB"
+}
+
+# #677 fixtures: the rule file the wrapper injects, plus a cache dir for the composite it folds
+# a caller's own append prompt into. Both live under the test HOME so nothing touches the real one.
+_ask_rule() {
+  mkdir -p "$BATS_TEST_TMPDIR/.claude"
+  RULE="$BATS_TEST_TMPDIR/.claude/ask-user-question-prompt.md"
+  printf 'ASK-RULE-BODY\n' >"$RULE"
+  CACHE="$BATS_TEST_TMPDIR/xdg-cache"
 }
 
 # ---------- claude wrapper: account selection + env injection ----------
@@ -158,6 +175,270 @@ EOF
   _launchers
   run -127 env HOME="$BATS_TEST_TMPDIR" CLAUDE_LAUNCHER_BIN="$BATS_TEST_TMPDIR/nope" "$LDIR/claude"
   [[ "$output" == *"could not resolve"* ]]
+}
+
+# ---------- claude wrapper: append-system-prompt normalisation (#677) ----------
+#
+# The rule that decisions go through AskUserQuestion is injected as a system prompt instead of
+# being left in CLAUDE.md. Three measured CLI properties drive what these tests pin
+# (claude 2.1.259): --append-system-prompt-file is not repeatable and a later occurrence silently
+# replaces an earlier one; it must sit before the first positional or a subcommand aborts with
+# "unknown option"; and it is mutually exclusive with --append-system-prompt. Together they mean
+# the wrapper cannot layer its flag on top of a caller's — it has to fold both into one file.
+# Everything below fails if that folding degrades into "last one wins", because the loss would
+# otherwise be silent.
+
+@test "claude wrapper: prepends the ask rule as a system prompt file (#677)" {
+  _launchers
+  _ask_rule
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume
+  [ "$status" -eq 0 ]
+  # Ahead of the caller's own arguments: after a subcommand the flag would abort the CLI.
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE --resume"
+  # The rule file is shared by absolute path across accounts, like the fable prompt (#345), so all
+  # four entry points must carry it — bare `cld` included, since that is the name hooks and
+  # launchd jobs reach the wrapper by.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/cld"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/cld-r06"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE"
+}
+
+@test "claude wrapper: a repeated append flag resolves last-wins like the CLI (#677)" {
+  _launchers
+  _ask_rule
+  # This is the property the whole fold exists for: the CLI keeps only the last occurrence and
+  # drops the earlier one without a word. If the scan ever stopped at the first match instead, the
+  # wrapper would fold the wrong prompt and nothing else here would notice.
+  printf 'FIRST-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/first.md"
+  printf 'LAST-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/last.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/first.md" \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/last.md"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -cFx -- '[--append-system-prompt-file]')" -eq 1 ]
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'LAST-PROMPT-BODY' "$composite"
+  ! grep -qFx 'FIRST-PROMPT-BODY' "$composite"
+  # …and the last occurrence is also the one whose readability decides the exit, even when an
+  # earlier one would have been fine.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/first.md" \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/missing.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/missing.md"* ]]
+}
+
+@test "claude wrapper: hands a value-less append flag back to the CLI (#677)" {
+  _launchers
+  _ask_rule
+  # `claude --append-system-prompt` with nothing after it is an error the CLI reports as
+  # "option '--append-system-prompt <prompt>' argument missing". Folding it as an empty prompt
+  # would start the session instead — the one silent drop this wrapper would otherwise have.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume --append-system-prompt
+  [ "$status" -eq 0 ]
+  # Restored at the END, not the front: prepending it would hand it the next token as the value it
+  # never had, turning "argument missing" into a silently accepted prompt.
+  printf '%s\n' "$output" | grep -qFx 'ARGV=--resume --append-system-prompt'
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume --append-system-prompt-file
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx 'ARGV=--resume --append-system-prompt-file'
+  # An explicitly *empty* value is a different case: the CLI accepts and ignores it, so the wrapper
+  # treats it as "no caller prompt" and the rule still goes in rather than being passed through.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt= --resume
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE --resume"
+}
+
+@test "claude wrapper: leaves argv alone when the rule file is absent (#677)" {
+  _launchers
+  # Before `chezmoi apply`, or after a manual removal: the session still starts, it just runs
+  # without the rule. Same trade-off _claude_fable already makes for the orchestrator prompt.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$BATS_TEST_TMPDIR/xdg-cache" \
+    CLAUDE_LAUNCHER_BIN="$STUB" "$LDIR/claude" --resume
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--resume"
+}
+
+@test "claude wrapper: folds a caller's prompt file and the rule into one composite (#677)" {
+  _launchers
+  _ask_rule
+  printf 'CALLER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/caller.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --model claude-fable-5-1 \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/caller.md"
+  [ "$status" -eq 0 ]
+  # Exactly one occurrence reaches the CLI: a second one would silently drop the first.
+  [ "$(printf '%s\n' "$output" | grep -cFx -- '[--append-system-prompt-file]')" -eq 1 ]
+  printf '%s\n' "$output" | grep -q '^ARGV=--append-system-prompt-file '
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  [ -f "$composite" ]
+  [[ "$composite" == "$CACHE/claude-launcher/append-system-prompt-"*".md" ]]
+  grep -qFx 'CALLER-PROMPT-BODY' "$composite"
+  grep -qFx 'ASK-RULE-BODY' "$composite"
+  # The rule goes last: #677 is about it being buried, and the tail is the salient end.
+  [ "$(grep -nFx 'CALLER-PROMPT-BODY' "$composite" | cut -d: -f1)" \
+    -lt "$(grep -nFx 'ASK-RULE-BODY' "$composite" | cut -d: -f1)" ]
+  # The caller's own occurrence is gone, and its other flags are untouched.
+  ! printf '%s\n' "$output" | grep -qF "$BATS_TEST_TMPDIR/caller.md"
+  printf '%s\n' "$output" | grep -qFx '[--model]'
+  printf '%s\n' "$output" | grep -qFx '[claude-fable-5-1]'
+}
+
+@test "claude wrapper: folds the equals and content spellings too (#677)" {
+  _launchers
+  _ask_rule
+  printf 'CALLER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/caller.md"
+  # --flag=value is the same option to commander, so it has to be the same option to the scan.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" "--append-system-prompt-file=$BATS_TEST_TMPDIR/caller.md" -p hi
+  [ "$status" -eq 0 ]
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'CALLER-PROMPT-BODY' "$composite"
+  grep -qFx 'ASK-RULE-BODY' "$composite"
+  ! printf '%s\n' "$output" | grep -qF -- '--append-system-prompt-file='
+  # The content spelling is mutually exclusive with the file one, so it is folded into a file
+  # rather than left alongside — leaving both would abort the CLI.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt 'CALLER-TEXT-BODY' -p hi
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qFx -- '[--append-system-prompt]'
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'CALLER-TEXT-BODY' "$composite"
+  grep -qFx 'ASK-RULE-BODY' "$composite"
+  # …and the content spelling has an equals form too, which the scan has to recognise separately.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt=EQUALS-TEXT-BODY -p hi
+  [ "$status" -eq 0 ]
+  ! printf '%s\n' "$output" | grep -qF -- '--append-system-prompt='
+  composite="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  grep -qFx 'EQUALS-TEXT-BODY' "$composite"
+  grep -qFx 'ASK-RULE-BODY' "$composite"
+}
+
+@test "claude wrapper: hands both spellings back so the CLI refuses them itself (#677)" {
+  _launchers
+  _ask_rule
+  printf 'CALLER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/caller.md"
+  # "Cannot use both ... Please use only one." is the CLI's call. Normalising here would turn a
+  # loud error into a winner the caller never chose.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt 'CALLER-TEXT-BODY' \
+    --append-system-prompt-file "$BATS_TEST_TMPDIR/caller.md"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx -- '[--append-system-prompt]'
+  printf '%s\n' "$output" | grep -qFx -- '[CALLER-TEXT-BODY]'
+  printf '%s\n' "$output" | grep -qFx -- '[--append-system-prompt-file]'
+  printf '%s\n' "$output" | grep -qFx -- "[$BATS_TEST_TMPDIR/caller.md]"
+  [ ! -d "$CACHE/claude-launcher" ]
+}
+
+@test "claude wrapper: stops scanning at -- and keeps word boundaries (#677)" {
+  _launchers
+  _ask_rule
+  # After a literal `--` the same text is a positional, not our flag: it must survive untouched
+  # and still get the rule prepended.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" -- --append-system-prompt-file /x
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE -- --append-system-prompt-file /x"
+  # A spaced argument and an empty one pin the boundaries the rewrite must preserve: rebuilding
+  # argv through a "$*" round trip would collapse them and ARGV alone could not tell.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --resume 'two words' '' --model claude-fable-5-1
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx 'ARGC=7'
+  # Everything after the ARGC line is one argument per line, so this compares the whole rebuilt
+  # argv at once — order included — without depending on how many env lines the stub dumps first.
+  args="$(printf '%s\n' "$output" | sed -n '/^ARGC=/,$p' | tail -n +2)"
+  expected="$(printf '[--append-system-prompt-file]\n[%s]\n[--resume]\n[two words]\n[]\n[--model]\n[claude-fable-5-1]' "$RULE")"
+  [ "$args" = "$expected" ]
+}
+
+@test "claude wrapper: refuses to drop the rule when the caller's prompt file is unreadable (#677)" {
+  _launchers
+  _ask_rule
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/missing.md"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not readable"* ]]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/missing.md"* ]]
+}
+
+@test "claude wrapper: stays ahead of subcommands and reuses the composite (#677)" {
+  _launchers
+  _ask_rule
+  printf 'CALLER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/caller.md"
+  # `claude --append-system-prompt-file <path> mcp list` parses the flag on the root command and
+  # runs the subcommand; the reverse order aborts with "unknown option" (measured, 2.1.259).
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" mcp list
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qFx "ARGV=--append-system-prompt-file $RULE mcp list"
+  # Content-addressed: the same inputs converge on one file instead of accumulating a new one per
+  # launch, so concurrent launches cannot read a half-written or foreign composite.
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/caller.md"
+  [ "$status" -eq 0 ]
+  first="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/caller.md"
+  [ "$status" -eq 0 ]
+  second="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  [ "$first" = "$second" ]
+  [ "$(find "$CACHE/claude-launcher" -name 'append-system-prompt-*.md' | wc -l)" -eq 1 ]
+  # A different input has to land on a different path with different content. Without this, a
+  # regression that made the key constant — every prompt colliding on one file — would still show
+  # "same input, one file" above and pass.
+  printf 'OTHER-PROMPT-BODY\n' >"$BATS_TEST_TMPDIR/other.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    "$LDIR/claude" --append-system-prompt-file "$BATS_TEST_TMPDIR/other.md"
+  [ "$status" -eq 0 ]
+  other="$(printf '%s\n' "$output" | sed -n 's/^ARGV=--append-system-prompt-file \([^ ]*\).*/\1/p')"
+  [ "$other" != "$first" ]
+  grep -qFx 'OTHER-PROMPT-BODY' "$other"
+  grep -qFx 'CALLER-PROMPT-BODY' "$first"
+  [ "$(find "$CACHE/claude-launcher" -name 'append-system-prompt-*.md' | wc -l)" -eq 2 ]
+  # No half-written temporaries left behind by the write-every-launch path.
+  [ "$(find "$CACHE/claude-launcher" -name '.append-system-prompt.*' | wc -l)" -eq 0 ]
+}
+
+@test "claude.zsh + wrapper: cldf keeps the whole fable prompt and gains the rule (#677)" {
+  _launchers
+  _ask_rule
+  # The end-to-end pin for "the new injection does not break the existing one": _claude_fable
+  # still passes its own --append-system-prompt-file, and the wrapper folds rather than replaces.
+  # The fixture is multi-line on purpose — grepping one line would pass even if the fold dropped
+  # everything around it, and the real orchestrator prompt is 200+ lines.
+  printf 'FABLE-LINE-1\nFABLE-LINE-2\n\nFABLE-LINE-4\n' \
+    >"$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  run env HOME="$BATS_TEST_TMPDIR" XDG_CACHE_HOME="$CACHE" CLAUDE_LAUNCHER_BIN="$STUB" \
+    PATH="$LDIR:$PATH" zsh -fc "
+      export HOME='$BATS_TEST_TMPDIR'
+      source '${HOME_DIR}/dot_config/zsh/claude.zsh'
+      _claude_fable \"\$HOME/.claude\" --resume 'two words' ''
+    "
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -cFx -- '[--append-system-prompt-file]')" -eq 1 ]
+  composite="$(printf '%s\n' "$output" | sed -n 's/.*--append-system-prompt-file \([^ ]*\).*/\1/p' | head -1)"
+  # Compare the whole composite, not a line of it: the orchestrator prompt must arrive intact and
+  # the rule must be last (the tail is the salient end — that is the point of #677).
+  printf 'FABLE-LINE-1\nFABLE-LINE-2\n\nFABLE-LINE-4\n\nASK-RULE-BODY\n' \
+    >"$BATS_TEST_TMPDIR/expected-composite.md"
+  cmp "$BATS_TEST_TMPDIR/expected-composite.md" "$composite"
+  ! printf '%s\n' "$output" | grep -qF "$BATS_TEST_TMPDIR/.claude/fable-orchestrator-prompt.md"
+  # …and the rest of argv survives in order, with word boundaries intact.
+  args="$(printf '%s\n' "$output" | sed -n '/^ARGC=/,$p' | tail -n +2)"
+  expected="$(printf '[--append-system-prompt-file]\n[%s]\n[--resume]\n[two words]\n[]\n[--model]\n[claude-fable-5-1]' "$composite")"
+  [ "$args" = "$expected" ]
 }
 
 # ---------- codex wrapper: account selection ----------

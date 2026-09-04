@@ -54,6 +54,8 @@ r06 の Claude 設定ディレクトリ（`~/.claude-r06`）には、すべて�
 - main モデルをフル ID `--model claude-fable-5-1`（`fable` エイリアスではない）で pin する。委譲プロンプトの Sonnet 5 世代前提と main モデル世代が silently ずれないようにするためで、モデル世代交代時にはプロンプトとセットで意識的に更新する（エイリアスは現在 [Fable 5.1 に解決される](https://code.claude.com/docs/en/model-config)ため、放っておくと次の世代交代で勝手に動く）。フラグを使うのは、ピッカーを開かずに pin を効かせるため: Claude Code は [main モデルを](https://code.claude.com/docs/en/model-config)セッション内 `/model` > `--model` > `ANTHROPIC_MODEL` > 設定ファイルの `model` > 組織既定 > `ANTHROPIC_DEFAULT_MODEL` の順で解決するので、`--model` は過去に `/model` で保存した既定に勝つ。
 - `home/dot_claude/fable-orchestrator-prompt.md`（デプロイ先: `~/.claude/fable-orchestrator-prompt.md`）を、readable なときのみ `--append-system-prompt-file <path>` で指定する。渡すのは **path** で、CLI 側が process 起動時にファイルを読む — プロンプトが伸びても argv には載らない。ファイル不在時（`chezmoi apply` 前 / 手動削除後）でもセッションは正常起動し、オーケストレーター誘導だけが効かない。
 
+#677 以降、このフラグは書いたままの形では CLI に届かない。ラッパーがこれを取り除き、オーケストレータープロンプトと AskUserQuestion 規約を 1 つの合成ファイルに畳んでから渡す（後述の [append-system-prompt の正規化](#append-system-prompt-の正規化)）。`cldf` がオーケストレータープロンプト全文を受け取ることは変わらず、テストで端から端まで固定してある — 単独ではなく連結された形で届くだけである。
+
 プロンプトファイルは意図的に `~/.claude/…` に置き、両アカウントから絶対パスで読む — `hooks-fork/` と同じ「default アカウント配下を両アカウントで共有」前例。
 
 `CLAUDE_CODE_SUBAGENT_MODEL` は**意図的に未設定**にしていますが、理由はこのドキュメントが以前述べていたものとは違います。Claude Code は v2.1.251 以降、[subagent のモデルを次の順で解決](https://code.claude.com/docs/en/sub-agents)します:
@@ -116,8 +118,33 @@ exec "$real" "$@"
 - homunculus slug は config dir のベースネームから `run_onchange_after_14` と同じ 3 分岐で導出されます：`.claude` → `default`、`.claude-*` → サフィックス、それ以外 → 先頭のドットを除去。
 - `EXA_API_KEY` と `FIRECRAWL_API_KEY` はラッパー自身が `~/.config/zsh/claude-secrets.zsh`（`chezmoi apply` 時に 1Password からレンダリングされる 0600 ファイル）からソースします — ただし呼び出し元がそのキーをすでに決めている場合（空文字であっても）はソースしません。これにより `morning-radar` は空の `EXA_API_KEY` を export することで web 検索をオプトアウトできます。`claude.zsh` はこのファイルを自分ではソースしなくなりました。
 - `real` は（このラッパー自身を再解決してしまう PATH 経由ではなく）`mise which claude` で解決されるため、pin 正しい mise 管理バイナリが常に実行されます。`CLAUDE_LAUNCHER_BIN` はテスト用にこれを上書きします。本物のバイナリが解決できない場合、ラッパーは誤ったバイナリをサイレントに実行する代わりに大きく失敗します（exit 127）。
+- #677 以降、ラッパーは `exec` の前に argv も書き換えます — 純粋に加算的でない唯一の箇所です。次節を参照。
 
 ソース：`home/dot_local/launchers/executable_claude`
+
+### append-system-prompt の正規化
+
+「判断を仰ぐときは `AskUserQuestion` を使う」規約は `home/dot_claude/ask-user-question-prompt.md`（デプロイ先: `~/.claude/ask-user-question-prompt.md`）に置かれ、instructions ではなく **system prompt** として注入されます。#614 はこれを `CLAUDE.md` に書きましたが守られず（#677 で 1 セッション中に 3 度の違反を実測）、#677 で権威を system prompt へ移しました。`claude.zsh` ではなくラッパーに置くのは、ここが全ての起動経路が通る唯一のファイルだからです — 対話 zsh、hooks、launchd ジョブ、frontier-harness の子セッション、Claude 自身の Bash ツール。
+
+形を決めているのは、実測した CLI（claude 2.1.259）の 3 つの性質です:
+
+| 性質 | 帰結 |
+| --- | --- |
+| `--append-system-prompt-file` は**複数指定できない** — `.argParser(String)` で宣言されており、後の指定が前の指定を警告なく置き換える | ラッパーは呼び出し側の指定に自分のフラグを**重ねられない**。そこで**畳む**: 呼び出し側の指定を argv から取り除き、そのプロンプトと規約を 1 ファイルに連結し、CLI が許す唯一の出現として渡す |
+| フラグは**最初の positional より前**に置く必要がある — サブコマンドの後ろでは `error: unknown option` で abort し、前に置けば root コマンドが解析してサブコマンドは正常に動く | プログラム名直後に前置する。codex ラッパーが `--profile` に使っているのと同じグローバル位置。サブコマンド許可リストの恒久保守は不要 |
+| `--append-system-prompt` と `--append-system-prompt-file` は**排他**（`Cannot use both … Please use only one.`, exit 1） | 呼び出し側が content 形式で渡した場合も同じ合成ファイルへ畳む。**両方**渡された場合は両方をそのまま返し、何が誤りかはラッパーではなく CLI が決める |
+
+合成ファイルは `${XDG_CACHE_HOME:-~/.cache}/claude-launcher/` に content-addressed で置かれ、名前は**書き込んだバイト列そのものの SHA-256** です。**既に非空のファイルがあっても再利用せず、毎回書き直します**。内容はこのリポジトリ上のファイル由来なのでパスは事前計算でき、同一 UID の別プロセス（侵害された hook / MCP サーバー / skill）が先にファイルを置ける以上、再利用すればそれが無検証でセッションの system prompt になってしまうからです。それでは規約を注入する意味そのものが失われます。`mv` は rename なので、symlink が置かれていてもエントリごと置換します。弱いダイジェストへのフォールバックはありません — `shasum` も `sha256sum` も無ければ、CRC32 で静かに名付ける代わりに abort します。
+
+さらに 3 点、明記しておきます:
+
+- **値を伴わない**フラグ（argv 末尾の `claude --append-system-prompt`）は、元の位置（末尾）に戻して CLI へ渡します。commander が `argument missing` を報告できるようにするためで、空プロンプトとして畳むとセッションが起動してしまいます — 設計上ここだけが沈黙ドロップになりかねない箇所でした。一方、値が**明示的に空**の場合は別扱いです（commander は受理して無視するため、「呼び出し側プロンプトなし」とみなして規約だけを注入します）。
+- argv 走査は他フラグの arity を**知りません**。そのため値がこれらのフラグ名と一致する入力（`claude -p '--append-system-prompt-file'`）はフラグとして誤認識され、次のトークンまで巻き込みます。フル arity テーブルは全オプションの追従が必要で、オプションが 1 つ増えるたびに drift するため、この制限は許容して明記する方針を採りました。codex ラッパーも同じ制限を持ちます。
+- `--append-system-prompt <text>` で渡した本文は、従来 argv とプロセスメモリにしか存在しませんでしたが、今はセッションより長生きする 0600 ファイルになります。現状この綴りを使う経路はありませんが、今後使う場合は短命な秘密情報を載せないこと。キャッシュに TTL 掃除を入れていないのは意図的です — content-addressed なので実在するプロンプトの種類数で上限が付き、起動ごとの掃除は「それらのファイルが変わったときにしか増えない集合」を抑えるために全セッションへコストを課すことになります。
+
+`--append-system-prompt-file` は**未文書**です（`.hideHelp()` により `claude --help` に現れない）。それでも依存してよいのは、肝心な一点で**沈黙しない**からです: 未知オプションは無視されずに exit 1 で abort し、読めないプロンプトファイルも同様に abort します。env 変数や user settings に代替経路はありません — `settings.appendSystemPrompt` は enterprise policyHelper の payload からのみ読まれ、それは管理者所有の managed settings に置かれます。
+
+**これは #616 が解こうとした問題の半分しか閉じません。** system prompt も `CLAUDE.md` と同じくセッション開始時に読まれるため、セッション*中*に書いた規約はそのセッションを縛りません。変わるのは権威と目立ちやすさです — 規約が無視された理由が「巨大な `CLAUDE.md` に埋もれていた」ことであれば、そちらが効く半分です。
 
 ---
 
