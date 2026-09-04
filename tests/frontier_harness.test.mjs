@@ -30,6 +30,7 @@ import {
 } from "../home/dot_local/lib/frontier-harness/manifest-gaps.mjs";
 import {
   approvedCommandSegments,
+  commandSegments,
   findManifestGaps,
   loadVerifiedManifest,
   manifestEntryRejection,
@@ -4393,6 +4394,61 @@ test("manifest は make のオプション付きコマンドを承認として�
     normalizeManifest({ commands: ["make lint"], domains: [], capabilities: [] }).commands,
     ["make lint"],
   );
+});
+
+// ---------------------------------------------------------------------------
+// #624: テーブル外 binary の動的構築引数
+// ---------------------------------------------------------------------------
+
+test("テーブル外 binary でも動的構築は照合を通さない", () => {
+  const approved = approvedCommandSegments(["make lint"]);
+
+  // `make` / `go` / `pytest` は GLOBAL_OPTIONS にも SUBCOMMAND_DISPATCHED_BINARIES にも
+  // 無い。以前はここでトークンの dynamic フラグが捨てられており、実際に拒否していたのは
+  // `APPROVABLE_MAKE_COMMAND` の字集合（`$` も backtick も含まない）という**別の理由**
+  // だった。`commandSegments` の契約どおり「静的に解釈できない」こと自体で落ちることを
+  // 固定する —— 承認できる形の検査を将来緩めても、この層が独立に残るように。
+  for (const command of [
+    "make $(cat /tmp/injected)",
+    "make $TARGET",
+    "make `cat /tmp/injected`",
+    'make -C "$DIR" lint',
+    "go $CMD",
+    'pytest "$TMPDIR/t"',
+  ]) {
+    assert.equal(commandSegments(command), null, command);
+    const match = matchCommand(command, approved);
+    assert.equal(match.allowed, false, command);
+    assert.match(match.reason, /cannot be interpreted statically/, command);
+  }
+
+  // 承認済みの静的な形は従来どおり通る（空白の揺れも含めて）。
+  assert.equal(matchCommand("make lint", approved).allowed, true);
+  assert.equal(matchCommand("make  lint", approved).allowed, true);
+});
+
+test("動的構築の拒否を強めても承認済み manifest は無効化されない", () => {
+  // `.harness/policy.json` が実際に載せている 4 コマンド。1 件でも承認から落ちると
+  // manifest hash が変わり、承認済みの repository が丸ごと止まる。
+  const commands = ["make lint", "make test", "make test-bats", "make fmt"];
+  for (const command of commands) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+  }
+  const approved = approvedCommandSegments(commands);
+  for (const command of commands) {
+    assert.equal(matchCommand(command, approved).allowed, true, command);
+  }
+  // 他のランナーも同じ。承認できる形の字集合は `$` も backtick も含まないので、
+  // 承認可能な文字列は原理的に動的トークンを持ちえない。
+  for (const command of [
+    "npm run test",
+    "uv run pytest",
+    "go test ./...",
+    "cargo test --workspace",
+  ]) {
+    assert.equal(manifestEntryRejection("commands", command), null, command);
+    assert.notEqual(commandSegments(command), null, command);
+  }
 });
 
 // ---------------------------------------------------------------------------

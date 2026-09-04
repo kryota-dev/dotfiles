@@ -315,6 +315,78 @@ test("an unrecognized global option makes the command ambiguous", () => {
   assert.equal(analyzeShellCommand("git status").ambiguous, null);
 });
 
+// ---------------------------------------------------------------------------
+// #624: テーブル外 binary の動的構築引数
+// ---------------------------------------------------------------------------
+
+test("動的構築の報告は binary のテーブルに依存しない", () => {
+  // `make` / `go` / `pytest` / `echo` はいずれも GLOBAL_OPTIONS にも
+  // SUBCOMMAND_DISPATCHED_BINARIES にも無い。それでも「静的に解釈できない」ことだけは
+  // 呼び出し側へ届ける（どう扱うかは呼び出し側が方向ごとに決める）。
+  for (const command of [
+    "make $(cat /tmp/injected)",
+    "make $TARGET",
+    "make ${TARGET}",
+    "make `cat /tmp/injected`",
+    'make -C "$DIR" lint',
+    "go $CMD",
+    'pytest "$TMPDIR/t"',
+    'echo "$(date)" >> log.txt',
+  ]) {
+    assert.equal(analyzeShellCommand(command).dynamic, true, command);
+  }
+  // 静的に読み切れるものは dynamic にしない。
+  for (const command of [
+    "make lint",
+    "go test ./...",
+    "npm run test",
+    "sudo ls",
+    "git status",
+  ]) {
+    assert.equal(analyzeShellCommand(command).dynamic, false, command);
+  }
+  // `${IFS}` は単語区切りとして展開するので動的構築ではない。ここを dynamic に倒すと
+  // 難読化の正規化（`git${IFS}push${IFS}--force` → git-force-push）が効かなくなる。
+  assert.equal(
+    analyzeShellCommand("git${IFS}push${IFS}--force origin main").dynamic,
+    false,
+  );
+  // 解析対象にならない入力でも戻り値の形は揃える。
+  assert.equal(analyzeShellCommand("").dynamic, false);
+  assert.equal(analyzeShellCommand(null).dynamic, false);
+});
+
+test("dynamic は ambiguous と独立で、escalation 側の判定を変えない", () => {
+  // テーブル外 binary の動的構築は dynamic だけが立ち、ambiguous は立たない。
+  const analysis = analyzeShellCommand("make $(cat /tmp/injected)");
+  assert.equal(analysis.dynamic, true);
+  assert.equal(analysis.ambiguous, null);
+  // 逆に、ネストシェルは ambiguous だが動的構築ではない。2 つは包含関係にない。
+  const nested = analyzeShellCommand("sudo ls");
+  assert.equal(nested.ambiguous, AMBIGUOUS_NESTED_SHELL);
+  assert.equal(nested.dynamic, false);
+  // テーブルに載る binary の dispatch 位置は従来どおり ambiguous でもある。
+  const tabled = analyzeShellCommand("git $(printf x) origin/main");
+  assert.equal(tabled.ambiguous, AMBIGUOUS_DYNAMIC);
+  assert.equal(tabled.dynamic, true);
+
+  // escalation（deny リスト）側は ambiguous だけを見る。dynamic を足したことで同期
+  // 問い合わせが 1 件も増えていないことを固定する —— 増やせば無人 wave が止まる。
+  for (const command of [
+    "make $TARGET",
+    "make $(cat /tmp/injected)",
+    'make -C "$DIR" lint',
+    "go $CMD",
+    'pytest "$TMPDIR/t"',
+    'echo "$(date)" >> log.txt',
+    'git commit -m "$(cat msg.txt)"',
+    'cat "$TMPDIR/x"',
+    'node "$TMPDIR/p.mjs"',
+  ]) {
+    assert.equal(classifyBash(command).decision, "allow", command);
+  }
+});
+
 test("the risk vocabulary contains every value the shipped config escalates on", () => {
   const config = JSON.parse(
     readFileSync("home/dot_config/frontier-harness/config.json", "utf8"),
