@@ -612,6 +612,38 @@ command-line variable assignment は承認できないので、`make -f /tmp/evi
 `make test-node` は依然として一致せず、`make lint; curl …` は承認の無い 2 つ目のセグメントへ割れ、
 `/tmp/evil/make lint` は「承認できる形ではない」として拒否され続けます。
 
+### `uv run` はどの形なら承認できるか
+
+`uv run` が承認できるのは `uv run <script>` の形だけです —— 引数はちょうど 1 つで、英数字か `_` で
+始まり `[A-Za-z0-9_.-]` の範囲に収まるスクリプト名に限ります。パスとオプションは承認できないので、
+`uv run /tmp/evil/payload` / `uv run ./payload` / `uv run scripts/build.py` /
+`uv run --script /tmp/x.py` / `uv run --with requests python` はいずれも「承認できる形ではない」として
+拒否されます。`uv run` 単体も拒否します。他のランナーが引数を必須にしているのと同じ理由です。
+
+狭めるのを `uv run` に限るのは、`make` のときと同じ種類の理由からです。他の承認可能なランナーは、
+いずれもリポジトリ側が定義したものへ処理を委ねます —— `npm run test` は `package.json` へ、`pytest` と
+`go test` はテスト探索へ。`uv run` だけが**引数に書いたファイルをそのまま起こす**ので、`/` と `.` を含む
+広いランナー字集合をそのまま当てると `uv run /tmp/evil/payload` が承認可能な文法の内側に入ってしまいます。
+字集合から `/` を落とせばパスでの指定そのものが閉じ、引数に `/` を含められない以上、途中から遡ることも
+できません —— `make` に必要だった `..` の検査は、この枝には対応物がありません。リポジトリ直下の
+ファイル名（`uv run main.py`）は通りますが、それは `make` のターゲットと同じ位置にあります。`/` を
+含まない以上、このリポジトリの持ち物だからです。
+
+引数をちょうど 1 つに固定していることは、字集合にはできない仕事をしています。`uv` は `uv run <name>` を
+プロジェクト環境の `bin` → `PATH` の順で解決するため、bare name が `[project.scripts]` の entry point へ
+届く保証を構文規則では作れません（`npm run` は `package.json` にスクリプトが無ければ単に失敗します）。
+残余は「bare name が `PATH` 上のバイナリへ解決される」経路で、引数の個数を 1 に抑えることは、そうした
+バイナリが**自身の引数をひとつも持たない形でしか承認できない**ことを意味します。代償として
+`uv run pytest tests/` は承認できなくなりますが、`pytest tests/` はランナーの枝で従来どおり承認できます。
+
+**既存の承認について。** この変更は、承認した時点では正当だった承認を無効にします。
+`uv run --with requests python` が残った `.harness/policy.json` は検証を通らなくなり、しかも落ちるのは
+その行だけではありません。`normalizeManifest` が manifest 全体を拒否するため、`fh run` から見えるのは
+`policyIntegrity.ok: false` の空 manifest で、そのリポジトリの**今も承認可能なコマンドまで含めて**すべてが
+gap になります。向きは fail-closed です —— 実行が止まるだけで、新たに何かが許可されることはありません。
+復旧手順は `.harness/policy.json` の該当行を書き直して onboarding の儀式をやり直すことで、拒否理由の文面が
+そう案内します。古い承認を保つ移行経路はありません。承認されていたのは、もはや承認できない形だからです。
+
 ## review registry
 
 ```bash
