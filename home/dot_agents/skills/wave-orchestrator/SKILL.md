@@ -277,6 +277,11 @@ CLAUDE_CONFIG_DIR="$HOME/<親の profile ディレクトリ>" fh session launch 
 - **`fh session resume` でも必ず渡す。継承されない。** `--capability` と違い resume-key から元の宣言を
   引く経路が無いので、**渡し忘れた resume は完了条件を課さないまま `succeeded` になる**。
 - **宣言した本数を控える。** 「成果物の検証」は件数の**一致**を見るので、本数が分からないと判定できない。
+- **「承認済みのタスクランナーが無い」を、onboard を試す前に結論しない。** 未承認なのか本当に無いのかは
+  儀式（下記）を通すまで区別できず、**省略した Leader が「無かった」と自己申告するだけで宣言必須を
+  すり抜けられる**。それでも 1 本も宣言できないリポジトリなら、`--gate` 無しで起こしてよいが、その子は
+  **「成果物の検証」の判定不能経路（→ user へ上げる）に必ず入る**ことを起動前に確認する。**gate を
+  省いたぶんを、後から成果物側で埋め合わせられると考えない。**
 
 **子の stderr をファイルへ残さない。** 子の生の stderr はそのまま継承されるので、会話内容を含みうる前提で
 扱う。ペインで覗くのはよいが `> child.log 2>&1` のように永続化しない。
@@ -300,6 +305,9 @@ cd <ワークツリー> && fh onboard --manifest <manifest.json> --approve --req
   `fh session` が通るかで見る。
 - **新しいワークツリーで `--from-gaps` を使わない**（既存の承認済み capability が落ちる）。
   `--manifest` に完全な集合を渡す。
+- **`--gate` に載せるコマンドも `commands` に入れる。** manifest が持つのは
+  `{commands, domains, capabilities}` で、**capability だけを承認した manifest では宣言した gate が
+  未承認になり、子を起こす前に exit 2 で止まる**。「完全な集合」には完了条件のコマンドも含む。
 
 **ワークツリーの依存は起動前に orchestrator 側で入れておく。** 子は sandbox 下で走るため、依存の
 インストールを完走できないことがある。**orchestrator が sandbox の外で先に済ませる。**
@@ -1002,8 +1010,12 @@ exit 1 かどうかを見る。`PENDING_CONFIRM` で入力欄をクリアしな�
 宣言してあるので、その結末は run へ連結されている。`adapterRunId` は起動時 JSON で控えた値を使う。
 
 ```sh
-fh runs --run "<adapterRunId>" --json | jq '{status: .run.status, verifications}'
+fh runs --run "<adapterRunId>" --json \
+  | jq '{status: .run.status, verification: .run.verification, verifications}'
 ```
+
+`.run.verification` が集計（`total` / `passed` / …）、`verifications` が 1 件ずつの記録である。
+**後者の `command` まで見る** —— 何を完了条件にしたかは、そこにしか残らない。
 
 | 見るもの | 何の証拠か | 使い方 |
 |---|---|---|

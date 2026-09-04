@@ -1914,10 +1914,11 @@ PY
   # 「その記述は規範か、references/ へ移すべき根拠か」を確認したうえで意図的に更新する。
   # #539 が legacy 節（32,778 B）を撤去すれば大きく下回るので、下限は課さない。
   #
-  # #615 で 88,194 B へ増えた（+3,695 B）。増分の内訳は Phase 2「起動する」の --gate 宣言規範と
-  # コマンド形、「成果物の検証」の判定表の作り替えと fail-closed の受け皿で、実測・事故の経緯は
-  # references/{liveness,verification}.md 側へ書いた（下の #615 節が両方を検査する）。増分が
-  # 規範であることを確認したうえで、同じ約 4% の余白の取り方で 92,000 B へ更新する。
+  # #615 で 89,473 B へ増えた（+4,974 B）。増分の内訳は Phase 2「起動する」の --gate 宣言規範と
+  # コマンド形、onboard の儀式への gate コマンド承認の接続、「成果物の検証」の判定表の作り替えと
+  # fail-closed の受け皿で、実測・事故の経緯は references/{liveness,verification}.md 側へ書いた
+  # （下の #615 節が両方を検査する）。増分が規範であることを確認したうえで、同じ約 4% の余白の
+  # 取り方（88,194 B 時点の見積り）で 92,000 B へ更新する。
   local size
   size=$(wc -c < "$SKILL_MD")
   [ "$size" -le 92000 ] || {
@@ -1939,26 +1940,36 @@ PY
 
 @test "#615 回帰: Phase 2 が wave の完了条件を --gate で宣言している" {
   # SKILL.md 全体への grep では「成果物の検証」節に --gate があるだけで通ってしまう。
-  # 起動の節を切り出し、コマンド形と 4 つの規範がその節の中にあることを見る。
+  # 起動の節を切り出し、コマンド形と規範がその節の中にあることを見る。
+  #
+  # 散文の needle は空白を畳んでから照合する（#610 側の 2 信号テストと同じ理由 —— 行幅の
+  # 折り返しや段落の組み直しで落ちると、規範が生きているのにテストだけが赤くなり、次の改訂で
+  # 「とりあえず needle を消す」圧力になる）。コマンド形（```sh フェンス）は畳まず厳密に見る。
   run python3 - "$SKILL_MD" <<'PY'
 import re
 import sys
 
 REQUIRED = [
-    # そのまま使うコマンド形に載っていること（規範だけ書いて形が無いと使われない）。
-    ("--gate", "起動コマンド形に --gate が無い"),
     # 宣言を必須にする規範。これが緩むと検証件数 0 の意味が割れて判定が成立しない。
     ("宣言せずに子を起こさない", "宣言を必須とする規範が無い"),
     # 承認境界。未承認の宣言は子を起こす前に落ちる（fail-closed であることを書く）。
     ("exit 2 で止まる", "未承認の宣言が exit 2 で止まることが書かれていない"),
-    # kind の語彙と本数上限。そのまま使える形であること。
+    # kind の書き方と語彙。語彙が消えると「そのまま使える形」でなくなる。
     ("<kind>:<command>", "gate の種別の書き方が無い"),
+    ("`performance` / `security`", "gate の kind 語彙が消えた"),
+    # 本数上限。宣言しすぎて harness を占有できないことの上限が読めなくなる。
+    ("上限 8 本", "gate の本数上限が書かれていない"),
     # resume は継承しない。渡し忘れると完了条件を課さないまま succeeded になる。
+    ("`fh session resume` でも必ず渡す", "resume での再宣言義務が消えた"),
     ("継承されない", "resume で --gate が継承されないことが書かれていない"),
     # 判定側（fh runs --run）へ渡す値。控えないと一次判定を引けない。
     ("adapterRunId", "adapterRunId を控える指示が無い"),
     # 件数の一致を見るので、宣言本数を控える必要がある。
     ("宣言した本数を控える", "宣言本数を控える規範が無い"),
+    # 「承認済みのものが無い」を自己申告で通せると、onboard を省いた Leader が宣言必須の
+    # 規範をすり抜けられる（gate 無しの子が信号 1 だけの弱い判定へ静かに戻る経路）。
+    ("onboard を試す前に結論しない", "onboard を試さずに「無い」と結論しない規範が無い"),
+    ("判定不能経路", "宣言できない場合に fail-closed 経路へ入る接続が無い"),
 ]
 
 src = open(sys.argv[1], encoding="utf-8").read()
@@ -1968,14 +1979,67 @@ if not m:
     raise SystemExit
 
 section = m.group(0)
+squashed = re.sub(r"\s+", "", section)
 for needle, message in REQUIRED:
-    if needle not in section:
+    if re.sub(r"\s+", "", needle) not in squashed:
         print(message)
 
 # コマンド形そのもの（```sh フェンス）に載っていること。散文で言及するだけにしない。
 fences = re.findall(r"```sh\n(.*?)```", section, re.S)
 if not any("fh session launch" in f and "--gate" in f for f in fences):
     print("fh session launch のコマンド形に --gate が無い")
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#615 回帰: onboard の儀式が gate コマンドの承認まで面倒を見ている" {
+  # 宣言の規範（Phase 2）だけを足して承認手順を繋がないと、手順どおりに --gate 'make test' を
+  # 宣言した Leader が exit 2 で止まる。manifest が持つのは {commands, domains, capabilities} で、
+  # capability だけを承認した manifest では gate が未承認になる。
+  run python3 - "$SKILL_MD" <<'PY'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^### 起動する$.*?(?=^#{2,4} )", src, re.S | re.M)
+if not m:
+    print("「起動する」節が見つからない")
+    raise SystemExit
+
+squashed = re.sub(r"\s+", "", m.group(0))
+for needle, message in [
+    ("`--gate` に載せるコマンドも `commands` に入れる", "gate コマンドを manifest へ入れる規範が無い"),
+    ("{commands, domains, capabilities}", "manifest が持つキーが書かれていない"),
+]:
+    if re.sub(r"\s+", "", needle) not in squashed:
+        print(message)
+PY
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "#615 回帰: 沈黙ストール節が status で終わらせず件数と成果物の両方を要求している" {
+  # Phase 2 の宣言と「成果物の検証」の判定は機械検査されているが、両者を結ぶこの 1 行が
+  # 無防備だと、旧文言（「成果物の側から」だけ）へ戻しても #615 の他テストは全部通る。
+  run python3 - "$SKILL_MD" <<'PY'
+import re
+import sys
+
+src = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^#### 沈黙ストールは別経路で見張る$.*?(?=^#{2,4} )", src, re.S | re.M)
+if not m:
+    print("「沈黙ストールは別経路で見張る」節が見つからない")
+    raise SystemExit
+
+squashed = re.sub(r"\s+", "", m.group(0))
+for needle, message in [
+    ("`fh runs` の status で終わらせず", "status で終わらせない規範が消えた"),
+    ("連結された検証結果の件数", "検証件数を見る側が消えた（成果物側だけに戻っている）"),
+    ("成果物の側", "成果物側を見る規範が消えた"),
+]:
+    if re.sub(r"\s+", "", needle) not in squashed:
+        print(message)
 PY
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -1991,11 +2055,16 @@ REQUIRED = [
     ("fh runs --run", "fh runs --run のコマンド形が無い"),
     ("一次判定", "検証件数が一次判定だと書かれていない"),
     # 「total > 0」で満足すると、8 本宣言して 1 本しか連結されなかった run が通る。
-    ("宣言した本数と**一致**", "宣言本数との一致を条件にしていない"),
+    ("宣言した本数と", "宣言本数との一致を条件にしていない"),
+    # 件数の一致だけを残して passed を落とすと、宣言本数ぶん failed が記録された run が
+    # 「通過」と読めてしまう。fail-closed へ倒すための条件そのものが抜ける。
+    ("その全部が `passed` のときだけ", "全 gate が passed であることを要求していない"),
     # 0 件の読み方。「gate が無かった」と読むと #573 の沈黙する故障がそのまま残る。
     ("「1 本も通して", "total 0 の読み方が書かれていない"),
     # 信号 1 は gate とは別の事実を見るので残す（gate に gh は載らない）。
     ("--json reviews", "レビュー件数の信号が判定表から消えた"),
+    # 信号 1 の非対称。片方だけになると「レビューが 1 件あるから通った」を規範が許す。
+    ("0 件は未通過の証拠になるが、1 件以上は通過の証明にならない", "信号 1 の非対称が消えた"),
     # 信号 2 は判定から外す。ただし理由ごと消さない（#610 側が rebase 警告を別に見る）。
     ("判定に使わない", "committedDate を判定に使わない旨が無い"),
     ("補助信号としても残さない", "信号 2 を補助としても残さない理由が無い"),
@@ -2013,9 +2082,19 @@ if not m:
     raise SystemExit
 
 section = m.group(0)
+# 散文は空白を畳んでから照合する（折り返しの変更で落とさない。理由は Phase 2 側テストの
+# コメントと同じ）。コマンド形は下の fence 検査で厳密に見る。
+squashed = re.sub(r"\s+", "", section)
 for needle, message in REQUIRED:
-    if needle not in section:
+    if re.sub(r"\s+", "", needle) not in squashed:
         print(message)
+
+# 一次判定を引くコマンド形が、判定基準の参照する集計（.run.verification）を実際に出すこと。
+# ここを落とすと Leader が verifications 配列を手で数えることになり、status を見ずに
+# 配列長だけで passed 扱いする誤読を誘う。
+fences = re.findall(r"```sh\n(.*?)```", section, re.S)
+if not any("fh runs --run" in f and ".run.verification" in f for f in fences):
+    print("fh runs --run のコマンド形が .run.verification を出力していない")
 PY
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -2036,7 +2115,21 @@ PY
   # 件数が主張しないこと（gate コマンドの定義を書き換えられる）。
   grep -qF 'verification.total > 0' "${REFS}/verification.md"
   # gh を gate に載せられない理由。信号 1 が gate に吸収されないことの根拠。
-  grep -qF 'APPROVABLE_COMMAND' "${REFS}/verification.md"
+  # 実装に存在するシンボルを指すこと（`APPROVABLE_COMMAND` という単一の定数は無い。
+  # 存在しない名前を書くと、根拠を検証しようとした読み手が grep で辿り着けない）。
+  grep -qF 'isApprovableCommand()' "${REFS}/verification.md"
+  local sym
+  for sym in APPROVABLE_RUNNER_COMMAND APPROVABLE_UV_RUN_COMMAND APPROVABLE_MAKE_COMMAND; do
+    grep -qF "$sym" "${REFS}/verification.md" || {
+      echo "verification.md が $sym を挙げていない（承認できる形の非対称が辿れない）"
+      false
+    }
+    # 実装側に本当に在ることも見る（references が実装を指すポインタであるという前提の担保）。
+    grep -qF "$sym" "${HOME_DIR}/dot_local/lib/frontier-harness/manifest-policy.mjs" || {
+      echo "$sym が manifest-policy.mjs に無い（根拠が実装から外れた）"
+      false
+    }
+  done
 
   # SKILL.md 側には実測を貼らない（貼ると #610 が塞いだ再肥大の経路が開く）。
   run grep -cF '#630' "$SKILL_MD"

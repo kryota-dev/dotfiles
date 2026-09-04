@@ -118,9 +118,17 @@ PR 内の履歴がそもそも潰れる。判定できない条件による限�
 
 ### 到達点の検査を gate に載せられない理由
 
-`--gate` に載せられるのは承認可能な形のコマンド（`manifest-policy.mjs` の `APPROVABLE_COMMAND`。
-`npm run` / `pnpm run` / `yarn run` / `bun run` / `uv run` / `pytest` / `go test` / `cargo test` と、
-#617 で加わった `make <target>`）に限られ、**`gh pr view ...` を直接は載せられない**。
+`--gate` に載せられるのは承認可能な形のコマンドに限られ、**`gh pr view ...` を直接は載せられない**。
+判定は `manifest-policy.mjs` の `isApprovableCommand()` で、字集合は用途ごとに 3 本へ分かれている。
+
+| 定数 | 承認できる形 |
+|---|---|
+| `APPROVABLE_RUNNER_COMMAND` | `npm run` / `pnpm run` / `yarn run` / `bun run` / `pytest` / `go test` / `cargo test` に引数を付けた形 |
+| `APPROVABLE_UV_RUN_COMMAND` | `uv run <script>`。**引数は 1 個だけ**（bare name が PATH のバイナリへ解決されうるため、字集合ではなく個数で上限を抑えている） |
+| `APPROVABLE_MAKE_COMMAND` | `make <target>`（#617）。オプション・変数上書きは不可で、target 内の `..` は `MAKE_TARGET_TRAVERSAL` が別に弾く |
+
+**この非対称そのものが「何を gate に載せられるか」の実像である。** 単一の定数を探しても見つからない
+（`APPROVABLE_COMMAND` という名前は実装に無い）。
 
 だから信号 1（レビュー件数）は gate に吸収されない。gate が答えるのは「宣言した完了条件が通ったか」
 で、「どの Phase まで届いたか」は PR の外形からしか読めない。**両者は別の信号であり、片方で他方を
