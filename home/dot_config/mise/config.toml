@@ -35,7 +35,7 @@ shfmt = "3.14.0"
 starship = "1.26.0"
 terraform = "1.16.1"
 tmux = "3.6a"
-uv = "0.12.9"
+uv = "0.12.10"
 yazi = "26.9.1"
 zoxide = "0.10.0"
 
