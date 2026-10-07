@@ -11,6 +11,15 @@ defaults write NSGlobalDomain KeyRepeat -int 2
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain InitialKeyRepeat -int 25
 
+# 長押しはアクセント記号の選択ではなくキーリピートにする（vim の移動のため）
+defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false
+
+# コードやコマンドを打つので、引用符・ダッシュ・ピリオド・スペルの自動置換を止める
+defaults write NSGlobalDomain NSAutomaticQuoteSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticDashSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticPeriodSubstitutionEnabled -bool false
+defaults write NSGlobalDomain NSAutomaticSpellingCorrectionEnabled -bool false
+
 # 外観をダークにする
 defaults write NSGlobalDomain AppleInterfaceStyle -string "Dark"
 defaults write NSGlobalDomain AppleIconAppearanceTheme -string "RegularDark"
