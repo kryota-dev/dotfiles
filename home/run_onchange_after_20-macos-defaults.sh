@@ -82,9 +82,6 @@ defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
 defaults write com.apple.finder _FXSortFoldersFirst -bool true
 defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"
 
-# ウィンドウのタイル配置で隙間を空けない
-defaults write com.apple.WindowManager EnableTiledWindowMargins -bool false
-
 # スクリーンショットをデスクトップに散らかさず、影も付けない（SystemUIServer の再起動で反映）
 mkdir -p "${HOME}/Pictures/Screenshots"
 defaults write com.apple.screencapture location -string "${HOME}/Pictures/Screenshots"
@@ -100,10 +97,6 @@ defaults write com.apple.menuextra.clock ShowSeconds -bool true
 
 # ターミナル
 defaults write com.apple.terminal StringEncodings -array 4
-
-# DBeaver で SQL の引用符とダッシュを勝手に置き換えない
-defaults write org.jkiss.dbeaver.core.product NSAutomaticDashSubstitutionEnabled -int 0
-defaults write org.jkiss.dbeaver.core.product NSAutomaticQuoteSubstitutionEnabled -int 0
 
 # Simulator で Mac のキーボードとクリップボードをそのまま使う
 defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool true
