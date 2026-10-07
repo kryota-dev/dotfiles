@@ -1,0 +1,49 @@
+[tools]
+# 言語ランタイム
+node = "24.21.0"
+python = "3.14.8"
+ruby = "4.0.7"
+go = "1.27.1"
+deno = "2.9.7"
+rust = "1.99.0"
+bun = "1.4.2"
+
+# CLI ツール
+act = "0.2.89"
+actionlint = "1.7.12"
+aws-cli = "2.37.9"
+bats = "1.14.0"
+chezmoi = "2.73.0"
+claude = "2.1.291"
+cloudflared = "2026.10.0"
+direnv = "2.37.1"
+fd = "10.5.0"
+fzf = "0.74.4"
+gcloud = "572.0.0"
+gh = "2.102.0"
+ghq = "1.11.2"
+gitleaks = "8.30.1"
+jq = "1.8.2"
+mas = "7.0.0"
+pandoc = "3.12"
+pinact = "5.0.0"
+ripgrep = "15.2.0"
+shellcheck = "0.11.0"
+shfmt = "3.14.1"
+starship = "1.26.0"
+terraform = "1.16.5"
+tmux = "3.6a"
+typst = "0.15.1"
+uv = "0.12.23"
+yazi = "26.9.1"
+zoxide = "0.10.0"
+"ubi:googleworkspace/cli" = { version = "0.22.5", exe = "gws" }
+# ~/.agents/skills の ax skill も同じリリースに固定している（.chezmoidata.toml）。
+"github:yusukebe/ax" = { version = "0.1.25", version_prefix = "v" }
+"npm:agent-browser" = "0.38.2"
+
+[settings]
+# 既定の flavor は lib/ を含まず、新規インストールが失敗する。
+python.precompiled_flavor = "install_only"
+# ソースからのビルドは、baseruby の無い新規インストールで止まる。
+ruby.compile = false

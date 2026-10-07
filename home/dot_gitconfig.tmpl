@@ -1,0 +1,28 @@
+[user]
+	name = {{ .name }}
+	email = {{ .email }}
+	signingkey = {{ .signingkey }}
+[core]
+	excludesfile = ~/.gitignore_global
+	editor = nvim
+	ignorecase = false
+	# グローバルの gitleaks pre-commit hook。core.hooksPath を独自に設定したリポジトリでは上書きされる。
+	hooksPath = ~/.config/git/hooks
+[commit]
+	gpgsign = true
+[gpg]
+	format = ssh
+[gpg "ssh"]
+	program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
+[init]
+	defaultBranch = main
+[extensions]
+	worktreeConfig = true
+[ghq]
+	root = ~/ghq
+	user = {{ .ghq_user }}
+[alias]
+	# lefthook / husky を使うリポジトリ用。この clone の hooksPath だけをローカルのディレクトリに向け、
+	# `lefthook install -f` がグローバルの gitleaks hook を置き換えないようにする。
+	# `lefthook install --reset-hooks-path` は global の hooksPath を消すので実行しない。
+	lefthook-adopt = "!f() { git config --local core.hooksPath .git/hooks-lefthook && echo 'この clone の core.hooksPath を .git/hooks-lefthook にしました。次に lefthook install -f を実行してください。'; }; f"

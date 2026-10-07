@@ -1,0 +1,6 @@
+#!/bin/bash
+# agent-browser が操作するブラウザを取得する。固定したバージョンが変わったら再実行する。
+# mise の設定のハッシュ: {{ include "dot_config/mise/config.toml" | sha256sum }}
+set -euo pipefail
+
+mise exec -- agent-browser install

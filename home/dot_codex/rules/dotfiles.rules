@@ -1,0 +1,37 @@
+# 破壊的なコマンドは必ず承認を求める。~/.claude/settings.json の permissions.ask と揃えておく。
+# （TUI の「常に許可」は default.rules に書かれるので、このファイルとは分けている）
+
+prefix_rule(
+    pattern = ["terraform", ["destroy", "force-unlock"]],
+    decision = "prompt",
+    justification = "インフラの状態を破棄・解除する",
+    match = ["terraform destroy", "terraform force-unlock 1234"],
+)
+prefix_rule(pattern = ["terraform", "state", "rm"], decision = "prompt")
+prefix_rule(pattern = ["terraform", "workspace", "delete"], decision = "prompt")
+prefix_rule(pattern = ["terraform", "apply", ["-auto-approve", "--auto-approve"]], decision = "prompt")
+prefix_rule(pattern = ["kubectl", "delete"], decision = "prompt")
+prefix_rule(pattern = ["helm", ["uninstall", "delete"]], decision = "prompt")
+prefix_rule(pattern = ["chezmoi", ["destroy", "forget", "purge"]], decision = "prompt")
+prefix_rule(pattern = ["docker", "system", "prune"], decision = "prompt")
+prefix_rule(pattern = ["docker", ["volume", "image", "container", "network"], "prune"], decision = "prompt")
+prefix_rule(pattern = ["docker", "volume", "rm"], decision = "prompt")
+prefix_rule(pattern = ["brew", ["uninstall", "remove", "rm", "autoremove", "untap"]], decision = "prompt")
+prefix_rule(pattern = ["mas", "uninstall"], decision = "prompt")
+prefix_rule(pattern = ["mise", ["uninstall", "implode", "prune"]], decision = "prompt")
+prefix_rule(pattern = ["gh", ["repo", "release"], "delete"], decision = "prompt")
+prefix_rule(pattern = ["gh", "secret", ["delete", "remove"]], decision = "prompt")
+prefix_rule(pattern = ["gh", ["cache", "run"], "delete"], decision = "prompt")
+prefix_rule(pattern = ["aws", "s3", ["rm", "rb"]], decision = "prompt")
+prefix_rule(pattern = ["supabase", "db", "reset"], decision = "prompt")
+prefix_rule(pattern = ["supabase", "projects", "delete"], decision = "prompt")
+prefix_rule(pattern = [["npm", "yarn", "pnpm"], ["publish", "unpublish"]], decision = "prompt")
+prefix_rule(pattern = ["defaults", "delete"], decision = "prompt")
+prefix_rule(pattern = ["git", ["filter-repo", "filter-branch"]], decision = "prompt")
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f"]],
+    decision = "forbidden",
+    justification = "ユーザーに確認したうえで --force-with-lease を使う",
+)
+prefix_rule(pattern = ["git", "reset", "--hard"], decision = "prompt")
+prefix_rule(pattern = ["sudo"], decision = "prompt")

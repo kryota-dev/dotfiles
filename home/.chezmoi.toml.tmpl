@@ -1,0 +1,7 @@
+{{- /* vault 名は公開したくないので、初回の init で入力させ、手元の chezmoi.toml にだけ残す。 */ -}}
+{{- $opVault := promptStringOnce . "op_vault" "1Password の vault 名（dotfiles の秘密情報を置いたもの）" -}}
+[data]
+  op_vault = {{ $opVault | quote }}
+
+[diff]
+  exclude = ["scripts"]

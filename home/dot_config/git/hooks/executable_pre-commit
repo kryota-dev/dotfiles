@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# グローバルの pre-commit hook（core.hooksPath）。staged の変更を gitleaks で検査してから、
+# core.hooksPath に隠されるリポジトリ自身の .git/hooks/pre-commit を呼ぶ。
+set -euo pipefail
+
+# GUI の Git クライアントなど、シェルの設定を読まない起動でも mise の gitleaks を見つける。
+PATH="$PATH:$HOME/.local/share/mise/shims"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  scan() { gitleaks git --staged --redact --no-banner "$@"; }
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+  # 秘密情報の検査。リポジトリ独自の .gitleaks.toml があれば gitleaks が自動で使う。
+  if [ -n "$toplevel" ] && [ -f "$toplevel/.gitleaks.toml" ]; then
+    scan || {
+      echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  else
+    scan --config "$HOME/.config/git/gitleaks.toml" || {
+      echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  fi
+
+  # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
+  own="$HOME/.config/git/gitleaks-own.toml"
+  case "$(git remote get-url origin 2>/dev/null || true)" in
+    "" | *github.com[:/]kryota-dev/*)
+      if [ -f "$own" ]; then
+        scan --config "$own" || {
+          echo "[pre-commit] クライアント・勤務先の固有名らしきものを検出したため、コミットを中止しました。" >&2
+          exit 1
+        }
+      fi
+      ;;
+  esac
+else
+  echo "[pre-commit] gitleaks が見つからないため、秘密情報の検査を省略しました。" >&2
+fi
+
+# --git-common-dir は core.hooksPath の影響を受けず（自分自身を呼ばない）、worktree からも使える。
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+local_hook="$common_dir/hooks/pre-commit"
+if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "${BASH_SOURCE[0]}" ]; then
+  exec "$local_hook" "$@"
+fi

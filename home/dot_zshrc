@@ -1,0 +1,16 @@
+setopt auto_pushd pushd_ignore_dups
+setopt hist_ignore_dups share_history inc_append_history
+export HISTFILE="$HOME/.zsh_history"
+export HISTSIZE=100000
+export SAVEHIST=100000
+
+export PNPM_HOME="$HOME/Library/pnpm"
+path=("$HOME/.local/bin" "$PNPM_HOME" $path)
+
+if command -v mise >/dev/null; then eval "$(mise activate zsh)"; fi
+if command -v direnv >/dev/null; then eval "$(direnv hook zsh)"; fi
+if command -v starship >/dev/null; then eval "$(starship init zsh)"; fi
+if command -v zoxide >/dev/null; then eval "$(zoxide init zsh)"; fi
+
+# プラグインと ~/.config/zsh 配下のモジュールは遅延読み込みする（sheldon/plugins.toml）。
+if command -v sheldon >/dev/null; then eval "$(sheldon source)"; fi

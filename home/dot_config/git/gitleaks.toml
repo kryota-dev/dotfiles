@@ -1,0 +1,13 @@
+# ~/.config/git/hooks/pre-commit が使うグローバルの gitleaks 設定。
+# すべてのリポジトリに効くので、パスの allowlist は置かない。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "1Password の参照はポインタであり、秘密情報ではない"
+regexTarget = "line"
+regexes = [
+  '''op://\S.*''',
+  '''onepasswordRead''',
+]

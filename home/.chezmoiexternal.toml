@@ -1,0 +1,35 @@
+["Library/Fonts"]
+    type = "archive"
+    url = "https://github.com/yuru7/moralerspace/releases/download/v{{ .versions.moralerspace_font }}/Moralerspace_v{{ .versions.moralerspace_font }}.zip"
+    stripComponents = 1
+    include = ["**/*.ttf"]
+    refreshPeriod = "672h"
+
+[".agents/skills/claude-api"]
+    type = "archive"
+    url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropics }}.tar.gz"
+    stripComponents = 3
+    include = ["*/skills/claude-api/**"]
+    refreshPeriod = "168h"
+
+[".agents/skills/natural-japanese"]
+    type = "archive"
+    url = "https://github.com/coji/natural-japanese/archive/{{ .skills.natural_japanese }}.tar.gz"
+    stripComponents = 3
+    include = ["*/skills/natural-japanese/**"]
+    refreshPeriod = "168h"
+
+[".agents/skills/eli5/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/{{ .skills.plugins_community }}/eli5/skills/eli5/SKILL.md"
+    refreshPeriod = "168h"
+
+[".agents/skills/japanese-tech-writing/SKILL.md"]
+    type = "file"
+    url = "https://gist.githubusercontent.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d/raw/{{ .skills.japanese_tech_writing }}/SKILL.md"
+    refreshPeriod = "168h"
+
+[".agents/skills/ax/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/yusukebe/ax/{{ .skills.ax }}/skills/ax/SKILL.md"
+    refreshPeriod = "168h"

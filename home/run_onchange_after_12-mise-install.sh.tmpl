@@ -1,0 +1,11 @@
+#!/bin/bash
+# mise の設定のハッシュ: {{ include "dot_config/mise/config.toml" | sha256sum }}
+set -euo pipefail
+
+# 認証付きで取得し、GitHub API のレート制限を避ける。
+if [ -z "${GITHUB_TOKEN:-}" ] && command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+  GITHUB_TOKEN="$(gh auth token)"
+  export GITHUB_TOKEN
+fi
+
+mise install --yes

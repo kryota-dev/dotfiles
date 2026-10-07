@@ -1,0 +1,18 @@
+# 自分の GitHub 名前空間のリポジトリで追加するクライアント・勤務先の固有名の検出ルール。
+# パターンは apply 時に 1Password から読むので、この公開リポジトリには現れない。
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "1Password の参照はポインタであり、秘密情報ではない"
+regexTarget = "line"
+regexes = [
+  '''op://\S.*''',
+  '''onepasswordRead''',
+]
+
+[[rules]]
+id = "client-identifiers"
+description = "クライアント・勤務先の固有名を公開リポジトリに入れない"
+regex = '''(?i)({{ onepasswordRead (printf "op://%s/Dotfiles - Redact Patterns/pattern" .op_vault) | trim }})'''

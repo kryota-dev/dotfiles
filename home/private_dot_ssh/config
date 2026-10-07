@@ -1,0 +1,9 @@
+# 自宅のホスト名は公開しないので、1Password から config.d/hosts に描画する。
+Include config.d/*
+
+Host devcontainer-*
+	ForwardAgent yes
+
+Host *
+	AddKeysToAgent yes
+	IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"

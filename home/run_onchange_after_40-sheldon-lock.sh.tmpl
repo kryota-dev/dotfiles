@@ -1,0 +1,5 @@
+#!/bin/bash
+# sheldon の設定のハッシュ: {{ include "dot_config/sheldon/plugins.toml" | sha256sum }}
+set -euo pipefail
+
+sheldon lock

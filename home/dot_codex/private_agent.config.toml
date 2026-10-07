@@ -1,0 +1,6 @@
+# `codex --profile agent`: 作業ツリーへの書き込みを伴う委任用。承認なし、ネットワークなし。
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = false

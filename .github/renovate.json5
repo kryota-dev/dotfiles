@@ -1,0 +1,52 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended', 'helpers:pinGitHubActionDigests', ':pinAllExceptPeerDependencies'],
+  timezone: 'Asia/Tokyo',
+  schedule: ['before 9am on monday'],
+  rebaseWhen: 'conflicted',
+  mise: {
+    managerFilePatterns: ['/^home/dot_config/mise/config\\.toml$/'],
+  },
+  customManagers: [
+    {
+      // .chezmoidata.toml の `# renovate:` コメント付きの pin を追跡する。
+      customType: 'regex',
+      managerFilePatterns: ['/^home/\\.chezmoidata\\.toml$/'],
+      matchStrings: [
+        '# renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) branch=(?<currentValue>\\S+)\\n\\w+ = "(?<currentDigest>[a-f0-9]{40})"',
+        '# renovate: datasource=(?<datasource>github-tags) depName=(?<depName>\\S+) version=(?<currentValue>\\S+)\\n\\w+ = "(?<currentDigest>[a-f0-9]{40})"',
+        '# renovate: datasource=(?<datasource>github-releases) depName=(?<depName>\\S+)\\n\\w+ = "(?<currentValue>[^"]+)"',
+      ],
+    },
+  ],
+  packageRules: [
+    {
+      // 通常のバージョン更新は週 1 回にまとめ、CI が通れば自動でマージする。
+      matchUpdateTypes: ['minor', 'patch', 'pin', 'pinDigest'],
+      groupName: 'non-major dependencies',
+      automerge: true,
+    },
+    {
+      // Moralerspace のリリースタグには先頭に "v" が付く。
+      matchDepNames: ['yuru7/moralerspace'],
+      extractVersion: '^v(?<version>.+)$',
+    },
+    {
+      // skill の本文はエージェントの挙動を左右し、ax は 1.0 前で skill が CLI のリリースに
+      // 紐づくため、自動マージせず手で確認する。
+      matchDepNames: ['anthropics/skills', 'anthropics/claude-plugins-community', 'coji/natural-japanese', 'yusukebe/ax', 'github:yusukebe/ax'],
+      groupName: null,
+      automerge: false,
+    },
+    {
+      matchDepNames: ['yusukebe/ax', 'github:yusukebe/ax'],
+      groupName: 'ax',
+    },
+    {
+      // workflow はトークンを持って動くので、Actions の更新は手で確認する。
+      matchManagers: ['github-actions'],
+      automerge: false,
+      groupName: 'github actions',
+    },
+  ],
+}

@@ -1,0 +1,23 @@
+#!/bin/bash
+# ~/.claude/settings.json で宣言した plugin を入れる。Claude Code は enabledPlugins を
+# 自分では入れないので、新しいマシンではこれが要る。
+# settings.json のハッシュ: {{ include "dot_claude/settings.json" | sha256sum }}
+set -euo pipefail
+
+# plugin の CLI が settings.json を書き換えるので、終わったら chezmoi の版に戻す。
+settings="$HOME/.claude/settings.json"
+backup="$(mktemp)"
+cp "$settings" "$backup"
+trap 'cp "$backup" "$settings"; rm -f "$backup"' EXIT
+
+claude() { mise exec -- claude "$@"; }
+
+claude plugin marketplace add anthropics/claude-plugins-official --scope user
+{{- range $name, $mkt := (include "dot_claude/settings.json" | fromJson).extraKnownMarketplaces }}
+claude plugin marketplace add "{{ $mkt.source.repo }}{{ if $mkt.source.ref }}#{{ $mkt.source.ref }}{{ end }}" --scope user
+{{- end }}
+{{- range $plugin, $enabled := (include "dot_claude/settings.json" | fromJson).enabledPlugins }}
+{{- if $enabled }}
+claude plugin install "{{ $plugin }}" --scope user
+{{- end }}
+{{- end }}

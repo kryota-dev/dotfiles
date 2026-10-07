@@ -1,0 +1,16 @@
+#!/bin/bash
+# Brewfile のハッシュ: {{ include "dot_Brewfile" | sha256sum }}
+set -euo pipefail
+
+eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+brewfile="{{ .chezmoi.sourceDir }}/dot_Brewfile"
+
+# Homebrew は信頼していない tap の formula を読み込まない。Brewfile に宣言した tap は使う意図を明示したものなので信頼する。
+sed -n 's/^tap "\([^"]*\)".*/\1/p' "$brewfile" | while read -r tap; do
+  brew trust --tap "$tap"
+done
+
+# 1 つの項目の失敗（App Store から消えたアプリなど）で apply 全体を止めない。
+if ! brew bundle --no-upgrade --file="$brewfile"; then
+  echo "WARNING: brew bundle で入らなかったものがあります（上の出力を参照）。brew bundle を再実行してください。" >&2
+fi

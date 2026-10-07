@@ -1,0 +1,23 @@
+name = "kryota-dev"
+email = "50436249+kryota-dev@users.noreply.github.com"
+# コミット署名に使う 1Password の SSH 鍵の公開鍵（公開して問題ない）。
+signingkey = "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPR3w0FRG4ysLddVDfTi5bRvuurzyF+GTrwJAMOXcKiz"
+ghq_user = "kryota-dev"
+
+[versions]
+# renovate: datasource=github-releases depName=yuru7/moralerspace
+moralerspace_font = "2.0.0"
+
+# 外部 skill。commit SHA で固定する。各 pin の直前のコメントを Renovate が読む。
+[skills]
+# renovate: datasource=git-refs depName=anthropics/skills packageName=https://github.com/anthropics/skills branch=main
+anthropics = "683bc88e56f3e09ba94f7055977f3d3aa499f202"
+# renovate: datasource=git-refs depName=anthropics/claude-plugins-community packageName=https://github.com/anthropics/claude-plugins-community branch=main
+plugins_community = "f60f0454df3045f724c43c6346ec80bdcc3472b2"
+# renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
+natural_japanese = "9a78a42964096da509b8f3e011f0085a5f080151"
+# k16shikano 氏の japanese-tech-writing の gist リビジョン（gist は Renovate で追跡できない）。
+japanese_tech_writing = "8f2d57610a73efc97d743c9b0b0ecb1002e09fa4"
+# mise/config.toml で固定した ax のリリースの commit にする（Renovate が両方を一緒に更新する）。
+# renovate: datasource=github-tags depName=yusukebe/ax version=v0.1.25
+ax = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
