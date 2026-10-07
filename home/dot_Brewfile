@@ -162,6 +162,8 @@ cask "google-chrome@canary"
 cask "google-drive", args: { appdir: "/Applications" }
 # Native desktop AI assistant from Google
 cask "google-gemini"
+# Japanese input software
+cask "google-japanese-ime"
 # Menu bar manager
 cask "jordanbaird-ice"
 # Blocks all Keyboard and TouchBar input

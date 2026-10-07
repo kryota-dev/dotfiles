@@ -26,6 +26,24 @@ defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 \
 defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 65 \
   '<dict><key>enabled</key><false/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array><key>type</key><string>standard</string></dict></dict>'
 
+# 入力ソースの切り替えは ⌃Space（前の入力ソース）だけを使い、「次の入力ソース」は無効にする
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 61 \
+  '<dict><key>enabled</key><false/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>786432</integer></array><key>type</key><string>standard</string></dict></dict>'
+
+# 入力ソースは ABC と Google 日本語入力（IME を入れてから再ログインで反映）
+defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
+  '<dict><key>InputSourceKind</key><string>Keyboard Layout</string><key>KeyboardLayout ID</key><integer>252</integer><key>KeyboardLayout Name</key><string>ABC</string></dict>' \
+  '<dict><key>Bundle ID</key><string>com.apple.CharacterPaletteIM</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>' \
+  '<dict><key>Bundle ID</key><string>com.apple.50onPaletteIM</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>' \
+  '<dict><key>Bundle ID</key><string>com.apple.PressAndHold</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>'
+defaults write com.apple.inputsources AppleEnabledThirdPartyInputSources -array \
+  '<dict><key>Bundle ID</key><string>com.google.inputmethod.Japanese</string><key>Input Mode</key><string>com.apple.inputmethod.Japanese</string><key>InputSourceKind</key><string>Input Mode</string></dict>' \
+  '<dict><key>Bundle ID</key><string>com.google.inputmethod.Japanese</string><key>InputSourceKind</key><string>Keyboard Input Method</string></dict>'
+
+# 表示言語と地域を日本語にする（再ログインで反映）
+defaults write NSGlobalDomain AppleLanguages -array "ja-JP" "en-JP"
+defaults write NSGlobalDomain AppleLocale -string "ja_JP"
+
 # Finder のスプリングローディング
 defaults write NSGlobalDomain com.apple.springing.enabled -bool true
 defaults write NSGlobalDomain com.apple.springing.delay -float 0.5
