@@ -98,10 +98,6 @@ defaults write com.apple.menuextra.clock ShowSeconds -bool true
 # ターミナル
 defaults write com.apple.terminal StringEncodings -array 4
 
-# Simulator で Mac のキーボードとクリップボードをそのまま使う
-defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool true
-defaults write com.apple.iphonesimulator PasteboardAutomaticSync -bool true
-
 # TextEdit の新規書類をプレーンテキストにする（sandbox のアプリなので、値はコンテナ側に書かれる）
 defaults write com.apple.TextEdit RichText -bool false
 
