@@ -108,9 +108,9 @@ defaults write com.apple.ActivityMonitor ShowCategory -int 102
 defaults write org.jkiss.dbeaver.core.product NSAutomaticDashSubstitutionEnabled -int 0
 defaults write org.jkiss.dbeaver.core.product NSAutomaticQuoteSubstitutionEnabled -int 0
 
-# Simulator で Mac のキーボードを奪わず、ペーストボードも自動で同期しない
-defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-defaults write com.apple.iphonesimulator PasteboardAutomaticSync -bool false
+# Simulator で Mac のキーボードとクリップボードをそのまま使う
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool true
+defaults write com.apple.iphonesimulator PasteboardAutomaticSync -bool true
 
 # TextEdit の新規書類をプレーンテキストにする（sandbox のアプリなので、値はコンテナ側に書かれる）
 defaults write com.apple.TextEdit RichText -bool false
