@@ -101,9 +101,6 @@ defaults write com.apple.menuextra.clock ShowSeconds -bool true
 # ターミナル
 defaults write com.apple.terminal StringEncodings -array 4
 
-# Activity Monitor で自分のプロセスだけを表示する
-defaults write com.apple.ActivityMonitor ShowCategory -int 102
-
 # DBeaver で SQL の引用符とダッシュを勝手に置き換えない
 defaults write org.jkiss.dbeaver.core.product NSAutomaticDashSubstitutionEnabled -int 0
 defaults write org.jkiss.dbeaver.core.product NSAutomaticQuoteSubstitutionEnabled -int 0
