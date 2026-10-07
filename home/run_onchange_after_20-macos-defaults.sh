@@ -55,9 +55,16 @@ defaults write com.apple.finder ShowRemovableMediaOnDesktop -bool true
 defaults write com.apple.finder ShowStatusBar -bool true
 defaults write com.apple.finder ShowPathbar -bool true
 defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
+defaults write com.apple.finder _FXSortFoldersFirst -bool true
+defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"
 
 # ウィンドウのタイル配置で隙間を空けない
 defaults write com.apple.WindowManager EnableTiledWindowMargins -bool false
+
+# スクリーンショットをデスクトップに散らかさず、影も付けない（SystemUIServer の再起動で反映）
+mkdir -p "${HOME}/Pictures/Screenshots"
+defaults write com.apple.screencapture location -string "${HOME}/Pictures/Screenshots"
+defaults write com.apple.screencapture disable-shadow -bool true
 
 # メニューバーの時計（ControlCenter の再起動で反映）
 defaults write com.apple.menuextra.clock IsAnalog -bool false
