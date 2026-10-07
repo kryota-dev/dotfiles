@@ -19,9 +19,12 @@ defaults write NSGlobalDomain AppleIconAppearanceTheme -string "RegularDark"
 defaults write NSGlobalDomain NavPanelFileListModeForOpenMode -int 2
 defaults write NSGlobalDomain NavPanelFileListModeForSaveMode -int 2
 
-# ⌘Space を Raycast に譲り、Spotlight を ⌘⌥Space に移す（activateSettings で即時に反映）
+# ⌘Space を Raycast に譲り、Spotlight を ⌘⌥Space に移す。⌘⌥Space の既定の割り当て（Finder の
+# 検索ウィンドウ）は衝突するので無効にする。activateSettings で即時に反映する。
 defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 \
   '<dict><key>enabled</key><true/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array><key>type</key><string>standard</string></dict></dict>'
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 65 \
+  '<dict><key>enabled</key><false/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array><key>type</key><string>standard</string></dict></dict>'
 
 # Finder のスプリングローディング
 defaults write NSGlobalDomain com.apple.springing.enabled -bool true
