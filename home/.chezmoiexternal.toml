@@ -33,3 +33,8 @@
     type = "file"
     url = "https://raw.githubusercontent.com/yusukebe/ax/{{ .skills.ax }}/skills/ax/SKILL.md"
     refreshPeriod = "168h"
+
+[".agents/skills/agent-browser/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/vercel-labs/agent-browser/{{ .skills.agent_browser }}/skills/agent-browser/SKILL.md"
+    refreshPeriod = "168h"

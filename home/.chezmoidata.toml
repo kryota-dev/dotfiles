@@ -21,3 +21,6 @@ japanese_tech_writing = "8f2d57610a73efc97d743c9b0b0ecb1002e09fa4"
 # mise/config.toml で固定した ax のリリースの commit にする（Renovate が両方を一緒に更新する）。
 # renovate: datasource=github-tags depName=yusukebe/ax version=v0.1.25
 ax = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
+# mise/config.toml で固定した agent-browser のリリースの commit にする（Renovate が両方を一緒に更新する）。
+# renovate: datasource=github-tags depName=vercel-labs/agent-browser version=v0.38.2
+agent_browser = "39a74c70d7759d5a6de7a22c04570bb626bbd081"
