@@ -27,8 +27,16 @@
 | `run_onchange_after_13` | スクリプトの変更 | Claude Code の MCP サーバーの登録 |
 | `run_onchange_after_17` | settings.json の変更 | 宣言した Claude Code の plugin のインストール |
 | `run_onchange_after_18` | mise の設定の変更 | agent-browser が使うブラウザの取得 |
-| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults` |
+| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults` とファイアウォール |
+| `run_onchange_after_21` | スクリプトの変更 | `duti` で既定のアプリ |
+| `run_onchange_after_22` | LaunchAgent の変更 | キーの割り当ての LaunchAgent を読み込み直す |
 | `run_onchange_after_40` | sheldon の設定の変更 | `sheldon lock` |
+
+## キーボード
+
+Caps Lock と Control の入れ替えだけは、`~/Library/LaunchAgents` に置いた LaunchAgent がログインのたびに
+`hidutil` で設定する。システム設定の修飾キーはキーボードごとにしか設定できず、`hidutil` の割り当ては再起動で
+消えるため。OS に付属するコマンドを呼ぶだけで、独自のランタイムは持たない。
 
 ## シェル
 
