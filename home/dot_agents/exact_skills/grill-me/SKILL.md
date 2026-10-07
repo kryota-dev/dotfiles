@@ -7,6 +7,8 @@ description: |
   使用場面: 計画・設計を実装前に多角的に stress-test したいとき（合意内容を PRD file として次セッションへ handoff したい場合は `--output-prd` を付ける）。
 ---
 
+<!-- 冒頭の 3 文は mattpocock/skills の grill-me（MIT License, Copyright (c) 2026 Matt Pocock）を訳したもの。 -->
+
 この計画のあらゆる側面について、共通理解に到達するまで容赦なくインタビューせよ。設計の決定木を1枝ずつ辿り、決定間の依存を一つずつ解決していく。各質問には推奨回答を添えること。
 
 質問は一度に1つずつ行う。

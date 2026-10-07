@@ -43,6 +43,11 @@
       groupName: 'ax',
     },
     {
+      // skill は CLI から本文を読み込む入口だけなので、CLI と一緒に自動マージする。
+      matchDepNames: ['vercel-labs/agent-browser', 'npm:agent-browser'],
+      groupName: 'agent-browser',
+    },
+    {
       // workflow はトークンを持って動くので、Actions の更新は手で確認する。
       matchManagers: ['github-actions'],
       automerge: false,
