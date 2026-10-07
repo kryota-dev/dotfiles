@@ -74,10 +74,12 @@ defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true
 
 # Dock
 defaults write com.apple.dock autohide-delay -float 0
+defaults write com.apple.dock autohide-time-modifier -float 0.15
 defaults write com.apple.dock autohide -bool true
 defaults write com.apple.dock mru-spaces -bool false
 defaults write com.apple.dock show-recents -bool false
 defaults write com.apple.dock tilesize -int 44
+defaults write com.apple.dock expose-group-apps -bool true
 
 # Finder
 defaults write com.apple.finder AppleShowAllFiles -bool true
@@ -90,6 +92,13 @@ defaults write com.apple.finder ShowPathbar -bool true
 defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
 defaults write com.apple.finder _FXSortFoldersFirst -bool true
 defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"
+defaults write com.apple.finder FXRemoveOldTrashItems -bool true
+
+# 窓のタイトルバーにファイルのアイコンを出し、ドラッグや ⌘クリックでパスを扱えるようにする
+defaults write com.apple.universalaccess showWindowTitlebarIcons -bool true
+
+# 外付けディスクをつなぐたびに Time Machine のバックアップ先を提案させない
+defaults write com.apple.TimeMachine DoNotOfferNewDisksForBackup -bool true
 
 # スクリーンショットをデスクトップに散らかさず、影も付けない（SystemUIServer の再起動で反映）
 mkdir -p "${HOME}/Pictures/Screenshots"
@@ -109,6 +118,12 @@ defaults write com.apple.terminal StringEncodings -array 4
 
 # TextEdit の新規書類をプレーンテキストにする（sandbox のアプリなので、値はコンテナ側に書かれる）
 defaults write com.apple.TextEdit RichText -bool false
+
+# Activity Monitor の Dock アイコンを CPU の使用状況のグラフにする
+defaults write com.apple.ActivityMonitor IconType -int 5
+
+# Xcode のツールバーにビルドの所要時間を出す
+defaults write com.apple.dt.Xcode ShowBuildOperationDuration -bool true
 
 for app in "Dock" "Finder" "SystemUIServer" "ControlCenter"; do
   killall "${app}" &>/dev/null || true
