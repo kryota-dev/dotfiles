@@ -11,6 +11,18 @@ defaults write NSGlobalDomain KeyRepeat -int 2
 defaults write NSGlobalDomain NSAutomaticCapitalizationEnabled -bool false
 defaults write NSGlobalDomain InitialKeyRepeat -int 25
 
+# 外観をダークにする
+defaults write NSGlobalDomain AppleInterfaceStyle -string "Dark"
+defaults write NSGlobalDomain AppleIconAppearanceTheme -string "RegularDark"
+
+# 開く・保存のダイアログをリスト表示にする
+defaults write NSGlobalDomain NavPanelFileListModeForOpenMode -int 2
+defaults write NSGlobalDomain NavPanelFileListModeForSaveMode -int 2
+
+# ⌘Space を Raycast に譲り、Spotlight を ⌘⌥Space に移す（activateSettings で即時に反映）
+defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 64 \
+  '<dict><key>enabled</key><true/><key>value</key><dict><key>parameters</key><array><integer>32</integer><integer>49</integer><integer>1572864</integer></array><key>type</key><string>standard</string></dict></dict>'
+
 # Finder のスプリングローディング
 defaults write NSGlobalDomain com.apple.springing.enabled -bool true
 defaults write NSGlobalDomain com.apple.springing.delay -float 0.5
@@ -44,6 +56,9 @@ defaults write com.apple.finder ShowStatusBar -bool true
 defaults write com.apple.finder ShowPathbar -bool true
 defaults write com.apple.finder FXPreferredViewStyle -string "Nlsv"
 
+# ウィンドウのタイル配置で隙間を空けない
+defaults write com.apple.WindowManager EnableTiledWindowMargins -bool false
+
 # メニューバーの時計（ControlCenter の再起動で反映）
 defaults write com.apple.menuextra.clock IsAnalog -bool false
 defaults write com.apple.menuextra.clock Show24Hour -bool true
@@ -55,8 +70,12 @@ defaults write com.apple.menuextra.clock ShowSeconds -bool true
 # ターミナル
 defaults write com.apple.terminal StringEncodings -array 4
 
+# TextEdit の新規書類をプレーンテキストにする（sandbox のアプリなので、値はコンテナ側に書かれる）
+defaults write com.apple.TextEdit RichText -bool false
+
 for app in "Dock" "Finder" "SystemUIServer" "ControlCenter"; do
   killall "${app}" &>/dev/null || true
 done
+/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
 
 echo "macOS の defaults を適用しました。"
