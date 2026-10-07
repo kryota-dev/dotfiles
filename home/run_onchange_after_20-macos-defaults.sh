@@ -44,6 +44,9 @@ defaults write com.apple.inputsources AppleEnabledThirdPartyInputSources -array 
 defaults write NSGlobalDomain AppleLanguages -array "ja-JP" "en-JP"
 defaults write NSGlobalDomain AppleLocale -string "ja_JP"
 
+# パーソナライズ広告を無効にする
+defaults write com.apple.AdLib allowApplePersonalizedAdvertising -bool false
+
 # Finder のスプリングローディング
 defaults write NSGlobalDomain com.apple.springing.enabled -bool true
 defaults write NSGlobalDomain com.apple.springing.delay -float 0.5
@@ -105,5 +108,9 @@ for app in "Dock" "Finder" "SystemUIServer" "ControlCenter"; do
   killall "${app}" &>/dev/null || true
 done
 /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
+
+# ファイアウォールを有効にする（既定は無効）。sudo に失敗しても apply は止めない。
+/usr/bin/sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on >/dev/null ||
+  echo "WARNING: sudo socketfilterfw --setglobalstate on を手で実行してください。" >&2
 
 echo "macOS の defaults を適用しました。"
