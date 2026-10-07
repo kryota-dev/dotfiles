@@ -9,6 +9,8 @@ chezmoi で管理する macOS 用の dotfiles。ソースのルートは `home/`
   Codex・chezmoi・Renovate の標準機能を使う。
 - エージェント向けのものは、Claude Code と Codex の両方で動くようにする。共通のルールは `home/AGENTS.md`、
   共通の skill は `home/dot_agents/exact_skills/` に置く。
+- 他者が公開している skill をそのまま使うときは、翻訳して置かず、`.chezmoiexternal.toml` で上流から取得する
+  （再配布に伴うライセンス表記を持たないため）。一部だけを取り込んだときは、その箇所に出典とライセンスを書く。
 - コメントには「なぜ」を数行で書く。経緯は git に残し、コメントには書かない。
 - public リポジトリなので、クライアント・勤務先の固有名をコミットしない。秘密情報は `onepasswordRead` で
   1Password から読む。
