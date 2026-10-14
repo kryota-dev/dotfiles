@@ -25,6 +25,7 @@
 | `run_onchange_before_10` | Brewfile の変更 | `brew bundle`（1 項目の失敗で apply を止めない） |
 | `run_onchange_after_12` | mise の設定の変更 | `mise install` |
 | `run_onchange_after_13` | スクリプトの変更 | Claude Code の MCP サーバーの登録 |
+| `run_onchange_after_14` | Codex の computer use プラグインの変更 | その MCP サーバーを Claude Code に `codex-cu` として登録 |
 | `run_onchange_after_17` | settings.json の変更 | 宣言した Claude Code の plugin のインストール |
 | `run_onchange_after_18` | mise の設定の変更 | agent-browser が使うブラウザの取得 |
 | `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults` とファイアウォール |

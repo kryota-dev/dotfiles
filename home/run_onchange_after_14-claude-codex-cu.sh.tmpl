@@ -1,0 +1,24 @@
+#!/bin/bash
+# Codex の computer use（ChatGPT アプリが展開する unified-computer-use プラグインの cua_repl）を、
+# Claude Code の user スコープの MCP サーバー codex-cu として登録する。command・args・env には
+# ChatGPT アプリのバージョンとホームのパスが入るので、リポジトリに書かずにプラグインの .mcp.json から読む。
+# Codex 専用の項目（enabled_tools・omit_tools_from・startup_timeout_sec など）は移さず、Codex が公開しない
+# ツールは settings.json の permissions.deny で禁止する。
+# 次の行はプラグインの .mcp.json のハッシュ。プラグインが更新されると変わり、このスクリプトが再実行される。
+{{- range glob (joinPath .chezmoi.homeDir ".codex/plugins/cache/openai-bundled/unified-computer-use/*/.mcp.json") }}
+# {{ include . | sha256sum }}
+{{- end }}
+set -euo pipefail
+
+shopt -s nullglob
+configs=("$HOME"/.codex/plugins/cache/openai-bundled/unified-computer-use/*/.mcp.json)
+
+mise exec -- claude mcp remove codex-cu --scope user >/dev/null 2>&1 || true
+if [ ${#configs[@]} -eq 0 ]; then
+  echo "unified-computer-use の .mcp.json が無いので、codex-cu を登録しない" >&2
+  exit 0
+fi
+
+latest=$(printf '%s\n' "${configs[@]}" | sort -V | tail -n 1)
+server=$(jq -ce '.mcpServers.cua_repl | select(.command) | {type: "stdio", command, args, env}' "$latest")
+mise exec -- claude mcp add-json codex-cu "$server" --scope user
