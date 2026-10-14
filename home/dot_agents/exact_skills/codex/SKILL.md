@@ -10,7 +10,7 @@ argument-hint: "<依頼内容>（日本語可）"
 
 # codex
 
-skill や orchestration から Codex を起動するときの起動形と約束は、このファイルに従う。既定の model・effort・MCP は `~/.codex/config.toml` にある。effort は `-c model_reasoning_effort=<high|xhigh>` で呼び出しごとに変えられる。
+skill や orchestration から Codex を起動するときの起動形と約束は、このファイルに従う。既定の model・effort・MCP は `~/.codex/config.toml` にある。effort は `-c model_reasoning_effort=<high|xhigh>` で呼び出しごとに変えられる。最も難しい作業を通しで任せるときは `--profile astra`（GPT-6 Astra）でモデルごと切り替える。
 
 ## 相談・分析（書き込まない）
 

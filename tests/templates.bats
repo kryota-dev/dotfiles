@@ -46,6 +46,13 @@ render() {
   [[ "$output" == *'memories = true'* ]]
 }
 
+@test "Codex の設定は model_context_window を消し、モデルの自動判定に任せる" {
+  input=$'model_context_window = 1000000\n'
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_config.toml")" <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'model_context_window'* ]]
+}
+
 @test "Codex の設定は空のファイルからでも描画できる" {
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_config.toml")" </dev/null
   [ "$status" -eq 0 ]
