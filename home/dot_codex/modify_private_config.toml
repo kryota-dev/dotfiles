@@ -2,9 +2,12 @@
 {{- /* Codex 自身もこのファイルに書き込む（プロジェクトの trust・plugin）ので、管理するのは以下のキーだけ。 */ -}}
 {{- $c := fromToml .chezmoi.stdin -}}
 {{- $c = setValueAtPath "personality" "pragmatic" $c -}}
-{{- $c = setValueAtPath "model" "gpt-6-astra" $c -}}
-{{- $c = setValueAtPath "model_reasoning_effort" "xhigh" $c -}}
-{{- $c = setValueAtPath "model_context_window" 1000000 $c -}}
+{{- /* 既定は OpenAI が Codex の複雑な作業に勧める GPT-6.1 Sol を既定のエフォートで使い、計画だけ深く考えさせる。最も難しい作業は --profile astra で切り替える。 */ -}}
+{{- $c = setValueAtPath "model" "gpt-6.1-sol" $c -}}
+{{- $c = setValueAtPath "model_reasoning_effort" "medium" $c -}}
+{{- $c = setValueAtPath "plan_mode_reasoning_effort" "high" $c -}}
+{{- /* コンテキストウィンドウはモデルごとに自動で決まる。固定値はモデルを切り替えるとずれるので、以前に書いたものも消す。 */ -}}
+{{- $c = deleteValueAtPath "model_context_window" $c -}}
 {{- $c = setValueAtPath "developer_instructions" "ユーザーの判断が必要なときは、選択肢と各選択肢の含意を番号付きで示してから止まる。報告の末尾に平文の問いを書いて待たない。" $c -}}
 {{- $c = setValueAtPath "features.memories" true $c -}}
 {{- $c = setValueAtPath "mcp_servers.context7" (dict "command" "npx" "args" (list "-y" "@upstash/context7-mcp")) $c -}}
