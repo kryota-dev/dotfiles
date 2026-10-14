@@ -11,7 +11,7 @@
 # 承認の単位はアプリ（cua.getApp ごと）で、クリック単位ではない。
 #
 # codex-cu は Codex アプリが「常に許可」を記憶する前提で作られていて、サーバー側に記憶も設定もない。
-# Claude Code 側にも hook 以外の自動応答の手段がないので、このリポジトリで唯一の hook にしている。
+# Claude Code 側にも hook 以外の自動応答の手段がない（設定キーも、ダイアログの「今後聞かない」もない）。
 
 # jq・claude は mise で入れている。mise を有効にしていない環境から起動されても見つかるようにする。
 command -v jq >/dev/null || PATH="$HOME/.local/share/mise/shims:$PATH"

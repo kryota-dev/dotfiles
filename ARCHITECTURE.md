@@ -63,11 +63,12 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   `.chezmoiignore` で削除の対象から外している。
 - Codex は `config.toml` と profile（`astra.config.toml`・`agent.config.toml`）に自分でも書き込む（プロジェクトの
   trust・plugin・モデルの案内の表示回数）ので、`modify_` テンプレートで管理するキーだけを上書きし、それ以外は残す。
-- hook は、Claude Code の `Elicitation` hook（`~/.claude/codex-cu-gate.sh`）だけを使う。`codex-cu`（Codex の
-  computer use）は `cua.getApp` のたびに「Allow Computer Use to use "<App>"?」の elicitation を出し、「常に許可」の
-  記憶を Codex アプリ（MCP クライアント）に委ねている。Claude Code にはその記憶がなく、ダイアログを省く手段も
-  hook しかない。hook は auto mode と同じ三層（必ず聞くアプリ → 常に許可するアプリ → `claude -p` の分類器が
-  ユーザーの依頼と実行予定の js に照らして判定）で、否・失敗はダイアログに戻す。
+- hook はスクリプトを `~/.claude/` に置き、`settings.json` の `hooks` で宣言する。今あるのは `codex-cu-gate.sh`
+  （`Elicitation`）だけ。`codex-cu`（Codex の computer use）は `cua.getApp` のたびに「Allow Computer Use to use
+  "<App>"?」の elicitation を出し、「常に許可」の記憶を Codex アプリ（MCP クライアント）に委ねている。Claude Code
+  にはその記憶がなく、ダイアログを省く手段も hook しかない。hook は auto mode と同じ三層（必ず聞くアプリ →
+  常に許可するアプリ → `claude -p` の分類器がユーザーの依頼と実行予定の js に照らして判定）で、否・失敗は
+  ダイアログに戻す。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
 
