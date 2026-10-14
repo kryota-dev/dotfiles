@@ -58,3 +58,27 @@ render() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'model = '* ]]
 }
+
+@test "Codex の profile は Codex が書いたキーを残し、管理するキーを設定する" {
+  input=$'[tui.model_availability_nux]\n"gpt-5.5" = 3\n'
+  for f in modify_private_astra.config.toml modify_private_agent.config.toml; do
+    run render --with-stdin "$(cat "$SOURCE/dot_codex/$f")" <<<"$input"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"gpt-5.5" = 3'* ]]
+  done
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_astra.config.toml")" <<<"$input"
+  [[ "$output" == *'model = "gpt-6-astra"'* ]]
+  [[ "$output" == *'model_reasoning_effort = "low"'* ]]
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_agent.config.toml")" <<<"$input"
+  [[ "$output" == *'approval_policy = "never"'* ]]
+  [[ "$output" == *'network_access = false'* ]]
+}
+
+@test "Codex の profile は空のファイルからでも描画できる" {
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_astra.config.toml")" </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'model = "gpt-6-astra"'* ]]
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_agent.config.toml")" </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'sandbox_mode = "workspace-write"'* ]]
+}

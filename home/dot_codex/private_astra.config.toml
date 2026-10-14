@@ -1,3 +1,0 @@
-# `codex --profile astra`: 最も難しい作業を通しでやらせるとき。Astra は Light（low）から始め、足りなければ上げる。
-model = "gpt-6-astra"
-model_reasoning_effort = "low"

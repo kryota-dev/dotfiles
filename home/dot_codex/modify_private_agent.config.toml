@@ -1,0 +1,8 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Codex は profile にも自分で書き込む（astra でモデルの案内の表示回数を確認）ので、管理するのは以下のキーだけ。 */ -}}
+{{- /* `codex --profile agent`: 作業ツリーへの書き込みを伴う委任用。承認なし、ネットワークなし。 */ -}}
+{{- $c := fromToml .chezmoi.stdin -}}
+{{- $c = setValueAtPath "sandbox_mode" "workspace-write" $c -}}
+{{- $c = setValueAtPath "approval_policy" "never" $c -}}
+{{- $c = setValueAtPath "sandbox_workspace_write.network_access" false $c -}}
+{{- toToml $c -}}
