@@ -5,7 +5,7 @@ chezmoi で管理する macOS 用の dotfiles。ソースのルートは `home/`
 
 ## ルール
 
-- このリポジトリは環境の宣言にとどめる。ランタイム・サーバー・状態ストア・CLI・hook を足さず、Claude Code・
+- このリポジトリは環境の宣言にとどめる。ランタイム・サーバー・状態ストア・CLI を足さず、Claude Code・
   Codex・chezmoi・Renovate の標準機能を使う。
 - エージェント向けのものは、Claude Code と Codex の両方で動くようにする。共通のルールは `home/AGENTS.md`、
   共通の skill は `home/dot_agents/exact_skills/` に置く。

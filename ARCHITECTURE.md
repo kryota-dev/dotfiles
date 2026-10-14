@@ -63,7 +63,17 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   `.chezmoiignore` で削除の対象から外している。
 - Codex は `config.toml` と profile（`astra.config.toml`・`agent.config.toml`）に自分でも書き込む（プロジェクトの
   trust・plugin・モデルの案内の表示回数）ので、`modify_` テンプレートで管理するキーだけを上書きし、それ以外は残す。
-- どちらのハーネスでも hook は使わない。
+- hook は、ハーネスの標準機能（設定キー・permission のルール・ダイアログの選択肢）で代替できないときだけ足し、
+  スクリプトを `~/.claude/` に置いて `settings.json` の `hooks` で宣言し、理由をここに書く。hook から呼ぶのは
+  ハーネス自身の CLI（`claude -p`）までにし、独自のランタイムやサーバーは持たない。
+- 今ある hook は `codex-cu-gate.sh`（`Elicitation`）だけ。`codex-cu`（Codex の computer use）は `cua.getApp` の
+  たびに「Allow Computer Use to use "<App>"?」の elicitation を出し、「常に許可」の記憶を Codex アプリ
+  （MCP クライアント）に委ねている。Claude Code にはその記憶がなく、ダイアログを省く手段も hook しかない。
+  hook は auto mode と同じ三層（必ず聞くアプリ → 常に許可するアプリ → `claude -p` の分類器がユーザーの依頼に
+  照らして判定）で、否・失敗・判断材料の不足はダイアログに戻す。permission mode に関わらず効く（hook の入力に
+  mode は渡らない）。限界: transcript は非同期に書かれるので、実行予定の js は「結果が未記録の呼び出しが
+  1 つだけ」のときに参考として渡すにとどめ、永続 REPL の既存の状態は見えない。subagent の中では user ターンが
+  人の依頼ではないので自動承認しない。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
 
