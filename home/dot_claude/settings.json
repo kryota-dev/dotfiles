@@ -181,6 +181,20 @@
     "type": "command",
     "command": "$HOME/.claude/statusline.sh"
   },
+  "hooks": {
+    "Elicitation": [
+      {
+        "matcher": "codex-cu",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/codex-cu-gate.sh",
+            "timeout": 45
+          }
+        ]
+      }
+    ]
+  },
   "model": "claude-opus-5-5[1m]",
   "effortLevel": "medium",
   "modelSettings": {
