@@ -120,6 +120,8 @@ gh pr view <番号> --json reviews,statusCheckRollup | jq --arg me "$ME" '{
 
 マージできる状態になったことを user に伝え、判断を委ねる。マージはしない。
 
+`multi-review` が PR 単位の問い（intent）を返していれば、「未解決の問い」として並べて示す。問題設定への問いには人間が答えるもので、Phase 7 で AI に自己回答させない。
+
 ## 失敗時
 
 | 局面 | 対処 |
