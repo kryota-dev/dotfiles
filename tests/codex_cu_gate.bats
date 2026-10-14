@@ -70,6 +70,13 @@ not_classified() {
   not_classified
 }
 
+@test "Serato DJ は分類器を呼ばずに accept する" {
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Serato DJ Lite"?')
+  [ "$status" -eq 0 ]
+  accepted
+  not_classified
+}
+
 @test "transcript が無ければ分類器を呼ばずにダイアログへ委ねる" {
   TRANSCRIPT="$BATS_TEST_TMPDIR/missing.jsonl"
   run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Finder"?')

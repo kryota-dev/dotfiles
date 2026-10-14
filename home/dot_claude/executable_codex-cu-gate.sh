@@ -62,7 +62,9 @@ esac
 # 2. 聞かずに許可するアプリ（読むだけ・手元で完結し、第三者にも認証情報にも届かないもの）。
 case "$app" in
   "Music" | "ミュージック" | "Calculator" | "計算機" | "TextEdit" | "テキストエディット" | \
-    "Preview" | "プレビュー" | "Podcasts" | "ポッドキャスト" | "Reminders" | "リマインダー")
+    "Preview" | "プレビュー" | "Podcasts" | "ポッドキャスト" | "Reminders" | "リマインダー" | \
+    "Serato DJ Lite" | "Serato DJ Pro")
+    # Serato DJ はサインイン画面を持つが、手元の DJ 操作が主で、サインインの入力は人がする。
     accept "always allow"
     ;;
 esac
