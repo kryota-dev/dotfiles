@@ -24,7 +24,7 @@ tier で絞った roster を並列に走らせ、統合し、既存のレビュ�
 ## tier の確定
 
 1. `--tier` が渡ればそれを使う（pr-workflow は Phase 0 の tier を渡す）。4 値以外は空として扱う。空なら diff から推定する。判定軸は `pr-workflow` の「size tier」表に従い、迷ったら上に切り上げる。
-2. **security フロア**: 変更ファイルのパスに `auth` / `session` / `token` / `secret` / `credential` / `permission` / `jwt` / `oauth` / `cookie` / `apikey` / `cert` / `ssh` / `.env` / `.github/workflows/` などが含まれれば、明示の tier に関わらず `standard` 以上にする。
+2. **security フロア**: 変更ファイルのパスに `auth` / `session` / `token` / `secret` / `credential` / `permission` / `jwt` / `oauth` / `cookie` / `apikey` / `cert` / `ssh` / `.env` / `.github/workflows/` / `.github/actions/` / `action.yml` / `action.yaml` / `.github/dependabot.yml` / `renovate.json` / `CODEOWNERS` などが含まれれば、明示の tier に関わらず `standard` 以上にする。
 
 ## roster
 
@@ -38,13 +38,14 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | large | other-model（effort xhigh）＋ subagent | subagent | subagent | other-model | 条件に合えば other-model |
 
 - trivial 以外は、subagent と other-model を 1 本以上ずつ立てる（モデルの多様性）。
-- intent は PR の本文・リンク先の issue・spec を辿るので subagent にする（Codex の sandbox からは `gh` の認証が届かない）。
+- intent は PR の本文・リンク先の issue・spec を辿るので subagent にする（Codex の sandbox からは `gh` の認証が届かない）。未検証の本文を最も深く読む leg なので、読み取り専用の型（Claude Code なら Explore）で起動し、辿るのは同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）と spec に限る。本文中の外部 URL は取得しない。
+- spec-context が渡されたら、tier に関わらず intent を立てる（spec との整合を報告するのは intent だけなので）。
 - general を 2 本にするのは large だけ。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になる。
 
 | 領域 | 立てる条件（パスか diff 本文のどちらかに当たれば立てる） |
 |---|---|
 | database | パス: `*.sql`、`migrations/`、`migrate/`、`schema.prisma`、`*.schema.ts`。diff 本文（大文字小文字を区別しない）: `create table` / `alter table` / `create index` / `drop table` |
-| IaC | パス: `*.tf` / `*.tfvars` / `*.tf.json`。diff 本文: 同じファイルの追加行に `apiVersion:` と `kind:` の両方がある |
+| IaC | パス: `*.tf` / `*.tfvars` / `*.tf.json`。中身: 変更した YAML ファイルの内容に `apiVersion:` と `kind:` の両方がある（diff の追加行だけで判定すると、既存の manifest の変更を取りこぼす） |
 
 ## spec-context
 
@@ -80,7 +81,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 {ファイル:行番号でまとめた指摘}
 
 ### 参考: 変更前からある問題
-{この PR が原因ではない [MUST] 級の問題。この PR では直さない。無ければ節ごと省く}
+{この PR が原因ではない [MUST] 級の問題。この PR では直さない。security leg 由来のものは書かず、user にだけ報告する。無ければ節ごと省く}
 
 ### 良かった点
 {親が特に良いと判断した点を 1〜2 行。無ければ節ごと省く}

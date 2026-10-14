@@ -11,8 +11,8 @@ codex exec --sandbox read-only --cd "$WT" --color never --json \
   -c model_reasoning_effort=<high|xhigh> -o "$RESULT" <HEREDOC> > "$STREAM" 2>&1
 ```
 
-- どの leg も heredoc で起動し、`perspectives.md` の共通の約束とその leg の観点、PR のタイトルと本文を入れる。`review` サブコマンドはプロンプトを受け取れず、共通の約束（PR 本文を読む・根拠の 3 条件）を渡せないので使わない。
-- Codex の sandbox からは `gh` の認証が届かないので、差分は `CHECKOUT_OK` なら `git fetch origin <base>` してから `git diff origin/<base>...HEAD` で取らせ、そうでなければ `${DIFF}` を埋め込む。
+- どの leg も heredoc で起動し、`perspectives.md` の共通の約束とその leg の観点、PR のタイトルと本文を入れる。`review` サブコマンドは使わない（プロンプトは受け取れるが `--base` と併用できず、共通の約束と差分の範囲を同時に指定できない）。
+- Codex の sandbox からは `gh` の認証が届かないので、差分は `CHECKOUT_OK` なら `git diff origin/<base>...HEAD` で取らせ（fetch は起動前に親が済ませる）、そうでなければ `${DIFF}` を埋め込む。PR のタイトルと本文の渡し方は execution.md の Phase 1 に従う。
 - effort は general を `xhigh`、それ以外を `high` にする。
 - 2 ラウンド目以降は、前のラウンドで指摘のあった leg を `codex exec resume <thread_id>` で続ける（`thread_id` は `$STREAM` の最初の `thread.started` にある）。resume には棄却台帳を入れない。resume できなければ fresh で起動する。
 
