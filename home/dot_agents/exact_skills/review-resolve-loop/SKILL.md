@@ -80,12 +80,12 @@ CI コメントは同じ comment id のまま本文が PATCH で書き換わる�
 
 ## 判定
 
-指摘は、該当コードと関連ファイルを Read してから判定する。今回の変更で起きたかどうかは `git diff {base}...HEAD` で確かめる（変更前からの挙動なら「退行なし」として対応不要にできる）。`multi-review` が自分名義で投稿した指摘は、統合時に一次ソースで検証済みなので妥当性を再検証しない（コードは修正のために読む）。それ以外の指摘は、断定的でも一次ソースで確かめてから採否を決める。
+指摘は、該当コードと関連ファイルを Read してから判定する。今回の変更で起きたかどうかは `git diff {base}...HEAD` で確かめる（変更前からの挙動なら「退行なし」として対応不要にできる）。`multi-review` が自分名義で投稿した指摘は、統合時に一次ソースで検証済みなので妥当性を再検証しない（コードは修正のために読む）。ただし「（未確認）」が付いたものは検証されていないので、一次ソースで確かめてから採否を決める。それ以外の指摘は、断定的でも一次ソースで確かめてから採否を決める。
 
 | 対象 | 対応する | 返信だけする | 返信しない |
 |---|---|---|---|
 | review thread | バグ・規約違反・妥当な修正提案 | 対応不要（退行なし・スコープ外・前回回答済み。根拠を添える） | 自分名義の `[GOOD]` など非 actionable なセルフ指摘（resolve だけ行う）、人間の非 actionable な発言（お礼・了解だけのもの。resolve もしない） |
-| review body | body でしか指摘されていない実質的な指摘（thread に無い nitpick など） | — | 個別 thread のサマリー（"Actionable comments posted" など）、指摘なしの ack・approve |
+| review body | body でしか指摘されていない実質的な指摘（thread に無い nitpick など） | — | 個別 thread のサマリー（"Actionable comments posted" など）、指摘なしの ack・approve、自分名義の `multi-review` の「PR 単位の問い」「参考: 変更前からある問題」「良かった点」の節（問いは pr-workflow が user に示し、参考はこの PR の範囲外） |
 | CI コメント | `claude-code-review` の actionable な指摘 | 「人間レビュー必須」「セルフマージ不可」の通知（認識と方針を返す） | サマリー、セルフマージ可、指摘なし |
 
 `claude-code-review` は全文を読んで判定する（`gh api repos/{owner}/{repo}/issues/comments/{commentId} --jq .body`）。承認の表では、セルフの項目のレビュアー欄を `{login} (self)` と書く。

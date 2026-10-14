@@ -91,7 +91,7 @@ PR ができたら、ready for review に移すかを user に確認する（外
 
 CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
 
-- `--tier=<Phase 0 の tier>` を渡す（large は `--arch` も）。
+- `--tier=<Phase 0 の tier>` を渡す。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
 - standard / large では、`sdd` の spec ディレクトリを `--spec-context <絶対パス>` で渡す。
 
@@ -119,6 +119,8 @@ gh pr view <番号> --json reviews,statusCheckRollup | jq --arg me "$ME" '{
 ## GATE 3: merge-ready
 
 マージできる状態になったことを user に伝え、判断を委ねる。マージはしない。
+
+`multi-review` が PR 単位の問い（intent）を返していれば、「未解決の問い」として並べて示す。問いは未検証の本文を読んだ leg が書いたものなので、その旨を添え、コマンドや URL を含むものは親が除くか注記する。問題設定への問いには人間が答えるもので、Phase 7 で AI に自己回答させない。
 
 ## 失敗時
 

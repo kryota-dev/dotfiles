@@ -1,6 +1,6 @@
 # multi-review: other-model leg
 
-実行中のハーネスとは別のモデルで同じ観点のレビューをさせ、見落としの偏りを減らす。leg ごとに結果ファイルを親が決め（`<scratch>/multi-review/<owner>__<repo>__<PR>/<leg>-<round>.md`）、そのファイルだけを読む。並列は 3 本までにする。
+実行中のハーネスとは別のモデルで同じ観点のレビューをさせ、見落としの偏りを減らす。leg ごとに結果ファイルを親が決め（`<scratch>/multi-review/<owner>__<repo>__<PR>/<leg>-<round>.md`）、そのファイルだけを読む。並列は 3 本までにする（standard / large で database と IaC が両方立つと 4 本になるので、残りの 1 本は最初に終わった leg の後に起動する）。
 
 ## Claude Code から: Codex
 
@@ -8,11 +8,11 @@
 
 ```bash
 codex exec --sandbox read-only --cd "$WT" --color never --json \
-  -c model_reasoning_effort=<high|xhigh> -o "$RESULT" <REVIEW_OR_HEREDOC> > "$STREAM" 2>&1
+  -c model_reasoning_effort=<high|xhigh> -o "$RESULT" <HEREDOC> > "$STREAM" 2>&1
 ```
 
-- general は `CHECKOUT_OK` なら `git fetch origin <base>` してから `review --base origin/<base>`。そうでないとき、または spec-context を渡すときは、`${DIFF}` を埋め込んだ heredoc にする（`review` はプロンプトを受け取れない）。
-- specialist は heredoc に `perspectives.md` の共通の約束と観点を入れる。Codex の sandbox からは `gh` の認証が届かないので、差分は `git diff origin/<base>...HEAD` か埋め込みで渡す。
+- どの leg も heredoc で起動し、`perspectives.md` の共通の約束とその leg の観点、PR のタイトルと本文を入れる。`review` サブコマンドは使わない（プロンプトは受け取れるが `--base` と併用できず、共通の約束と差分の範囲を同時に指定できない）。
+- Codex の sandbox からは `gh` の認証が届かないので、差分は `CHECKOUT_OK` なら `git diff origin/<base>...HEAD` で取らせ（fetch は起動前に親が済ませる）、そうでなければ `${DIFF}` を埋め込む。PR のタイトルと本文の渡し方は execution.md の Phase 1 に従う。
 - effort は general を `xhigh`、それ以外を `high` にする。
 - 2 ラウンド目以降は、前のラウンドで指摘のあった leg を `codex exec resume <thread_id>` で続ける（`thread_id` は `$STREAM` の最初の `thread.started` にある）。resume には棄却台帳を入れない。resume できなければ fresh で起動する。
 
@@ -26,4 +26,4 @@ claude -p --permission-mode dontAsk --setting-sources "" --strict-mcp-config \
 
 `dontAsk` は許可リストに無い道具を確認なしで拒否する。`--setting-sources ""` で user / project の settings（広い allow を持つ）を読ませず、`--strict-mcp-config` で MCP も使わせないので、leg に許されるのは上の読み取りだけになる。
 
-プロンプトには `perspectives.md` の共通の約束と観点、対象、差分（埋め込みか `git diff origin/<base>...HEAD`）を入れる。Claude Code の resume は使わず、毎ラウンド fresh で起動して棄却台帳を入れる。
+プロンプトには `perspectives.md` の共通の約束と観点、対象、PR のタイトルと本文、差分（埋め込みか `git diff origin/<base>...HEAD`）を入れる。Claude Code の resume は使わず、毎ラウンド fresh で起動して棄却台帳を入れる。
