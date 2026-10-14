@@ -60,6 +60,23 @@ not_classified() {
   not_classified
 }
 
+@test "日本語の表示名でも、必ず聞くアプリはダイアログへ委ね、常に許可するアプリは accept する" {
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "システム設定"?')
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "ミュージック"?')
+  [ "$status" -eq 0 ]
+  accepted
+  not_classified
+}
+
+@test "Serato DJ は分類器を呼ばずに accept する" {
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Serato DJ Lite"?')
+  [ "$status" -eq 0 ]
+  accepted
+  not_classified
+}
+
 @test "transcript が無ければ分類器を呼ばずにダイアログへ委ねる" {
   TRANSCRIPT="$BATS_TEST_TMPDIR/missing.jsonl"
   run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Finder"?')
@@ -136,4 +153,22 @@ EOF
   run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Finder"?')
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "前の依頼を文脈として渡し、skill の本文と中断の記録は依頼として扱わない" {
+  cat >>"$TRANSCRIPT" <<'EOF'
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"js1","content":"opened"}]}}
+{"type":"user","message":{"role":"user","content":"Serato をインストールして"}}
+{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /tmp/x"}]}}
+{"type":"user","message":{"role":"user","content":"インストールも自律的に進めて。"}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}
+EOF
+  export CLASSIFIER_RESULT='{"ok": true, "reason": "ok"}'
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "インストーラ"?')
+  accepted
+  args=$(cat "$BATS_TEST_TMPDIR/claude-args")
+  [[ "$args" == *'"user_request":"インストールも自律的に進めて。"'* ]]
+  [[ "$args" == *'"earlier_requests":["Chrome は触らないで\nMusic App で PUSHIM のプレイリストを再生して","Serato をインストールして"]'* ]]
+  [[ "$args" != *'Base directory'* ]]
+  [[ "$args" != *'Request interrupted'* ]]
 }
