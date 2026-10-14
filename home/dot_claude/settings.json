@@ -189,7 +189,7 @@
           {
             "type": "command",
             "command": "$HOME/.claude/codex-cu-gate.sh",
-            "timeout": 45
+            "timeout": 10
           }
         ]
       }

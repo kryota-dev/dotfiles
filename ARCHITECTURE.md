@@ -63,12 +63,15 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   `.chezmoiignore` で削除の対象から外している。
 - Codex は `config.toml` と profile（`astra.config.toml`・`agent.config.toml`）に自分でも書き込む（プロジェクトの
   trust・plugin・モデルの案内の表示回数）ので、`modify_` テンプレートで管理するキーだけを上書きし、それ以外は残す。
-- hook はスクリプトを `~/.claude/` に置き、`settings.json` の `hooks` で宣言する。今あるのは `codex-cu-gate.sh`
-  （`Elicitation`）だけ。`codex-cu`（Codex の computer use）は `cua.getApp` のたびに「Allow Computer Use to use
-  "<App>"?」の elicitation を出し、「常に許可」の記憶を Codex アプリ（MCP クライアント）に委ねている。Claude Code
-  にはその記憶がなく、ダイアログを省く手段も hook しかない。hook は auto mode と同じ三層（必ず聞くアプリ →
-  常に許可するアプリ → `claude -p` の分類器がユーザーの依頼と実行予定の js に照らして判定）で、否・失敗は
-  ダイアログに戻す。
+- hook は、ハーネスの標準機能（設定キー・permission のルール・ダイアログの選択肢）で代替できないときだけ足し、
+  スクリプトを `~/.claude/` に置いて `settings.json` の `hooks` で宣言し、理由をここに書く。hook から呼ぶのは
+  ハーネス自身の CLI（`claude -p`）までにし、独自のランタイムやサーバーは持たない。
+- 今ある hook は `codex-cu-gate.sh`（`Elicitation`）だけ。`codex-cu`（Codex の computer use）は `cua.getApp` の
+  たびに「Allow Computer Use to use "<App>"?」の elicitation を出し、「常に許可」の記憶を Codex アプリ
+  （MCP クライアント）に委ねている。Claude Code にはその記憶がなく、ダイアログを省く手段も hook しかない。
+  hook は「必ず聞くアプリ」と「常に許可するアプリ」の 2 つのリストで判定し、どちらにも無いアプリと判断に迷う
+  入力はダイアログに戻す。限界: hook の入力に permission mode は渡らないので transcript の `permission-mode` の
+  記録（非公開の形式）から読み、auto / bypassPermissions のときだけ自動承認する。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
 
