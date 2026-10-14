@@ -61,7 +61,6 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | {
 
 - `event` は `COMMENT` か省略（Pending）だけ。`APPROVE` / `REQUEST_CHANGES` は使わない。
 - インラインには `[MUST]` / `[SHOULD]` を載せる。`[NITS]` は user が含めると答えたときだけ。差分外の指摘・PR 単位の問い・参考（変更前からある問題）・良かった点は body に書き、インラインに載せない（参考をスレッドにすると `review-resolve-loop` が直しにいく）。
-- AI ツールのクレジットや署名を付けない。
 
 ```bash
 # A. サマリーを body に含めて即時投稿

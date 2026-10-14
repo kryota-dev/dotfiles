@@ -10,7 +10,6 @@
 
 ## commit / PR / 公開物に書かないもの
 
-- AI ツールのクレジット・署名・`Co-Authored-By` trailer・"Generated with ..." の行を付けない。
 - public リポジトリの issue / PR / コードに、クライアント・勤務先の固有名（製品名・組織名・scope 名など）を書かない。`<owner>/<repo>` のような汎用のプレースホルダを使う。
 
 ## git / PR / Issue
