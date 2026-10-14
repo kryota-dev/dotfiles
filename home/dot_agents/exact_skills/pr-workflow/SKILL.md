@@ -91,7 +91,7 @@ PR ができたら、ready for review に移すかを user に確認する（外
 
 CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
 
-- `--tier=<Phase 0 の tier>` を渡す（large は `--arch` も）。
+- `--tier=<Phase 0 の tier>` を渡す。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
 - standard / large では、`sdd` の spec ディレクトリを `--spec-context <絶対パス>` で渡す。
 
