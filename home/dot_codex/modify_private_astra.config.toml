@@ -1,0 +1,7 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Codex 自身もこのファイルに書き込む（モデルの案内の表示回数など）ので、管理するのは以下のキーだけ。 */ -}}
+{{- /* `codex --profile astra`: 最も難しい作業を通しでやらせるとき。Astra は Light（low）から始め、足りなければ上げる。 */ -}}
+{{- $c := fromToml .chezmoi.stdin -}}
+{{- $c = setValueAtPath "model" "gpt-6-astra" $c -}}
+{{- $c = setValueAtPath "model_reasoning_effort" "low" $c -}}
+{{- toToml $c -}}

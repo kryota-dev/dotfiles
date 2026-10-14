@@ -53,7 +53,7 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 |---|---|---|
 | ルール | `~/.claude/CLAUDE.md` が `~/AGENTS.md` を読み込む | `~/.codex/AGENTS.md` → `~/AGENTS.md` |
 | skill | `~/.claude/skills` → `~/.agents/skills` | `~/.agents/skills` をそのまま読む |
-| 設定 | `~/.claude/settings.json`（ファイルごと管理） | `~/.codex/config.toml`（modify テンプレート） |
+| 設定 | `~/.claude/settings.json`（ファイルごと管理） | `~/.codex/config.toml` と profile（modify テンプレート） |
 | 危険なコマンド | `permissions.ask` / `deny` | `~/.codex/rules/dotfiles.rules` |
 | MCP サーバー | `run_onchange_after_13` で登録 | `config.toml` に宣言 |
 | 記憶・subagent・通知 | 標準機能 | 標準機能 |
@@ -61,8 +61,8 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 - `~/.agents/skills` は `exact_` ディレクトリで、ソースに無い skill は apply で削除する。外部 skill はこの中に
   chezmoi の externals として置く。ハーネス自身が書き込む `.system`（Codex）と `synced`（Claude Code）は
   `.chezmoiignore` で削除の対象から外している。
-- Codex は `config.toml` に自分でも書き込む（プロジェクトの trust・plugin）ので、`modify_` テンプレートで
-  管理するキーだけを上書きし、それ以外は残す。
+- Codex は `config.toml` と profile（`astra.config.toml`・`agent.config.toml`）に自分でも書き込む（プロジェクトの
+  trust・plugin・モデルの案内の表示回数）ので、`modify_` テンプレートで管理するキーだけを上書きし、それ以外は残す。
 - どちらのハーネスでも hook は使わない。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
