@@ -39,13 +39,18 @@ accept() {
   exit 0
 }
 
+# アプリ名は OS の言語での表示名で届く（日本語環境では Music が「ミュージック」）。標準アプリは英語名と
+# 日本語名の両方を並べる。
+
 # 1. 操作を人が必ず確認するアプリ。認証情報・OS 設定・任意のコマンドに至るもの（ターミナル・エディタの
 #    統合ターミナル・スクリプト実行）・第三者へ送信するもの。分類器より優先する。
 case "$app" in
-  "1Password" | "Passwords" | "Keychain Access" | "System Settings" | \
-    "Terminal" | "Ghostty" | "iTerm2" | "Warp" | "Alacritty" | "kitty" | "WezTerm" | \
-    "Script Editor" | "Automator" | "Shortcuts" | "Code" | "Visual Studio Code" | "Cursor" | \
-    "Mail" | "Messages" | "Slack" | "Discord" | "LINE" | "Spark Desktop")
+  "1Password" | "Passwords" | "パスワード" | "Keychain Access" | "キーチェーンアクセス" | \
+    "System Settings" | "システム設定" | \
+    "Terminal" | "ターミナル" | "Ghostty" | "iTerm2" | "Warp" | "Alacritty" | "kitty" | "WezTerm" | \
+    "Script Editor" | "スクリプトエディタ" | "Automator" | "Shortcuts" | "ショートカット" | \
+    "Code" | "Visual Studio Code" | "Cursor" | \
+    "Mail" | "メール" | "Messages" | "メッセージ" | "Slack" | "Discord" | "LINE" | "Spark Desktop")
     ask "always ask"
     ;;
 esac
@@ -55,7 +60,8 @@ esac
 
 # 2. 聞かずに許可するアプリ（読むだけ・手元で完結し、第三者にも認証情報にも届かないもの）。
 case "$app" in
-  "Music" | "Calculator" | "TextEdit" | "Preview" | "Podcasts" | "Reminders")
+  "Music" | "ミュージック" | "Calculator" | "計算機" | "TextEdit" | "テキストエディット" | \
+    "Preview" | "プレビュー" | "Podcasts" | "ポッドキャスト" | "Reminders" | "リマインダー")
     accept "always allow"
     ;;
 esac

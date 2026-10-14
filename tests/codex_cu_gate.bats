@@ -60,6 +60,16 @@ not_classified() {
   not_classified
 }
 
+@test "日本語の表示名でも、必ず聞くアプリはダイアログへ委ね、常に許可するアプリは accept する" {
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "システム設定"?')
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "ミュージック"?')
+  [ "$status" -eq 0 ]
+  accepted
+  not_classified
+}
+
 @test "transcript が無ければ分類器を呼ばずにダイアログへ委ねる" {
   TRANSCRIPT="$BATS_TEST_TMPDIR/missing.jsonl"
   run --separate-stderr bash "$GATE" < <(elicit 'Allow Computer Use to use "Finder"?')
