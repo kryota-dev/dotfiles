@@ -172,7 +172,9 @@
       "Bash(*.gmail-mcp*)",
       "Bash(*.gmail-mcp/credentials.json*)",
       "Bash(*.gmail-mcp/gcp-oauth.keys.json*)",
-      "mcp__supabase__execute_sql"
+      "mcp__supabase__execute_sql",
+      "mcp__codex-cu__js_add_node_module_dir",
+      "mcp__codex-cu__turn_ended"
     ],
     "defaultMode": "auto"
   },
