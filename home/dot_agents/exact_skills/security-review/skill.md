@@ -1,5 +1,6 @@
 ---
 name: security-review
+model: claude-opus-4-6
 description: |
   自分が開発・運用・保守するプロジェクトのセキュリティレビューを、マルチモデル オーケストレーションで実施する。
   Fable 5.1（ソースコード脆弱性発見）と Codex GPT-5.4（脅威モデリング・設定検証）をフェーズごとに使い分け、
@@ -24,24 +25,23 @@ PR 単位の差分レビュー（`multi-review`）ではなく、プロジェク
 - AI の出力は偽陽性・偽陰性を含む。Critical / High の発見は必ず手動で検証する
 - このレビューは専門的なペネトレーションテストを代替するものではなく、補完するもの
 
-## モデル選定
+## なぜ Opus 4.6 を親に使うか
 
 セーフガードのリアルタイムサイバー分類器は Opus 4.7（2026-04）から導入された。
 Fable 5.1 / Opus 5.5 / Sonnet 5.5 はいずれも Fable レベルのサイバーセーフガードを持ち、
 攻撃シナリオの列挙中にフォールバック（Opus 4.8 への降格）が発生しうる。
+Opus 4.6（2026-02）はサイバー分類器の搭載前で、フロンティアクラスの推論能力を持つ。
+フォールバックなしにオーケストレーションを完遂できる。
 
-**親セッション（この skill を実行するモデル）はフォールバックを受けない**ことを前提とする。
-親が Fable / Opus 5.5 / Sonnet 5.5 で動いている場合、Phase 3（脅威モデリング）の
-コーディネーションでフォールバックが発生する可能性がある。その場合は Phase 3 を
-丸ごと Codex に委ね、親はプロンプトの受け渡しのみを行う。
+## フェーズ別のモデルと effort
 
 | フェーズ | モデル | effort | 根拠 |
 |---|---|---|---|
-| Phase 1: 偵察 | 親 | medium | 構造の読み取りと整理。深い推論は不要 |
+| Phase 1: 偵察 | 親（Opus 4.6） | medium | 構造の読み取りと整理。深い推論は不要 |
 | Phase 2: 脆弱性発見 | **Fable 5.1** subagent | **high** | GA で許可されている最強の解析能力。見落としが致命的 |
 | Phase 3: 脅威モデリング | **Codex** GPT-5.4 | high | Claude のセーフガードが攻撃シナリオの詳述をブロックしうる |
 | Phase 4: 設定検証 | **Codex** GPT-5.4 | medium | チェックリスト的。網羅性が重要で深い推論は不要 |
-| Phase 5: 統合レポート | 親 | medium | 既存の発見を整理・優先度付けする作業 |
+| Phase 5: 統合レポート | 親（Opus 4.6） | medium | 既存の発見を整理・優先度付けする作業 |
 
 ### effort の考え方
 
@@ -57,7 +57,7 @@ Fable 5.1 / Opus 5.5 / Sonnet 5.5 はいずれも Fable レベルのサイバー
 | `--phase` | `all` | 実行するフェーズ（`1`〜`5` で個別指定、`all` で全フェーズ） |
 | `--scope` | リポジトリ全体 | レビュー対象を特定のディレクトリに絞る |
 
-## Phase 1: 偵察（親 — effort: medium）
+## Phase 1: 偵察（親 Opus 4.6 — effort: medium）
 
 プロジェクトの構造を把握し、攻撃面マップを作る。
 
@@ -94,6 +94,17 @@ Fable 5.1 の subagent を起動する。Fable 5.1 はソースコードの脆�
 `references/checklists.md` の「Phase 2 プロンプトテンプレート」を読み、攻撃面マップを埋め込んで
 subagent に渡す。
 
+### プロンプト設計（Claude Fable 5.1 向け）
+
+Fable 5.1 は thinking が常時有効で、自律性が高い。以下の原則に従う:
+
+- **ロールと目的を冒頭で簡潔に定義する。** 手順を逐一規定しない。Fable は自分で段取りを組む
+- **検査項目はカテゴリとして渡し、「これらの観点で精査せよ」と委ねる。** 個々のチェック手順は書かない
+- **出力形式は構造だけ指定する。** フィールド名と型を示し、文言の書き方は任せる
+- **effort は `high`** — `output_config.effort` で制御。`budget_tokens` は使わない（400 エラー）
+- Fable の thinking の raw chain は返らない。`display: "summarized"` を subagent に渡す必要はない
+  （Claude Code の subagent は自動で処理する）
+
 ### Claude Code での起動
 
 ```
@@ -112,6 +123,15 @@ Claude のセーフガードが攻撃シナリオの詳述をブロックしう�
 
 `references/checklists.md` の「Phase 3 プロンプトテンプレート」を読み、攻撃面マップを
 埋め込んで Codex に渡す。
+
+### プロンプト設計（GPT-5.4 / Codex 向け）
+
+Codex のプロンプトは 4 部構成に従う:
+
+- **Goal**: 完了時の状態を 1 文で（「STRIDE フレームワークで脅威を列挙し、残余リスクと対策を提示する」）
+- **Context**: 攻撃面マップとプロジェクトの構造を埋め込む
+- **Constraints**: 「確認や質問は不要」「確信が持てない主張には『（未確認）』を付ける」
+- **Done when**: 「全 STRIDE カテゴリを網羅し、各脅威に攻撃経路・影響・緩和策・残余リスクを記述した」
 
 ### Claude Code での起動
 
@@ -132,6 +152,15 @@ Codex に委譲する。Phase 3 と同じく `codex` skill の相談モードを
 
 `references/checklists.md` の「Phase 4 プロンプトテンプレート」を読み、Codex に渡す。
 
+### プロンプト設計（GPT-5.4 / Codex 向け）
+
+Phase 3 と同じ 4 部構成。effort は medium（チェックリスト的な作業）。
+
+- **Goal**: 「デプロイ設定・インフラ設定のセキュリティ不備を検出する」
+- **Context**: 攻撃面マップから、デプロイ先・CI/CD・クラウドサービスの情報を抜粋
+- **Constraints**: 同上
+- **Done when**: 「全検査項目を確認し、不備のある項目について具体的な修正案を記述した」
+
 ### Claude Code での起動
 
 ```bash
@@ -143,7 +172,7 @@ codex exec --sandbox read-only --cd <project-dir> --color never \
 PROMPT
 ```
 
-## Phase 5: 統合レポート（親 — effort: medium）
+## Phase 5: 統合レポート（親 Opus 4.6 — effort: medium）
 
 Phase 2〜4 の結果を統合し、レポートを作成する。
 `references/checklists.md` の「Phase 5 レポートテンプレート」に従う。
