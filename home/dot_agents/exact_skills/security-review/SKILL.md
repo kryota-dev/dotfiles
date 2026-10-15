@@ -38,9 +38,9 @@ Opus 4.6（2026-02）はサイバー分類器の搭載前で、フロンティ�
 | フェーズ | モデル | effort | 根拠 |
 |---|---|---|---|
 | Phase 1: 偵察 | 親（Opus 4.6） | medium | 構造の読み取りと整理。深い推論は不要 |
-| Phase 2: 脆弱性発見 | **Fable 5.1** subagent | **high** | GA で許可されている最強の解析能力。見落としが致命的 |
-| Phase 3: 脅威モデリング | **Codex** GPT-5.4 | high | Claude のセーフガードが攻撃シナリオの詳述をブロックしうる |
-| Phase 4: 設定検証 | **Codex** GPT-5.4 | medium | チェックリスト的。網羅性が重要で深い推論は不要 |
+| Phase 2: 脆弱性発見 | **Fable 5.1** subagent（Codex なら既定モデル） | **high** | GA で許可されている最強の解析能力。見落としが致命的 |
+| Phase 3: 脅威モデリング | **Codex**（既定モデル） | high | Claude のセーフガードが攻撃シナリオの詳述をブロックしうる |
+| Phase 4: 設定検証 | **Codex**（既定モデル） | medium | チェックリスト的。網羅性が重要で深い推論は不要 |
 | Phase 5: 統合レポート | 親（Opus 4.6） | medium | 既存の発見を整理・優先度付けする作業 |
 
 ### effort の考え方
@@ -105,10 +105,24 @@ Fable 5.1 は thinking が常時有効で、自律性が高い。以下の原則
 - Fable の thinking の raw chain は返らない。`display: "summarized"` を subagent に渡す必要はない
   （Claude Code の subagent は自動で処理する）
 
-### Claude Code での起動
+### ハーネス別の起動
+
+**Claude Code:**
 
 ```
 Agent(model: fable, prompt: "Phase 2 プロンプト + 攻撃面マップ")
+```
+
+**Codex:**
+
+Codex から実行するときは、Phase 2 も `codex exec` の相談モードで行う（Fable subagent は使えない）。
+Codex の既定モデルで脆弱性発見を実施し、Claude Code との品質差をレポートの「対象外・制約事項」に記す。
+
+```bash
+codex exec --sandbox read-only --cd <project-dir> --color never \
+  -c model_reasoning_effort=high -o "$RESULT" - <<'PROMPT' > "$LOG" 2>&1
+[Phase 2 プロンプト + 攻撃面マップ]
+PROMPT
 ```
 
 ### セーフガード発動時
@@ -116,15 +130,16 @@ Agent(model: fable, prompt: "Phase 2 プロンプト + 攻撃面マップ")
 Fable がフォールバックした場合、問題のファイル / 関数を特定し、Codex に個別委譲する。
 Codex への委譲は `codex` skill の相談モード（`--sandbox read-only`）を使う。
 
-## Phase 3: 脅威モデリング（Codex GPT-5.4 — effort: high）
+## Phase 3: 脅威モデリング（Codex — effort: high）
 
 Claude のセーフガードが攻撃シナリオの詳述をブロックしうるため、Codex に委譲する。
 `codex` skill の相談モード（`--sandbox read-only`）で起動する。
+モデルは Codex の既定モデルを使う（レポートには実際のモデル名を記載する）。
 
 `references/checklists.md` の「Phase 3 プロンプトテンプレート」を読み、攻撃面マップを
 埋め込んで Codex に渡す。
 
-### プロンプト設計（GPT-5.4 / Codex 向け）
+### プロンプト設計（Codex 向け）
 
 Codex のプロンプトは 4 部構成に従う:
 
@@ -133,7 +148,7 @@ Codex のプロンプトは 4 部構成に従う:
 - **Constraints**: 「確認や質問は不要」「確信が持てない主張には『（未確認）』を付ける」
 - **Done when**: 「全 STRIDE カテゴリを網羅し、各脅威に攻撃経路・影響・緩和策・残余リスクを記述した」
 
-### Claude Code での起動
+### ハーネス別の起動
 
 ```bash
 RESULT="/tmp/security-review-phase3-$(date +%s).md"
@@ -146,13 +161,14 @@ PROMPT
 
 結果は `$RESULT` を読む（`$LOG` ではない）。
 
-## Phase 4: セキュリティ設定検証（Codex GPT-5.4 — effort: medium）
+## Phase 4: セキュリティ設定検証（Codex — effort: medium）
 
 Codex に委譲する。Phase 3 と同じく `codex` skill の相談モードを使う。
+モデルは Codex の既定モデルを使う。
 
 `references/checklists.md` の「Phase 4 プロンプトテンプレート」を読み、Codex に渡す。
 
-### プロンプト設計（GPT-5.4 / Codex 向け）
+### プロンプト設計（Codex 向け）
 
 Phase 3 と同じ 4 部構成。effort は medium（チェックリスト的な作業）。
 
@@ -161,7 +177,7 @@ Phase 3 と同じ 4 部構成。effort は medium（チェックリスト的な�
 - **Constraints**: 同上
 - **Done when**: 「全検査項目を確認し、不備のある項目について具体的な修正案を記述した」
 
-### Claude Code での起動
+### ハーネス別の起動
 
 ```bash
 RESULT="/tmp/security-review-phase4-$(date +%s).md"
