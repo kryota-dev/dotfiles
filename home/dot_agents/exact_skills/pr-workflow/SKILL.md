@@ -92,6 +92,7 @@ PR ができたら、ready for review に移すかを user に確認する（外
 CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
 
 - `--tier=<Phase 0 の tier>` を渡す。
+- レビュアーは親の履歴と過去のレビュー結果を渡さず新規起動する（Codex の `spawn_agent` は `fork_turns: "none"`）。対象 HEAD・base の SHA を固定し、モデル・推論設定・履歴継承・確認範囲を multi-review の実行記録に残す。指摘0件でも確認根拠を省かない。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
 - standard / large では、`sdd` の spec ディレクトリを `--spec-context <絶対パス>` で渡す。
 
@@ -115,6 +116,7 @@ gh pr view <番号> --json reviews,statusCheckRollup | jq --arg me "$ME" '{
 - `mine == 0` なら Phase 6 が走っていない。Phase 6 からやり直す。
 - 指摘がゼロで返信の痕跡が無いのは正常（Phase 7 の完了条件は「起動して未処理が 0 件」）。
 - 自分名義のレビュー件数と CI の結論を、最終報告に必ず含める。
+- multi-review の実行記録を読み、全 leg の新規起動・履歴分離、対象 SHA、確認根拠（0件を含む）、代替の有無と限界が記録されていることを確かめる。欠落していれば Phase 6 の手順で補い、確認できない点は最終報告に残す。
 
 ## GATE 3: merge-ready
 
