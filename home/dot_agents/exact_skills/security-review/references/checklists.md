@@ -3,15 +3,21 @@
 各フェーズで subagent / Codex に渡すプロンプトのテンプレートと、検査項目の詳細。
 `[攻撃面マップ]` のプレースホルダは Phase 1 の出力で置き換える。
 
+## プロンプト設計の原則
+
+### Fable 5.1 向け（Phase 2）
+
+thinking が常時有効で自律性が高い。ロールと目的を冒頭で簡潔に定義し、手順を逐一規定しない。
+検査項目はカテゴリとして渡して委ねる。出力形式は構造だけ指定する。
+effort は `output_config.effort` で制御し、`budget_tokens` は使わない（400 エラー）。
+
+### Codex 向け（Phase 3-4）
+
+Goal / Context / Constraints / Done when の 4 部構成に従う。
+
 ---
 
-## Phase 2 プロンプトテンプレート（Claude Fable 5.1 subagent）
-
-Fable 5.1 向けのプロンプト設計原則:
-- thinking が常時有効なので、手順を逐一規定しない（自分で段取りを組む）
-- ロールと目的を冒頭で簡潔に定義し、検査項目はカテゴリとして渡して委ねる
-- 出力形式は構造だけ指定し、文言の書き方は任せる
-- `budget_tokens` は使わない（Fable 5.1 では 400 エラー）。effort で制御する
+## Phase 2 プロンプトテンプレート（Fable 5.1 subagent）
 
 ```
 このプロジェクトのソースコードのセキュリティレビュアーとして、
@@ -52,9 +58,7 @@ postinstall スクリプトのリスク。
 
 ---
 
-## Phase 3 プロンプトテンプレート（Codex GPT-5.4）
-
-GPT-5.4 / Codex 向けの 4 部構成（Goal / Context / Constraints / Done when）に従う。
+## Phase 3 プロンプトテンプレート（Codex）
 
 ```
 ## Goal
@@ -98,9 +102,7 @@ Information Disclosure / Denial of Service / Elevation of Privilege）を
 
 ---
 
-## Phase 4 プロンプトテンプレート（Codex GPT-5.4）
-
-GPT-5.4 / Codex 向けの 4 部構成。
+## Phase 4 プロンプトテンプレート（Codex）
 
 ```
 ## Goal
