@@ -13,8 +13,11 @@ trap 'cp "$backup" "$settings"; rm -f "$backup"' EXIT
 claude() { mise exec -- claude "$@"; }
 
 claude plugin marketplace add anthropics/claude-plugins-official --scope user
+{{- /* settings 型の marketplace は settings.json そのものが定義なので add しない。 */ -}}
 {{- range $name, $mkt := (include "dot_claude/settings.json" | fromJson).extraKnownMarketplaces }}
+{{- if eq $mkt.source.source "github" }}
 claude plugin marketplace add "{{ $mkt.source.repo }}{{ if $mkt.source.ref }}#{{ $mkt.source.ref }}{{ end }}" --scope user
+{{- end }}
 {{- end }}
 {{- range $plugin, $enabled := (include "dot_claude/settings.json" | fromJson).enabledPlugins }}
 {{- if $enabled }}

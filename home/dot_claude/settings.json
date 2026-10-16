@@ -118,7 +118,17 @@
       "Bash(pnpm publish:*)",
       "Bash(defaults delete:*)",
       "Bash(git filter-repo:*)",
-      "Bash(git filter-branch:*)"
+      "Bash(git filter-branch:*)",
+      "mcp__plugin_spark_spark__draft",
+      "mcp__plugin_spark_spark__event",
+      "mcp__plugin_spark_spark__comment",
+      "mcp__plugin_spark_spark__action",
+      "mcp__plugin_spark_spark__contact-action",
+      "Bash(spark draft:*)",
+      "Bash(spark event:*)",
+      "Bash(spark comment:*)",
+      "Bash(spark action:*)",
+      "Bash(spark contact-action:*)"
     ],
     "deny": [
       "Bash(sudo:*)",
@@ -207,7 +217,8 @@
   },
   "enabledPlugins": {
     "codex@openai-codex": true,
-    "claude-code-setup@claude-plugins-official": true
+    "claude-code-setup@claude-plugins-official": true,
+    "spark@spark-mail": true
   },
   "extraKnownMarketplaces": {
     "openai-codex": {
@@ -215,6 +226,22 @@
         "source": "github",
         "repo": "openai/codex-plugin-cc",
         "ref": "v1.0.6"
+      }
+    },
+    "spark-mail": {
+      "source": {
+        "source": "settings",
+        "name": "spark-mail",
+        "plugins": [
+          {
+            "name": "spark",
+            "source": {
+              "source": "github",
+              "repo": "readdle/spark-claude-plugin",
+              "sha": "166b1c818b34357d8b3aaa8750069b55258bccef"
+            }
+          }
+        ]
       }
     }
   },

@@ -82,3 +82,12 @@ render() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'sandbox_mode = "workspace-write"'* ]]
 }
+
+@test "Claude Code の plugin のスクリプトは、github の marketplace だけを add する" {
+  run render <"$SOURCE/run_onchange_after_17-claude-plugins.sh.tmpl"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'claude plugin marketplace add "openai/codex-plugin-cc#'* ]]
+  [[ "$output" != *'marketplace add ""'* ]]
+  [[ "$output" != *'marketplace add "#'* ]]
+  [[ "$output" == *'claude plugin install "spark@spark-mail" --scope user'* ]]
+}
