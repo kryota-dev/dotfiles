@@ -81,7 +81,11 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   IPC ソケットにつなぐので、Codex の sandbox の中のシェルからは届かない（sandbox の外で起動する MCP なら届く）。
   そのため、skill だけの公式 Codex plugin は使わない。受信したメールの本文は信頼できない入力なので、書き込み系の
   `draft` / `event` / `comment` / `action` / `contact-action` は、MCP でもシェルでも毎回確認する（Claude Code は
-  `permissions.ask`、Codex は `default_tools_approval_mode = "writes"` と rules）。アプリの中の設定は宣言できないので、
+  `permissions.ask`、Codex は `default_tools_approval_mode = "writes"` と rules）。主な防御は MCP 側で、Bash の
+  ルールは絶対パスなど別の書き方の呼び出しを止めない。読み取りは承認なしで通り、firecrawl などの読み取り専用ツールも
+  任意の URL に送れるので、メールが文脈に入ると確認なしで外へ出しうる。そのため Codex の spark は既定で無効にし、
+  使うときだけ `codex -c mcp_servers.spark.enabled=true` で有効にする（review leg や委任した agent の文脈にメールを
+  入れない）。Claude Code は auto mode の分類器が、読んだ内容に駆動された操作を見る。アプリの中の設定は宣言できないので、
   新しいマシンでは手で行う: Spark Desktop の Settings → AI Agents → Setup CLI（`/usr/local/bin/spark` を作る）と、
   アカウントごとの access level（Off / Read / Triage / Send）。`spark` は起動中の Spark Desktop に問い合わせるので、
   使う間は Spark Desktop を開いておく。
