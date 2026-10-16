@@ -91,3 +91,10 @@ render() {
   [[ "$output" != *'marketplace add "#'* ]]
   [[ "$output" == *'claude plugin install "spark@spark-mail" --scope user'* ]]
 }
+
+@test "Codex の設定は spark の MCP を、書き込み系だけ承認を求める形で宣言する" {
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_config.toml")" </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'[mcp_servers.spark]'* ]]
+  [[ "$output" == *'default_tools_approval_mode = "writes"'* ]]
+}

@@ -14,4 +14,6 @@
 {{- $c = setValueAtPath "mcp_servers.deepwiki" (dict "url" "https://mcp.deepwiki.com/mcp") $c -}}
 {{- $c = setValueAtPath "mcp_servers.exa" (dict "command" "npx" "args" (list "-y" "exa-mcp-server@3.2.1") "env_vars" (list "EXA_API_KEY")) $c -}}
 {{- $c = setValueAtPath "mcp_servers.firecrawl" (dict "command" "npx" "args" (list "-y" "firecrawl-mcp@3.22.0") "env_vars" (list "FIRECRAWL_API_KEY")) $c -}}
+{{- /* spark は Spark Desktop の IPC ソケットにつなぐので、sandbox の中のシェルからは届かない。sandbox の外で起動する MCP で使い、read-only と注釈されていない書き込み系のツールだけ承認を求める。 */ -}}
+{{- $c = setValueAtPath "mcp_servers.spark" (dict "command" "spark" "args" (list "mcp") "default_tools_approval_mode" "writes") $c -}}
 {{- toToml $c -}}

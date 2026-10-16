@@ -29,6 +29,12 @@ prefix_rule(pattern = [["npm", "yarn", "pnpm"], ["publish", "unpublish"]], decis
 prefix_rule(pattern = ["defaults", "delete"], decision = "prompt")
 prefix_rule(pattern = ["git", ["filter-repo", "filter-branch"]], decision = "prompt")
 prefix_rule(
+    pattern = ["spark", ["draft", "event", "comment", "action", "contact-action"]],
+    decision = "prompt",
+    justification = "メールの下書き・予定・コメント・メールや連絡先への操作で、受信したメールの指示に従っている可能性がある",
+    match = ["spark draft --to a@example.com", "spark action archive 1"],
+)
+prefix_rule(
     pattern = ["git", "push", ["--force", "-f"]],
     decision = "forbidden",
     justification = "ユーザーに確認したうえで --force-with-lease を使う",

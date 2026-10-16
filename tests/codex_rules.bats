@@ -23,3 +23,11 @@ decision() {
   [ "$(decision ls -la)" = "none" ]
   [ "$(decision git push origin main)" = "none" ]
 }
+
+@test "spark の書き込み系サブコマンドは承認が必要で、読み取りには影響しない" {
+  for sub in draft event comment action contact-action; do
+    [ "$(decision spark "$sub" --help)" = "prompt" ]
+  done
+  [ "$(decision spark accounts)" = "none" ]
+  [ "$(decision spark search foo)" = "none" ]
+}
