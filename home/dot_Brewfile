@@ -184,6 +184,8 @@ cask "postman", args: { appdir: "/Applications" }
 cask "raspberry-pi-imager"
 # Control your tools with a few keystrokes
 cask "raycast", args: { appdir: "/Applications" }
+# Email client
+cask "readdle-spark"
 # Plugin for AWS CLI to start and end sessions that connect to managed instances
 cask "session-manager-plugin"
 # Team communication and collaboration software
@@ -215,7 +217,6 @@ mas "Microsoft PowerPoint", id: 462062816
 mas "Microsoft Word", id: 462054704
 mas "PicGIF Lite", id: 844918735
 mas "RunCat Neo", id: 6757801838
-mas "Spark Desktop", id: 6445813049
 mas "ToyViewer", id: 414298354
 mas "Windows App", id: 1295203466
 mas "Xcode", id: 497799835
