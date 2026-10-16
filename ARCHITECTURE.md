@@ -75,6 +75,16 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   mode は渡らない）。限界: transcript は非同期に書かれるので、実行予定の js は「結果が未記録の呼び出しが
   1 つだけ」のときに参考として渡すにとどめ、永続 REPL の既存の状態は見えない。subagent の中では user ターンが
   人の依頼ではないので自動承認しない。
+- メール・カレンダーは Spark Desktop 同梱の Spark CLI（`spark`）を MCP（`spark mcp`）で使う。Claude Code は
+  公式 plugin（`readdle/spark-claude-plugin`。MCP と recipe の skill を含む）を `settings.json` の inline
+  marketplace で commit SHA に固定し、Codex は `config.toml` に MCP を宣言する。`spark` は Spark Desktop の
+  IPC ソケットにつなぐので、Codex の sandbox の中のシェルからは届かない（sandbox の外で起動する MCP なら届く）。
+  そのため、skill だけの公式 Codex plugin は使わない。受信したメールの本文は信頼できない入力なので、書き込み系の
+  `draft` / `event` / `comment` / `action` / `contact-action` は、MCP でもシェルでも毎回確認する（Claude Code は
+  `permissions.ask`、Codex は `default_tools_approval_mode = "writes"` と rules）。アプリの中の設定は宣言できないので、
+  新しいマシンでは手で行う: Spark Desktop の Settings → AI Agents → Setup CLI（`/usr/local/bin/spark` を作る）と、
+  アカウントごとの access level（Off / Read / Triage / Send）。`spark` は起動中の Spark Desktop に問い合わせるので、
+  使う間は Spark Desktop を開いておく。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
 
