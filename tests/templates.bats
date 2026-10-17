@@ -43,7 +43,7 @@ render() {
   [[ "$output" == *'trust_level = "trusted"'* ]]
   [[ "$output" == *'[mcp_servers.node_repl]'* ]]
   [[ "$output" == *'[mcp_servers.context7]'* ]]
-  [[ "$output" == *'memories = true'* ]]
+  [[ "$output" == *'memories = false'* ]]
 }
 
 @test "Codex の設定は model_context_window を消し、モデルの自動判定に任せる" {

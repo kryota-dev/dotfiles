@@ -3,7 +3,7 @@ slug: obsidian-vault
 feature: Obsidian の vault をエージェント共有の作業記憶にする
 created_at: 2026-10-17T15:20:20+09:00
 grill_session: session_01URzA66y6iGNLkNjzuLmdBH
-status: draft
+status: implemented
 ---
 
 # Obsidian の vault をエージェント共有の作業記憶にする
@@ -112,7 +112,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 1. dotfiles の PR ①（土台）: Brewfile・gpg-agent・gitignore・pre-commit hook・externals・`vault` skill・AGENTS.md。この段階では memory を止めない。
 2. personal の vault の立ち上げ: GPG 鍵（エージェントが 1Password 経由で作る）、`vault` skill の手順による作成、Obsidian Git の配置、復元の確認。あわせて、Mac ごとの準備（鍵の import・キーチェーン・Drive からの復元・別名・Obsidian への登録・GUI アプリの PATH）を `chezmoi apply` に組み込む（PR）。
 3. memory の移行: 振り分けの一覧を示す → ユーザーが承認 → 書き込み → 原本を `~/Archive/` に退避。
-4. dotfiles の PR ②（切り替え）: 両ハーネスの memory を止め、CLAUDE.md の memory のルールを削除し、ARCHITECTURE.md を更新する。
+4. dotfiles の PR ②（切り替え）: 両ハーネスの memory を止め、CLAUDE.md の memory のルールを削除し、ARCHITECTURE.md を更新する。移行で集めたルール案のうち、ユーザーが採ったものを AGENTS.md に反映する。
 5. クライアントの vault: 案件に入るときに、その都度 `vault` skill で作成する。
 
 移行の前に memory を止めると、その間の学びが残らない。そのため段階 4 を段階 3 の後に置く。
