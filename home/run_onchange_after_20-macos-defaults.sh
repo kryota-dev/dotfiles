@@ -131,10 +131,11 @@ done
 /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
 
 # GUI アプリ（Obsidian Git）から Homebrew の git-remote-gcrypt と gpg を見つけさせる。launchd の user ドメインの
-# PATH は既定で /usr/bin:/bin:/usr/sbin:/sbin だけ。反映には再起動が要る。sudo に失敗しても apply は止めない。
+# PATH は既定で /usr/bin:/bin:/usr/sbin:/sbin だけ。Homebrew の bin はユーザーが書き込めるので、システムのコマンドを
+# 差し替えられないよう後ろに置く。反映には再起動が要る。sudo に失敗しても apply は止めない。
 for prefix in /opt/homebrew /usr/local; do
   [ -x "$prefix/bin/brew" ] || continue
-  /usr/bin/sudo /bin/launchctl config user path "$prefix/bin:/usr/bin:/bin:/usr/sbin:/sbin" >/dev/null ||
+  /usr/bin/sudo /bin/launchctl config user path "/usr/bin:/bin:/usr/sbin:/sbin:$prefix/bin" >/dev/null ||
     echo "WARNING: sudo launchctl config user path を手で実行してください。" >&2
   break
 done
