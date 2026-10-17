@@ -23,21 +23,20 @@ description: |
 vault は 2 層ある。
 
 - `~/vaults/personal/`: 共有の層。汎用の知見・1 日の全体像・個人のリポジトリの作業記憶。
-- `~/vaults/<owner>/`: クライアントごとの層。
+- `~/vaults/<owner>/`: クライアントごとの層。そのクライアントの owner の別名と匿名のラベルは、vault の中の `_vault.md` に書き、別名は `~/vaults/<別名>` の symlink にする。クライアントと owner・ラベルの対応は、そのクライアントの vault の中にしか置かない（personal に置くと、契約が終わっても履歴に残り、ほかのクライアントのセッションにも読まれるため）。
 
 作業中のリポジトリから、使う vault を次の順に決める。
 
 1. `git remote get-url origin` から GitHub の owner を取り出す（`git@github.com:<owner>/<repo>.git` と `https://github.com/<owner>/<repo>` の両方の形）。
-2. `~/vaults/personal/owners.md` の対応表に owner があれば、それに従う。自分の owner は personal の `projects/<repo>/` を指す。
-3. 対応表に無く、`~/vaults/<owner>/` があれば、それを使う。
-4. remote が無い、またはリポジトリの外なら、personal を使う（`projects/<ディレクトリ名>/`）。
-5. どれにも当たらなければ、vault を読まずに作業を続ける。記録すべきことが出たら、新しい vault を作るか、記録しないかを 1 セッションに 1 回だけユーザーに確認する。クライアントの記録を personal に書かない（契約が終わったときに vault ごと消せなくなり、個人のリポジトリのセッションからも読まれるため）。
+2. owner が `~/vaults/personal/owners.md`（自分の owner の一覧。クライアントの情報は書かない）にあれば、personal の `projects/<repo>/` を使う。
+3. owner が `personal` 以外で、`~/vaults/<owner>`（ディレクトリか symlink）があれば、それを使う。
+4. remote が無い、リポジトリの外、またはどれにも当たらなければ、vault を読まずに作業を続ける。記録すべきことが出たら、新しい vault を作るか、記録しないかを 1 セッションに 1 回だけユーザーに確認する。クライアントの記録を personal に書かない（契約が終わったときに vault ごと消せなくなり、個人のリポジトリのセッションからも読まれるため）。
 
 ## 読む範囲
 
 | セッション | 読んでよいもの |
 |---|---|
-| クライアントのリポジトリ | その vault の全体と、personal の `knowledge/`・`owners.md` |
+| クライアントのリポジトリ | その vault の全体と、personal の `knowledge/`・`owners.md`（自分の owner だけ） |
 | 個人のリポジトリ | personal の全体 |
 
 クライアントのリポジトリのセッションでは、これ以外の `~/vaults/*` を読まない。personal の `daily/` には各案件の要約が入るので、これも読まない。vault を横断する検索（`grep -r ~/vaults` など）もしない。
@@ -51,7 +50,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 1. vault を解決する。
 2. 入口のノート `_index.md` を読む。個人のリポジトリなら personal の `projects/<repo>/_index.md` を読む。
 3. personal の `knowledge/_index.md`（知見の一覧）を読む。個々の知見は、作業に要るときだけ読む。
-4. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したら、理由をユーザーに 1 行で伝えて作業を続ける。
+4. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更がある（Obsidian Git の commit が pre-commit hook で止まっている）ときは、理由をユーザーに 1 行で伝えて作業を続ける。
 5. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
 
 ## 作業の区切りと終了時
@@ -66,7 +65,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 | `daily/YYYY-MM-DD.md` | 何をしたか、何が分かったか、次に何をするか。既存のファイルには末尾に追記する |
 | `decisions/YYYY-MM-DD-<slug>.md` | 決めたこと、検討した代替案、理由 |
 | `_index.md` | 現状・進行中の作業・直近の決定へのリンク。書く直前に読み直し、変える箇所だけを編集する。短く保ち、古くなった項目は消す |
-| personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく `owners.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る） |
+| personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく、その vault の `_vault.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る） |
 | personal の `knowledge/` | 案件に依存しない技術の知見。クライアントのセッションからは、下の「知見の共有」の手順で書く |
 
 - 振る舞いのルールを学んだとき（「今後は〜する」「〜はしない」）は、AGENTS.md・skill・vault の自動で読まれる場所に書かない。personal の `_inbox/rule-proposals.md` に、提案と理由を追記する。クライアントのセッションからは、知見の共有と同じ検査を通してから書く。ユーザーが dotfiles の PR で AGENTS.md に反映する。
@@ -78,13 +77,13 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 人の確認を挟まずに、固有の情報が personal に入るのを防ぐ。
 
 1. 知見を汎用の形に書き直す。クライアント名・製品名・リポジトリ名・人名・URL を除き、コード例は一般的な例に置き換える。
-2. 下書きを vault の外の一時ファイルに書き、クライアント・勤務先の固有名のパターンで検査する。
+2. slug・索引に書く要約の行・本文をまとめて、vault の外の一時ファイル（`mktemp "${TMPDIR:-/tmp}/vault-knowledge.XXXXXX"`）に書き、クライアント・勤務先の固有名のパターンで検査する。
 
    ```bash
    gitleaks dir --config ~/.config/git/gitleaks-own.toml --no-banner --redact <一時ファイル>
    ```
 
-3. 終了コードが 0 なら personal の `knowledge/<slug>.md` に置き、`knowledge/_index.md` に 1 行（`- [[<slug>]]: <要約>`）を `>>` で追記する。0 以外、または gitleaks や設定ファイルが無ければ、personal には書かず、クライアントの vault の `notes/<slug>.md` に置く。
+3. 終了コードが 0 なら personal の `knowledge/<slug>.md` に置き、`knowledge/_index.md` に 1 行（`- [[<slug>]]: <要約>`）を `>>` で追記する。0 以外、または gitleaks や設定ファイルが無ければ、personal には書かず、クライアントの vault の `notes/<slug>.md` に置く。どちらの場合も一時ファイルは消す。personal の commit では、pre-commit hook も同じパターンで検査する。
 
 ### 書き方
 
@@ -103,7 +102,11 @@ author: human | claude | codex
 
 vault への commit と push は、`~/AGENTS.md` の git の規約（作業ブランチ・commit の前の承認）の例外とし、`main` に直接、承認を取らずに行う。書いたら、そのたびに自分が書いたファイルだけを commit して push する。pathspec を付けた `git commit -- <file>` は、ほかに stage された変更（Obsidian Git やユーザーのもの）を含めない。
 
+書く前に、対象のファイルに未 commit の手入力があれば（`git -C <vault> status --porcelain -- <file>` が空でない）、先にそれだけを手入力として commit する。pathspec はファイル単位でしか分けられないので、そのまま書くと手入力が `agent(...)` の commit に混ざり、revert で手入力まで消えるため。
+
 ```bash
+git -C <vault> add -- <file> && git -C <vault> commit -m "human: 手入力を記録" -- <file>   # 未 commit の手入力があるときだけ
+# ここで書く
 git -C <vault> add -- <書いたファイル>
 git -C <vault> commit -m "agent(<claude|codex>): <何を書いたか>" -- <書いたファイル>
 git -C <vault> push

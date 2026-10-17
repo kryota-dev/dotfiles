@@ -1,12 +1,12 @@
 # 新しい vault の作成
 
-ユーザーに頼まれたときだけ行う。vault 名（`personal` か owner）、匿名のラベル（クライアントのとき）、使う GPG 鍵をユーザーに確かめてから始める。owner 名・Google アカウント・鍵 ID は、公開する場所（dotfiles・PR・Issue）に書かない。
+ユーザーに頼まれたときだけ行う。vault 名（`personal` か owner）、クライアントのときは owner の別名と匿名のラベル（`c1` など。ほかの vault と重ならないもの）、使う GPG 鍵をユーザーに確かめてから始める。owner 名・Google アカウント・鍵 ID は、公開する場所（dotfiles・PR・Issue）に書かない。
 
 ## バックアップの置き場
 
 vault は git-remote-gcrypt で暗号化し、Google Drive for desktop の同期フォルダの中の普通のディレクトリへ push する。gcrypt は、絶対パスで `HEAD` を持たないディレクトリを local バックエンドとして扱い、新しい pack のファイルだけを書くので、push の量は差分にとどまる。bare リポジトリ（`HEAD` を持つ）にすると git のバックエンドとして扱われ、push のたびに履歴全体を送るので、`git init --bare` はしない。認証は Drive アプリが担い、1Password も GitHub も通らない。Drive 上に置かれるのは暗号化したファイルだけで、Drive の版の履歴（30 日）も残る。
 
-`<backup>` は `~/Library/CloudStorage/GoogleDrive-<account>/<マイドライブ>/vault-backups/<name>`（`<マイドライブ>` のフォルダ名は OS の言語で変わる）。クライアントの業務用の Google アカウントではなく、自分のアカウントを使う。
+`<backup>` は `$HOME/Library/CloudStorage/GoogleDrive-<account>/<マイドライブ>/vault-backups/<name>`（`<マイドライブ>` のフォルダ名は OS の言語で変わり、英語では空白を含む `My Drive`）。gcrypt は `/` で始まるパスだけを local バックエンドとして扱うので、`~` を使わず `$HOME` で絶対パスにし、使う箇所はすべて二重引用符で囲む。personal のバックアップは必ず `vault-backups/personal` にする（pre-commit hook がこのパスでクライアント名を検査するため）。クライアントの業務用の Google アカウントではなく、自分のアカウントを使う。
 
 ## 前提: vault 用の GPG 鍵
 
@@ -29,7 +29,9 @@ vault は git-remote-gcrypt で暗号化し、Google Drive for desktop の同期
    daily/  decisions/  meetings/  notes/  attachments/
    ```
 
-   personal ではさらに `knowledge/_index.md`・`projects/`・`_inbox/rule-proposals.md`・`owners.md` を作る。`owners.md` には owner・vault・匿名のラベル（`c1` など）の対応表を書く（自分の owner は `personal`）。クライアントの vault を作るときは、personal の `owners.md` に 1 行足す。
+   personal ではさらに `knowledge/_index.md`・`projects/`・`_inbox/rule-proposals.md`・`owners.md` を作る。`owners.md` には自分の GitHub の owner だけを 1 行ずつ書き、クライアントの情報は書かない。
+
+   クライアントの vault ではさらに `_vault.md` を作り、owner の別名（1 つのクライアントが複数の owner を持つとき）と匿名のラベルを書く。別名ごとに `ln -s <owner> ~/vaults/<別名>` で symlink を作る。
 
 2. `.obsidian/` の雛形を用意する。personal があれば、その `.obsidian/` から次だけをコピーする: `app.json`・`core-plugins.json`・`community-plugins.json`・`plugins/obsidian-git/`。`workspace*.json` はコピーしない（Obsidian が開くたびに書き換える）。personal を作るときは、ユーザーに Obsidian で vault を開いてもらい、Obsidian Git を入れて設定してもらう。
 
@@ -38,7 +40,7 @@ vault は git-remote-gcrypt で暗号化し、Google Drive for desktop の同期
    ```bash
    git -C <vault> init
    git -C <vault> config commit.gpgsign false
-   mkdir -p <backup>
+   mkdir -p "<backup>"
    git -C <vault> remote add origin "gcrypt::<backup>"
    git -C <vault> config remote.origin.gcrypt-participants <fpr>
    git -C <vault> config remote.origin.gcrypt-signingkey <fpr>
@@ -63,7 +65,10 @@ vault は git-remote-gcrypt で暗号化し、Google Drive for desktop の同期
 
 ## 別の Mac での復元
 
-必ず clone から始める。gcrypt の push は実質的に常に force になるので、`git init` した新しいリポジトリから push すると、バックアップの履歴を上書きする。
+1. 1Password の控えから vault 用の秘密鍵を `gpg --import` で入れ、前提の節の手順 3（gpg-agent の再起動と、キーチェーンへのパスフレーズの保存）を行う。ユーザーが自分のターミナルで行う。
+2. 必ず clone から始める。gcrypt の push は実質的に常に force になるので、`git init` した新しいリポジトリから push すると、バックアップの履歴を上書きする。
+3. クライアントの vault では、`_vault.md` の別名ごとに symlink を作り直す。
+4. 手順 6 の Obsidian Git の PATH の設定を行う（Mac ごとの localStorage に保存されるため）。
 
 ```bash
 git clone -c remote.origin.gcrypt-participants=<fpr> "gcrypt::<backup>" ~/vaults/<name>
