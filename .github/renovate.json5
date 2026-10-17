@@ -34,7 +34,7 @@
     {
       // skill の本文はエージェントの挙動を左右し、ax は 1.0 前で skill が CLI のリリースに
       // 紐づくため、自動マージせず手で確認する。
-      matchDepNames: ['anthropics/skills', 'anthropics/claude-plugins-community', 'coji/natural-japanese', 'yusukebe/ax', 'github:yusukebe/ax'],
+      matchDepNames: ['anthropics/skills', 'anthropics/claude-plugins-community', 'coji/natural-japanese', 'kepano/obsidian-skills', 'yusukebe/ax', 'github:yusukebe/ax'],
       groupName: null,
       automerge: false,
     },

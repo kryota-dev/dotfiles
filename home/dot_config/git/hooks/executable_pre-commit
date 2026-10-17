@@ -24,17 +24,21 @@ if command -v gitleaks >/dev/null 2>&1; then
   fi
 
   # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
+  # gcrypt の remote（暗号化した Obsidian の vault）のうち、クライアントの vault はクライアント名を書くのが
+  # 前提なので除く。personal の vault は全案件のセッションが読むので、クライアント名を入れないよう検査する。
   own="$HOME/.config/git/gitleaks-own.toml"
+  check_own=false
   case "$(git remote get-url origin 2>/dev/null || true)" in
-    "" | *github.com[:/]kryota-dev/*)
-      if [ -f "$own" ]; then
-        scan --config "$own" || {
-          echo "[pre-commit] クライアント・勤務先の固有名らしきものを検出したため、コミットを中止しました。" >&2
-          exit 1
-        }
-      fi
-      ;;
+    gcrypt::*/vault-backups/personal) check_own=true ;;
+    gcrypt::*) ;;
+    "" | *github.com[:/]kryota-dev/*) check_own=true ;;
   esac
+  if "$check_own" && [ -f "$own" ]; then
+    scan --config "$own" || {
+      echo "[pre-commit] クライアント・勤務先の固有名らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  fi
 else
   echo "[pre-commit] gitleaks が見つからないため、秘密情報の検査を省略しました。" >&2
 fi
