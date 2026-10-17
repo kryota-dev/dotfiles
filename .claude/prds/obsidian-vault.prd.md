@@ -75,7 +75,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - personal の `daily/` には、クライアント名ではなく `_vault.md` の匿名のラベルを書く。クライアントのセッションからは、ファイルを読まずに `>>` で追記する。
 - クライアントのセッションで得た知見は、汎用の形に書き直してから `gitleaks dir --config ~/.config/git/gitleaks-own.toml`（public リポジトリでクライアント名を止めている既存のパターン）で検査する。slug と索引の要約の行も同じ検査に含める。通れば personal の `knowledge/` に書き、通らなければクライアントの vault に残す。ルール案も同じ検査を通す。
 - pre-commit hook は、personal のバックアップ（`vault-backups/personal`）では同じパターンで固有名を検査する。personal にクライアント名が入るのを、commit の時点で決定的に止める。
-- 契約が終わったら、クライアントの vault・別名の symlink・Drive 上のバックアップを消す。ラベルとの対応は消えた vault の中にしか無かったので、personal には結び付かない匿名のラベルと検査済みの知見しか残らない。
+- 契約が終わったら、vault 名を Drive の `vault-backups/.closed` に記録してから、Drive 上のバックアップ・クライアントの vault・別名の symlink を消す（`.closed` が無いと、apply の自動の復元や、ほかの Mac からの push で戻るため）。ラベルとの対応は消えた vault の中にしか無かったので、personal には結び付かない匿名のラベルと検査済みの知見しか残らない。
 
 ### 履歴とバックアップ
 
@@ -83,7 +83,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - エージェントは書いた直後に `agent(claude): ...` / `agent(codex): ...` で、書いたファイルだけを commit（`git commit -- <file>`）して push する。書く前に、そのファイルに未 commit の手入力があれば、先に `human:` の commit として記録する。push の失敗は作業を止めず、ユーザーに伝える。
 - 手入力の変更の commit と push は Obsidian Git プラグインが定期的に行う（Obsidian で開いている vault だけ）。
 - remote は git-remote-gcrypt の local バックエンドで、Google Drive for desktop の同期フォルダの中の普通のディレクトリにする。新しい pack だけを書くので差分で済み、中身・ファイル名・履歴は暗号化される。認証は Drive アプリが担う。
-- 鍵は vault 専用の GPG 鍵にする。パスフレーズは pinentry-mac で macOS のキーチェーンに保存する。秘密鍵の控えとパスフレーズは 1Password に置く。鍵の作成と書き出しはユーザーが自分のターミナルで行う。
+- 鍵は vault 専用の GPG 鍵にする。パスフレーズは pinentry-mac で macOS のキーチェーンに保存する。秘密鍵の控えとパスフレーズは 1Password に置く。鍵はエージェントが 1Password で生成したパスフレーズで作り、秘密鍵とパスフレーズはパイプでだけ受け渡す（画面とセッションのログに出さない）。Mac ごとの鍵の import と pinentry-mac 用のキーチェーンの項目は `run_after_31` が作る。
 - セッションの開始時に、push されていない commit の数と Drive の起動を確かめ、残っていれば push を試し、失敗したらユーザーに伝える（バックアップの停止の検知）。
 - グローバルの pre-commit hook は、クライアントの vault（`gcrypt::` の remote）ではクライアント名の検査を外し、秘密情報の検査だけを行う。personal の vault では両方を行う。
 
@@ -96,6 +96,8 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 | `home/dot_gitignore_global` | `.obsidian/`（リポジトリをその場だけ vault として開くため） |
 | `home/dot_config/git/hooks/executable_pre-commit` | クライアントの vault の remote ではクライアント名の検査を外し、personal の vault では行う |
 | `home/.chezmoiexternal.toml` | kepano/obsidian-skills の `obsidian-markdown`・`obsidian-bases`・`json-canvas`（commit SHA で固定） |
+| `home/run_after_31-vaults.sh.tmpl` | apply のたびに、鍵の import・キーチェーンの項目・Drive からの復元（`.closed` の名前を除く）・別名の symlink・Obsidian への登録 |
+| `home/run_onchange_after_20-macos-defaults.sh` | `launchctl config user path` で GUI アプリの PATH に Homebrew を入れる |
 | `home/dot_agents/exact_skills/vault/` | 読み書きの手順、知見の共有の検査、commit と push、vault の作成・削除の手順 |
 | `home/AGENTS.md` | vault の解決規約・安全の原則・git の規約の例外（数行） |
 | `home/dot_claude/settings.json` | `"autoMemoryEnabled": false`（段階 4） |
@@ -108,7 +110,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 ### 段階
 
 1. dotfiles の PR ①（土台）: Brewfile・gpg-agent・gitignore・pre-commit hook・externals・`vault` skill・AGENTS.md。この段階では memory を止めない。
-2. personal の vault の立ち上げ: GPG 鍵、`vault` skill の手順による作成、Obsidian Git の設定（PATH を含む）、復元の確認、Drive のストリーミングでの push・clone の確認。
+2. personal の vault の立ち上げ: GPG 鍵（エージェントが 1Password 経由で作る）、`vault` skill の手順による作成、Obsidian Git の配置、復元の確認。あわせて、Mac ごとの準備（鍵の import・キーチェーン・Drive からの復元・別名・Obsidian への登録・GUI アプリの PATH）を `chezmoi apply` に組み込む（PR）。
 3. memory の移行: 振り分けの一覧を示す → ユーザーが承認 → 書き込み → 原本を `~/Archive/` に退避。
 4. dotfiles の PR ②（切り替え）: 両ハーネスの memory を止め、CLAUDE.md の memory のルールを削除し、ARCHITECTURE.md を更新する。
 5. クライアントの vault: 案件に入るときに、その都度 `vault` skill で作成する。
@@ -129,9 +131,10 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - **AC-010**: エージェントが振る舞いのルールを学んだとき、AGENTS.md や vault の自動で読まれる場所ではなく、`_inbox/rule-proposals.md` に提案として書く。
 - **AC-011**: 既存の Claude Code の memory（旧構成のものを除く）と Codex の memory の要約が、振り分けの一覧のユーザー承認を経て vault に移され、原本が `~/Archive/` に退避されている。
 - **AC-012**: Claude Code の auto memory と Codex の memories が無効になり、新しいセッションで memory が読み込まれも書き込まれもしない。
-- **AC-013**: `vault` skill の手順で、新しいクライアントの vault（骨組み・`.obsidian/` の雛形・git・Drive のバックアップ・`gcrypt::` の remote・最初の push・Obsidian Git の PATH）を作れる。
+- **AC-013**: `vault` skill の手順で、新しいクライアントの vault（骨組み・`.obsidian/` の雛形・git・Drive のバックアップ・`gcrypt::` の remote・最初の push・Obsidian Git の配置）を作れる。
 - **AC-014**: スクリプト・テンプレート・CI に触れた PR では `make test` が通る。pre-commit hook の remote ごとの分岐が bats でテストされている。
 - **AC-015**: クライアントのセッションから personal に書かれるのは、匿名のラベルの 1 行と、`gitleaks-own.toml` の検査を通った知見（slug と索引の行を含む）・ルール案だけである。personal にはクライアントと owner・ラベルの対応が無く、personal の commit は pre-commit hook でも固有名を検査される。
+- **AC-017**: 新しい Mac で、1Password と Google Drive にサインインした後の `chezmoi apply` だけで、GPG 鍵の import、pinentry-mac 用のキーチェーン項目、Drive のバックアップからの vault の復元、別名の symlink、Obsidian への登録が済む。ユーザーが覚えて打つコマンドは無い。サインインの前の apply は、何もせずに成功する。
 - **AC-016**: push されていない commit、1 日以上 commit されない変更（hook で止まった Obsidian Git の commit）、Drive の停止のいずれかがあるとき、次のセッションの開始時にエージェントが push を試し、残る問題をユーザーに伝える。
 
 ## Considered Alternatives / Rejection Rationale
@@ -162,7 +165,9 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 | 読み書きの手順を AGENTS.md にすべて書く | vault を使わない作業でも、常にコンテキストを消費する |
 | 公式 CLI と `obsidian-cli` skill を使う | Obsidian アプリが起動していないと動かない。既定の対象が「最後にフォーカスした vault」なので、vault の分離を越えうる |
 | パスフレーズのない GPG 鍵 | ログアウト中やディスクの盗難時にも鍵が使える。ログイン中は、キーチェーンに保存したパスフレーズも同じユーザーのプロセスから使えるので差は小さいが、そうしたプロセスは平文の vault も読めるので、増える実害は小さい（受け入れたリスク） |
-| vault の作成を dotfiles のスクリプトにする | 独自の CLI を持たない方針に反する |
+| vault の作成を dotfiles のスクリプトにする | 独自の CLI を持たない方針に反する。作成は頻度が低いので skill の手順にし、Mac ごとに要る準備だけを apply のスクリプトにした |
+| 鍵の作成と Mac ごとの準備をユーザーの手順書にする | ユーザーはコマンドを覚えられず、忘れる前提。鍵は 1Password 経由でエージェントが作り、Mac ごとの準備は apply で自動化した |
+| Obsidian Git の PATH を vault ごとに設定する | Obsidian の localStorage に保存されるので、雛形でも git でも伝わらない。`launchctl config user path` で GUI アプリ全体に入れた |
 | Codex の memory を残す | 記憶が 2 か所に分かれ、食い違ったときにどちらが正しいか分からない |
 | Codex の自動生成物（raw・rollout）も移す | 量が多く、ノイズも入る |
 
@@ -177,7 +182,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 
 ## Open Questions
 
-- Google Drive のストリーミング（オンラインのみ）のファイルに対して、gcrypt の push・repack・clone が問題なく動くか。段階 2 で実機で確かめ、問題があればバックアップのフォルダを「オフラインで使用可能」にする。
+- Google Drive のストリーミングで、repack が起きたとき（pack が 25 を超えたとき）に問題なく動くか。push と clone は、この Mac で確かめた（2026-10-17）。問題があればバックアップのフォルダを「オフラインで使用可能」にする。
 - Obsidian Git の commit の間隔と、エージェントの commit が重なったときに、ロックの衝突以外の問題が起きないか。
 - `_index.md` が自動の書き込みで肥大したとき、どう要約し直すか。
 - 開始時の読み込みはモデルが AGENTS.md に従うかどうかに頼る。標準の memory のような確実さが要るなら、段階 4 の前に SessionStart hook で `_index.md` を注入するかを判断する（Codex の hook の有無は未確認）。

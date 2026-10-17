@@ -1,0 +1,125 @@
+#!/bin/bash
+# Obsidian の vault（エージェントの作業記憶）を、この Mac で使える状態にそろえる。apply のたびに走り、
+# 足りないものだけを作る。新しい Mac でも手で覚えておく手順を残さないため。
+# 1Password・Google Drive・ツールが使えないときは何もせず、apply を止めない（次の apply でやり直す）。
+set -euo pipefail
+# バックアップや vault が 1 つも無いとき、glob を文字どおりに残さない。
+shopt -s nullglob
+
+# op_vault は chezmoi init で入力する値。CI のように未設定の環境でも描画できるよう get で読む。
+op_vault="${OP_VAULT:-{{ get . "op_vault" }}}"
+item="Dotfiles - Vault"
+key_doc="Dotfiles - Vault GPG key"
+vaults="${VAULTS_HOME:-$HOME/vaults}"
+cloud="${CLOUD_STORAGE:-$HOME/Library/CloudStorage}"
+obsidian_json="${OBSIDIAN_JSON:-$HOME/Library/Application Support/obsidian/obsidian.json}"
+# vault 名と owner の別名に使ってよい文字。パスや JSON に入れるので、それ以外は扱わない。
+name_pattern='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+skip() {
+  echo "vault: $1。次の apply でやり直します。" >&2
+  exit 0
+}
+
+[ -n "$op_vault" ] || skip "1Password の vault 名（op_vault）が未設定です"
+for c in op gpg git git-remote-gcrypt pinentry-mac; do
+  command -v "$c" >/dev/null 2>&1 || skip "$c が見つかりません"
+done
+fpr=$(op read "op://$op_vault/$item/fingerprint" 2>/dev/null) || skip "1Password から「${item}」を読めません"
+account=$(op read "op://$op_vault/$item/drive_account" 2>/dev/null) || skip "1Password の「${item}」に drive_account がありません"
+passphrase() { op read "op://$op_vault/$item/password"; }
+
+# vault 用の GPG 鍵。gcrypt は暗号化のときに --trust-model=always を渡すので、信用度は設定しない。
+if ! gpg --list-secret-keys "$fpr" >/dev/null 2>&1; then
+  op document get "$key_doc" --vault "$op_vault" |
+    gpg --batch --pinentry-mode loopback --passphrase-fd 3 --import 3< <(passphrase) ||
+    skip "1Password の「${key_doc}」から GPG 鍵を入れられません"
+  echo "vault: GPG 鍵を 1Password から入れました。"
+fi
+
+# pinentry-mac はキーチェーンの service「GnuPG」・account「keygrip」の項目からパスフレーズを読む。
+# 署名（主鍵）と復号（副鍵）で keygrip が異なるので、両方を作る。空のパスワードで作ると、以後は存在の確認で
+# 作り直されないので、読めたことを確かめてから作る。
+pinentry=$(command -v pinentry-mac)
+for grip in $(gpg --with-keygrip --with-colons --list-secret-keys "$fpr" | awk -F: '/^grp/{print $10}'); do
+  security find-generic-password -s GnuPG -a "$grip" >/dev/null 2>&1 && continue
+  pass=$(passphrase 2>/dev/null) && [ -n "$pass" ] || skip "1Password から「${item}」のパスフレーズを読めません"
+  # security は標準入力からパスワードを読めないので引数で渡す（プロセス一覧と、入っていればプロセス監査の
+  # ログに現れうる）。
+  security add-generic-password -s GnuPG -a "$grip" -l GnuPG -T "$pinentry" -w "$pass"
+  unset pass
+  echo "vault: pinentry-mac 用のキーチェーン項目を作りました。"
+done
+
+# Drive の同期フォルダのバックアップから、手元に無い vault を復元する。マイドライブの名前は OS の言語で
+# 変わる。共有ドライブは他者が作れるので探さない。
+backups=
+for my_drive in マイドライブ "My Drive"; do
+  [ -d "$cloud/GoogleDrive-$account/$my_drive/vault-backups" ] || continue
+  backups="$cloud/GoogleDrive-$account/$my_drive/vault-backups"
+  break
+done
+[ -n "$backups" ] || skip "Google Drive（${account}）の vault-backups が見つかりません"
+# 契約が終わって消した vault の名前。ほかの Mac に残った vault の push がバックアップを作り直しても戻さない。
+closed="$backups/.closed"
+is_closed() { [ -f "$closed" ] && grep -qxF "$1" "$closed"; }
+mkdir -p "$vaults"
+for backup in "$backups"/*/; do
+  name=$(basename "$backup")
+  dest="$vaults/$name"
+  [[ "$name" =~ $name_pattern ]] || {
+    echo "vault: バックアップの名前「${name}」は扱えないので飛ばします。" >&2
+    continue
+  }
+  is_closed "$name" && continue
+  [ -e "$dest" ] && continue
+  # gcrypt の push は実質的に常に force になるので、必ず clone から始める。participants を指定しない clone は
+  # どの有効な署名も受け入れる。git は checkout に失敗しても clone 先を残すので、一時ディレクトリに clone して
+  # 設定まで済んでから移す。
+  tmp="$vaults/.restoring-$name"
+  rm -rf "$tmp"
+  if git clone -q -c remote.origin.gcrypt-participants="$fpr" "gcrypt::${backup%/}" "$tmp" &&
+    git -C "$tmp" config remote.origin.gcrypt-signingkey "$fpr" &&
+    git -C "$tmp" config commit.gpgsign false; then
+    mv "$tmp" "$dest"
+    echo "vault: $name を復元しました。"
+  else
+    rm -rf "$tmp"
+    echo "vault: $name を復元できませんでした。" >&2
+  fi
+done
+for dir in "$vaults"/*/; do
+  is_closed "$(basename "$dir")" &&
+    echo "vault: 契約を終えた $(basename "$dir") が残っています。references/close-vault.md の手順で消してください。" >&2
+done
+
+# クライアントの vault の別名（_vault.md の owners）を symlink にする。
+for meta in "$vaults"/*/_vault.md; do
+  name=$(basename "$(dirname "$meta")")
+  while read -r owner; do
+    [ -n "$owner" ] || continue
+    [[ "$owner" =~ $name_pattern ]] || {
+      echo "vault: ${name}/_vault.md の owner「${owner}」は扱えないので飛ばします。" >&2
+      continue
+    }
+    [ "$owner" = "$name" ] || [ -e "$vaults/$owner" ] || [ -L "$vaults/$owner" ] && continue
+    ln -s "$name" "$vaults/$owner"
+  done < <(sed -n 's/^owners: *\[\(.*\)\]/\1/p' "$meta" | tr ',' '\n' | tr -d ' ')
+done
+
+# Obsidian の vault の一覧に登録する。Obsidian は起動中に一覧を書き戻すので、起動していないときだけ触る。
+pgrep -x Obsidian >/dev/null 2>&1 && exit 0
+mkdir -p "$(dirname "$obsidian_json")"
+[ -s "$obsidian_json" ] || printf '%s\n' '{"vaults":{}}' >"$obsidian_json"
+for dir in "$vaults"/*/; do
+  path="${dir%/}"
+  [ -L "$path" ] && continue
+  [[ "$(basename "$path")" =~ $name_pattern ]] || continue
+  # plutil は / を \/ にエスケープして書くので、両方の形で照合する。
+  grep -qF -e "\"$path\"" -e "\"${path//\//\\/}\"" "$obsidian_json" && continue
+  id=$(openssl rand -hex 8)
+  plutil -insert "vaults.$id" -dictionary "$obsidian_json"
+  plutil -insert "vaults.$id.path" -string "$path" "$obsidian_json"
+  plutil -insert "vaults.$id.ts" -integer "$(date +%s)000" "$obsidian_json"
+  echo "vault: $(basename "$path") を Obsidian に登録しました。"
+done
