@@ -22,7 +22,7 @@ description: |
 | `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し、slug は basename（拡張子と `.prd` を除く）。省略時は確定した feature 名を kebab-case にした slug で `.claude/prds/<slug>.prd.md`（git tracked）に出力する |
 | `--mode=interactive\|auto` | `interactive` | `auto` は user との対話の代わりに決定木を自分で踏破し、最終 PRD を user が 1 回承認する |
 
-flag を渡さなければ、対話だけで終わりファイルは出力しない。`pr-workflow` の standard / large path から呼ばれたときは、PRD の生成を既定の受け渡しとする。いずれの場合も、ファイルに保存する前に内容を示して user の承認を得る（memory の記録と同じ扱い）。
+flag を渡さなければ、対話だけで終わりファイルは出力しない。`pr-workflow` の standard / large path から呼ばれたときは、PRD の生成を既定の受け渡しとする。いずれの場合も、ファイルに保存する前に内容を示して user の承認を得る。
 
 ## `--mode=auto` の契約
 
