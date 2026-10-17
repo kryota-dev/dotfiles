@@ -40,13 +40,6 @@
     include = ["*/skills/json-canvas/**"]
     refreshPeriod = "168h"
 
-[".agents/skills/obsidian-cli"]
-    type = "archive"
-    url = "https://github.com/kepano/obsidian-skills/archive/{{ .skills.obsidian }}.tar.gz"
-    stripComponents = 3
-    include = ["*/skills/obsidian-cli/**"]
-    refreshPeriod = "168h"
-
 [".agents/skills/eli5/SKILL.md"]
     type = "file"
     url = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/{{ .skills.plugins_community }}/eli5/skills/eli5/SKILL.md"
