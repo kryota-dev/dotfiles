@@ -51,7 +51,9 @@ chezmoi apply   # pinentry-mac 用のキーチェーン項目を作る
    ---
    ```
 
-2. Obsidian Git を入れる。personal があれば、その `.obsidian/` から `community-plugins.json` と `plugins/obsidian-git/` をコピーする。無ければ、GitHub のリリースから入れて設定を書く。`<tag>` は `gh release view --repo Vinzent03/obsidian-git --json tagName` の最新。手入力の commit に `human:` を付け、エージェントの `agent(...)` と区別する。
+   vault 名と owner には英数字・`.`・`_`・`-` だけを使う（それ以外はスクリプトが扱わない）。
+
+2. Obsidian Git を入れる。personal があれば、その `.obsidian/` から `community-plugins.json` と `plugins/obsidian-git/` をコピーする。無ければ、GitHub のリリースから入れて設定を書く。`<tag>` は `gh release view --repo Vinzent03/obsidian-git --json tagName` の最新を使い、入れた tag を vault の `_index.md` の直近の決定に記録する（`main.js` は Obsidian の中で実行され、vault ごとほかの Mac にも配られるため、何を入れたかを残す）。手入力の commit に `human:` を付け、エージェントの `agent(...)` と区別する。
 
    ```bash
    P=<vault>/.obsidian/plugins/obsidian-git; mkdir -p "$P"
