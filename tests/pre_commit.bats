@@ -32,13 +32,20 @@ run_hook() {
   grep -q 'gitleaks-own.toml' "$LOG"
 }
 
-@test "gcrypt の remote（暗号化した vault）ではクライアント名を検査せず、秘密情報だけを検査する" {
-  git -C "$REPO" remote add origin gcrypt::git@github.com:kryota-dev/example.git
+@test "クライアントの vault（gcrypt の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
+  git -C "$REPO" remote add origin "gcrypt::$HOME/Library/CloudStorage/GoogleDrive-x/My Drive/vault-backups/client-a"
   run_hook
   [ "$status" -eq 0 ]
   grep -q 'gitleaks.toml' "$LOG"
   run grep -c 'gitleaks-own.toml' "$LOG"
   [ "$output" = 0 ]
+}
+
+@test "personal の vault（gcrypt の remote）ではクライアント名も検査する" {
+  git -C "$REPO" remote add origin "gcrypt::$HOME/Library/CloudStorage/GoogleDrive-x/My Drive/vault-backups/personal"
+  run_hook
+  [ "$status" -eq 0 ]
+  grep -q 'gitleaks-own.toml' "$LOG"
 }
 
 @test "他者の remote ではクライアント名を検査しない" {
