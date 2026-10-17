@@ -75,7 +75,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - personal の `daily/` には、クライアント名ではなく `_vault.md` の匿名のラベルを書く。クライアントのセッションからは、ファイルを読まずに `>>` で追記する。
 - クライアントのセッションで得た知見は、汎用の形に書き直してから `gitleaks dir --config ~/.config/git/gitleaks-own.toml`（public リポジトリでクライアント名を止めている既存のパターン）で検査する。slug と索引の要約の行も同じ検査に含める。通れば personal の `knowledge/` に書き、通らなければクライアントの vault に残す。ルール案も同じ検査を通す。
 - pre-commit hook は、personal のバックアップ（`vault-backups/personal`）では同じパターンで固有名を検査する。personal にクライアント名が入るのを、commit の時点で決定的に止める。
-- 契約が終わったら、クライアントの vault・別名の symlink・Drive 上のバックアップを消す。ラベルとの対応は消えた vault の中にしか無かったので、personal には結び付かない匿名のラベルと検査済みの知見しか残らない。
+- 契約が終わったら、vault 名を Drive の `vault-backups/.closed` に記録してから、Drive 上のバックアップ・クライアントの vault・別名の symlink を消す（`.closed` が無いと、apply の自動の復元や、ほかの Mac からの push で戻るため）。ラベルとの対応は消えた vault の中にしか無かったので、personal には結び付かない匿名のラベルと検査済みの知見しか残らない。
 
 ### 履歴とバックアップ
 
@@ -83,7 +83,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - エージェントは書いた直後に `agent(claude): ...` / `agent(codex): ...` で、書いたファイルだけを commit（`git commit -- <file>`）して push する。書く前に、そのファイルに未 commit の手入力があれば、先に `human:` の commit として記録する。push の失敗は作業を止めず、ユーザーに伝える。
 - 手入力の変更の commit と push は Obsidian Git プラグインが定期的に行う（Obsidian で開いている vault だけ）。
 - remote は git-remote-gcrypt の local バックエンドで、Google Drive for desktop の同期フォルダの中の普通のディレクトリにする。新しい pack だけを書くので差分で済み、中身・ファイル名・履歴は暗号化される。認証は Drive アプリが担う。
-- 鍵は vault 専用の GPG 鍵にする。パスフレーズは pinentry-mac で macOS のキーチェーンに保存する。秘密鍵の控えとパスフレーズは 1Password に置く。鍵の作成と書き出しはユーザーが自分のターミナルで行う。
+- 鍵は vault 専用の GPG 鍵にする。パスフレーズは pinentry-mac で macOS のキーチェーンに保存する。秘密鍵の控えとパスフレーズは 1Password に置く。鍵はエージェントが 1Password で生成したパスフレーズで作り、秘密鍵とパスフレーズはパイプでだけ受け渡す（画面とセッションのログに出さない）。Mac ごとの鍵の import と pinentry-mac 用のキーチェーンの項目は `run_after_31` が作る。
 - セッションの開始時に、push されていない commit の数と Drive の起動を確かめ、残っていれば push を試し、失敗したらユーザーに伝える（バックアップの停止の検知）。
 - グローバルの pre-commit hook は、クライアントの vault（`gcrypt::` の remote）ではクライアント名の検査を外し、秘密情報の検査だけを行う。personal の vault では両方を行う。
 
@@ -96,6 +96,8 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 | `home/dot_gitignore_global` | `.obsidian/`（リポジトリをその場だけ vault として開くため） |
 | `home/dot_config/git/hooks/executable_pre-commit` | クライアントの vault の remote ではクライアント名の検査を外し、personal の vault では行う |
 | `home/.chezmoiexternal.toml` | kepano/obsidian-skills の `obsidian-markdown`・`obsidian-bases`・`json-canvas`（commit SHA で固定） |
+| `home/run_after_31-vaults.sh.tmpl` | apply のたびに、鍵の import・キーチェーンの項目・Drive からの復元（`.closed` の名前を除く）・別名の symlink・Obsidian への登録 |
+| `home/run_onchange_after_20-macos-defaults.sh` | `launchctl config user path` で GUI アプリの PATH に Homebrew を入れる |
 | `home/dot_agents/exact_skills/vault/` | 読み書きの手順、知見の共有の検査、commit と push、vault の作成・削除の手順 |
 | `home/AGENTS.md` | vault の解決規約・安全の原則・git の規約の例外（数行） |
 | `home/dot_claude/settings.json` | `"autoMemoryEnabled": false`（段階 4） |
@@ -129,7 +131,7 @@ Claude Code と Codex はそれぞれ標準の memory を持つが、互いに�
 - **AC-010**: エージェントが振る舞いのルールを学んだとき、AGENTS.md や vault の自動で読まれる場所ではなく、`_inbox/rule-proposals.md` に提案として書く。
 - **AC-011**: 既存の Claude Code の memory（旧構成のものを除く）と Codex の memory の要約が、振り分けの一覧のユーザー承認を経て vault に移され、原本が `~/Archive/` に退避されている。
 - **AC-012**: Claude Code の auto memory と Codex の memories が無効になり、新しいセッションで memory が読み込まれも書き込まれもしない。
-- **AC-013**: `vault` skill の手順で、新しいクライアントの vault（骨組み・`.obsidian/` の雛形・git・Drive のバックアップ・`gcrypt::` の remote・最初の push・Obsidian Git の PATH）を作れる。
+- **AC-013**: `vault` skill の手順で、新しいクライアントの vault（骨組み・`.obsidian/` の雛形・git・Drive のバックアップ・`gcrypt::` の remote・最初の push・Obsidian Git の配置）を作れる。
 - **AC-014**: スクリプト・テンプレート・CI に触れた PR では `make test` が通る。pre-commit hook の remote ごとの分岐が bats でテストされている。
 - **AC-015**: クライアントのセッションから personal に書かれるのは、匿名のラベルの 1 行と、`gitleaks-own.toml` の検査を通った知見（slug と索引の行を含む）・ルール案だけである。personal にはクライアントと owner・ラベルの対応が無く、personal の commit は pre-commit hook でも固有名を検査される。
 - **AC-017**: 新しい Mac で、1Password と Google Drive にサインインした後の `chezmoi apply` だけで、GPG 鍵の import、pinentry-mac 用のキーチェーン項目、Drive のバックアップからの vault の復元、別名の symlink、Obsidian への登録が済む。ユーザーが覚えて打つコマンドは無い。サインインの前の apply は、何もせずに成功する。
