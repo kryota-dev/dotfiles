@@ -24,8 +24,10 @@ if command -v gitleaks >/dev/null 2>&1; then
   fi
 
   # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
+  # gcrypt の remote（暗号化した Obsidian の vault）は公開されず、クライアント名を書くのが前提なので除く。
   own="$HOME/.config/git/gitleaks-own.toml"
   case "$(git remote get-url origin 2>/dev/null || true)" in
+    gcrypt::*) ;;
     "" | *github.com[:/]kryota-dev/*)
       if [ -f "$own" ]; then
         scan --config "$own" || {
