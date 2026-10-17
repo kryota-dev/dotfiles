@@ -16,6 +16,8 @@ anthropics = "683bc88e56f3e09ba94f7055977f3d3aa499f202"
 plugins_community = "f60f0454df3045f724c43c6346ec80bdcc3472b2"
 # renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
 natural_japanese = "9a78a42964096da509b8f3e011f0085a5f080151"
+# renovate: datasource=git-refs depName=kepano/obsidian-skills packageName=https://github.com/kepano/obsidian-skills branch=main
+obsidian = "3ccff5338ea700537839b21900aa5358a0402c98"
 # k16shikano 氏の japanese-tech-writing の gist リビジョン（gist は Renovate で追跡できない）。
 japanese_tech_writing = "8f2d57610a73efc97d743c9b0b0ecb1002e09fa4"
 # mise/config.toml で固定した ax のリリースの commit にする（Renovate が両方を一緒に更新する）。
