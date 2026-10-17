@@ -28,6 +28,20 @@ setup() {
   stub git-remote-gcrypt ''
   stub pinentry-mac ''
   stub pgrep 'exit 1'
+  # CI（Ubuntu）には macOS 付属の plutil が無いので、使う操作（-insert <keypath> -json <値> <file>）だけを真似る。
+  if ! command -v plutil >/dev/null 2>&1; then
+    stub plutil 'python3 - "$@" <<'"'"'PY'"'"'
+import json, sys
+_, keypath, _, value, path = sys.argv[1:]
+data = json.load(open(path))
+node = data
+*parents, last = keypath.split(".")
+for key in parents:
+    node = node.setdefault(key, {})
+node[last] = json.loads(value)
+json.dump(data, open(path, "w"))
+PY'
+  fi
   export PATH="$BIN:$PATH"
 }
 
