@@ -6,7 +6,8 @@ set -euo pipefail
 # バックアップや vault が 1 つも無いとき、glob を文字どおりに残さない。
 shopt -s nullglob
 
-op_vault={{ .op_vault | quote }}
+# op_vault は chezmoi init で入力する値。CI のように未設定の環境でも描画できるよう get で読む。
+op_vault="${OP_VAULT:-{{ get . "op_vault" }}}"
 item="Dotfiles - Vault"
 key_doc="Dotfiles - Vault GPG key"
 vaults="${VAULTS_HOME:-$HOME/vaults}"
@@ -18,6 +19,7 @@ skip() {
   exit 0
 }
 
+[ -n "$op_vault" ] || skip "1Password の vault 名（op_vault）が未設定です"
 for c in op gpg git git-remote-gcrypt pinentry-mac; do
   command -v "$c" >/dev/null 2>&1 || skip "$c が見つかりません"
 done

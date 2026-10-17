@@ -9,6 +9,7 @@ setup() {
   BIN="$BATS_TEST_TMPDIR/bin"
   LOG="$BATS_TEST_TMPDIR/calls.log"
   mkdir -p "$BIN"
+  export OP_VAULT=test
   export VAULTS_HOME="$BATS_TEST_TMPDIR/vaults"
   export CLOUD_STORAGE="$BATS_TEST_TMPDIR/cloud"
   export OBSIDIAN_JSON="$BATS_TEST_TMPDIR/obsidian/obsidian.json"
