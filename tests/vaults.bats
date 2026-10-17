@@ -28,17 +28,19 @@ setup() {
   stub git-remote-gcrypt ''
   stub pinentry-mac ''
   stub pgrep 'exit 1'
-  # CI（Ubuntu）には macOS 付属の plutil が無いので、使う操作（-insert <keypath> -json <値> <file>）だけを真似る。
+  # CI（Ubuntu）には macOS 付属の plutil が無いので、使う操作（-insert <keypath> -dictionary|-string|-integer）だけを真似る。
   if ! command -v plutil >/dev/null 2>&1; then
     stub plutil 'python3 - "$@" <<'"'"'PY'"'"'
 import json, sys
-_, keypath, _, value, path = sys.argv[1:]
+args = sys.argv[2:]
+keypath, kind, path = args[0], args[1], args[-1]
+value = {"-dictionary": lambda: {}, "-string": lambda: args[2], "-integer": lambda: int(args[2])}[kind]()
 data = json.load(open(path))
 node = data
 *parents, last = keypath.split(".")
 for key in parents:
-    node = node.setdefault(key, {})
-node[last] = json.loads(value)
+    node = node[key]
+node[last] = value
 json.dump(data, open(path, "w"))
 PY'
   fi
@@ -69,9 +71,51 @@ stub() {
   mkdir -p "$BACKUPS/personal" "$BACKUPS/client-a" "$VAULTS_HOME/personal"
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q "git clone -q -c remote.origin.gcrypt-participants=FPR gcrypt::$BACKUPS/client-a $VAULTS_HOME/client-a" "$LOG"
+  grep -q "git clone -q -c remote.origin.gcrypt-participants=FPR gcrypt::$BACKUPS/client-a $VAULTS_HOME/.restoring-client-a" "$LOG"
   run grep -c 'git clone' "$LOG"
   [ "$output" = 1 ]
+  [ -d "$VAULTS_HOME/client-a" ]
+}
+
+@test "clone に失敗したら途中のディレクトリを残さず、次の apply でやり直せる" {
+  mkdir -p "$BACKUPS/client-a"
+  stub git 'if [ "$1" = clone ]; then for a; do d=$a; done; mkdir -p "$d"; exit 1; fi'
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"client-a を復元できませんでした"* ]]
+  [ ! -e "$VAULTS_HOME/client-a" ]
+  [ ! -e "$VAULTS_HOME/.restoring-client-a" ]
+}
+
+@test "契約を終えた vault（.closed に書いたもの）は復元せず、手元に残っていれば知らせる" {
+  mkdir -p "$BACKUPS/client-a" "$BACKUPS/client-b" "$VAULTS_HOME/client-b"
+  printf '%s\n' client-a client-b >"$BACKUPS/.closed"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  run grep -c 'git clone' "$LOG"
+  [ "$output" = 0 ]
+  run bash "$SCRIPT"
+  [[ "$output" == *"契約を終えた client-b が残っています"* ]]
+}
+
+@test "共有ドライブの vault-backups は使わない" {
+  mkdir -p "$CLOUD_STORAGE/GoogleDrive-me@example.com/Shared drives/vault-backups/client-a"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"vault-backups が見つかりません"* ]]
+}
+
+@test "パスフレーズを読めなければ、空のキーチェーン項目を作らない" {
+  stub op 'case "$*" in
+  *fingerprint*) echo FPR ;;
+  *drive_account*) echo me@example.com ;;
+  *password*) exit 1 ;;
+  esac'
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"パスフレーズを読めません"* ]]
+  run grep -c 'add-generic-password' "$LOG"
+  [ "$output" = 0 ]
 }
 
 @test "キーチェーンの項目を keygrip ごとに作る" {
@@ -83,10 +127,14 @@ stub() {
 
 @test "_vault.md の owners から別名の symlink を作る" {
   mkdir -p "$BACKUPS" "$VAULTS_HOME/client-a"
-  printf -- '---\nowners: [client-a, client-a-labs]\nlabel: c1\n---\n' >"$VAULTS_HOME/client-a/_vault.md"
+  printf -- '---\nowners: [client-a, client-a-labs, ../escape, *]\nlabel: c1\n---\n' >"$VAULTS_HOME/client-a/_vault.md"
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(readlink "$VAULTS_HOME/client-a-labs")" = client-a ]
+  [[ "$output" == *"owner「../escape」は扱えない"* ]]
+  [ ! -L "$BATS_TEST_TMPDIR/escape" ]
+  run find "$VAULTS_HOME" -maxdepth 1 -type l
+  [ "${#lines[@]}" -eq 1 ]
 }
 
 @test "Obsidian に vault を一度だけ登録し、別名の symlink は登録しない" {
