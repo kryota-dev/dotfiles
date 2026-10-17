@@ -135,6 +135,10 @@ dist
 ### Playwright MCP
 .playwright-mcp/
 
+### Obsidian
+# リポジトリをその場だけ vault として開いたときに Obsidian が作る設定。
+.obsidian/
+
 ### 個人用のファイル
 .kryota-dev
 *.local.*
