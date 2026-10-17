@@ -45,8 +45,12 @@ brew "git"
 brew "git-crypt"
 # Quickly rewrite git repository history
 brew "git-filter-repo"
+# GPG-encrypted git remotes
+brew "git-remote-gcrypt"
 # Prevents you from committing sensitive information to a git repo
 brew "git-secrets"
+# GNU Privacy Guard (OpenPGP)
+brew "gnupg"
 # Select default apps for documents and URL schemes on macOS
 brew "duti"
 # GNU implementation of the famous stream editor
@@ -73,6 +77,8 @@ brew "mawk"
 brew "mise"
 # Ambitious Vim-fork focused on extensibility and agility
 brew "neovim"
+# Pinentry for GPG on Mac
+brew "pinentry-mac"
 # PDF rendering library (based on the xpdf-3.0 code base)
 brew "poppler"
 # Convert bitmaps to vector graphics
@@ -178,6 +184,8 @@ cask "microsoft-edge", args: { appdir: "/Applications" }
 cask "nani"
 # App to write, plan, collaborate, and get organised
 cask "notion", args: { appdir: "/Applications" }
+# Knowledge base that works on top of a local folder of plain text Markdown files
+cask "obsidian"
 # Collaboration platform for API development
 cask "postman", args: { appdir: "/Applications" }
 # Imaging utility to install operating systems to a microSD card
