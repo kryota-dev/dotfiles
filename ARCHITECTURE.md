@@ -28,9 +28,10 @@
 | `run_onchange_after_14` | Codex の computer use プラグインの変更 | その MCP サーバーを Claude Code に `codex-cu` として登録 |
 | `run_onchange_after_17` | settings.json の変更 | 宣言した Claude Code の plugin のインストール |
 | `run_onchange_after_18` | mise の設定の変更 | agent-browser が使うブラウザの取得 |
-| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults` とファイアウォール |
+| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults`・ファイアウォール・GUI アプリの PATH |
 | `run_onchange_after_21` | スクリプトの変更 | `duti` で既定のアプリ |
 | `run_onchange_after_22` | LaunchAgent の変更 | キーの割り当ての LaunchAgent を読み込み直す |
+| `run_after_31` | apply のたび | Obsidian の vault をそろえる（下記） |
 | `run_onchange_after_40` | sheldon の設定の変更 | `sheldon lock` |
 
 ## キーボード
@@ -77,6 +78,19 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   人の依頼ではないので自動承認しない。
 - skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
   （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
+
+## 作業記憶（Obsidian の vault）
+
+Claude Code と Codex の作業記憶は `~/vaults/` の Obsidian の vault に置く（手順は `vault` skill、設計は
+`.claude/prds/obsidian-vault.prd.md`）。vault は git-remote-gcrypt で暗号化し、Google Drive の同期フォルダの
+ディレクトリへ push する。vault の中身はこのリポジトリに置かない。
+
+新しい Mac でも覚えておく手順を残さないため、`run_after_31` が apply のたびに足りないものだけを作る。
+1Password の項目「Dotfiles - Vault」とドキュメント「Dotfiles - Vault GPG key」から GPG 鍵を入れ、
+pinentry-mac が読むキーチェーンの項目（service `GnuPG`・account は keygrip）を作り、Drive のバックアップから
+手元に無い vault を clone し、別名の symlink を作り、Obsidian の vault の一覧に登録する。1Password や Drive に
+まだサインインしていなければ何もせず、apply を止めない。Obsidian Git が gcrypt と gpg を見つけられるよう、
+`run_onchange_after_20` が `launchctl config user path` で GUI アプリの PATH に Homebrew を入れる。
 
 ## 秘密情報
 
