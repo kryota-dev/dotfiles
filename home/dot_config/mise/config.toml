@@ -40,6 +40,7 @@ zoxide = "0.10.0"
 "ubi:googleworkspace/cli" = { version = "0.22.5", exe = "gws" }
 # ~/.agents/skills の ax skill も同じリリースに固定している（.chezmoidata.toml）。
 "github:yusukebe/ax" = { version = "0.1.25", version_prefix = "v" }
+"github:k1LoW/mo" = { version = "1.6.9", version_prefix = "v" }
 # ~/.agents/skills の agent-browser skill も同じリリースに固定している（.chezmoidata.toml）。
 "npm:agent-browser" = "0.38.2"
 
