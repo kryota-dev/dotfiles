@@ -57,7 +57,8 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 | 設定 | `~/.claude/settings.json`（ファイルごと管理） | `~/.codex/config.toml` と profile（modify テンプレート） |
 | 危険なコマンド | `permissions.ask` / `deny` | `~/.codex/rules/dotfiles.rules` |
 | MCP サーバー | `run_onchange_after_13` で登録 | `config.toml` に宣言 |
-| 記憶・subagent・通知 | 標準機能 | 標準機能 |
+| 記憶 | Obsidian の vault（`autoMemoryEnabled: false`） | Obsidian の vault（`features.memories = false`） |
+| subagent・通知 | 標準機能 | 標準機能 |
 
 - `~/.agents/skills` は `exact_` ディレクトリで、ソースに無い skill は apply で削除する。外部 skill はこの中に
   chezmoi の externals として置く。ハーネス自身が書き込む `.system`（Codex）と `synced`（Claude Code）は
@@ -82,7 +83,8 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 ## 作業記憶（Obsidian の vault）
 
 Claude Code と Codex の作業記憶は `~/vaults/` の Obsidian の vault に置く（手順は `vault` skill、設計は
-`.claude/prds/obsidian-vault.prd.md`）。vault は git-remote-gcrypt で暗号化し、Google Drive の同期フォルダの
+`.claude/prds/obsidian-vault.prd.md`）。記憶の置き場所を 1 つにするため、両ハーネスの標準の memory は止めている。
+エージェントが学んだ振る舞いのルールは vault に提案として書き、ユーザーが PR で `home/AGENTS.md` に反映する。vault は git-remote-gcrypt で暗号化し、Google Drive の同期フォルダの
 ディレクトリへ push する。vault の中身はこのリポジトリに置かない。
 
 新しい Mac でも覚えておく手順を残さないため、`run_after_31` が apply のたびに足りないものだけを作る。
