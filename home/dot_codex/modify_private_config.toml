@@ -9,7 +9,8 @@
 {{- /* コンテキストウィンドウはモデルごとに自動で決まる。固定値はモデルを切り替えるとずれるので、以前に書いたものも消す。 */ -}}
 {{- $c = deleteValueAtPath "model_context_window" $c -}}
 {{- $c = setValueAtPath "developer_instructions" "ユーザーの判断が必要なときは、選択肢と各選択肢の含意を番号付きで示してから止まる。報告の末尾に平文の問いを書いて待たない。" $c -}}
-{{- $c = setValueAtPath "features.memories" true $c -}}
+{{- /* 記憶は Claude Code と共有する Obsidian の vault に置くので、Codex 自身の memories は止める。 */ -}}
+{{- $c = setValueAtPath "features.memories" false $c -}}
 {{- $c = setValueAtPath "mcp_servers.context7" (dict "command" "npx" "args" (list "-y" "@upstash/context7-mcp")) $c -}}
 {{- $c = setValueAtPath "mcp_servers.deepwiki" (dict "url" "https://mcp.deepwiki.com/mcp") $c -}}
 {{- $c = setValueAtPath "mcp_servers.exa" (dict "command" "npx" "args" (list "-y" "exa-mcp-server@3.2.1") "env_vars" (list "EXA_API_KEY")) $c -}}

@@ -175,6 +175,7 @@
     "defaultMode": "auto"
   },
   "language": "Japanese",
+  "autoMemoryEnabled": false,
   "alwaysThinkingEnabled": false,
   "cleanupPeriodDays": 20,
   "statusLine": {
