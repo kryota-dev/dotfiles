@@ -58,6 +58,7 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 | 危険なコマンド | `permissions.ask` / `deny` | `~/.codex/rules/dotfiles.rules` |
 | MCP サーバー | `run_onchange_after_13` で登録 | `config.toml` に宣言 |
 | 記憶 | Obsidian の vault（`autoMemoryEnabled: false`） | Obsidian の vault（`features.memories = false`） |
+| subagent の役割 | `~/.claude/agents/*.md`（model・effort） | `~/.codex/agents/*.toml`（model・model_reasoning_effort） |
 | subagent・通知 | 標準機能 | 標準機能 |
 
 - `~/.agents/skills` は `exact_` ディレクトリで、ソースに無い skill は apply で削除する。外部 skill はこの中に
@@ -77,8 +78,21 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   mode は渡らない）。限界: transcript は非同期に書かれるので、実行予定の js は「結果が未記録の呼び出しが
   1 つだけ」のときに参考として渡すにとどめ、永続 REPL の既存の状態は見えない。subagent の中では user ターンが
   人の依頼ではないので自動承認しない。
-- skill はどちらのハーネスでも動く書き方にする。`multi-review` は、もう一方のハーネスの CLI
-  （Claude Code からは `codex exec`、Codex からは `claude -p`）を別モデルのレビュアーとして使う。
+- skill はどちらのハーネスでも動く書き方にする。もう一方のハーネスのモデルは、その CLI（Claude Code からは
+  `codex exec`、Codex からは `claude -p`）で呼ぶ。
+
+## モデルの役割分担
+
+設計と判断は Claude（Opus 5.5）、実装は GPT（GPT-6.1 Sol）に任せる。レビューの general は実装と別の系統の
+Claude が担う。根拠（各モデルの得意・不得意と費用）と役割表は
+`home/dot_agents/exact_skills/pr-workflow/references/model-roles.md` にある。
+
+モデルとエフォートは、役割ごとに各ハーネスの標準の subagent 定義に宣言し、skill には役割の名前だけを書く。
+Claude Code 2.1.291 は subagent の effort を定義の frontmatter でしか受け付けず、`codex exec` は Codex の
+agent の定義を選べず、`claude -p --setting-sources ""` は `~/.claude/agents` を読まない。そのため、もう一方の
+ハーネスから呼ぶときは、定義ファイルの model と effort の行を `sed` で読んで CLI の引数に渡す。値の正本は定義
+ファイルで、役割表との一致は `tests/agent_roles.bats` が検査する。`agents/` は `exact_` にしない（`/agents` で
+手元に作った定義を apply で消さないため）。
 
 ## 作業記憶（Obsidian の vault）
 
