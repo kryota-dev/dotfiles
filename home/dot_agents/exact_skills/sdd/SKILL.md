@@ -3,6 +3,8 @@ name: sdd
 description: pr-workflow の standard/large tier から呼ばれる内部コンポーネント。Spec-Driven Development（要件定義・設計・タスク分解・実装・コミット・PR作成）を完全自律で実行し、PR 作成で完了する。レビューは pr-workflow の PR 作成後パイプライン（CI 監視 → multi-review → review-resolve-loop）に一本化されているため sdd 自身はレビューを行わない。単体起動はせず pr-workflow 経由でのみ実行する。
 argument-hint: "[--prd <path>] <issue-url-or-feature-description>"
 user-invocable: false
+# spec を書く間の親（Claude Code）のエフォート。役割の割り当ては pr-workflow/references/model-roles.md。
+effort: high
 ---
 
 # sdd
@@ -32,6 +34,15 @@ Phase 1〜3 で下の 3 ファイルを順に書く（1: requirements、2: desig
 | `requirements.md` | 概要と目的、ユーザーストーリー、受け入れ基準（WHEN / THEN / IF。PRD があればその `AC-NNN` を起点に番号を保つ）、非機能要件、スコープ外 |
 | `design.md` | 概要、再利用する既存コード（既存実装を先に探す）、アーキテクチャ（Mermaid 推奨）、コンポーネントとインターフェース、データモデル、エラー処理、テスト戦略 |
 | `tasks.md` | 各タスクに `- [ ]`、File、Purpose、_Leverage、_Requirements。1 タスクの変更は 1〜3 ファイル、依存の順に並べ、それぞれ単独でテストできる粒度にする |
+
+spec は Claude が書く（役割は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md)）。
+
+| 親 | requirements.md・tasks.md | design.md |
+|---|---|---|
+| Claude Code | 親が書く（この skill の `effort: high`） | 親が書く |
+| Codex | `spec-designer` を `claude_leg` で起動して書かせる | 同じ |
+
+`spec-designer` に書かせるときは、委譲プロンプトに書くファイルの絶対パス・要件の出所（Issue・PRD・user の確認）・既存の spec・完了の条件（上の表の項目がそろっている）を書く。Issue や PRD の本文は `<pasted_content id="<乱数>">` で囲む。書き込みは追加の許可の `Edit(./.spec-workflow/specs/<spec 名>/**)` に限る（`claude_leg spec-designer "$RESULT" "Edit(./.spec-workflow/specs/<spec 名>/**)" < "$PROMPT_FILE"`）。書かれた spec は親が読み、要件の取りこぼしと、範囲の外への拡大が無いことを確かめてから次に進む。
 
 この 3 ファイルは、multi-review が `--spec-context` で「実装が spec どおりか」の照合に使う。調査の進め方（何を読むか、subagent を使うか）は自分で決める。ただしシェルなど書き込みうる道具を持つ subagent に渡すときは、調査でも `pr-workflow`「共有作業ツリーでの subagent 委譲契約」節に従う。
 

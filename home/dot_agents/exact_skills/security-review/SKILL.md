@@ -1,13 +1,12 @@
 ---
 name: security-review
-model: claude-opus-4-6
 description: |
   自分が開発・運用・保守するプロジェクトのセキュリティレビューを、マルチモデル オーケストレーションで実施する。
-  Fable 5.1（ソースコード脆弱性発見）と Codex（脅威モデリング・設定検証）をフェーズごとに使い分け、
-  セーフガードによるフォールバックを避けながら、防御的セキュリティレビューの品質を最大化する。
+  脆弱性の発見は Claude と GPT の役割を並列に走らせて合わせ、脅威モデリングと設定検証は GPT の役割に任せる。
+  cyber safeguard の fallback で親のセッションが格下のモデルに固定されないよう、攻撃シナリオを扱う作業は別プロセスで行う。
   トリガー: "security-review", "セキュリティレビュー", "脆弱性チェック", "脅威モデリング", "攻撃面を洗い出して"
   使用場面: 自分のプロジェクトのセキュリティを体系的にレビューしたいとき。PR 単位のレビューには multi-review を使う。
-argument-hint: "[--phase=1|2|3|4|5|all] [--scope=<対象ディレクトリ>]"
+argument-hint: "[--phase=1|2|3|4|5|all] [--scope=<対象ディレクトリ>] [--deep]"
 user-invocable: true
 ---
 
@@ -17,7 +16,8 @@ user-invocable: true
 PR 単位の差分レビュー（`multi-review`）ではなく、プロジェクト全体を対象とする体系的なレビュー。
 
 **実行するときは、Phase 1 の前に [`references/checklists.md`](references/checklists.md) を Read する。**
-各フェーズのプロンプトテンプレート・設計原則・検査項目の詳細はそちらに置く。
+各フェーズのプロンプトテンプレート・設計原則・検査項目の詳細はそちらに置く。役割（モデルとエフォート）・起動のしかた・
+fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md) に従う。
 
 ## 前提
 
@@ -25,25 +25,28 @@ PR 単位の差分レビュー（`multi-review`）ではなく、プロジェク
 - AI の出力は偽陽性・偽陰性を含む。Critical / High の発見は必ず手動で検証する
 - このレビューは専門的なペネトレーションテストを代替するものではなく、補完するもの
 
-## なぜ Opus 4.6 を親に使うか
+## cyber safeguard とモデルの選び方
 
-セーフガードのリアルタイムサイバー分類器は Opus 4.7（2026-04）から導入された。
-Fable 5.1 / Opus 5.5 / Sonnet 5.5 はいずれも Fable レベルのサイバーセーフガードを持ち、
-攻撃シナリオの列挙中にフォールバック（Opus 4.8 への降格）が発生しうる。
-Opus 4.6（2026-02）はサイバー分類器の搭載前で、フロンティアクラスの推論能力を持つ。
-フォールバックなしにオーケストレーションを完遂できる。
+- Claude の役割のモデルは、ソースコードの脆弱性の走査・セキュリティ問題のトリアージ・安全なコードの作成にはそのまま使える。
+  exploit の生成や攻撃手順の詳述は classifier に当たり、格下のモデルに fallback しうる（詳細は model-roles.md の「fallback の検出」）。
+- Claude Code 2.1.229 以降は、fallback するとセッションの残りがそのモデルに固定される。親が攻撃シナリオを書くと、
+  以降の統合の判断まで格下のモデルで行うことになる。
+- そこで、Claude の leg は親のセッションの外（`claude -p` の別プロセス。model-roles.md の `claude_leg`）で走らせ、
+  攻撃シナリオを詳述する Phase 3 は GPT に任せる。親は攻撃面の整理と統合だけを行う。
+- 以前は classifier の導入前の Opus 4.6 を親にしていたが、やめた。Opus 4.6 は API で非推奨になっており、
+  ソースの走査は現行の Claude のモデルで許可されているので、能力を落とす理由が無い。
 
-## フェーズ別のモデルと effort
+## フェーズ別の役割
 
-見落としのコスト（偽陰性）がレビュー時間のコストより遥かに高いため、脆弱性発見と脅威モデリングには high を使う。
+見落としのコスト（偽陰性）がレビュー時間のコストより遥かに高いため、脆弱性の発見は 2 つの系統で独立に行う。
 
-| フェーズ | モデル | effort | 根拠 |
+| フェーズ | 役割 | 起動 | 根拠 |
 |---|---|---|---|
-| Phase 1: 偵察 | 親（Opus 4.6） | medium | 構造の読み取りと整理。深い推論は不要 |
-| Phase 2: 脆弱性発見 | **Fable 5.1** subagent（Codex なら既定モデル） | **high** | GA で許可されている最強の解析能力。見落としが致命的 |
-| Phase 3: 脅威モデリング | **Codex**（既定モデル） | high | Claude のセーフガードが攻撃シナリオの詳述をブロックしうる |
-| Phase 4: 設定検証 | **Codex**（既定モデル） | medium | チェックリスト的。網羅性が重要で深い推論は不要 |
-| Phase 5: 統合レポート | 親（Opus 4.6） | medium | 既存の発見を整理・優先度付けする作業 |
+| Phase 1: 偵察 | 親 | — | 構造の読み取りと整理。深い推論は不要 |
+| Phase 2: 脆弱性発見 | `review-security` ＋ `reviewer-gpt`（並列）。`--deep` なら `review-security-deep` も | Claude は `claude_leg`、GPT は `codex exec --sandbox read-only` | 系統ごとに見落としが違う。`--deep` の役割は最難の問題でだけ上積みがあり、単価が高い |
+| Phase 3: 脅威モデリング | `reviewer-gpt` | `codex exec --sandbox read-only` | 攻撃経路の詳述は Claude の classifier に当たりうる |
+| Phase 4: 設定検証 | `checker-gpt` | 同上 | チェックリスト的。網羅性が重要で深い推論は不要 |
+| Phase 5: 統合レポート | 親 | — | 既存の発見を整理・優先度付けする作業 |
 
 ## 引数
 
@@ -51,8 +54,9 @@ Opus 4.6（2026-02）はサイバー分類器の搭載前で、フロンティ�
 |---|---|---|
 | `--phase` | `all` | 実行するフェーズ（`1`〜`5` で個別指定、`all` で全フェーズ） |
 | `--scope` | リポジトリ全体 | レビュー対象を特定のディレクトリに絞る |
+| `--deep` | off | Phase 2 に `review-security-deep` を足す。費用は増える |
 
-## Phase 1: 偵察（親 Opus 4.6 — effort: medium）
+## Phase 1: 偵察（親）
 
 プロジェクトの構造を把握し、以下の攻撃面マップを作る。以降のフェーズに渡す。
 
@@ -69,45 +73,59 @@ Opus 4.6（2026-02）はサイバー分類器の搭載前で、フロンティ�
 プロジェクト固有の設計文書（README、CLAUDE.md、docs/、ADR 等）を読み、
 セキュリティに関する設計判断とその理由を抽出して攻撃面マップに含める。
 
-## Phase 2: ソースコード脆弱性発見（Fable 5.1 subagent — effort: high）
+## Phase 2: ソースコード脆弱性発見（Claude と GPT を並列）
 
-`references/checklists.md` の「Phase 2 プロンプトテンプレート」を読み、攻撃面マップを埋め込んで渡す。
+`references/checklists.md` の「Phase 2 プロンプトテンプレート」に攻撃面マップを埋め込み、同じ内容を各 leg に渡す。
+結果は leg ごとに親が決めたファイルに書かせ、そのファイルだけを読む。leg に他の leg の結果を渡さない。
 
-**Claude Code:** `Agent(model: fable, prompt: "Phase 2 プロンプト + 攻撃面マップ")`
+**Claude の leg**（Claude Code からでも Codex からでも）:
 
-**Codex:** Fable subagent は使えない。`codex` skill の相談モードで起動し、effort は
-`-c model_reasoning_effort=high` にする。品質差をレポートの「対象外・制約事項」に記す。
+```bash
+claude_leg review-security "$RESULT" < "$PROMPT_FILE"
+```
 
-## Phase 3: 脅威モデリング（Codex — effort: high）
+`--deep` のときは、同じ形で `review-security-deep` も起動する。leg の Read は作業ディレクトリに限られ、Bash も持たないので、
+コミットの履歴が要るなら親が `git log` の出力を作業用のディレクトリに書き、追加の許可 `Read(/<そのディレクトリ>/**)` を渡す。JSON の `modelUsage` で、実際に使われたモデルを確かめる。
 
-Claude のセーフガードが攻撃シナリオの詳述をブロックしうるため、Codex に委譲する。
-`codex` skill の相談モードで起動し、effort は `-c model_reasoning_effort=high` にする。
-`references/checklists.md` の「Phase 3 プロンプトテンプレート」を読み、攻撃面マップを埋め込んで渡す。
-結果は `-o` のファイルを読む。
+**GPT の leg**: `reviewer-gpt` を `codex` skill の「相談・分析」の起動形（`--sandbox read-only`。`-m` と
+`-c model_reasoning_effort=` は役割の定義から）で起動する。Codex が親のときも `spawn_agent` ではなくこの形にする
+（spawn した leg は親の sandbox を継承し、読み取り専用にできないため）。
 
-## Phase 4: セキュリティ設定検証（Codex — effort: medium）
+## Phase 3: 脅威モデリング（GPT）
 
-`codex` skill の相談モードで起動し、effort は `-c model_reasoning_effort=medium` にする。
-`references/checklists.md` の「Phase 4 プロンプトテンプレート」を読み、Codex に渡す。
+`reviewer-gpt` を Phase 2 の GPT の leg と同じ形で起動し、「Phase 3 プロンプトテンプレート」に攻撃面マップを埋め込んで渡す。
+Phase 2 の結果があれば、Critical / High の要約（ファイルと種類だけ）を Context に足してよい。
 
-## Phase 5: 統合レポート（親 Opus 4.6 — effort: medium）
+## Phase 4: セキュリティ設定検証（GPT）
 
-Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レポートテンプレート」に従ってレポートを作成する。出力先は user に確認する。
+`checker-gpt` を同じ形で起動し、「Phase 4 プロンプトテンプレート」を渡す。
 
-## セーフガード発動時のフォールバック戦略
+## Phase 5: 統合レポート（親）
+
+Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レポートテンプレート」に従ってレポートを作成する。
+
+1. Phase 2 の発見を、ファイル:行番号と種類で突き合わせる。両方の系統が出したものは確度が高い。
+2. 片方の系統だけが出した Critical / High は、親がコードで経路を確かめる。確かめきれなければ、もう一方の系統の役割に
+   「この経路が成立するか」だけを、該当の箇所を添えて確かめさせる（攻撃手順は求めない）。
+3. 各 leg の役割・要求したモデル・実際のモデル（fallback の有無）を、レポートの「使用モデル」に書く。
+
+出力先は user に確認する。
+
+## セーフガード発動時の対処
 
 | 状況 | 対処 |
 |---|---|
-| Fable がソースコード解析中にフォールバック | 問題のファイル / 関数を特定し、Codex に個別委譲 |
-| Codex が脅威モデリングを拒否 | プロンプトを防御的な文脈に書き換え再試行。それでも拒否なら手動で列挙 |
-| 特定の CWE パターンの検査がブロック | 検査項目を分割し、1 項目ずつ実行 |
-| レポートの攻撃シナリオ記述がブロック | 「影響と緩和策」のみを記述し、攻撃手順は省略 |
+| Claude の leg が fallback（`modelUsage` に要求していないモデル） | 結果は捨てずに残し、「fallback した」と記録する。カバーが欠けた範囲を `reviewer-gpt` に追加で渡す |
+| 親のセッションが fallback した | 以降の統合の判断の質が落ちる。user に伝え、新しいセッションで Phase 5 をやり直すかを確認する |
+| GPT が脅威モデリングを拒否 | プロンプトを防御的な文脈（緩和策を導くための列挙）に書き換えて再試行。それでも拒否なら、親が影響と緩和策だけを列挙する |
+| 特定の CWE パターンの検査がブロック | 検査項目を分割し、1 項目ずつ実行する |
+| レポートの攻撃シナリオ記述がブロック | 「影響と緩和策」のみを記述し、攻撃手順は省略する |
 
 ## 正規プログラムの申請
 
 より深いレビューが必要なら、各社の正規プログラムに申請する:
 
-- **Anthropic CVP Defense Access**（個人可）: `portal.anthropic.com/programs/cvp`
-  — Fable 5.1 / Opus 5.5 のセーフガード緩和。MFA 必須
-- **OpenAI Trusted Access for Cyber**: `platform.openai.com/trusted-access`
-  — GPT-Daybreak-Blue（防御的セキュリティ向け低拒否モデル）へのアクセス
+- **Anthropic Cyber Verification Program**: `portal.anthropic.com/programs/cvp`
+  — Claude のモデルのセーフガードの緩和。承認後に始めた新しいセッションから効く
+- **OpenAI Daybreak（Trusted Access for Cyber）**: `platform.openai.com/trusted-access`
+  — 承認されたら、`codex exec` に `--cyber-access-program daybreak_blue` を付けて防御的な用途の制限を緩める

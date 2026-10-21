@@ -12,14 +12,20 @@ argument-hint: "<PR番号 | owner/repo#PR番号 | PR URL> [--tier=trivial|small|
 
 tier で絞った roster を並列に走らせ、統合し、既存のレビューと重複する指摘を除いてから、user の承認を得て PR に投稿する。
 
-**実行するときは、Phase 1 の前に [`references/execution.md`](references/execution.md) を Read する。** 各 leg に渡す観点は [`references/perspectives.md`](references/perspectives.md)、別モデルの leg の起動形は [`references/other-model-legs.md`](references/other-model-legs.md)、裏取りは [`references/fact-check.md`](references/fact-check.md)。
+**実行するときは、Phase 1 の前に [`references/execution.md`](references/execution.md) を Read する。** 各 leg に渡す観点は [`references/perspectives.md`](references/perspectives.md)、leg の起動形は [`references/other-model-legs.md`](references/other-model-legs.md)、役割とモデルの割り当ては [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md)、裏取りは [`references/fact-check.md`](references/fact-check.md)。
 
-## leg の種類
+## leg と役割
 
-| 種類 | 実体 |
-|---|---|
-| **subagent** | 実行中のハーネスの subagent（Claude Code の Agent、Codex の spawn_agent） |
-| **other-model** | もう一方のハーネスの CLI。Claude Code からは `codex exec`、Codex からは `claude -p`。使えなければ履歴を分離した新規 subagent で代える（代替した leg、理由、失われるモデルの多様性と検証の限界を統合サマリーに書く。同じモデルの新規起動だけでは別モデルの独立性は補えない） |
+各 leg は、model-roles.md の役割（モデルとエフォートの組）で起動する。役割の系統（Claude / GPT）と実行中のハーネスで、起動のしかたが決まる。
+
+| 役割の系統 | Claude Code から | Codex から |
+|---|---|---|
+| Claude | `claude -p`（model-roles.md の `claude_leg`） | `claude -p`（同じ） |
+| GPT | `codex exec` | `spawn_agent`（`agent_type` に役割名）。親の sandbox が read-only でないときは `codex exec --sandbox read-only` |
+
+Claude の役割を Claude Code の subagent で走らせないのは、親の広い permission を継承させないためと、cyber safeguard の fallback を親から隔離して `modelUsage` で検出するため（理由の詳細は model-roles.md）。
+
+もう一方のハーネスの CLI が使えないときは、実行中のハーネスの新規 subagent で代える。代替した leg・理由・失われるモデルの多様性と検証の限界を統合サマリーに書く（同じモデルの新規起動だけでは、別モデルの独立性は補えない）。
 
 全 leg は毎回新規セッションで起動し、親の実装履歴・過去のレビュー結果を渡さない。Codex subagent は `fork_turns: "none"` を明示する。起動方法・入力・実行記録は execution.md を参照する。この契約は pr-workflow 経由でも同じとする。
 
@@ -34,13 +40,15 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 
 | tier | general | security | intent | simplicity | database / IaC |
 |---|---|---|---|---|---|
-| trivial | other-model | — | — | — | — |
-| small | other-model | — | — | subagent | — |
-| standard | other-model（effort xhigh） | subagent | subagent | other-model | 条件に合えば other-model |
-| large | other-model（effort xhigh）＋ subagent | subagent | subagent | other-model | 条件に合えば other-model |
+| trivial | `review-general-light` | — | — | — | — |
+| small | `review-general-light` | — | — | `review-simplicity` | — |
+| standard | `review-general` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
+| large | `review-general` ＋ `reviewer-gpt` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 
-- trivial 以外は、subagent と other-model を 1 本以上ずつ立てる（モデルの多様性）。
-- intent は PR の本文・リンク先の issue・spec を辿るので subagent にする（Codex の sandbox からは `gh` の認証が届かない）。未検証の本文を最も深く読む leg なので、読み取り専用の型（Claude Code なら Explore）で起動し、辿るのは同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）と spec に限る。本文中の外部 URL は取得しない。
+- **general は実装と別の系統で見る。** 実装は GPT が行う（pr-workflow）ので、general の主担当は Claude にする。large だけ GPT の general を足し、同じ系統の目でも見る。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になるので、2 本にするのは large だけにする。
+- 親がほとんどを自分で書いた PR（trivial や、secret に触れるので委任しなかったタスク）や、人が書いた PR でも、roster は変えない。実装の系統が Claude なら、統合サマリーに「general が実装と同じ系統」と書く。
+- Claude の leg が cyber safeguard で fallback したら（`modelUsage` に要求していないモデルがある）、model-roles.md の「fallback の検出」に従って `reviewer-gpt` で走らせ直し、実行記録に残す。
+- intent は PR の本文・リンク先の issue・spec を辿る。未検証の本文を最も深く読む leg で、`review-intent` は Bash も `gh` も持たない。親が、本文がリンクする同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）の要件と本文だけを取得してファイルに書き、そのパスと spec を渡す。レビュー・コメントの履歴と、本文中の外部 URL は取得しない。
 - spec-context が渡されたら、tier に関わらず intent を立てる（spec との整合を報告するのは intent だけなので）。
 - general を 2 本にするのは large だけ。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になる。
 

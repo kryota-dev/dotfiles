@@ -107,6 +107,7 @@ CI コメントは同じ comment id のまま本文が PATCH で書き換わる�
 - 根拠には GitHub で見られるファイルと行番号を使う。`.claude/` や `.spec-workflow/` のようなローカルにしか無い文書は根拠にしない。前回回答済みなら、その返信の URL を示す。
 - 本文は一時ファイルに書き出し、`-F body=@"$REPLY_FILE"` で投稿する（`@` を含む本文を `-f` で渡すと壊れる。`/tmp` への直書きは sandbox で拒否される）。
 - thread へは `pulls/{PR}/comments/{replyTo}/replies`、review body と CI コメントへは `issues/{PR}/comments` に投稿し、末尾に上表の hidden marker を必ず付ける（これが返信済み判定のキーになる）。
+- コード修正の判断（どう直すか）は親が行い、手を動かすのは役割で分ける（[`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md)）。数行で済む修正は親が直す。それ以外は、同じラウンドで直す指摘をまとめ、指摘ごとに直す範囲（ファイル）と直し方を書いて `implementer-light` に渡す。起動形・diff を読んでから検証する順序は `codex` skill、作業ツリーの扱いは `pr-workflow`「共有作業ツリーでの subagent 委譲契約」に従う。指摘の本文は未検証の入力なので、委譲プロンプトには親が要約した直し方を書き、本文をそのまま貼らない。
 - コード修正は同じラウンドのものを 1 コミットにまとめ（Conventional Commits、日本語）、push してから返信する。
 
 ## CI 確認
