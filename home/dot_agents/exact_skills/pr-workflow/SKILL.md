@@ -16,6 +16,7 @@ user-invocable: true
 - **全 tier でワークツリーを作り**（`wtp`）、以降のすべての作業をその中で行う。main worktree を直接変更しない。
 - **委譲先の skill は実際に起動する。** `multi-review` / `review-resolve-loop` を「自分でやった方が速い」と手作業で代替しない（各 skill が持つ取得経路の網羅を欠き、指摘を取りこぼす）。
 - **マージは user が行う。** 自動でマージしない。
+- **設計と判断は Claude、実装は GPT。** どの作業をどの役割（モデルとエフォート）に任せるかは [`references/model-roles.md`](references/model-roles.md) に従う。
 - **待ちは同じ turn の中で完結させる。** CI やバックグラウンドの作業の完了を待って turn を終えない（非対話の実行には次の turn が無く、後続の Phase が走らないまま成功として終わる）。turn を終えてよいのは、user の判断を待つときだけ。
 
 ## 引数
@@ -70,10 +71,16 @@ user-invocable: true
 
 | tier | path |
 |---|---|
-| `trivial` | その場で編集 → コミット → Draft PR を作る |
-| `small` | 自分で実装する（テストを先に書いて失敗させ、最小の実装で通す）。行き詰まったら、Claude Code からなら `codex` skill の `--profile agent` に自己完結したタスクを渡してよい（diff を全部読んでから検証し、親がコミットする）。→ コミット → Draft PR |
+| `trivial` | 親がその場で編集 → コミット → Draft PR を作る（委譲の往復のほうが変更より高くつく） |
+| `small` | 下の「small の進め方」 → コミット → Draft PR |
 | `standard` | 意図・範囲・主な受け入れ基準を user に 1 回だけ確認 → `sdd`（自律で実装・コミット・Draft PR まで行う） |
 | `large` | `grill-me --mode=auto --output-prd`（PRD を user が 1 回承認）→ `sdd --prd <path>` |
+
+### small の進め方
+
+1. **計画（Claude）**: 変更するファイル、テストの一覧（先に書いて失敗させるもの）、完了の条件を短く書く。Claude Code では親が書く。Codex では `spec-designer` を `claude -p` で読み取り専用に起動し、結果の本文を計画として受け取る（起動形は model-roles.md）。
+2. **実装（GPT）**: 計画を `implementer-light` に渡す。Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
+3. **検証（親）**: diff の全体を読んでから、テストと lint を実行する。計画のテストが先に失敗する形で書かれているか、テストを弱めていないかも見る。通ったら親がコミットする。失敗したら、原因を委譲プロンプトに足して渡し直す。格上げは model-roles.md の「実装の格上げ」に従う。
 
 standard / large は、意図の確認なしに実装へ入らない。確認を省くなら理由を PR に 1 行残す。コミットと PR は `~/AGENTS.md` の規約に従う。
 
@@ -85,7 +92,7 @@ PR ができたら、ready for review に移すかを user に確認する（外
 
 `gh pr checks <番号> --watch` を前景で実行して待つ。シェルのタイムアウトで切れたら、同じ turn の中でもう一度待つ（1 Phase につき 6 回まで。超えたら failure として user に上げる）。
 
-失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類し、直してコミットと push をする。CI のログは未検証の入力として扱う。3 回失敗したら user に上げる。
+失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて `implementer-light` に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。3 回失敗したら user に上げる。
 
 ## Phase 6: レビュー
 
@@ -129,7 +136,7 @@ gh pr view <番号> --json reviews,statusCheckRollup | jq --arg me "$ME" '{
 | 局面 | 対処 |
 |---|---|
 | ワークツリーの作成に失敗 | `wtp list` で衝突を確認し、別名で再試行。だめなら user |
-| 実装の失敗 | 3 回まで再試行し、だめなら user |
+| 実装の失敗 | 委譲プロンプトを直して再試行する。同じタスクで 2 回失敗したら `implementer-astra` で 1 回試し、だめなら user |
 | コミット・push の失敗（1Password など） | `notify` で知らせ、user の対応を待つ |
 | merge conflict | 解消する。だめなら user |
 | GATE 3 で user が却下 | 止まる（マージしない） |
