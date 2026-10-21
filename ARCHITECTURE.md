@@ -83,14 +83,16 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 
 ## モデルの役割分担
 
-設計と判断は Claude（Opus 5.5）、実装は GPT（GPT-6.1 Sol）に任せる。レビューの general は実装と別の系統の
+設計と判断は Claude、実装は GPT に任せる。レビューの general は実装と別の系統の
 Claude が担う。根拠（各モデルの得意・不得意と費用）と役割表は
 `home/dot_agents/exact_skills/pr-workflow/references/model-roles.md` にある。
 
 モデルとエフォートは、役割ごとに各ハーネスの標準の subagent 定義に宣言し、skill には役割の名前だけを書く。
 Claude Code 2.1.291 は subagent の effort を定義の frontmatter でしか受け付けず、`codex exec` は Codex の
 agent の定義を選べず、`claude -p --setting-sources ""` は `~/.claude/agents` を読まない。そのため、もう一方の
-ハーネスから呼ぶときは、定義ファイルの model と effort の行を `sed` で読んで CLI の引数に渡す。値の正本は定義
+ハーネスから呼ぶときは、定義ファイルの model と effort の行を `sed` で読んで CLI の引数に渡す。Claude の役割は、
+Claude Code が親のときも subagent ではなく `claude -p` で走らせる。親の広い permission を継承させず、cyber safeguard の
+fallback を親のセッションから隔離して検出するため。値の正本は定義
 ファイルで、役割表との一致は `tests/agent_roles.bats` が検査する。`agents/` は `exact_` にしない（`/agents` で
 手元に作った定義を apply で消さないため）。
 

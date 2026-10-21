@@ -4,7 +4,7 @@ reviewer の断定的な主張は、投稿する前に親が一次ソースで�
 
 ## 委譲
 
-確かめる指摘が多ければ、1 件ずつ `fact-checker`（Sonnet 5.5。引用を探して返すだけの範囲の狭い作業なので、Opus は使わない）に並列で調べさせてよい。`fact-checker` は読み取りと web 取得の道具しか持たない（書き込みとコマンド実行をさせない）。Codex からは `claude -p` で同じ役割の値と、`--allowedTools "Read" "Grep" "Glob" "WebFetch" "WebSearch"` で起動する。subagent には「該当する記述の有無・引用・URL」を返させ、採否は親が引用と URL を読んで決める。
+確かめる指摘が多ければ、1 件ずつ `fact-checker` に並列で調べさせてよい（どちらのハーネスからも model-roles.md の `claude_leg` で起動する）。`fact-checker` は WebFetch と WebSearch しか持たない。未検証の web の内容を読む leg に、ローカルのファイルを読む道具と外へ出す道具を同時に持たせないため、リポジトリとの照合は親が行う。subagent には「該当する記述の有無・引用・URL」を返させ、採否は親が引用と URL を読んで決める。
 
 ## 確かめる対象と手段
 

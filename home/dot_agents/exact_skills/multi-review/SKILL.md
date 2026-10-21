@@ -20,8 +20,10 @@ tier で絞った roster を並列に走らせ、統合し、既存のレビュ�
 
 | 役割の系統 | Claude Code から | Codex から |
 |---|---|---|
-| Claude | Agent ツールの subagent（`subagent_type` に役割名） | `claude -p` |
+| Claude | `claude -p`（model-roles.md の `claude_leg`） | `claude -p`（同じ） |
 | GPT | `codex exec` | `spawn_agent`（`agent_type` に役割名） |
+
+Claude の役割を Claude Code の subagent で走らせないのは、親の広い permission を継承させないためと、cyber safeguard の fallback を親から隔離して `modelUsage` で検出するため（理由の詳細は model-roles.md）。
 
 もう一方のハーネスの CLI が使えないときは、実行中のハーネスの新規 subagent で代える。代替した leg・理由・失われるモデルの多様性と検証の限界を統合サマリーに書く（同じモデルの新規起動だけでは、別モデルの独立性は補えない）。
 
@@ -40,13 +42,13 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 |---|---|---|---|---|---|
 | trivial | `review-general-light` | — | — | — | — |
 | small | `review-general-light` | — | — | `review-simplicity` | — |
-| standard | `review-general` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt-focused` |
-| large | `review-general` ＋ `reviewer-gpt` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt-focused` |
+| standard | `review-general` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
+| large | `review-general` ＋ `reviewer-gpt` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 
 - **general は実装と別の系統で見る。** 実装は GPT が行う（pr-workflow）ので、general の主担当は Claude にする。large だけ GPT の general を足し、同じ系統の目でも見る。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になるので、2 本にするのは large だけにする。
 - 親がほとんどを自分で書いた PR（trivial や、secret に触れるので委任しなかったタスク）や、人が書いた PR でも、roster は変えない。実装の系統が Claude なら、統合サマリーに「general が実装と同じ系統」と書く。
-- leg が cyber safeguard で fallback したら、model-roles.md の「fallback の検出」に従って GPT で走らせ直し、実行記録に残す。
-- intent は PR の本文・リンク先の issue・spec を辿る。未検証の本文を最も深く読む leg なので、編集の道具を持たない `review-intent` で起動し、辿るのは同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）と spec に限る。本文中の外部 URL は取得しない。Codex から `claude -p` で起動するときは `gh` を許さないので、親が同じ repo のリンク先の issue / PR の本文（要件と本文だけ）を取得してファイルに書き、そのパスを渡す。
+- Claude の leg が cyber safeguard で fallback したら（`modelUsage` に要求していないモデルがある）、model-roles.md の「fallback の検出」に従って `reviewer-gpt` で走らせ直し、実行記録に残す。
+- intent は PR の本文・リンク先の issue・spec を辿る。未検証の本文を最も深く読む leg で、`review-intent` は Bash も `gh` も持たない。親が、本文がリンクする同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）の要件と本文だけを取得してファイルに書き、そのパスと spec を渡す。レビュー・コメントの履歴と、本文中の外部 URL は取得しない。
 - spec-context が渡されたら、tier に関わらず intent を立てる（spec との整合を報告するのは intent だけなので）。
 - general を 2 本にするのは large だけ。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になる。
 

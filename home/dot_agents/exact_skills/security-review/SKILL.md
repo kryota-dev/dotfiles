@@ -2,7 +2,7 @@
 name: security-review
 description: |
   自分が開発・運用・保守するプロジェクトのセキュリティレビューを、マルチモデル オーケストレーションで実施する。
-  脆弱性の発見は Claude（Opus 5.5）と GPT（GPT-6.1 Sol）を並列に走らせて合わせ、脅威モデリングと設定検証は GPT に任せる。
+  脆弱性の発見は Claude と GPT の役割を並列に走らせて合わせ、脅威モデリングと設定検証は GPT の役割に任せる。
   cyber safeguard の fallback で親のセッションが格下のモデルに固定されないよう、攻撃シナリオを扱う作業は別プロセスで行う。
   トリガー: "security-review", "セキュリティレビュー", "脆弱性チェック", "脅威モデリング", "攻撃面を洗い出して"
   使用場面: 自分のプロジェクトのセキュリティを体系的にレビューしたいとき。PR 単位のレビューには multi-review を使う。
@@ -27,14 +27,14 @@ fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/r
 
 ## cyber safeguard とモデルの選び方
 
-- Opus 5.5・Sonnet 5.5・Fable 5.1 は、ソースコードの脆弱性の走査・セキュリティ問題のトリアージ・安全なコードの作成には
-  そのまま使える。exploit の生成や攻撃手順の詳述は classifier に当たり、Opus 4.8 などに fallback しうる。
+- Claude の役割のモデルは、ソースコードの脆弱性の走査・セキュリティ問題のトリアージ・安全なコードの作成にはそのまま使える。
+  exploit の生成や攻撃手順の詳述は classifier に当たり、格下のモデルに fallback しうる（詳細は model-roles.md の「fallback の検出」）。
 - Claude Code 2.1.229 以降は、fallback するとセッションの残りがそのモデルに固定される。親が攻撃シナリオを書くと、
   以降の統合の判断まで格下のモデルで行うことになる。
-- そこで、Claude の leg は親のセッションの外（`claude -p` の別プロセス）で走らせ、攻撃シナリオを詳述する Phase 3 は
-  GPT に任せる。親は攻撃面の整理と統合だけを行う。
+- そこで、Claude の leg は親のセッションの外（`claude -p` の別プロセス。model-roles.md の `claude_leg`）で走らせ、
+  攻撃シナリオを詳述する Phase 3 は GPT に任せる。親は攻撃面の整理と統合だけを行う。
 - 以前は classifier の導入前の Opus 4.6 を親にしていたが、やめた。Opus 4.6 は API で非推奨になっており、
-  ソースの走査は 5.5 世代で許可されているので、能力を落とす理由が無い。
+  ソースの走査は現行の Claude のモデルで許可されているので、能力を落とす理由が無い。
 
 ## フェーズ別の役割
 
@@ -43,8 +43,8 @@ fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/r
 | フェーズ | 役割 | 起動 | 根拠 |
 |---|---|---|---|
 | Phase 1: 偵察 | 親 | — | 構造の読み取りと整理。深い推論は不要 |
-| Phase 2: 脆弱性発見 | `review-security` ＋ `reviewer-gpt-focused`（並列）。`--deep` なら `review-security-deep` も | Claude は `claude -p`、GPT は `codex exec`（Codex なら `spawn_agent`） | 系統ごとに見落としが違う。Fable 5.1 は最難の問題でだけ上積みがあり、単価が高い |
-| Phase 3: 脅威モデリング | `reviewer-gpt-focused` | `codex exec`（Codex なら `spawn_agent`） | 攻撃経路の詳述は Claude の classifier に当たりうる |
+| Phase 2: 脆弱性発見 | `review-security` ＋ `reviewer-gpt`（並列）。`--deep` なら `review-security-deep` も | Claude は `claude_leg`、GPT は `codex exec --sandbox read-only` | 系統ごとに見落としが違う。`--deep` の役割は最難の問題でだけ上積みがあり、単価が高い |
+| Phase 3: 脅威モデリング | `reviewer-gpt` | `codex exec --sandbox read-only` | 攻撃経路の詳述は Claude の classifier に当たりうる |
 | Phase 4: 設定検証 | `checker-gpt` | 同上 | チェックリスト的。網羅性が重要で深い推論は不要 |
 | Phase 5: 統合レポート | 親 | — | 既存の発見を整理・優先度付けする作業 |
 
@@ -54,7 +54,7 @@ fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/r
 |---|---|---|
 | `--phase` | `all` | 実行するフェーズ（`1`〜`5` で個別指定、`all` で全フェーズ） |
 | `--scope` | リポジトリ全体 | レビュー対象を特定のディレクトリに絞る |
-| `--deep` | off | Phase 2 に Fable 5.1（`review-security-deep`）を足す。費用は増える |
+| `--deep` | off | Phase 2 に `review-security-deep` を足す。費用は増える |
 
 ## Phase 1: 偵察（親）
 
@@ -78,24 +78,22 @@ fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/r
 `references/checklists.md` の「Phase 2 プロンプトテンプレート」に攻撃面マップを埋め込み、同じ内容を各 leg に渡す。
 結果は leg ごとに親が決めたファイルに書かせ、そのファイルだけを読む。leg に他の leg の結果を渡さない。
 
-**Claude の leg**（Claude Code からでも Codex からでも `claude -p`）:
+**Claude の leg**（Claude Code からでも Codex からでも）:
 
 ```bash
-M=$(claude_role review-security model) E=$(claude_role review-security effort)
-claude -p --model "$M" --effort "$E" --output-format json \
-  --permission-mode dontAsk --setting-sources "" --strict-mcp-config \
-  --allowedTools "Read" "Grep" "Glob" "Bash(git log:*)" "Bash(git show:*)" \
-  < "$PROMPT_FILE" > "$RESULT" 2>"$RESULT.err"
+claude_leg review-security "$RESULT" < "$PROMPT_FILE"
 ```
 
-`--deep` のときは、同じ形で `review-security-deep` も起動する。JSON の `modelUsage` で、実際に使われたモデルを確かめる。
+`--deep` のときは、同じ形で `review-security-deep` も起動する。leg は Read・Grep・Glob しか持たないので、
+コミットの履歴が要るなら親が `git log` の出力をファイルに書いて渡す。JSON の `modelUsage` で、実際に使われたモデルを確かめる。
 
-**GPT の leg**: `reviewer-gpt-focused` を、Claude Code からは `codex` skill の「相談・分析」の起動形
-（`-m` と `-c model_reasoning_effort=` は役割の定義から）、Codex からは `spawn_agent` で起動する。
+**GPT の leg**: `reviewer-gpt` を `codex` skill の「相談・分析」の起動形（`--sandbox read-only`。`-m` と
+`-c model_reasoning_effort=` は役割の定義から）で起動する。Codex が親のときも `spawn_agent` ではなくこの形にする
+（spawn した leg は親の sandbox を継承し、読み取り専用にできないため）。
 
 ## Phase 3: 脅威モデリング（GPT）
 
-`reviewer-gpt-focused` を Phase 2 の GPT の leg と同じ形で起動し、「Phase 3 プロンプトテンプレート」に攻撃面マップを埋め込んで渡す。
+`reviewer-gpt` を Phase 2 の GPT の leg と同じ形で起動し、「Phase 3 プロンプトテンプレート」に攻撃面マップを埋め込んで渡す。
 Phase 2 の結果があれば、Critical / High の要約（ファイルと種類だけ）を Context に足してよい。
 
 ## Phase 4: セキュリティ設定検証（GPT）
@@ -117,7 +115,7 @@ Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レ
 
 | 状況 | 対処 |
 |---|---|
-| Claude の leg が fallback（`modelUsage` に要求していないモデル） | 結果は捨てずに残し、「fallback した」と記録する。カバーが欠けた範囲を `reviewer-gpt-focused` に追加で渡す |
+| Claude の leg が fallback（`modelUsage` に要求していないモデル） | 結果は捨てずに残し、「fallback した」と記録する。カバーが欠けた範囲を `reviewer-gpt` に追加で渡す |
 | 親のセッションが fallback した | 以降の統合の判断の質が落ちる。user に伝え、新しいセッションで Phase 5 をやり直すかを確認する |
 | GPT が脅威モデリングを拒否 | プロンプトを防御的な文脈（緩和策を導くための列挙）に書き換えて再試行。それでも拒否なら、親が影響と緩和策だけを列挙する |
 | 特定の CWE パターンの検査がブロック | 検査項目を分割し、1 項目ずつ実行する |
@@ -128,6 +126,6 @@ Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レ
 より深いレビューが必要なら、各社の正規プログラムに申請する:
 
 - **Anthropic Cyber Verification Program**: `portal.anthropic.com/programs/cvp`
-  — Fable 5.1 / Opus 5.5 のセーフガードの緩和。承認後に始めた新しいセッションから効く
+  — Claude のモデルのセーフガードの緩和。承認後に始めた新しいセッションから効く
 - **OpenAI Daybreak（Trusted Access for Cyber）**: `platform.openai.com/trusted-access`
   — 承認されたら、`codex exec` に `--cyber-access-program daybreak_blue` を付けて防御的な用途の制限を緩める

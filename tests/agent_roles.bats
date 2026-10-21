@@ -147,3 +147,43 @@ definition_names() {
     done <<<"$roles"
   done < <(find "$SOURCE/dot_agents/exact_skills" -type f -name '*.md')
 }
+
+# 役割表の文書にある起動の関数を取り出し、リポジトリの定義を ~/.claude/agents に見立てて読み込む。
+load_role_helpers() {
+  local home="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$home/.claude" "$home/.codex"
+  ln -sfn "$SOURCE/dot_claude/agents" "$home/.claude/agents"
+  ln -sfn "$SOURCE/dot_codex/agents" "$home/.codex/agents"
+  awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$ROLES" >"$BATS_TEST_TMPDIR/helpers.sh"
+  HOME="$home"
+  # shellcheck disable=SC1091
+  source "$BATS_TEST_TMPDIR/helpers.sh"
+}
+
+@test "役割表の文書の起動の関数は shellcheck を通る" {
+  command -v shellcheck >/dev/null || skip "shellcheck がインストールされていない"
+  awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$ROLES" | shellcheck -s bash -
+}
+
+@test "起動の関数は定義から model・effort・道具・本文を読む" {
+  load_role_helpers
+  [ "$(claude_role review-security model)" = claude-opus-5-5 ]
+  [ "$(claude_role review-security effort)" = high ]
+  [ "$(claude_role fact-checker tools | tr -d ,)" = "WebFetch WebSearch" ]
+  body=$(claude_body review-security)
+  [[ "$body" == *"pasted_content"* ]]
+  [[ "$body" != *"model:"* ]]
+  [ "$(gpt_role implementer model)" = gpt-6.1-sol ]
+  [ "$(gpt_role reviewer-gpt model_reasoning_effort)" = high ]
+}
+
+@test "Claude の役割は Bash も Edit も Write も持たない" {
+  local f tools
+  for f in "$SOURCE/dot_claude/agents/"*.md; do
+    tools=$(claude_field "$f" tools)
+    [[ ",$tools," != *"Bash"* && ",$tools," != *"Edit"* && ",$tools," != *"Write"* ]] || {
+      echo "書き込みかシェルの道具を持つ: $f ($tools)"
+      return 1
+    }
+  done
+}

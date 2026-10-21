@@ -8,13 +8,13 @@
 ### Claude 向け（Phase 2 の `review-security`・`review-security-deep`）
 
 自律性が高い。ロールと目的を冒頭で簡潔に定義し、手順を逐一規定しない。
-検査項目はカテゴリとして渡して委ねる。出力形式は構造だけ指定する。
-Opus 5.5 は止める条件が無いと長く走るので、完了の条件（全カテゴリを見終えた）と、見る範囲（攻撃面マップの箇所）を必ず書く。
-effort は役割の定義で決まる。API を直接使うときは `output_config.effort` で制御し、`budget_tokens` は使わない（400 エラー）。
+検査項目はカテゴリとして渡して委ねる。出力形式は構造だけ指定する。見る範囲（攻撃面マップの箇所）と完了の条件を書き、
+「念のため再確認する」のような検証の指示は足さない。考える量は役割の effort で決まる（モデルの性質と対策は model-roles.md）。
+攻撃面マップに貼るコードや設定の抜粋は `<pasted_content id="<乱数>">` で囲む。
 
-### GPT 向け（Phase 2 の `reviewer-gpt-focused`、Phase 3-4）
+### GPT 向け（Phase 2 の `reviewer-gpt`、Phase 3-4）
 
-Goal / Context / Constraints / Done when の 4 部構成に従う。範囲の外まで手を広げやすいので、Constraints に見る範囲を書く。
+Goal / Context / Constraints / Done when の 4 部構成に従う（`codex` skill）。Constraints に見る範囲を、Done when に出力の形を書く。
 Phase 2 のテンプレートは Claude と同じ内容を渡し、末尾の「完了の条件」を Done when として扱わせる。
 
 ---
@@ -65,7 +65,7 @@ postinstall スクリプトのリスク。
 
 ---
 
-## Phase 3 プロンプトテンプレート（GPT: `reviewer-gpt-focused`）
+## Phase 3 プロンプトテンプレート（GPT: `reviewer-gpt`）
 
 ```
 ## Goal

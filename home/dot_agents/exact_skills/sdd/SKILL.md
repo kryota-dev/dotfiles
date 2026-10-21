@@ -39,10 +39,10 @@ spec は Claude が書く（役割は [`pr-workflow/references/model-roles.md`](
 
 | 親 | requirements.md・tasks.md | design.md |
 |---|---|---|
-| Claude Code | 親が書く（この skill の `effort: high`） | standard は親、large は `spec-designer-deep` に書かせる |
-| Codex | `spec-designer` を `claude -p` で起動して書かせる | standard は `spec-designer`、large は `spec-designer-deep` を `claude -p` で |
+| Claude Code | 親が書く（この skill の `effort: high`） | 親が書く |
+| Codex | `spec-designer` を `claude_leg` で起動して書かせる | 同じ |
 
-`spec-designer-deep` や `claude -p` に書かせるときは、委譲プロンプトに書くファイルの絶対パス・要件の出所（Issue・PRD・user の確認）・既存の spec・完了の条件（上の表の項目がそろっている）を書く。`claude -p` の書き込みは `--allowedTools` の `Edit(./.spec-workflow/specs/<spec 名>/**)` に限る。書かれた spec は親が読み、要件の取りこぼしと、範囲の外への拡大が無いことを確かめてから次に進む。
+`spec-designer` に書かせるときは、委譲プロンプトに書くファイルの絶対パス・要件の出所（Issue・PRD・user の確認）・既存の spec・完了の条件（上の表の項目がそろっている）を書く。Issue や PRD の本文は `<pasted_content id="<乱数>">` で囲む。書き込みは追加の許可の `Edit(./.spec-workflow/specs/<spec 名>/**)` に限る（`claude_leg spec-designer "$RESULT" "Edit(./.spec-workflow/specs/<spec 名>/**)" < "$PROMPT_FILE"`）。書かれた spec は親が読み、要件の取りこぼしと、範囲の外への拡大が無いことを確かめてから次に進む。
 
 この 3 ファイルは、multi-review が `--spec-context` で「実装が spec どおりか」の照合に使う。調査の進め方（何を読むか、subagent を使うか）は自分で決める。ただしシェルなど書き込みうる道具を持つ subagent に渡すときは、調査でも `pr-workflow`「共有作業ツリーでの subagent 委譲契約」節に従う。
 

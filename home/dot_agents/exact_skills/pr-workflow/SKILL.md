@@ -78,7 +78,7 @@ user-invocable: true
 
 ### small の進め方
 
-1. **計画（Claude）**: 変更するファイル、テストの一覧（先に書いて失敗させるもの）、完了の条件を短く書く。Claude Code では親が書く。Codex では `spec-designer` を `claude -p` で読み取り専用に起動し、結果の本文を計画として受け取る（起動形は model-roles.md）。
+1. **計画（Claude）**: 変更するファイル、テストの一覧（先に書いて失敗させるもの）、完了の条件を短く書く。Claude Code では親が書く。Codex では `spec-designer` を model-roles.md の `claude_leg` で起動し（追加の許可は渡さず、読み取りだけにする）、結果の本文を計画として受け取る。
 2. **実装（GPT）**: 計画を `implementer-light` に渡す。Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
 3. **検証（親）**: diff の全体を読んでから、テストと lint を実行する。計画のテストが先に失敗する形で書かれているか、テストを弱めていないかも見る。通ったら親がコミットする。失敗したら、原因を委譲プロンプトに足して渡し直す。格上げは model-roles.md の「実装の格上げ」に従う。
 
