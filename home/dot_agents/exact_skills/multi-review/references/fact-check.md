@@ -4,7 +4,7 @@ reviewer の断定的な主張は、投稿する前に親が一次ソースで�
 
 ## 委譲
 
-確かめる指摘が多ければ、1 件ずつ subagent に並列で調べさせてよい。未検証の web コンテンツを読む subagent には、書き込みとコマンド実行をさせない（Claude Code なら読み取りと web 取得だけの道具に絞る）。subagent には「該当する記述の有無・引用・URL」を返させ、採否は親が引用と URL を読んで決める。
+確かめる指摘が多ければ、1 件ずつ `fact-checker`（Sonnet 5.5。引用を探して返すだけの範囲の狭い作業なので、Opus は使わない）に並列で調べさせてよい。`fact-checker` は読み取りと web 取得の道具しか持たない（書き込みとコマンド実行をさせない）。Codex からは `claude -p` で同じ役割の値と、`--allowedTools "Read" "Grep" "Glob" "WebFetch" "WebSearch"` で起動する。subagent には「該当する記述の有無・引用・URL」を返させ、採否は親が引用と URL を読んで決める。
 
 ## 確かめる対象と手段
 
