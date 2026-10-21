@@ -10,7 +10,26 @@ argument-hint: "<依頼内容>（日本語可）"
 
 # codex
 
-skill や orchestration から Codex を起動するときの起動形と約束は、このファイルに従う。既定の model・effort・MCP は `~/.codex/config.toml` にある。effort は `-c model_reasoning_effort=<high|xhigh>` で呼び出しごとに変えられる。最も難しい作業を通しで任せるときは `--profile astra`（GPT-6 Astra）でモデルごと切り替える。
+skill や orchestration から Codex を起動するときの起動形と約束は、このファイルに従う。既定の model・effort・MCP は `~/.codex/config.toml` にある。
+
+skill から呼ぶときは、役割（`implementer`・`reviewer-gpt` など）を決めて、その定義から `-m` と `-c model_reasoning_effort=` を渡す。役割表・値の読み方・格上げ（`implementer-astra`）は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md) に従い、値をここに書き写さない。単体で相談するときは既定のままでよい。
+
+```bash
+gpt_role() { sed -nE "s/^$2 *= *\"([^\"]*)\"\$/\1/p" "$HOME/.codex/agents/$1.toml" | head -1; }
+ROLE=implementer
+M=$(gpt_role "$ROLE" model) E=$(gpt_role "$ROLE" model_reasoning_effort)
+[ -n "$M" ] && [ -n "$E" ] || { echo "abort: ~/.codex/agents/$ROLE.toml が無い。chezmoi apply を実行する" >&2; exit 1; }
+# 以下の起動形に -m "$M" -c model_reasoning_effort="$E" を足す
+```
+
+## プロンプトの書き方
+
+GPT-6.1 Sol は、範囲を区切らないと頼まれていない作業まで続け、出力が長くなりがちである。委譲プロンプトは次の 4 部で書く。
+
+- **Goal**: 何を達成するかを 1〜2 文で。
+- **Context**: 判断に要る事実（対象のファイル・関連する設計・既存の規約）。親の会話の経緯は書かない。
+- **Constraints**: 書いてよいファイルの列挙、してはいけない操作、確認や質問は不要であること。
+- **Done when**: 完了の条件と、返す内容の形と長さ（「10 行以内で」など）。条件を満たしたら止まることを書く。
 
 ## 相談・分析（書き込まない）
 
@@ -61,9 +80,11 @@ GD=$(git -C "$TARGET_DIR" rev-parse --path-format=absolute --git-dir 2>/dev/null
   GCD=$(git -C "$TARGET_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
   [ "$GD" != "$GCD" ] || { echo "abort: $TARGET_DIR is not a linked worktree" >&2; exit 1; }
 codex exec --profile agent --cd "$TARGET_DIR" --color never -o <RESULT_FILE> - <<'PROMPT' > <LOG_FILE> 2>&1
-<実装依頼（対象ファイルを列挙して範囲を明示する）>
+<実装依頼（上の 4 部構成。対象ファイルを列挙して範囲を明示する）>
 PROMPT
 ```
+
+`-m` と `-c model_reasoning_effort=` は役割（standard・large のタスクは `implementer`、small と修正は `implementer-light`、格上げは `implementer-astra`）の定義から渡す。
 
 **親の手順（この順を守る）**:
 
