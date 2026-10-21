@@ -62,7 +62,7 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 | subagent・通知 | 標準機能 | 標準機能 |
 
 - `~/.agents/skills` は `exact_` ディレクトリで、ソースに無い skill は apply で削除する。外部 skill はこの中に
-  chezmoi の externals として置く。ハーネス自身が書き込む `.system`（Codex）と `synced`（Claude Code）は
+  chezmoi の externals として置く。ハーネス自身が書き込む `.system`（Codex）と、`synced` とその退避の `.trash`（Claude Code）は
   `.chezmoiignore` で削除の対象から外している。
 - Codex は `config.toml` と profile（`astra.config.toml`・`agent.config.toml`）に自分でも書き込む（プロジェクトの
   trust・plugin・モデルの案内の表示回数）ので、`modify_` テンプレートで管理するキーだけを上書きし、それ以外は残す。
