@@ -1,23 +1,25 @@
 # セキュリティレビュー — フェーズ別チェックリストとプロンプトテンプレート
 
-各フェーズで subagent / Codex に渡すプロンプトのテンプレートと、検査項目の詳細。
+各フェーズで Claude と GPT の leg に渡すプロンプトのテンプレートと、検査項目の詳細。
 `[攻撃面マップ]` のプレースホルダは Phase 1 の出力で置き換える。
 
 ## プロンプト設計の原則
 
-### Fable 5.1 向け（Phase 2）
+### Claude 向け（Phase 2 の `review-security`・`review-security-deep`）
 
-thinking が常時有効で自律性が高い。ロールと目的を冒頭で簡潔に定義し、手順を逐一規定しない。
+自律性が高い。ロールと目的を冒頭で簡潔に定義し、手順を逐一規定しない。
 検査項目はカテゴリとして渡して委ねる。出力形式は構造だけ指定する。
-effort は `output_config.effort` で制御し、`budget_tokens` は使わない（400 エラー）。
+Opus 5.5 は止める条件が無いと長く走るので、完了の条件（全カテゴリを見終えた）と、見る範囲（攻撃面マップの箇所）を必ず書く。
+effort は役割の定義で決まる。API を直接使うときは `output_config.effort` で制御し、`budget_tokens` は使わない（400 エラー）。
 
-### Codex 向け（Phase 3-4）
+### GPT 向け（Phase 2 の `reviewer-gpt-focused`、Phase 3-4）
 
-Goal / Context / Constraints / Done when の 4 部構成に従う。
+Goal / Context / Constraints / Done when の 4 部構成に従う。範囲の外まで手を広げやすいので、Constraints に見る範囲を書く。
+Phase 2 のテンプレートは Claude と同じ内容を渡し、末尾の「完了の条件」を Done when として扱わせる。
 
 ---
 
-## Phase 2 プロンプトテンプレート（Fable 5.1 subagent）
+## Phase 2 プロンプトテンプレート（Claude と GPT の両方に渡す）
 
 ```
 このプロジェクトのソースコードのセキュリティレビュアーとして、
@@ -54,11 +56,16 @@ postinstall スクリプトのリスク。
 - 再現シナリオ
 - 修正案
 - 検証方法
+
+再現シナリオは、脆弱な経路（入力から問題の箇所まで）を示すにとどめる。exploit のコードは書かない。
+確信が持てない主張には「（未確認）」と付ける。
+完了の条件: 上の全カテゴリを、攻撃面マップの範囲で確認した。該当が無いカテゴリは「該当なし」と書いた。
+条件を満たしたら止まる。範囲の外のコードは、経路を追うのに必要なときだけ読む。
 ```
 
 ---
 
-## Phase 3 プロンプトテンプレート（Codex）
+## Phase 3 プロンプトテンプレート（GPT: `reviewer-gpt-focused`）
 
 ```
 ## Goal
@@ -102,7 +109,7 @@ Information Disclosure / Denial of Service / Elevation of Privilege）を
 
 ---
 
-## Phase 4 プロンプトテンプレート（Codex）
+## Phase 4 プロンプトテンプレート（GPT: `checker-gpt`）
 
 ```
 ## Goal
@@ -158,7 +165,7 @@ IAM / サービスアカウントの権限（最小権限の原則）、
 - 対象プロジェクト: [名前]
 - 実施日: [日付]
 - レビュー範囲: [対象ディレクトリ / 全体]
-- 使用モデル: Phase 2 [Fable 5.1 or Codex 既定モデル] / Phase 3-4 Codex [実際のモデル名]
+- 使用モデル: 各 leg の役割・要求したモデル・実際のモデル（fallback の有無）
 
 ## エグゼクティブサマリ
 
