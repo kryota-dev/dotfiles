@@ -30,7 +30,7 @@ require_roles() {
 
 definition_names() {
   local f
-  for f in "$SOURCE/$1/agents/"*".$2"; do
+  for f in "$SOURCE/$1/"*".$2"; do
     [ -f "$f" ] || continue
     basename "$f" ".$2"
   done | sort
@@ -38,7 +38,7 @@ definition_names() {
 
 @test "Claude の定義は必須の frontmatter を持ち、name がファイル名と一致する" {
   local f key name count=0
-  for f in "$SOURCE/dot_claude/agents/"*.md; do
+  for f in "$SOURCE/dot_agents/roles/"*.md; do
     [ -f "$f" ] || continue
     count=$((count + 1))
     for key in name description model effort; do
@@ -97,7 +97,7 @@ definition_names() {
   }
   while read -r role family model effort; do
     if [ "$family" = Claude ]; then
-      f="$SOURCE/dot_claude/agents/$role.md"
+      f="$SOURCE/dot_agents/roles/$role.md"
     else
       f="$SOURCE/dot_codex/agents/$role.toml"
     fi
@@ -120,9 +120,9 @@ definition_names() {
   for family in Claude GPT; do
     expected=$(echo "$rows" | awk -v family="$family" '$2 == family { print $1 }' | sort)
     if [ "$family" = Claude ]; then
-      actual=$(definition_names dot_claude md)
+      actual=$(definition_names dot_agents/roles md)
     else
-      actual=$(definition_names dot_codex toml)
+      actual=$(definition_names dot_codex/agents toml)
     fi
     # 重複行も残して比較し、集合だけでなく件数の食い違いも検出する。
     [ "$expected" = "$actual" ] || {
@@ -140,7 +140,7 @@ definition_names() {
     while IFS= read -r role; do
       [ -n "$role" ] || continue
       [ "$role" = review-resolve-loop ] && continue
-      [ -f "$SOURCE/dot_claude/agents/$role.md" ] || [ -f "$SOURCE/dot_codex/agents/$role.toml" ] || {
+      [ -f "$SOURCE/dot_agents/roles/$role.md" ] || [ -f "$SOURCE/dot_codex/agents/$role.toml" ] || {
         echo "参照する役割 $role の定義がありません: $f"
         return 1
       }
@@ -148,11 +148,11 @@ definition_names() {
   done < <(find "$SOURCE/dot_agents/exact_skills" -type f -name '*.md')
 }
 
-# 役割表の文書にある起動の関数を取り出し、リポジトリの定義を ~/.claude/agents に見立てて読み込む。
+# 役割表の文書にある起動の関数を取り出し、リポジトリの定義を ~/.agents/roles と ~/.codex/agents に見立てて読み込む。
 load_role_helpers() {
   local home="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$home/.claude" "$home/.codex"
-  ln -sfn "$SOURCE/dot_claude/agents" "$home/.claude/agents"
+  mkdir -p "$home/.agents" "$home/.codex"
+  ln -sfn "$SOURCE/dot_agents/roles" "$home/.agents/roles"
   ln -sfn "$SOURCE/dot_codex/agents" "$home/.codex/agents"
   awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$ROLES" >"$BATS_TEST_TMPDIR/helpers.sh"
   HOME="$home"
@@ -177,13 +177,31 @@ load_role_helpers() {
   [ "$(gpt_role reviewer-gpt model_reasoning_effort)" = high ]
 }
 
-@test "Claude の役割は Bash も Edit も Write も持たない" {
+@test "Claude の役割は Bash を持たず、書き込みの道具は spec-designer だけが持つ" {
   local f tools
-  for f in "$SOURCE/dot_claude/agents/"*.md; do
+  for f in "$SOURCE/dot_agents/roles/"*.md; do
     tools=$(claude_field "$f" tools)
-    [[ ",$tools," != *"Bash"* && ",$tools," != *"Edit"* && ",$tools," != *"Write"* ]] || {
-      echo "書き込みかシェルの道具を持つ: $f ($tools)"
+    [[ "$tools" != *Bash* ]] || {
+      echo "Bash を持つ: $f"
+      return 1
+    }
+    [ "$(basename "$f" .md)" = spec-designer ] && continue
+    [[ "$tools" != *Edit* && "$tools" != *Write* ]] || {
+      echo "書き込みの道具を持つ: $f ($tools)"
       return 1
     }
   done
+}
+
+@test "claude_leg は道具を --tools で絞り、Read を作業ディレクトリに限る" {
+  load_role_helpers
+  # claude の代わりに引数を書き出すだけの関数を置き、組み立てた起動の引数を確かめる。
+  claude() { printf '%s\n' "$@"; }
+  claude_leg fact-checker "$BATS_TEST_TMPDIR/out.json" </dev/null
+  args=$(cat "$BATS_TEST_TMPDIR/out.json")
+  [[ "$args" == *$'--tools\nWebFetch\nWebSearch\n'* ]]
+  [[ "$args" == *$'--allowedTools\nRead(./**)\nWebFetch\nWebSearch\n'* ]]
+  [[ "$args" == *$'--setting-sources\n\n'* ]]
+  [[ "$args" == *"--permission-mode"$'\n'"dontAsk"* ]]
+  [[ "$args" != *$'\nRead\n'* ]]
 }

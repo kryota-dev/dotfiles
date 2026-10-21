@@ -21,7 +21,7 @@ tier で絞った roster を並列に走らせ、統合し、既存のレビュ�
 | 役割の系統 | Claude Code から | Codex から |
 |---|---|---|
 | Claude | `claude -p`（model-roles.md の `claude_leg`） | `claude -p`（同じ） |
-| GPT | `codex exec` | `spawn_agent`（`agent_type` に役割名） |
+| GPT | `codex exec` | `spawn_agent`（`agent_type` に役割名）。親の sandbox が read-only でないときは `codex exec --sandbox read-only` |
 
 Claude の役割を Claude Code の subagent で走らせないのは、親の広い permission を継承させないためと、cyber safeguard の fallback を親から隔離して `modelUsage` で検出するため（理由の詳細は model-roles.md）。
 

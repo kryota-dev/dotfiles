@@ -58,7 +58,7 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 | 危険なコマンド | `permissions.ask` / `deny` | `~/.codex/rules/dotfiles.rules` |
 | MCP サーバー | `run_onchange_after_13` で登録 | `config.toml` に宣言 |
 | 記憶 | Obsidian の vault（`autoMemoryEnabled: false`） | Obsidian の vault（`features.memories = false`） |
-| subagent の役割 | `~/.claude/agents/*.md`（model・effort） | `~/.codex/agents/*.toml`（model・model_reasoning_effort） |
+| モデルの役割 | `~/.agents/roles/*.md`（model・effort・道具。`claude -p` に渡す） | `~/.codex/agents/*.toml`（model・model_reasoning_effort） |
 | subagent・通知 | 標準機能 | 標準機能 |
 
 - `~/.agents/skills` は `exact_` ディレクトリで、ソースに無い skill は apply で削除する。外部 skill はこの中に
@@ -87,14 +87,14 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 Claude が担う。根拠（各モデルの得意・不得意と費用）と役割表は
 `home/dot_agents/exact_skills/pr-workflow/references/model-roles.md` にある。
 
-モデルとエフォートは、役割ごとに各ハーネスの標準の subagent 定義に宣言し、skill には役割の名前だけを書く。
-Claude Code 2.1.291 は subagent の effort を定義の frontmatter でしか受け付けず、`codex exec` は Codex の
-agent の定義を選べず、`claude -p --setting-sources ""` は `~/.claude/agents` を読まない。そのため、もう一方の
-ハーネスから呼ぶときは、定義ファイルの model と effort の行を `sed` で読んで CLI の引数に渡す。Claude の役割は、
-Claude Code が親のときも subagent ではなく `claude -p` で走らせる。親の広い permission を継承させず、cyber safeguard の
-fallback を親のセッションから隔離して検出するため。値の正本は定義
-ファイルで、役割表との一致は `tests/agent_roles.bats` が検査する。`agents/` は `exact_` にしない（`/agents` で
-手元に作った定義を apply で消さないため）。
+モデルとエフォートは役割ごとに定義ファイルへ宣言し、skill には役割の名前だけを書く。GPT の役割は Codex の custom agent
+（`~/.codex/agents/*.toml`）で、Codex からは `spawn_agent`、Claude Code からは `codex exec` に定義の値を渡して起動する
+（`codex exec` は agent の定義を選べない）。Claude の役割は `~/.agents/roles/*.md` に置き、どちらのハーネスからも
+権限を絞った `claude -p` で起動する。Claude Code の subagent にしないのは、親の広い permission を継承させず、
+cyber safeguard の fallback を親のセッションから隔離して `modelUsage` で検出するため。`~/.claude/agents` に置くと
+Claude Code が自動委譲で subagent として選びうるので、Claude Code が読まない場所に置く。値の正本は定義ファイルで、
+役割表との一致と起動の引数は `tests/agent_roles.bats` が検査する。`roles/` と `agents/` は `exact_` にしない
+（手元に作った定義を apply で消さないため）。
 
 ## 作業記憶（Obsidian の vault）
 

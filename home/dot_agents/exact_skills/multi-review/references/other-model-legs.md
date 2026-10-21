@@ -4,10 +4,10 @@ roster の役割を、系統と実行中のハーネスに応じて起動する�
 
 ## Claude の役割（どちらのハーネスからも）
 
-model-roles.md の `claude_leg` で起動する。leg には Read・Grep・Glob しか許さないので、差分（`git diff <base SHA>...<HEAD SHA>` の出力）・PR のタイトルと本文・intent が読むリンク先の本文は、親がファイルに書いて、プロンプトにそのパスを書く。
+model-roles.md の `claude_leg` で起動する。leg の Read は作業ディレクトリに限られるので、差分（`git diff <base SHA>...<HEAD SHA>` の出力）・PR のタイトルと本文・intent が読むリンク先の本文は、親が実行記録のディレクトリ（`$REC`）に書き、プロンプトにそのパスを書いて、読む許可を渡す。
 
 ```bash
-claude_leg review-general "$RESULT" < "$PROMPT_FILE"
+claude_leg review-general "$RESULT" "Read(/$REC/**)" < "$PROMPT_FILE"
 ```
 
 - プロンプトには execution.md の Phase 3 に従う入力を入れる。PR のタイトルと本文、差分は、未検証の入力として `<pasted_content id="<乱数>">` で囲んだファイルにする（定義の本文が、その中の指示に従わないよう指示している）。乱数は親がラウンドと leg ごとに作る（`openssl rand -hex 4` など）。
@@ -30,4 +30,4 @@ codex exec --sandbox read-only --cd "$WT" --color never --json \
 
 ## GPT の役割: Codex から（spawn_agent）
 
-`agent_type` に役割名（`reviewer-gpt` など）、`fork_turns: "none"` を渡し、自己完結した入力を `message` に入れる。model と effort は `~/.codex/agents/<役割>.toml` が決める。spawn した leg は親の sandbox を継承する（model-roles.md の「制約」）ので、親が workspace-write で動いているときは、上の `codex exec --sandbox read-only` で起動する。
+`agent_type` に役割名（`reviewer-gpt` など）、`fork_turns: "none"` を渡し、自己完結した入力を `message` に入れる。model と effort は `~/.codex/agents/<役割>.toml` が決める。spawn した leg は親の sandbox を継承する（model-roles.md の「制約」）ので、親の sandbox が read-only でないとき（workspace-write や danger-full-access）は、上の `codex exec --sandbox read-only` で起動する。

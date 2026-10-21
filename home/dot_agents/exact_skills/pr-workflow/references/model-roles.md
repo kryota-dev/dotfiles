@@ -4,7 +4,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 
 ## 役割表
 
-値の正本は定義ファイルで、この表との一致は `tests/agent_roles.bats` が検査する。Claude の役割は `~/.claude/agents/<役割>.md`、GPT の役割は `~/.codex/agents/<役割>.toml` にある。
+値の正本は定義ファイルで、この表との一致は `tests/agent_roles.bats` が検査する。Claude の役割は `~/.agents/roles/<役割>.md`、GPT の役割は `~/.codex/agents/<役割>.toml` にある。Claude の役割は Claude Code の subagent として使わないので、Claude Code が読む `~/.claude/agents` には置かない（置くと、自動委譲で親のセッションの中で走りうる）。
 
 | 役割 | 系統 | model | effort | 用途 |
 |---|---|---|---|---|
@@ -54,33 +54,43 @@ Claude の役割は、どちらのハーネスからでも `claude -p` の別プ
 - **検出**: `claude -p` の JSON の `modelUsage` で、実際に使われたモデルを確かめられる。手元の 2.1.291 の subagent の報告には、公式ドキュメントにある `⚠ This agent switched to` が出ない（cyber の fallback は `safeguards flagged this message` と `[answered by …]` の形で届く）。
 
 ```bash
-claude_role() { sed -n "s/^$2: *//p" "$HOME/.claude/agents/$1.md" | head -1; }
+claude_role() { sed -n "s/^$2: *//p" "$HOME/.agents/roles/$1.md" | head -1; }
 # 定義の本文（2 つ目の --- より後）
-claude_body() { awk 'n>=2; /^---$/{n++}' "$HOME/.claude/agents/$1.md"; }
+claude_body() { awk 'n>=2; /^---$/{n++}' "$HOME/.agents/roles/$1.md"; }
 # claude_leg <役割> <結果 JSON> [追加の許可 …] < プロンプト
 claude_leg() {
-  local role=$1 out=$2 m e tools
+  local role=$1 out=$2 m e tools t
   shift 2
   m=$(claude_role "$role" model) e=$(claude_role "$role" effort) tools=$(claude_role "$role" tools | tr -d ,)
   [ -n "$m" ] && [ -n "$e" ] && [ -n "$tools" ] || {
-    echo "abort: ~/.claude/agents/$role.md が無い。chezmoi apply を実行する" >&2
+    echo "abort: ~/.agents/roles/$role.md が無い。chezmoi apply を実行する" >&2
     return 1
   }
+  # ファイルを読む道具は Read の規則で作業ディレクトリに限り、それ以外の道具（WebFetch など）は名前で許す。
+  local allow=("Read(./**)")
+  for t in $tools; do
+    case $t in Read | Grep | Glob | Edit | Write) ;; *) allow+=("$t") ;; esac
+  done
   # shellcheck disable=SC2086 # tools は定義の道具名を空白で区切ったもの
   claude -p --model "$m" --effort "$e" --output-format json \
     --permission-mode dontAsk --setting-sources "" --strict-mcp-config \
     --append-system-prompt "$(claude_body "$role")" \
-    --allowedTools $tools "$@" \
-    --disallowedTools "Read(//**/.env*)" "Read(//**/*.pem)" "Read(//**/*.key)" "Read(//**/id_*)" \
-    "Read(~/.ssh/**)" "Read(//**/*credentials*)" "Read(//**/*secret*)" \
+    --tools $tools --allowedTools "${allow[@]}" "$@" \
+    --disallowedTools "Read(//**/.env)" "Read(//**/.env.*)" "Read(//**/.envrc)" \
+    "Read(//**/id_rsa)" "Read(//**/id_ed25519)" "Read(//**/*.pem)" "Read(//**/*.key)" \
+    "Read(//**/*credentials*.json)" "Read(//**/*credentials*.yaml)" "Read(//**/*credentials*.yml)" \
+    "Read(//**/*secret*.json)" "Read(//**/*secret*.yaml)" "Read(//**/*secret*.yml)" "Read(//**/secrets/**)" \
+    "Read(~/.ssh/**)" "Read(~/.aws/**)" "Read(~/.config/gcloud/**)" "Read(~/.config/gh/**)" \
+    "Read(~/.docker/**)" "Read(~/.codex/**)" "Read(~/.netrc)" "Read(~/.npmrc)" \
     > "$out" 2> "$out.err"
 }
 ```
 
-- `dontAsk` は許可リストに無い道具を確認なしで拒否する。`--setting-sources ""` で user / project の settings（広い allow を持つ）を読ませず、`--strict-mcp-config` で MCP も使わせない。
-- `--setting-sources ""` では settings.json の Read の deny も効かないので、秘密のファイルを `--disallowedTools` で拒否する。この組み合わせで拒否されることは実機で確かめた。
-- `~/.claude/agents` も読まれないので、`--agent` は使えない。値と本文は定義ファイルから読んで渡す。
-- 定義の道具は Read・Grep・Glob（`fact-checker` は WebFetch・WebSearch）だけで、Bash は持たない。diff・コミットの履歴・リンク先の Issue の本文は、親が取得してファイルに書き、そのパスを渡す。書き込みが要るとき（spec）は、書いてよいパスだけを追加の許可に `Edit(./<パス>/**)` で渡す。`Edit` の規則は Write にも効く。
+- `--tools` で、使える道具そのものを定義の道具に絞る。`--allowedTools` は確認を省く指定で、道具を絞らない（`dontAsk` でも作業ディレクトリの中の読み取りは通る）。この違いは実機で確かめた。
+- Read は `Read(./**)` で作業ディレクトリに限る。Read の規則は Grep と Glob にも効く。親が作業ディレクトリの外に置いた入力（差分・本文など）は、追加の許可に `Read(//<入力のディレクトリ>/**)` を渡して読ませる。
+- `dontAsk` は許可リストに無い操作を確認なしで拒否する。`--setting-sources ""` で user / project の settings（広い allow を持つ）を読ませず、`--strict-mcp-config` で MCP も使わせない。settings.json の deny も効かなくなるので、同等以上の秘密のファイルを `--disallowedTools` で拒否する。パターンは拡張子と名前で絞り、`secretManager.ts` のような認証まわりのソースは拒否しない。
+- `--setting-sources ""` では Claude Code の agent の定義も読まれないので `--agent` は使わず、値と本文は `~/.agents/roles` の定義から読んで渡す。
+- 定義の道具は Read・Grep・Glob（`fact-checker` は WebFetch・WebSearch、`spec-designer` は Edit・Write も）で、Bash は持たない。diff・コミットの履歴・リンク先の Issue の本文は、親が取得してファイルに書き、そのディレクトリを追加の許可で渡す。`spec-designer` の書き込みは、追加の許可の `Edit(./<パス>/**)` で許したパスに限られる（`Edit` の規則は Write にも効く。許したパスの外は拒否されることを実機で確かめた）。
 - 結果は JSON の `result` を読む。`session_id` と `modelUsage` も実行記録に残す。
 
 ## GPT の役割の起動
