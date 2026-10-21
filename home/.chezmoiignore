@@ -1,4 +1,6 @@
 # ハーネス自身が書き込むので、~/.agents/skills の exact_ による削除から外す。
 # .system: Codex の system skill。synced: Claude Code が claude.ai から同期する skill。
+# .trash: その同期で入れ替えた skill の退避。
 .agents/skills/.system
 .agents/skills/synced
+.agents/skills/.trash
