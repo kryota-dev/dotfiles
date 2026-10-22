@@ -3,7 +3,7 @@
 
 SOURCE := $(CURDIR)/home
 # 通常のシェルスクリプトと、描画してから lint するスクリプトのテンプレート。
-SCRIPTS := install.sh $(shell find home -name '*.sh' -not -name '*.tmpl') home/dot_config/git/hooks/executable_pre-commit
+SCRIPTS := install.sh $(shell find home -name '*.sh' -not -name '*.tmpl') home/dot_config/git/exact_hooks/readonly_executable_pre-commit
 SCRIPT_TEMPLATES := $(wildcard home/run_*.sh.tmpl)
 ZSH_FILES := home/dot_zshrc home/dot_zprofile $(wildcard home/dot_config/zsh/*.zsh)
 

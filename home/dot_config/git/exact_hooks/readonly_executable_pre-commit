@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# グローバルの pre-commit hook（core.hooksPath）。staged の変更を gitleaks で検査してから、
+# core.hooksPath に隠されるリポジトリ自身の .git/hooks/pre-commit を呼ぶ。
+set -euo pipefail
+
+# リポジトリ自身のフックに自分が書き換えられても戻せるよう、先に自分を複製しておく。
+self="${BASH_SOURCE[0]}"
+self_copy="$(mktemp "${TMPDIR:-/tmp}/pre-commit.XXXXXX")"
+trap 'rm -f "$self_copy"' EXIT
+cp "$self" "$self_copy"
+
+# 本番の配置で hooks が書き込める状態なら、書き込みの権限を外す。chezmoi は最初のエラーで止まるので、
+# apply が途中で失敗すると、書き込みの権限を外す run_after_41 に届かないまま残ることがある。
+if [ "$self" -ef "$HOME/.config/git/hooks/pre-commit" ] && [ -w "$(dirname "$self")" ]; then
+  chmod a-w "$(dirname "$self")" 2>/dev/null || true
+  echo "[pre-commit] WARNING: ~/.config/git/hooks に書き込める状態だったので、書き込みの権限を外しました。前回の chezmoi apply が途中で止まった可能性があります。" >&2
+fi
+
+# GUI の Git クライアントなど、シェルの設定を読まない起動でも mise の gitleaks を見つける。
+PATH="$PATH:$HOME/.local/share/mise/shims"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  scan() { gitleaks git --staged --redact --no-banner "$@"; }
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+
+  # 秘密情報の検査。リポジトリ独自の .gitleaks.toml があれば gitleaks が自動で使う。
+  if [ -n "$toplevel" ] && [ -f "$toplevel/.gitleaks.toml" ]; then
+    scan || {
+      echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  else
+    scan --config "$HOME/.config/git/gitleaks.toml" || {
+      echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  fi
+
+  # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
+  # gcrypt の remote（暗号化した Obsidian の vault）のうち、クライアントの vault はクライアント名を書くのが
+  # 前提なので除く。personal の vault は全案件のセッションが読むので、クライアント名を入れないよう検査する。
+  own="$HOME/.config/git/gitleaks-own.toml"
+  check_own=false
+  case "$(git remote get-url origin 2>/dev/null || true)" in
+    gcrypt::*/vault-backups/personal) check_own=true ;;
+    gcrypt::*) ;;
+    "" | *github.com[:/]kryota-dev/*) check_own=true ;;
+  esac
+  if "$check_own" && [ -f "$own" ]; then
+    scan --config "$own" || {
+      echo "[pre-commit] クライアント・勤務先の固有名らしきものを検出したため、コミットを中止しました。" >&2
+      exit 1
+    }
+  fi
+else
+  echo "[pre-commit] gitleaks が見つからないため、秘密情報の検査を省略しました。" >&2
+fi
+
+# --git-common-dir は core.hooksPath の影響を受けず（自分自身を呼ばない）、worktree からも使える。
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+local_hook="$common_dir/hooks/pre-commit"
+if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "$self" ]; then
+  # 古い lefthook（2.1.4 以前、PR #1371）は hooks の書き先を `git rev-parse --git-path hooks` で求めるので、
+  # 子プロセスがグローバルの core.hooksPath を受け継ぐと、`lefthook run` がグローバルの hooks を書き直す。
+  # そこで子プロセスにだけ core.hooksPath をリポジトリの hooks に向ける（グローバルの検査はここで済んでいる）。
+  #
+  # それでも、`git config --global` や固定のパスを読んでグローバルの hooks に書くツールには効かないので、
+  # exec ではなく子プロセスで呼び、呼んだあとに自分が書き換わっていないかを確かめて戻す。bash はスクリプトを
+  # 読み進めながら実行するので、書き換えられたファイルを読まないよう、呼んだあとの処理は { } で一度に読み込む。
+  {
+    n="${GIT_CONFIG_COUNT:-0}"
+    rc=0
+    env GIT_CONFIG_COUNT="$((n + 1))" "GIT_CONFIG_KEY_$n=core.hooksPath" "GIT_CONFIG_VALUE_$n=$common_dir/hooks" \
+      "$local_hook" "$@" || rc=$?
+    if ! cmp -s "$self_copy" "$self"; then
+      hooks_dir="$(dirname "$self")"
+      restored=true
+      # 読み取り専用のファイルは上書きできないので、消してから置き直す。
+      { chmod u+w "$hooks_dir" && rm -f "$self" && cp "$self_copy" "$self" && chmod 555 "$self"; } 2>/dev/null || restored=false
+      chmod a-w "$hooks_dir" 2>/dev/null || true
+      if "$restored"; then
+        echo "[pre-commit] WARNING: グローバルの pre-commit がリポジトリのフックに書き換えられたので、元に戻しました。管理外のフックを消すために chezmoi apply を実行してください。" >&2
+      else
+        echo "[pre-commit] WARNING: グローバルの pre-commit がリポジトリのフックに書き換えられましたが、元に戻せませんでした。chezmoi apply を実行して戻し、管理外のフックを消してください。" >&2
+      fi
+    fi
+    exit "$rc"
+  }
+fi
