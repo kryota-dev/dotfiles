@@ -5,7 +5,7 @@
 bats_require_minimum_version 1.5.0
 
 setup() {
-  HOOK="$BATS_TEST_DIRNAME/../home/dot_config/git/exact_hooks/executable_pre-commit"
+  HOOK="$BATS_TEST_DIRNAME/../home/dot_config/git/exact_hooks/readonly_executable_pre-commit"
   export HOME="$BATS_TEST_TMPDIR/home"
   export TMPDIR="$BATS_TEST_TMPDIR"
   mkdir -p "$HOME/.config/git" "$BATS_TEST_TMPDIR/bin"
@@ -33,6 +33,9 @@ run_installed_hook() {
   GLOBAL_HOOK="$HOME/.config/git/hooks/pre-commit"
   cp "$HOOK" "$GLOBAL_HOOK"
   chmod +x "$GLOBAL_HOOK"
+  # 本番の apply 後の状態に合わせる。
+  [ -z "${HOOK_READONLY:-}" ] || chmod a-w "$GLOBAL_HOOK"
+  [ -z "${HOOKS_DIR_LOCKED:-}" ] || chmod a-w "$HOME/.config/git/hooks"
   run --separate-stderr bash -c 'cd "$1" && bash "$2"' _ "$REPO" "$GLOBAL_HOOK"
 }
 
@@ -92,6 +95,26 @@ write_repo_hook() {
   [[ "$stderr" == *"chezmoi apply"* ]]
 }
 
+@test "グローバルの pre-commit が読み取り専用でも、リポジトリのフックが rm して書き直したら、元に戻して警告する" {
+  # chezmoi の readonly_ のファイルは、上書きでは書き換えられないので、rm してから書き直す。
+  write_repo_hook "d=\"\$HOME/.config/git/hooks\"; chmod u+w \"\$d\"; rm -f \"\$d/pre-commit\"; printf '#!/usr/bin/env bash\necho replaced\n' >\"\$d/pre-commit\""
+  cp "$HOOK" "$BATS_TEST_TMPDIR/original"
+  HOOK_READONLY=1 run_installed_hook
+  [ "$status" -eq 0 ]
+  cmp -s "$BATS_TEST_TMPDIR/original" "$GLOBAL_HOOK"
+  [ -x "$GLOBAL_HOOK" ]
+  [ ! -w "$GLOBAL_HOOK" ]
+  [[ "$stderr" == *"[pre-commit] WARNING:"* ]]
+}
+
+@test "hooks ディレクトリが書き込める状態で走ったら、書き込みの権限を外して警告する" {
+  write_repo_hook "exit 0"
+  run_installed_hook
+  [ "$status" -eq 0 ]
+  [ ! -w "$HOME/.config/git/hooks" ]
+  [[ "$stderr" == *"[pre-commit] WARNING:"* ]]
+}
+
 @test "リポジトリのフックの終了コードをそのまま返す" {
   write_repo_hook "exit 3"
   run_installed_hook
@@ -100,7 +123,7 @@ write_repo_hook() {
 
 @test "書き換えが無いときは警告を出さない" {
   write_repo_hook "exit 0"
-  run_installed_hook
+  HOOKS_DIR_LOCKED=1 run_installed_hook
   [ "$status" -eq 0 ]
   [[ "$stderr" != *"WARNING"* ]]
 }

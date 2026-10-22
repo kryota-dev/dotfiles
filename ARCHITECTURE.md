@@ -122,9 +122,10 @@ vault 名・自宅のホスト名のように、秘密ではないが公開し�
 
 ほかのリポジトリの古い lefthook（2.1.4 以前の `lefthook run`、2.1.0 より前の `lefthook install`）は、グローバルの
 `core.hooksPath` のフックを上書きする。これを 3 層で防ぐ。`run_after_41` が apply のあいだ `~/.config/git/hooks` から
-書き込みの権限を外し、`run_before_06` が apply の前に戻す（`readonly_` はディレクトリの中を更新できない）。
+書き込みの権限を外し、`run_before_06` が apply の前に戻す（ディレクトリの `readonly_` は中を更新できない）。
+ディレクトリの権限では中身の書き直しを止められないので、pre-commit 自体も `readonly_` にする。
 `exact_hooks` が管理外のフックを apply で消す。それでも書き換わったら、pre-commit がリポジトリのフックを呼んだあとに
-気付いて元に戻し、警告する。
+気付いて元に戻し、警告する。apply が途中で止まって書き込める状態が残っていれば、次の commit で pre-commit が外す。
 
 ## 依存の更新
 

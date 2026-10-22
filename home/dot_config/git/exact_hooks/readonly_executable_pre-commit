@@ -9,6 +9,13 @@ self_copy="$(mktemp "${TMPDIR:-/tmp}/pre-commit.XXXXXX")"
 trap 'rm -f "$self_copy"' EXIT
 cp "$self" "$self_copy"
 
+# 本番の配置で hooks が書き込める状態なら、書き込みの権限を外す。chezmoi は最初のエラーで止まるので、
+# apply が途中で失敗すると、書き込みの権限を外す run_after_41 に届かないまま残ることがある。
+if [ "$self" -ef "$HOME/.config/git/hooks/pre-commit" ] && [ -w "$(dirname "$self")" ]; then
+  chmod a-w "$(dirname "$self")" 2>/dev/null || true
+  echo "[pre-commit] WARNING: ~/.config/git/hooks に書き込める状態だったので、書き込みの権限を外しました。前回の chezmoi apply が途中で止まった可能性があります。" >&2
+fi
+
 # GUI の Git クライアントなど、シェルの設定を読まない起動でも mise の gitleaks を見つける。
 PATH="$PATH:$HOME/.local/share/mise/shims"
 
@@ -62,7 +69,8 @@ if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "$self"
     if ! cmp -s "$self_copy" "$self"; then
       hooks_dir="$(dirname "$self")"
       restored=true
-      { chmod u+w "$hooks_dir" && cp "$self_copy" "$self" && chmod +x "$self"; } 2>/dev/null || restored=false
+      # 読み取り専用のファイルは上書きできないので、消してから置き直す。
+      { chmod u+w "$hooks_dir" && rm -f "$self" && cp "$self_copy" "$self" && chmod 555 "$self"; } 2>/dev/null || restored=false
       chmod a-w "$hooks_dir" 2>/dev/null || true
       if "$restored"; then
         echo "[pre-commit] WARNING: グローバルの pre-commit がリポジトリのフックに書き換えられたので、元に戻しました。管理外のフックを消すために chezmoi apply を実行してください。" >&2
