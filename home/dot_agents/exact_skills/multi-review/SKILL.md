@@ -55,7 +55,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | large | `review-general` ＋ `reviewer-gpt`（入れ替えない。同じ系統の目と別の系統の目の両方で見る形が、すでに対称になっている） |
 
 - **general は実装と別の系統で見る。** pr-workflow は実装者を PR ごとに選び、`--implementer` で渡す。gpt なら Claude、claude なら GPT が general の主担当になる。large だけは両方の系統の general を立てる。同じ観点を 2 つのモデルで回すと、差分が小さいうちは重複が大半になるので、2 本にするのは large だけにする。
-- 親がほとんどを自分で書いた PR（trivial や、secret に触れるので委任しなかったタスク）や、人が書いた PR でも、roster は変えない。`--implementer` が渡らず、実装の系統が Claude なら、統合サマリーに「general が実装と同じ系統」と書く。
+- `--implementer` は実際に書いた系統を表す（pr-workflow は、親が書く PR では親のハーネスの系統を渡す）。`--implementer` が渡らない PR（人が書いた PR を含む）では roster を変えず、実装の系統が Claude なら、統合サマリーに「general が実装と同じ系統」と書く。
 - Claude の leg が cyber safeguard で fallback したら（`modelUsage` に要求していないモデルがある）、model-roles.md の「fallback の検出」に従って `reviewer-gpt` で走らせ直し、実行記録に残す。
 - intent は PR の本文・リンク先の issue・spec を辿る。未検証の本文を最も深く読む leg で、`review-intent` は Bash も `gh` も持たない。親が、本文がリンクする同じ repo の issue / PR（`gh … --repo "$OWNER/$REPO"`）の要件と本文だけを取得してファイルに書き、そのパスと spec を渡す。レビュー・コメントの履歴と、本文中の外部 URL は取得しない。
 - spec-context が渡されたら、tier に関わらず intent を立てる（spec との整合を報告するのは intent だけなので）。

@@ -44,7 +44,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 
 - 既定は Codex（GPT）。
 - `command -v codex` が失敗するか、`codex login status` が 0 以外なら Claude。Codex を起動できない。
-- 読ませるファイルの合計のバイト数を 4 で割った見込みが `LONG_CONTEXT_TOKENS=272000` を超えるなら Claude。Sonnet 5.5 は 272K トークンを超えるプロンプトで大幅に安い（[BenchLM](https://benchlm.ai/compare/claude-sonnet-5-5-vs-gpt-6-1-sol)）。
+- Phase 0 の時点で分かる入力（Issue・Phase 0 で読んだファイル・spec や PRD）の合計のバイト数を 4 で割った見込みが `LONG_CONTEXT_TOKENS=272000` を超えるなら Claude。Sonnet 5.5 は 272K トークンを超えるプロンプトで大幅に安い（[BenchLM](https://benchlm.ai/compare/claude-sonnet-5-5-vs-gpt-6-1-sol)）。
 
 secret や認証情報に触れうるタスクは、どちらを選んでも親が書く。
 
@@ -129,7 +129,7 @@ claude_leg() {
 ```bash
 # claude_impl <役割> <結果 JSON> [許すドメイン …] < プロンプト
 claude_impl() {
-  local role=$1 out=$2 m e tools gd gcd root settings
+  local role=$1 out=$2 m e tools gd gcd root secret_env settings
   shift 2
   gd=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) &&
     gcd=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
@@ -143,13 +143,15 @@ claude_impl() {
     echo "abort: ~/.agents/roles/$role.md が無い。chezmoi apply を実行する" >&2
     return 1
   }
-  settings=$(jq -nc --arg gcd "$gcd" '{sandbox: {
+  # 起動時の環境から、名前が認証情報らしい変数を拾って拒否に足す（固定の一覧だけでは漏れる）。
+  secret_env=$(compgen -e | grep -E 'TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL' | jq -Rsc 'split("\n") | map(select(length > 0))')
+  settings=$(jq -nc --arg gcd "$gcd" --argjson env "$secret_env" '{sandbox: {
     enabled: true, allowUnsandboxedCommands: false, failIfUnavailable: true, autoAllowBashIfSandboxed: true,
     network: {strictAllowlist: true, allowedDomains: $ARGS.positional},
     filesystem: {denyWrite: [$gcd]},
     credentials: {
-      files: (["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.config/gh", "~/.docker", "~/.codex", "~/.netrc", "~/.npmrc", "~/.git-credentials"] | map({path: ., mode: "deny"})),
-      envVars: (["GH_TOKEN", "GITHUB_TOKEN", "NPM_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"] | map({name: ., mode: "deny"}))}}}' --args "$@")
+      files: (["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.config/gh", "~/.docker", "~/.codex", "~/.netrc", "~/.npmrc", "~/.git-credentials", "~/.gmail-mcp", "~/.config/op", "~/.gnupg", "~/.kube"] | map({path: ., mode: "deny"})),
+      envVars: ((["GH_TOKEN", "GITHUB_TOKEN", "NPM_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"] + $env) | unique | map({name: ., mode: "deny"}))}}}' --args "$@")
   # shellcheck disable=SC2086 # tools は定義の道具名を空白で区切ったもの
   claude -p --model "$m" --effort "$e" --output-format json \
     --permission-mode dontAsk --setting-sources "" --strict-mcp-config --settings "$settings" \
@@ -164,10 +166,11 @@ claude_impl() {
 - プロンプトは stdin で渡す。`--allowedTools` などの可変長の引数が、末尾の位置引数を飲み込むため。
 - Bash の allow は渡さない。sandbox の中のコマンドは auto-allow で確認なしに通り、`FOO=bar cmd` のように通常の判定に回るものは `dontAsk` で拒否される。
 - `denyWrite` に git の共通ディレクトリを入れる。sandbox は linked worktree の共有 `.git` への書き込みを既定で許すので、commit・reset を物理的に止めるために必要である。linked worktree の外では起動しない。
-- 実機の確認（2026-10-22、Claude Code 2.1.291、macOS）: 同じ設定で、Bash は通り、外部への `curl` は proxy に 403 で拒否され、`denyRead` のファイルの読み取りと `$HOME` への書き込みは `Operation not permitted` で拒否された。
+- 環境変数は、固定の一覧に加えて、起動時の環境から名前が認証情報らしいものを拾い、`credentials.envVars` で sandbox の中から消す。`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` は使わない。付けると `bash t.sh` のようなスクリプトの実行が自動許可から外れ、`dontAsk` で拒否されて、実装者がテストを回せなくなる（実機で確かめた）。
+- 実機の確認（2026-10-22、Claude Code 2.1.291、macOS）: この関数で、Bash は確認なしで通った。外部への `curl` は proxy に 403 で拒否された。worktree のルートの `.git` ファイルと `$HOME` への書き込みは `operation not permitted` で拒否され、Edit も拒否された。`~/.ssh` の読み取りは拒否され、`credentials.envVars` の環境変数（`GH_TOKEN`）は消えていた。一覧に無かった `~/.gmail-mcp` は読め、一覧に無い環境変数は見えたので、上の一覧と環境変数の拾い上げを足した。
 - `failIfUnavailable` により、sandbox を起動できないと claude は起動時に終わる。sandbox なしで走らせ直さず、user に上げる。
-- ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 3 引数以降に渡す。
-- 親は diff の全体を読んでから、ホストでテストと lint を実行する。commit は親が行う。
+- ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 3 引数以降に渡す。書き込みのできる API を持つドメイン（汎用のコードホスティングなど）は、秘密の持ち出しの経路になるので避ける。
+- 親は `git status --porcelain` と `git diff` で、新規ファイルも含めて変更の全体を読んでから、ホストでテストと lint を実行する（`git diff` は未追跡のファイルを出さない）。commit は親が行う。順序は `codex` skill の親の手順と同じ。
 - 結果の `modelUsage` に要求していないモデルがあれば、fallback として実行記録と PR の本文に残す。走らせ直さない。
 
 ## GPT の役割の起動

@@ -47,6 +47,7 @@ user-invocable: true
 役割と推奨の規則は model-roles.md の「実装者の選択」に従う。
 
 - tier が `trivial` なら尋ねない（親が編集する）。
+- 親が書く PR（trivial と、secret に触れうるので親が書いたタスクだけの PR）では、実装者は親のハーネスの系統とする（Claude Code なら claude、Codex なら codex）。
 - `--implementer` があればそれを使う。
 - 無ければ、ハーネスの構造化された質問ツールで 1 回だけ尋ねる。推奨は上の規則で決めて先頭に置き、各選択肢に使う役割と推奨の理由を 1 行で添える。
 - 非対話で尋ねられなければ推奨を採り、その旨と理由を PR の本文に 1 行残す。
@@ -104,14 +105,14 @@ PR ができたら、ready for review に移すかを user に確認する（外
 
 `gh pr checks <番号> --watch` を前景で実行して待つ。シェルのタイムアウトで切れたら、同じ turn の中でもう一度待つ（1 Phase につき 6 回まで。超えたら failure として user に上げる）。
 
-失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて実装者の系統の light の役割に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。3 回失敗したら user に上げる。
+失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて実装者の系統の light の役割に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。CI の失敗が 3 回続いたら user に上げる。この上限は CI の実行の回数で、実装の格上げの段とは別に数え、先に当たったほうで user に上げる。
 
 ## Phase 6: レビュー
 
 CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
 
 - `--tier=<Phase 0 の tier>` を渡す。
-- `--implementer=<claude|gpt>` を渡す（Codex を選んだら gpt）。
+- `--implementer=<claude|gpt>` を渡す（Codex を選んだら gpt。親が書く PR では親のハーネスの系統）。
 - レビュアーは親の履歴と過去のレビュー結果を渡さず新規起動する（Codex の `spawn_agent` は `fork_turns: "none"`）。対象 HEAD・base の SHA を固定し、モデル・推論設定・履歴継承・確認範囲を multi-review の実行記録に残す。指摘0件でも確認根拠を省かない。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
 - standard / large では、`sdd` の spec ディレクトリを `--spec-context <絶対パス>` で渡す。

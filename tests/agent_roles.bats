@@ -221,6 +221,7 @@ load_role_helpers() {
 @test "claude_impl は sandbox の設定・道具・権限を組み立てる" {
   load_role_helpers
   claude() { printf '%s\n' "$@"; }
+  export EXAMPLE_SERVICE_API_KEY=dummy
   local repo="$BATS_TEST_TMPDIR/main" wt="$BATS_TEST_TMPDIR/wt" gcd settings
   git init -q "$repo"
   git -C "$repo" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
@@ -244,4 +245,12 @@ load_role_helpers() {
   root=$(git rev-parse --show-toplevel)
   [[ "$args" == *$'\n'"Edit(/$root/**)"$'\n'* ]]
   [[ "$args" != *'Edit(./**)'* ]]
+  [[ "$args" == *$'\n'"Read(/$root/**)"$'\n'* ]]
+  [[ "$args" == *$'--disallowedTools\nRead(//**/.env)\n'* ]]
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "GH_TOKEN" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
+  [ "$(jq -r '.sandbox.credentials.files | map(select(.path == "~/.gmail-mcp")) | length' <<<"$settings")" = 1 ]
+  # 固定の一覧に無い変数も、名前が認証情報らしければ拒否に入る。
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "EXAMPLE_SERVICE_API_KEY" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "HOME")) | length' <<<"$settings")" = 0 ]
+  [[ "$args" != *SUBPROCESS_ENV_SCRUB* ]]
 }
