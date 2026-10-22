@@ -60,13 +60,13 @@ fi
 common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 local_hook="$common_dir/hooks/pre-commit"
 if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "$self" ]; then
-  # exec ではなく子プロセスで呼ぶのは、古い lefthook（2.1.4 以前、PR #1371）がここで自分のシムを
-  # グローバルの hooksPath に上書きしても、戻すため。bash はスクリプトを読み進めながら実行するので、
-  # 書き換えられたファイルを読まないよう、呼んだあとの処理は { } で一度に読み込んで exit で終える。
-  #
-  # 古い lefthook は hooks の書き先を `git rev-parse --git-path hooks` で求めるので、子プロセスが
-  # グローバルの core.hooksPath を受け継ぐと、`lefthook run` が書き直すフックがグローバルの hooks に入る。
+  # 古い lefthook（2.1.4 以前、PR #1371）は hooks の書き先を `git rev-parse --git-path hooks` で求めるので、
+  # 子プロセスがグローバルの core.hooksPath を受け継ぐと、`lefthook run` がグローバルの hooks を書き直す。
   # そこで子プロセスにだけ core.hooksPath をリポジトリの hooks に向ける（グローバルの検査はここで済んでいる）。
+  #
+  # それでも、`git config --global` や固定のパスを読んでグローバルの hooks に書くツールには効かないので、
+  # exec ではなく子プロセスで呼び、呼んだあとに自分が書き換わっていないかを確かめて戻す。bash はスクリプトを
+  # 読み進めながら実行するので、書き換えられたファイルを読まないよう、呼んだあとの処理は { } で一度に読み込む。
   {
     n="${GIT_CONFIG_COUNT:-0}"
     rc=0
