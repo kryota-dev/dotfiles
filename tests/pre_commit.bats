@@ -127,3 +127,25 @@ write_repo_hook() {
   [ "$status" -eq 0 ]
   [[ "$stderr" != *"WARNING"* ]]
 }
+
+# グローバルの core.hooksPath を設定し、リポジトリのフックが見る git の hooks の場所を記録させる。
+record_git_path_hooks() {
+  export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/gitconfig"
+  git config --global core.hooksPath "$HOME/.config/git/hooks"
+  write_repo_hook "$1git rev-parse --path-format=absolute --git-path hooks >\"$BATS_TEST_TMPDIR/git-path-hooks\""
+}
+
+@test "リポジトリのフックの子プロセスでは、core.hooksPath がリポジトリの hooks を指す" {
+  record_git_path_hooks ""
+  run_installed_hook
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/git-path-hooks")" = "$(cd "$REPO/.git/hooks" && pwd -P)" ]
+}
+
+@test "GIT_CONFIG_COUNT が設定済みでも壊さず、続きの番号で core.hooksPath を足す" {
+  record_git_path_hooks "git config user.name >\"$BATS_TEST_TMPDIR/user-name\"; "
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=probe run_installed_hook
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/user-name")" = probe ]
+  [ "$(cat "$BATS_TEST_TMPDIR/git-path-hooks")" = "$(cd "$REPO/.git/hooks" && pwd -P)" ]
+}

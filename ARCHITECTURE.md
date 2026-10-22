@@ -121,7 +121,9 @@ vault 名・自宅のホスト名のように、秘密ではないが公開し�
 固有名（パターンは 1Password にある）も検出する。
 
 ほかのリポジトリの古い lefthook（2.1.4 以前の `lefthook run`、2.1.0 より前の `lefthook install`）は、グローバルの
-`core.hooksPath` のフックを上書きする。これを 3 層で防ぐ。`run_after_41` が apply のあいだ `~/.config/git/hooks` から
+`core.hooksPath` のフックを上書きする（lefthook は書き先を `git rev-parse --git-path hooks` で求める）。まず、pre-commit は
+リポジトリのフックの子プロセスにだけ `GIT_CONFIG_*` で `core.hooksPath` をリポジトリの hooks に向け、commit の経路での
+上書きを書き先ごと外す。commit の外で動く古い `lefthook install` に備えて、さらに次で防ぐ。`run_after_41` が apply のあいだ `~/.config/git/hooks` から
 書き込みの権限を外し、`run_before_06` が apply の前に戻す（ディレクトリの `readonly_` は中を更新できない）。
 ディレクトリの権限では中身の書き直しを止められないので、pre-commit 自体も `readonly_` にする。
 `exact_hooks` が管理外のフックを apply で消す。それでも書き換わったら、pre-commit がリポジトリのフックを呼んだあとに

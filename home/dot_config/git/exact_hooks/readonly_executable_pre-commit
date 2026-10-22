@@ -63,9 +63,15 @@ if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "$self"
   # exec ではなく子プロセスで呼ぶのは、古い lefthook（2.1.4 以前、PR #1371）がここで自分のシムを
   # グローバルの hooksPath に上書きしても、戻すため。bash はスクリプトを読み進めながら実行するので、
   # 書き換えられたファイルを読まないよう、呼んだあとの処理は { } で一度に読み込んで exit で終える。
+  #
+  # 古い lefthook は hooks の書き先を `git rev-parse --git-path hooks` で求めるので、子プロセスが
+  # グローバルの core.hooksPath を受け継ぐと、`lefthook run` が書き直すフックがグローバルの hooks に入る。
+  # そこで子プロセスにだけ core.hooksPath をリポジトリの hooks に向ける（グローバルの検査はここで済んでいる）。
   {
+    n="${GIT_CONFIG_COUNT:-0}"
     rc=0
-    "$local_hook" "$@" || rc=$?
+    env GIT_CONFIG_COUNT="$((n + 1))" "GIT_CONFIG_KEY_$n=core.hooksPath" "GIT_CONFIG_VALUE_$n=$common_dir/hooks" \
+      "$local_hook" "$@" || rc=$?
     if ! cmp -s "$self_copy" "$self"; then
       hooks_dir="$(dirname "$self")"
       restored=true
