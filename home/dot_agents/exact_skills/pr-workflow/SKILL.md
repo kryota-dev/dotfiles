@@ -5,7 +5,7 @@ description: |
   operation variant を判定し、ワークツリー作成 → 実装 → CI → レビュー → 指摘対応を tier に応じた深さで進める。
   トリガー: "pr-workflow", "tier 判定して PR まで", "ワークフロー skill で進めて"
   使用場面: 規模の異なるタスクを、tier に応じた深さで PR にしたいとき。
-argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--strict]"
+argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--implementer=claude|codex] [--strict]"
 user-invocable: true
 ---
 
@@ -16,7 +16,7 @@ user-invocable: true
 - **全 tier でワークツリーを作り**（`wtp`）、以降のすべての作業をその中で行う。main worktree を直接変更しない。
 - **委譲先の skill は実際に起動する。** `multi-review` / `review-resolve-loop` を「自分でやった方が速い」と手作業で代替しない（各 skill が持つ取得経路の網羅を欠き、指摘を取りこぼす）。
 - **マージは user が行う。** 自動でマージしない。
-- **設計と判断は Claude、実装は GPT。** どの作業をどの役割（モデルとエフォート）に任せるかは [`references/model-roles.md`](references/model-roles.md) に従う。
+- **設計と判断は Claude。実装者は PR ごとに Claude と Codex から選ぶ。** どの作業をどの役割（モデルとエフォート）に任せるかは [`references/model-roles.md`](references/model-roles.md) に従う。
 - **待ちは同じ turn の中で完結させる。** CI やバックグラウンドの作業の完了を待って turn を終えない（非対話の実行には次の turn が無く、後続の Phase が走らないまま成功として終わる）。turn を終えてよいのは、user の判断を待つときだけ。
 
 ## 引数
@@ -26,6 +26,7 @@ user-invocable: true
 | `<task description>` | - | タスク（自由記述。Issue の URL / `#番号` 可） |
 | `--size` | 自動判定 | tier の上書き |
 | `--operation` | 自動判定 | operation variant の上書き |
+| `--implementer` | 尋ねる | 実装者の系統（`claude\|codex`）。渡されたら尋ねない |
 | `--strict` | off | GATE 2 を自動で進めず user の承認を待つ |
 
 ## Phase 0: 分類
@@ -41,6 +42,17 @@ user-invocable: true
 - 実装中にこれらへの変更が判明したら、その場で `standard` 以上に引き上げ、重い path に切り替える。
 - operation: `add-feature`（受け入れ基準を網羅）、`change-feature`（後方互換を確認）、`fix-defect`（再現テストを先に書く）、`refactor`（外部の振る舞いを変えないことを検証）、`mvp`（最小の範囲に絞る）。
 
+## 実装者の選択
+
+役割と推奨の規則は model-roles.md の「実装者の選択」に従う。
+
+- tier が `trivial` なら尋ねない（親が編集する）。
+- `--implementer` があればそれを使う。
+- 無ければ、ハーネスの構造化された質問ツールで 1 回だけ尋ねる。推奨は上の規則で決めて先頭に置き、各選択肢に使う役割と推奨の理由を 1 行で添える。
+- 非対話で尋ねられなければ推奨を採り、その旨と理由を PR の本文に 1 行残す。
+- 決めた実装者は、その PR の初回の実装・CI の修正・指摘の修正・格上げのすべてに使う。
+- secret や認証情報に触れうるタスクは、どちらを選んでも親が書く。
+
 ## Phase 0.5: ワークツリー
 
 1. ブランチ名を operation から決める（`feat/…` / `fix/…` / `refactor/…`。Issue があれば番号を含めてよい）。
@@ -48,7 +60,7 @@ user-invocable: true
 3. 衝突したら `wtp list` で確認し、再利用するか別名にする。
 4. 呼び出し元がワークツリーを用意済みなら作らずに使う。削除はマージ後に user か呼び出し元が `wtp remove` で行う。
 
-`sdd` に委ねるときは、委譲プロンプトに「ワークツリーは作成済み。現在のワークツリーで作業し、新しく作らない。PR の base は `<$BASE>`」と書く。
+`sdd` に委ねるときは、委譲プロンプトに「ワークツリーは作成済み。現在のワークツリーで作業し、新しく作らない。PR の base は `<$BASE>`。実装者は `<claude|codex>`」と書く。
 
 ### 共有作業ツリーでの subagent 委譲契約
 
@@ -79,7 +91,7 @@ user-invocable: true
 ### small の進め方
 
 1. **計画（Claude）**: 変更するファイル、テストの一覧（先に書いて失敗させるもの）、完了の条件を短く書く。Claude Code では親が書く。Codex では `spec-designer` を model-roles.md の `claude_leg` で起動し（追加の許可は渡さず、読み取りだけにする）、結果の本文を計画として受け取る。
-2. **実装（GPT）**: 計画を `implementer-light` に渡す。Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
+2. **実装（選んだ実装者）**: 計画を実装者の系統の light の役割に渡す。Codex なら、Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。Claude なら、どちらのハーネスからも model-roles.md の `claude_impl`。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
 3. **検証（親）**: diff の全体を読んでから、テストと lint を実行する。計画のテストが先に失敗する形で書かれているか、テストを弱めていないかも見る。通ったら親がコミットする。失敗したら、原因を委譲プロンプトに足して渡し直す。格上げは model-roles.md の「実装の格上げ」に従う。
 
 standard / large は、意図の確認なしに実装へ入らない。確認を省くなら理由を PR に 1 行残す。コミットと PR は `~/AGENTS.md` の規約に従う。
@@ -92,13 +104,14 @@ PR ができたら、ready for review に移すかを user に確認する（外
 
 `gh pr checks <番号> --watch` を前景で実行して待つ。シェルのタイムアウトで切れたら、同じ turn の中でもう一度待つ（1 Phase につき 6 回まで。超えたら failure として user に上げる）。
 
-失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて `implementer-light` に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。3 回失敗したら user に上げる。
+失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて実装者の系統の light の役割に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。3 回失敗したら user に上げる。
 
 ## Phase 6: レビュー
 
 CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
 
 - `--tier=<Phase 0 の tier>` を渡す。
+- `--implementer=<claude|gpt>` を渡す（Codex を選んだら gpt）。
 - レビュアーは親の履歴と過去のレビュー結果を渡さず新規起動する（Codex の `spawn_agent` は `fork_turns: "none"`）。対象 HEAD・base の SHA を固定し、モデル・推論設定・履歴継承・確認範囲を multi-review の実行記録に残す。指摘0件でも確認根拠を省かない。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
 - standard / large では、`sdd` の spec ディレクトリを `--spec-context <絶対パス>` で渡す。
@@ -107,7 +120,7 @@ GATE 2 は自動で通過する（`--strict` のときだけ user の承認を�
 
 ## Phase 7: 指摘対応
 
-`review-resolve-loop` を起動する。委譲プロンプトに「対応方針の承認は、真の人間レビュアーの項目があるラウンドだけで取る。bot と自分名義だけのラウンドは承認なしで進める。人間への返信前の承認は省かない」と書く。
+`review-resolve-loop` を起動する。委譲プロンプトに「対応方針の承認は、真の人間レビュアーの項目があるラウンドだけで取る。bot と自分名義だけのラウンドは承認なしで進める。人間への返信前の承認は省かない」と書く。あわせて「修正は実装者の系統の light の役割に渡す（実装者は `<claude|codex>`）」と書く。
 
 ## 到達点の検査（GATE 3 の前に必ず行う）
 
@@ -136,7 +149,7 @@ gh pr view <番号> --json reviews,statusCheckRollup | jq --arg me "$ME" '{
 | 局面 | 対処 |
 |---|---|
 | ワークツリーの作成に失敗 | `wtp list` で衝突を確認し、別名で再試行。だめなら user |
-| 実装の失敗 | 委譲プロンプトを直して再試行する。同じタスクで 2 回失敗したら `implementer-astra` で 1 回試し、だめなら user |
+| 実装の失敗 | model-roles.md の「実装の格上げ」に従い、同じ系統の中で 1 段ずつ上げる。最上位でもだめなら user |
 | コミット・push の失敗（1Password など） | `notify` で知らせ、user の対応を待つ |
 | merge conflict | 解消する。だめなら user |
 | GATE 3 で user が却下 | 止まる（マージしない） |

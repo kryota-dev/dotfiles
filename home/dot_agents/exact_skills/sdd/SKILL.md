@@ -17,6 +17,7 @@ spec（要件・設計・タスク）を書いてから実装し、コミット�
 
 - 引数: Issue URL か `#番号` なら `gh issue view <…> --json title,body,number,labels` で読む。テキストならそのまま使う。
 - PRD の受け取り（任意 / opt-in）: `--prd <path>` で `/grill-me --output-prd` の PRD を受け取り、要件の起点にする。file が無ければ error にして `/grill-me --output-prd` での作成を案内する（PRD を捏造しない）。
+- 実装者（`claude|codex`）: 呼び出し元から受け取る。受け取らなかったら、[`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md)「実装者の選択」の推奨を採る（sdd は承認で止まらないので尋ねない）。その旨と理由を PR の本文に 1 行残す。
 - spec 名: PRD の frontmatter の `slug`、無ければ内容から kebab-case で決める。
 
 ## ブランチとワークツリー
