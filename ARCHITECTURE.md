@@ -22,6 +22,7 @@
 | スクリプト | 実行する条件 | 内容 |
 |---|---|---|
 | `run_before_05` | apply のたび | macOS の更新で失われうる Rosetta 2 と Xcode のライセンス同意 |
+| `run_before_06` | apply のたび | `~/.config/git/hooks` に書き込みの権限を戻す（下の「秘密情報」） |
 | `run_onchange_before_10` | Brewfile の変更 | `brew bundle`（1 項目の失敗で apply を止めない） |
 | `run_onchange_after_12` | mise の設定の変更 | `mise install` |
 | `run_onchange_after_13` | スクリプトの変更 | Claude Code の MCP サーバーの登録 |
@@ -33,6 +34,7 @@
 | `run_onchange_after_22` | LaunchAgent の変更 | キーの割り当ての LaunchAgent を読み込み直す |
 | `run_after_31` | apply のたび | Obsidian の vault をそろえる（下記） |
 | `run_onchange_after_40` | sheldon の設定の変更 | `sheldon lock` |
+| `run_after_41` | apply のたび | `~/.config/git/hooks` から書き込みの権限を外す（下の「秘密情報」） |
 
 ## キーボード
 
@@ -117,6 +119,12 @@ vault 名・自宅のホスト名のように、秘密ではないが公開し�
 `.chezmoi.toml.tmpl` の `promptStringOnce` で初回に入力させて手元の設定に残し、ホスト名は 1Password から描画する。
 グローバルの gitleaks の pre-commit hook がすべてのコミットを検査し、自分のリポジトリではクライアント・勤務先の
 固有名（パターンは 1Password にある）も検出する。
+
+ほかのリポジトリの古い lefthook（2.1.4 以前の `lefthook run`、2.1.0 より前の `lefthook install`）は、グローバルの
+`core.hooksPath` のフックを上書きする。これを 3 層で防ぐ。`run_after_41` が apply のあいだ `~/.config/git/hooks` から
+書き込みの権限を外し、`run_before_06` が apply の前に戻す（`readonly_` はディレクトリの中を更新できない）。
+`exact_hooks` が管理外のフックを apply で消す。それでも書き換わったら、pre-commit がリポジトリのフックを呼んだあとに
+気付いて元に戻し、警告する。
 
 ## 依存の更新
 
