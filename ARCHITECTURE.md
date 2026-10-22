@@ -83,14 +83,16 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 
 ## モデルの役割分担
 
-設計と判断は Claude、実装は GPT に任せる。レビューの general は実装と別の系統の
-Claude が担う。根拠（各モデルの得意・不得意と費用）と役割表は
+設計と判断は Claude。実装者は PR ごとに Claude と GPT から選び、レビューの general は実装と別の系統が担う。
+根拠（各モデルの得意・不得意と費用）と役割表は
 `home/dot_agents/exact_skills/pr-workflow/references/model-roles.md` にある。
 
 モデルとエフォートは役割ごとに定義ファイルへ宣言し、skill には役割の名前だけを書く。GPT の役割は Codex の custom agent
 （`~/.codex/agents/*.toml`）で、Codex からは `spawn_agent`、Claude Code からは `codex exec` に定義の値を渡して起動する
 （`codex exec` は agent の定義を選べない）。Claude の役割は `~/.agents/roles/*.md` に置き、どちらのハーネスからも
-権限を絞った `claude -p` で起動する。Claude Code の subagent にしないのは、親の広い permission を継承させず、
+権限を絞った `claude -p` で起動する。実装の役割（`implementer-claude*`）だけは Bash を持ち、Claude Code の sandbox
+（`--settings` で有効にし、ネットワークなし・書き込みは作業ツリーと一時ディレクトリだけで、git の共通ディレクトリへの
+書き込みは拒否）の中で動く。Claude Code の subagent にしないのは、親の広い permission を継承させず、
 cyber safeguard の fallback を親のセッションから隔離して `modelUsage` で検出するため。`~/.claude/agents` に置くと
 Claude Code が自動委譲で subagent として選びうるので、Claude Code が読まない場所に置く。値の正本は定義ファイルで、
 役割表との一致と起動の引数は `tests/agent_roles.bats` が検査する。`roles/` と `agents/` は `exact_` にしない

@@ -177,15 +177,17 @@ load_role_helpers() {
   [ "$(gpt_role reviewer-gpt model_reasoning_effort)" = high ]
 }
 
-@test "Claude の役割は Bash を持たず、書き込みの道具は spec-designer だけが持つ" {
-  local f tools
+@test "Bash を持つのは implementer-claude* だけ、書き込みの道具を持つのは spec-designer と implementer-claude* だけ" {
+  local f tools name
   for f in "$SOURCE/dot_agents/roles/"*.md; do
     tools=$(claude_field "$f" tools)
+    name=$(basename "$f" .md)
+    case $name in implementer-claude*) continue ;; esac
     [[ "$tools" != *Bash* ]] || {
       echo "Bash を持つ: $f"
       return 1
     }
-    [ "$(basename "$f" .md)" = spec-designer ] && continue
+    [ "$name" = spec-designer ] && continue
     [[ "$tools" != *Edit* && "$tools" != *Write* ]] || {
       echo "書き込みの道具を持つ: $f ($tools)"
       return 1
@@ -204,4 +206,51 @@ load_role_helpers() {
   [[ "$args" == *$'--setting-sources\n\n'* ]]
   [[ "$args" == *"--permission-mode"$'\n'"dontAsk"* ]]
   [[ "$args" != *$'\nRead\n'* ]]
+}
+
+@test "claude_impl は linked worktree の外では claude を呼ばずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  git init -q "$BATS_TEST_TMPDIR/plain"
+  cd "$BATS_TEST_TMPDIR/plain"
+  run claude_impl implementer-claude "$BATS_TEST_TMPDIR/out.json" </dev/null
+  [ "$status" -ne 0 ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
+}
+
+@test "claude_impl は sandbox の設定・道具・権限を組み立てる" {
+  load_role_helpers
+  claude() { printf '%s\n' "$@"; }
+  export EXAMPLE_SERVICE_API_KEY=dummy
+  local repo="$BATS_TEST_TMPDIR/main" wt="$BATS_TEST_TMPDIR/wt" gcd settings
+  git init -q "$repo"
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
+  git -C "$repo" worktree add -q "$wt"
+  gcd=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)
+  cd "$wt"
+  claude_impl implementer-claude "$BATS_TEST_TMPDIR/out.json" example.com </dev/null
+  args=$(cat "$BATS_TEST_TMPDIR/out.json")
+  settings=$(awk '/^--settings$/{getline; print; exit}' "$BATS_TEST_TMPDIR/out.json")
+  [ "$(jq -r '.sandbox.enabled' <<<"$settings")" = true ]
+  [ "$(jq -r '.sandbox.allowUnsandboxedCommands' <<<"$settings")" = false ]
+  [ "$(jq -r '.sandbox.failIfUnavailable' <<<"$settings")" = true ]
+  [ "$(jq -r '.sandbox.network.strictAllowlist' <<<"$settings")" = true ]
+  [ "$(jq -r '.sandbox.network.allowedDomains | join(",")' <<<"$settings")" = example.com ]
+  [ "$(jq -r --arg gcd "$gcd" '.sandbox.filesystem.denyWrite | index($gcd) != null' <<<"$settings")" = true ]
+  [ "$(jq -r '.sandbox.credentials.files | map(select(.path == "~/.ssh" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
+  [[ "$args" == *$'--tools\nBash\n'* ]]
+  [[ "$args" == *$'--setting-sources\n\n'* ]]
+  [[ "$args" == *"--permission-mode"$'\n'"dontAsk"* ]]
+  # 実装者が cd しても基準が移らないよう、許可は worktree のルートの絶対パスで固定する。
+  root=$(git rev-parse --show-toplevel)
+  [[ "$args" == *$'\n'"Edit(/$root/**)"$'\n'* ]]
+  [[ "$args" != *'Edit(./**)'* ]]
+  [[ "$args" == *$'\n'"Read(/$root/**)"$'\n'* ]]
+  [[ "$args" == *$'--disallowedTools\nRead(//**/.env)\n'* ]]
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "GH_TOKEN" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
+  [ "$(jq -r '.sandbox.credentials.files | map(select(.path == "~/.gmail-mcp")) | length' <<<"$settings")" = 1 ]
+  # 固定の一覧に無い変数も、名前が認証情報らしければ拒否に入る。
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "EXAMPLE_SERVICE_API_KEY" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
+  [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "HOME")) | length' <<<"$settings")" = 0 ]
+  [[ "$args" != *SUBPROCESS_ENV_SCRUB* ]]
 }

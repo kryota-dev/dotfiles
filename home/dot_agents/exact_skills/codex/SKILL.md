@@ -84,7 +84,7 @@ codex exec --profile agent --cd "$TARGET_DIR" --color never -o <RESULT_FILE> - <
 PROMPT
 ```
 
-`-m` と `-c model_reasoning_effort=` は役割（standard・large のタスクは `implementer`、small と修正は `implementer-light`、格上げは `implementer-astra`）の定義から渡す。
+`-m` と `-c model_reasoning_effort=` は役割（standard・large のタスクは `implementer`、small と修正は `implementer-light`、格上げは `implementer-astra`）の定義から渡す。実装者に Claude を選んだ PR の実装は Codex に渡さず、[`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md) の「Claude の実装の役割の起動」に従う。
 
 **親の手順（この順を守る）**:
 
