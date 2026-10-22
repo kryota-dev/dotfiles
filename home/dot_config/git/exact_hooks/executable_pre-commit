@@ -3,6 +3,12 @@
 # core.hooksPath に隠されるリポジトリ自身の .git/hooks/pre-commit を呼ぶ。
 set -euo pipefail
 
+# リポジトリ自身のフックに自分が書き換えられても戻せるよう、先に自分を複製しておく。
+self="${BASH_SOURCE[0]}"
+self_copy="$(mktemp "${TMPDIR:-/tmp}/pre-commit.XXXXXX")"
+trap 'rm -f "$self_copy"' EXIT
+cp "$self" "$self_copy"
+
 # GUI の Git クライアントなど、シェルの設定を読まない起動でも mise の gitleaks を見つける。
 PATH="$PATH:$HOME/.local/share/mise/shims"
 
@@ -46,6 +52,24 @@ fi
 # --git-common-dir は core.hooksPath の影響を受けず（自分自身を呼ばない）、worktree からも使える。
 common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 local_hook="$common_dir/hooks/pre-commit"
-if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "${BASH_SOURCE[0]}" ]; then
-  exec "$local_hook" "$@"
+if [ -n "$common_dir" ] && [ -x "$local_hook" ] && ! [ "$local_hook" -ef "$self" ]; then
+  # exec ではなく子プロセスで呼ぶのは、古い lefthook（2.1.4 以前、PR #1371）がここで自分のシムを
+  # グローバルの hooksPath に上書きしても、戻すため。bash はスクリプトを読み進めながら実行するので、
+  # 書き換えられたファイルを読まないよう、呼んだあとの処理は { } で一度に読み込んで exit で終える。
+  {
+    rc=0
+    "$local_hook" "$@" || rc=$?
+    if ! cmp -s "$self_copy" "$self"; then
+      hooks_dir="$(dirname "$self")"
+      restored=true
+      { chmod u+w "$hooks_dir" && cp "$self_copy" "$self" && chmod +x "$self"; } 2>/dev/null || restored=false
+      chmod a-w "$hooks_dir" 2>/dev/null || true
+      if "$restored"; then
+        echo "[pre-commit] WARNING: グローバルの pre-commit がリポジトリのフックに書き換えられたので、元に戻しました。管理外のフックを消すために chezmoi apply を実行してください。" >&2
+      else
+        echo "[pre-commit] WARNING: グローバルの pre-commit がリポジトリのフックに書き換えられましたが、元に戻せませんでした。chezmoi apply を実行して戻し、管理外のフックを消してください。" >&2
+      fi
+    fi
+    exit "$rc"
+  }
 fi
