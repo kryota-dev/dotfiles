@@ -179,11 +179,12 @@ claude_impl() {
 
 ```bash
 gpt_role() { sed -nE "s/^$2 *= *\"([^\"]*)\"\$/\1/p" "$HOME/.codex/agents/$1.toml" | head -1; }
+gpt_body() { awk '/^"""$/{f=0} f; /^developer_instructions = """$/{f=1}' "$HOME/.codex/agents/$1.toml"; }
 ```
 
 | 親 | 起動 |
 |---|---|
-| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill |
+| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill。定義の本文を渡す役割（`grill-counterpart-gpt` など）は `-c developer_instructions="$(gpt_body R)"` も足す |
 | Codex | `spawn_agent` に `agent_type: <役割>` と `fork_turns: "none"` を渡す |
 
 値が空なら（`chezmoi apply` の前など）起動せずに止め、`chezmoi apply` を案内する。既定のモデルで黙って代えない。
