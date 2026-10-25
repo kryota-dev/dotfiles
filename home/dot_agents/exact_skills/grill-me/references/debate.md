@@ -9,15 +9,22 @@
 | 場所 | 中身 |
 |---|---|
 | `materials/` | 親が取得した issue・PR の本文、タスク記述 |
-| `sealed/NNN.md` | 親の封じた案（問い・案・根拠・人間の軸の該当）。相手に開示するまで渡さない |
 | `transcript/` | 往復のプロンプトと結果の全文 |
+
+親の封じた案は `$GRILL_DIR` の下に置かない。親だけが使う別の一時ディレクトリ `$SEALED_DIR`（`mktemp -d` で `$GRILL_DIR` と別に作る）に置く。
+
+| 場所 | 中身 |
+|---|---|
+| `$SEALED_DIR/NNN.md` | 親の封じた案（問い・案・根拠・人間の軸の該当）。相手に開示するまで渡さない。相手に渡すプロンプトに `$SEALED_DIR` のパスを書かない |
+
+GPT の相手は read-only の sandbox でディスクを読めるので、許可では絞れない。`$SEALED_DIR` を相手から辿れない場所に置くことと、役割の本文で守る。
 
 ## 相手の起動と続き
 
 | 親 | 起動 | 続き |
 |---|---|---|
-| Claude Code | `codex exec --sandbox read-only`。役割は `grill-counterpart-gpt` | `codex exec resume <thread_id>` |
-| Codex | `claude_leg grill-counterpart`。repo のルートを cwd にする | 同じ cwd で `claude_leg … --resume <session_id>` |
+| Claude Code | `codex exec --sandbox read-only`。役割は `grill-counterpart-gpt` | `codex exec resume <thread_id>`。resume でも sandbox・model・effort を明示する |
+| Codex | `claude_leg grill-counterpart`。repo のルートを cwd にする | 同じ cwd で `claude_leg … --resume <session_id>`（`claude_leg` の `Read(./**)` は cwd が基準なので） |
 
 関数 `claude_leg`・`gpt_role`・`gpt_body` は model-roles.md の「Claude の役割の起動」「GPT の役割の起動」にある。相手は 1 セッションを最後まで続ける。
 
@@ -27,40 +34,41 @@ Claude Code が親のとき:
 
 ```bash
 R=grill-counterpart-gpt
+M=$(gpt_role "$R" model)
+E=$(gpt_role "$R" model_reasoning_effort)
+B=$(gpt_body "$R")
+# M・E・B のどれかが空なら、起動せずに「失敗時」の 3 択へ進む
+[ -n "$M" ] && [ -n "$E" ] && [ -n "$B" ] || { echo "abort: 役割の値が空。chezmoi apply を実行する" >&2; exit 1; }
 codex exec --sandbox read-only --cd <repo> --color never --json \
-  -m "$(gpt_role "$R" model)" \
-  -c model_reasoning_effort="$(gpt_role "$R" model_reasoning_effort)" \
-  -c developer_instructions="$(gpt_body "$R")" \
+  -m "$M" \
+  -c model_reasoning_effort="$E" \
+  -c developer_instructions="$B" \
   -o "$GRILL_DIR/transcript/001.result.md" - < "$GRILL_DIR/transcript/001.prompt.md" \
   > "$GRILL_DIR/transcript/001.log" 2>&1
 TID=$(grep -o '"thread_id":"[^"]*"' "$GRILL_DIR/transcript/001.log" | head -1 | cut -d'"' -f4)
-codex exec resume "$TID" --json -o "$GRILL_DIR/transcript/002.result.md" - \
+codex exec resume "$TID" --json \
+  -m "$M" -c model_reasoning_effort="$E" -c sandbox_mode="read-only" \
+  -o "$GRILL_DIR/transcript/002.result.md" - \
   < "$GRILL_DIR/transcript/002.prompt.md" > "$GRILL_DIR/transcript/002.log" 2>&1
 ```
 
 Codex が親のとき（repo のルートから実行する）:
 
 ```bash
-claude_leg grill-counterpart "$GRILL_DIR/transcript/001.result.json" "Read(/$GRILL_DIR/**)" \
+claude_leg grill-counterpart "$GRILL_DIR/transcript/001.result.json" "Read(/$GRILL_DIR/materials/**)" \
   < "$GRILL_DIR/transcript/001.prompt.md"
-claude_leg grill-counterpart "$GRILL_DIR/transcript/002.result.json" "Read(/$GRILL_DIR/**)" \
+claude_leg grill-counterpart "$GRILL_DIR/transcript/002.result.json" "Read(/$GRILL_DIR/materials/**)" \
   --resume "$(jq -r .session_id "$GRILL_DIR/transcript/001.result.json")" \
   < "$GRILL_DIR/transcript/002.prompt.md"
 ```
-
-実機で確かめたこと（2026-10-25）:
-
-- `codex exec` は `-c developer_instructions=…` で役割の本文が反映され、`codex exec resume` でも保たれる。
-- `codex exec --json` の出力に、実際に使われたモデルは出ない。
-- `claude -p --resume` は別の cwd からも続けられる。ただし `claude_leg` の `Read(./**)` は cwd が基準なので、起動と同じ cwd から続ける。
 
 ## 流れ
 
 1. **材料を集めて書き出す。** タスク記述・issue 本文・リンク先の PR / issue・関連コードを探索し、取得した本文を `materials/` に書く。取得は親が行い、相手には取得させない。
 2. **親が枝の一覧を作る。** 決定木の枝を洗い出す。
-3. **相手を起動し、足りない枝を足させる。** 最初の依頼（後述）を送る。相手の追加を採るかは親が決め、採らない枝は理由を記録する。順序は親が決める。
+3. **相手を起動し、足りない枝を足させる。** 最初の依頼（後述）を送る。相手が足した枝はすべて一覧に入れる。要らない枝は、ほかの判断と同じく盲検の往復で該当なしと決める。順序は親が決める。
 4. **目的とスコープを user に確認する。** 辿り始める前に、線引きを user に聞く。
-5. **判断ごとに盲検で往復する。** 親は `sealed/NNN.md` に問い・案・根拠・人間の軸を書いて封じてから、問いと確定済みの判断の差分だけを相手に送る。親の案と推奨は送らない。
+5. **判断ごとに盲検で往復する。** 親は `$SEALED_DIR/NNN.md` に問い・案・根拠・人間の軸を書いて封じてから、問いと確定済みの判断の差分だけを相手に送る。親の案と推奨は送らない。
 6. **照らし合わせる。** 案が一致すれば確定する。食い違えば、親の案と根拠を開示して最大 2 往復で議論し、一次ソースで裏付いた側を採る。価値判断で優劣がつかないとき、または 2 往復で収束しないときは、両案を保留して最後の承認点で聞く。
 7. **人間の軸を扱う。** 判断が 7 つの軸に当たるかは、親が最終的に判断する。相手の `人間の軸:` の印も、見落としを防ぐ補助に使う。「出た時点」の軸は user に確認し、「最後に聞く軸」は両案を保留する。2 モデルが一致しても user が決める。
 8. **終える。** 新しい判断も未解決の事項も出なくなったら、最後の承認点へ進む。呼び出しの回数に上限は設けない。
