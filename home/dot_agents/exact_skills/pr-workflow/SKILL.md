@@ -87,7 +87,7 @@ user-invocable: true
 | `trivial` | 親がその場で編集 → コミット → Draft PR を作る（委譲の往復のほうが変更より高くつく） |
 | `small` | 下の「small の進め方」 → コミット → Draft PR |
 | `standard` | 意図・範囲・主な受け入れ基準を user に 1 回だけ確認 → `sdd`（自律で実装・コミット・Draft PR まで行う） |
-| `large` | `grill-me --mode=auto --output-prd`（PRD を user が 1 回承認）→ `sdd --prd <path>` |
+| `large` | `grill-me --mode=auto --output-prd`（親と別の系統のモデルと議論し、PRD を user が 1 回承認）→ `sdd --prd <path>` |
 
 ### small の進め方
 
