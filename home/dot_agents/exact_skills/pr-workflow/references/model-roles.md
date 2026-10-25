@@ -25,6 +25,8 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `reviewer-gpt-light` | GPT | gpt-6.1-sol | medium | multi-review の general の GPT 側（実装者に Claude を選んだ PR の trivial・small） |
 | `reviewer-gpt` | GPT | gpt-6.1-sol | high | multi-review の general の GPT 側（large、実装者に Claude を選んだ PR の standard）・database・IaC、security-review の Phase 2・3 |
 | `checker-gpt` | GPT | gpt-6.1-sol | medium | security-review の Phase 4 |
+| `grill-counterpart` | Claude | claude-opus-5-5 | high | grill-me の auto mode の議論の相手（親が Codex のとき） |
+| `grill-counterpart-gpt` | GPT | gpt-6.1-sol | high | grill-me の auto mode の議論の相手（親が Claude Code のとき） |
 
 表に無い作業は親が行う。Claude Code の親は Opus 5.5（medium、`settings.json` の既定）で、分類・GATE・統合の判断・spec と計画の執筆・trivial の編集・数行で済む修正を受け持つ。Codex の親は GPT-6.1 Sol（medium、`config.toml` の既定）である。
 
