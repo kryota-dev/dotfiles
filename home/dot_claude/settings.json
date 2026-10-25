@@ -13,6 +13,9 @@
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "95",
     "MAX_THINKING_TOKENS": "127999"
   },
+  "autoMode": {
+    "classifyAllShell": true
+  },
   "permissions": {
     "allow": [
       "Bash(ls:*)",
