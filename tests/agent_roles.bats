@@ -136,7 +136,7 @@ definition_names() {
   require_roles
   local f roles role
   while IFS= read -r f; do
-    roles=$(grep -Eo '`(spec-designer|review-|implementer|reviewer-gpt|checker-gpt|fact-checker)[a-z-]*`' "$f" | sed 's/`//g' | sort -u)
+    roles=$(grep -Eo '`(spec-designer|review-|implementer|reviewer-gpt|checker-gpt|fact-checker|grill-counterpart)[a-z-]*`' "$f" | sed 's/`//g' | sort -u)
     while IFS= read -r role; do
       [ -n "$role" ] || continue
       [ "$role" = review-resolve-loop ] && continue
@@ -175,6 +175,10 @@ load_role_helpers() {
   [[ "$body" != *"model:"* ]]
   [ "$(gpt_role implementer model)" = gpt-6.1-sol ]
   [ "$(gpt_role reviewer-gpt model_reasoning_effort)" = high ]
+  gbody=$(gpt_body grill-counterpart-gpt)
+  [[ "$gbody" == "あなたは"* ]]
+  [[ "$gbody" != *"model ="* ]]
+  [[ "$gbody" != *'"""'* ]]
 }
 
 @test "Bash を持つのは implementer-claude* だけ、書き込みの道具を持つのは spec-designer と implementer-claude* だけ" {

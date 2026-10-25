@@ -25,6 +25,8 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `reviewer-gpt-light` | GPT | gpt-6.1-sol | medium | multi-review の general の GPT 側（実装者に Claude を選んだ PR の trivial・small） |
 | `reviewer-gpt` | GPT | gpt-6.1-sol | high | multi-review の general の GPT 側（large、実装者に Claude を選んだ PR の standard）・database・IaC、security-review の Phase 2・3 |
 | `checker-gpt` | GPT | gpt-6.1-sol | medium | security-review の Phase 4 |
+| `grill-counterpart` | Claude | claude-opus-5-5 | high | grill-me の auto mode の議論の相手（親が Codex のとき） |
+| `grill-counterpart-gpt` | GPT | gpt-6.1-sol | high | grill-me の auto mode の議論の相手（親が Claude Code のとき） |
 
 表に無い作業は親が行う。Claude Code の親は Opus 5.5（medium、`settings.json` の既定）で、分類・GATE・統合の判断・spec と計画の執筆・trivial の編集・数行で済む修正を受け持つ。Codex の親は GPT-6.1 Sol（medium、`config.toml` の既定）である。
 
@@ -177,11 +179,12 @@ claude_impl() {
 
 ```bash
 gpt_role() { sed -nE "s/^$2 *= *\"([^\"]*)\"\$/\1/p" "$HOME/.codex/agents/$1.toml" | head -1; }
+gpt_body() { awk '/^"""$/{f=0} f; /^developer_instructions = """$/{f=1}' "$HOME/.codex/agents/$1.toml"; }
 ```
 
 | 親 | 起動 |
 |---|---|
-| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill |
+| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill。定義の本文を渡す役割（`grill-counterpart-gpt` など）は `-c developer_instructions="$(gpt_body R)"` も足す |
 | Codex | `spawn_agent` に `agent_type: <役割>` と `fork_turns: "none"` を渡す |
 
 値が空なら（`chezmoi apply` の前など）起動せずに止め、`chezmoi apply` を案内する。既定のモデルで黙って代えない。
