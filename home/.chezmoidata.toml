@@ -14,6 +14,8 @@ moralerspace_font = "2.0.0"
 anthropics = "683bc88e56f3e09ba94f7055977f3d3aa499f202"
 # renovate: datasource=git-refs depName=anthropics/claude-plugins-community packageName=https://github.com/anthropics/claude-plugins-community branch=main
 plugins_community = "f60f0454df3045f724c43c6346ec80bdcc3472b2"
+# renovate: datasource=git-refs depName=sasamuku/dotfiles packageName=https://github.com/sasamuku/dotfiles branch=main
+sasamuku_dotfiles = "bf0d20f49c110faf72df4e4774fc75f3b316bcf1"
 # renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
 natural_japanese = "9a78a42964096da509b8f3e011f0085a5f080151"
 # renovate: datasource=git-refs depName=kepano/obsidian-skills packageName=https://github.com/kepano/obsidian-skills branch=main
