@@ -45,6 +45,18 @@
     url = "https://raw.githubusercontent.com/anthropics/claude-plugins-community/{{ .skills.plugins_community }}/eli5/skills/eli5/SKILL.md"
     refreshPeriod = "168h"
 
+# 上流にライセンスが無いので、複製してコミットせず取得する。
+# agents/openai.yaml は Codex に暗黙の呼び出しをさせない設定で、SKILL.md の disable-model-invocation と対になる。
+[".agents/skills/eli10/SKILL.md"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/sasamuku/dotfiles/{{ .skills.sasamuku_dotfiles }}/.agents/skills/eli10/SKILL.md"
+    refreshPeriod = "168h"
+
+[".agents/skills/eli10/agents/openai.yaml"]
+    type = "file"
+    url = "https://raw.githubusercontent.com/sasamuku/dotfiles/{{ .skills.sasamuku_dotfiles }}/.agents/skills/eli10/agents/openai.yaml"
+    refreshPeriod = "168h"
+
 [".agents/skills/japanese-tech-writing/SKILL.md"]
     type = "file"
     url = "https://gist.githubusercontent.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d/raw/{{ .skills.japanese_tech_writing }}/SKILL.md"
