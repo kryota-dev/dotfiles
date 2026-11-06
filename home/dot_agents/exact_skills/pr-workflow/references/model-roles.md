@@ -14,7 +14,8 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `review-security` | Claude | claude-opus-5-5 | high | multi-review の security、security-review の Phase 2 |
 | `review-security-deep` | Claude | claude-fable-5-1 | high | security-review の `--deep` |
 | `review-intent` | Claude | claude-opus-5-5 | high | multi-review の intent |
-| `review-simplicity` | Claude | claude-sonnet-5-5 | medium | multi-review の simplicity |
+| `review-simplicity` | Claude | claude-opus-5-5 | high | multi-review の simplicity（standard 以上） |
+| `review-simplicity-light` | Claude | claude-sonnet-5-5 | medium | multi-review の simplicity（small） |
 | `fact-checker` | Claude | claude-sonnet-5-5 | medium | multi-review の裏取りの委譲（web の一次ソースだけ） |
 | `implementer-claude` | Claude | claude-sonnet-5-5 | high | 実装者に Claude を選んだ PR の standard・large の実装（tasks.md の 1 タスク） |
 | `implementer-claude-light` | Claude | claude-sonnet-5-5 | medium | 実装者に Claude を選んだ PR の small の実装、CI の失敗の修正、レビュー指摘の修正 |
@@ -61,6 +62,7 @@ secret や認証情報に触れうるタスクは、どちらを選んでも親�
 - **実装の段を系統で揃える**: Sonnet 5.5 と GPT-6.1 Sol はどちらも $2/$10 per MTok で、Opus 5.5 と GPT-6 Astra がそれぞれの最上位である（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)、[OpenAI](https://developers.openai.com/api/docs/models)）。light・通常・最上位の 3 段が、どちらの系統でも同じ位置に並ぶ。Sonnet 5.5 は、仕様が明確な agentic coding を medium から、難しければ high から始めるよう公式が勧め、最難の長時間作業には Opus を勧めている（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#calibrate-effort)）。
 - **GPT-6 Luna は採らない**: 単価は Sol の 1/20 だが、Codex の harness での Coding Agent Index が Sol の 57 に対して 41 である（[ComputingForGeeks](https://computingforgeeks.com/gpt-6-sol-luna-released-features-benchmarks/)）。失敗と格上げの往復が増えうる。
 - **general は実装と別の系統で見る**: 同じ系統のモデルは見落としが重なりやすい。実装者の系統と逆の系統が、general の主担当になる。
+- **simplicity は standard 以上を Opus で見る**: 精度の低いレビュアーは細かい指摘を増やし、親が折れる機会を増やす。上の actionable precision は一般のレビューの値で、simplicity での実測ではない。意図しない複雑さが入りやすい standard 以上だけを Opus にし、small は費用を抑えて Sonnet のままにする。
 
 ## 弱点への対策（公式のプロンプトのガイドによる）
 

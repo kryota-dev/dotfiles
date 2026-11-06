@@ -41,7 +41,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | tier | general | security | intent | simplicity | database / IaC |
 |---|---|---|---|---|---|
 | trivial | `review-general-light` | — | — | — | — |
-| small | `review-general-light` | — | — | `review-simplicity` | — |
+| small | `review-general-light` | — | — | `review-simplicity-light` | — |
 | standard | `review-general` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 | large | `review-general` ＋ `reviewer-gpt` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 
