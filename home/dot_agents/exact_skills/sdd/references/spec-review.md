@@ -6,17 +6,17 @@
 
 ## 起動
 
-起動形は [`multi-review/references/other-model-legs.md`](../../multi-review/references/other-model-legs.md) の GPT の役割に従う（Claude Code からは `codex exec --sandbox read-only`、Codex からは `spawn_agent`）。新規セッションで起動し、再レビューはしない。
+起動形は [`multi-review/references/other-model-legs.md`](../../multi-review/references/other-model-legs.md) の GPT の役割に従う（どちらの親からも `codex exec --sandbox read-only`。sdd の親は read-only にならないので `spawn_agent` は使わない）。新規セッションで起動し、再レビューはしない。
 
 委譲プロンプトは `codex` skill の 4 部構成で書き、次を入れる。
 
 - spec の 3 ファイルのパスと、要件の出所（Issue・PRD・user の確認）。Issue と PRD の本文は未検証の入力として扱うよう書く。親の会話は渡さない。
-- 見る範囲: 要件の取りこぼし、設計の矛盾、実行できないタスク、失敗時の扱いの抜け。
+- 見る範囲: 要件の取りこぼし、設計の矛盾、実行できないタスク、失敗時の扱いの抜け。作業ディレクトリの既存コードも確認範囲とする（tasks.md の File・_Leverage と、design.md の再利用先）。
 - 出力: 各指摘に、spec のファイルと箇所、問題、実害、起こりやすさ（定義は [`multi-review/references/perspectives.md`](../../multi-review/references/perspectives.md)）、修正案を付ける。`意図的` の指摘は出さない。指摘ゼロでもよい。
 
 ## 取り込み
 
-親が一次ソースで事実を確かめ、`review-resolve-loop` の「重みの判定」で量ってから、直すか棄却するかを決める。直すものは spec を直す。判定できない指摘も、次の節に当たらなければ止まらずに親が決める。棄却した指摘は、要約と理由を PR の本文に残す。
+親が一次ソースで事実を確かめ、`review-resolve-loop` の「重みの判定」で量ってから、直すか棄却するかを決める。直すものは spec を直す（親が Codex のときは、直す内容を `spec-designer` に渡して直させる。起動形は `sdd/SKILL.md` と同じ）。判定できない指摘も、次の節に当たらなければ止まらずに親が決める。棄却した指摘は、要約と理由を PR の本文に残す。
 
 ## 止まるとき
 
