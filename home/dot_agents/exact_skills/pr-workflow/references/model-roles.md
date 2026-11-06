@@ -24,7 +24,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `implementer-light` | GPT | gpt-6.1-sol | medium | 実装者に GPT を選んだ PR の small の実装、CI の失敗の修正、レビュー指摘の修正 |
 | `implementer-astra` | GPT | gpt-6-astra | high | 実装者に GPT を選んだ PR で、`implementer` か `implementer-light` が失敗したときの格上げ |
 | `reviewer-gpt-light` | GPT | gpt-6.1-sol | medium | multi-review の general の GPT 側（実装者に Claude を選んだ PR の trivial・small） |
-| `reviewer-gpt` | GPT | gpt-6.1-sol | high | multi-review の general の GPT 側（large、実装者に Claude を選んだ PR の standard）・database・IaC、security-review の Phase 2・3 |
+| `reviewer-gpt` | GPT | gpt-6.1-sol | high | multi-review の general の GPT 側（large、実装者に Claude を選んだ PR の standard）・database・IaC、security-review の Phase 2・3、sdd の spec レビュー |
 | `checker-gpt` | GPT | gpt-6.1-sol | medium | security-review の Phase 4 |
 | `grill-counterpart` | Claude | claude-opus-5-5 | high | grill-me の auto mode の議論の相手（親が Codex のとき） |
 | `grill-counterpart-gpt` | GPT | gpt-6.1-sol | high | grill-me の auto mode の議論の相手（親が Claude Code のとき） |

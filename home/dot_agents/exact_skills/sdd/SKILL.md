@@ -1,6 +1,6 @@
 ---
 name: sdd
-description: pr-workflow の standard/large tier から呼ばれる内部コンポーネント。Spec-Driven Development（要件定義・設計・タスク分解・実装・コミット・PR作成）を完全自律で実行し、PR 作成で完了する。レビューは pr-workflow の PR 作成後パイプライン（CI 監視 → multi-review → review-resolve-loop）に一本化されているため sdd 自身はレビューを行わない。単体起動はせず pr-workflow 経由でのみ実行する。
+description: pr-workflow の standard/large tier から呼ばれる内部コンポーネント。Spec-Driven Development（要件定義・設計・タスク分解・実装・コミット・PR作成）を完全自律で実行し、PR 作成で完了する。レビューは pr-workflow の PR 作成後パイプライン（CI 監視 → multi-review → review-resolve-loop）に一本化されているため sdd 自身は実装のレビューを行わない。spec だけは、実装の前に別の系統が 1 回レビューする。単体起動はせず pr-workflow 経由でのみ実行する。
 argument-hint: "[--prd <path>] <issue-url-or-feature-description>"
 user-invocable: false
 # spec を書く間の親（Claude Code）のエフォート。役割の割り当ては pr-workflow/references/model-roles.md。
@@ -9,9 +9,9 @@ effort: high
 
 # sdd
 
-spec（要件・設計・タスク）を書いてから実装し、コミットと Draft PR の作成まで自律で行う。レビューはしない（pr-workflow の PR 作成後の工程が担う）。
+spec（要件・設計・タスク）を書いてから実装し、コミットと Draft PR の作成まで自律で行う。実装のレビューはしない（pr-workflow の PR 作成後の工程が担う）。spec だけは、実装の前に別の系統が 1 回レビューする。
 
-承認のために止まらない。止まるのは、呼び出し元がワークツリーを用意しなかったとき（下記）と、Git 操作が認証エラー（1Password など）で通らないとき（`notify` してから user に判断を仰ぐ）だけ。spec-workflow MCP の承認ツールも、止まる原因になるので使わない。
+承認のために止まらない。止まるのは、呼び出し元がワークツリーを用意しなかったとき（下記）、spec レビューの指摘が user の承認済みの判断を覆すとき（[`references/spec-review.md`](references/spec-review.md)）、Git 操作が認証エラー（1Password など）で通らないとき（`notify` してから user に判断を仰ぐ）だけ。spec-workflow MCP の承認ツールも、止まる原因になるので使わない。
 
 ## 入力
 
@@ -49,5 +49,6 @@ spec は Claude が書く（役割は [`pr-workflow/references/model-roles.md`](
 
 ## 実装と納品
 
+- Phase 3 の後、Phase 4 に入る前に [`references/spec-review.md`](references/spec-review.md) を Read し、spec レビューを行う。
 - Phase 4（実装）に入る前に [`references/implementation.md`](references/implementation.md) を Read する。
 - Phase 5（コミット & PR）に入る前に [`references/delivery.md`](references/delivery.md) を Read する。
