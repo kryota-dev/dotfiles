@@ -9,6 +9,26 @@ render() {
   chezmoi execute-template --source "$SOURCE" "$@"
 }
 
+assert_t3_settings() {
+  jq -e '{defaultRuntimeMode, defaultThreadEnvMode, defaultModelSelection, branchNamingMode, worktreeCleanup} == {
+    "defaultRuntimeMode": "auto",
+    "defaultThreadEnvMode": "worktree",
+    "defaultModelSelection": {"instanceId": "claudeAgent", "model": "claude-opus-5-5"},
+    "branchNamingMode": "semantic",
+    "worktreeCleanup": {
+      "mode": "custom",
+      "rules": {
+        "worktreeKeepWhen": "uncommitted-changes",
+        "worktreeAfterDays": null,
+        "worktreeSettledAfterDays": null,
+        "worktreeOnMerge": true,
+        "worktreeOnDelete": false,
+        "worktreeUnchanged": false
+      }
+    }
+  }' <<<"$output" >/dev/null
+}
+
 @test "1Password を参照しないテンプレートはすべて描画できる" {
   while IFS= read -r f; do
     grep -q onepasswordRead "$f" && continue
@@ -81,4 +101,51 @@ render() {
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_agent.config.toml")" </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *'sandbox_mode = "workspace-write"'* ]]
+}
+
+@test "T3 Code の設定は T3 Code が書いたキーを残し、管理するキーを設定する" {
+  input='{"theme":"dark","providerOptions":{"custom":true}}'
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<"$input"
+  [ "$status" -eq 0 ]
+  assert_t3_settings
+  jq -e 'del(.defaultRuntimeMode, .defaultThreadEnvMode, .defaultModelSelection, .branchNamingMode, .worktreeCleanup) == {"theme":"dark","providerOptions":{"custom":true}}' <<<"$output" >/dev/null
+}
+
+@test "T3 Code の設定は手で変えた管理するキーを宣言の値に戻す" {
+  input='{
+    "defaultRuntimeMode": "full-access",
+    "defaultThreadEnvMode": "local",
+    "defaultModelSelection": {"instanceId":"other","model":"other","extra":true},
+    "branchNamingMode": "random",
+    "worktreeCleanup": {
+      "mode": "never",
+      "rules": {
+        "worktreeKeepWhen": "always",
+        "worktreeAfterDays": 7,
+        "worktreeSettledAfterDays": 3,
+        "worktreeOnMerge": false,
+        "worktreeOnDelete": true,
+        "worktreeUnchanged": true
+      }
+    }
+  }'
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<"$input"
+  [ "$status" -eq 0 ]
+  assert_t3_settings
+  jq -e 'length == 5' <<<"$output" >/dev/null
+}
+
+@test "T3 Code の設定は空または空白だけの入力から管理するキーだけを描画できる" {
+  for input in '' $' \t\n\r '; do
+    run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" < <(printf '%s' "$input")
+    [ "$status" -eq 0 ]
+    assert_t3_settings
+    jq -e 'length == 5' <<<"$output" >/dev/null
+  done
+}
+
+@test "T3 Code の設定は壊れた JSON で描画が失敗する" {
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<'{"theme":'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'fromJson'* ]]
 }
