@@ -41,7 +41,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | tier | general | security | intent | simplicity | database / IaC |
 |---|---|---|---|---|---|
 | trivial | `review-general-light` | — | — | — | — |
-| small | `review-general-light` | — | — | `review-simplicity` | — |
+| small | `review-general-light` | — | — | `review-simplicity-light` | — |
 | standard | `review-general` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 | large | `review-general` ＋ `reviewer-gpt` | `review-security` | `review-intent` | `review-simplicity` | 条件に合えば `reviewer-gpt` |
 
@@ -78,7 +78,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | `[SHOULD]` | 修正推奨 |
 | `[NITS]` | 軽微な提案 |
 
-各指摘に、ファイル:行番号、問題、実害、修正案を付ける。経路を追い切れなかった `[MUST]` には「（未確認）」が付く。security leg の重大度は、Critical・High を `[MUST]`、Medium を `[SHOULD]`、Low・Info を `[NITS]` に写す。intent は行を持たない PR 単位の問いを返す。PR 本文に独自の prefix 規約（`[must]/[imo]/[nits]/[fyi]` など）があれば、投稿時にそれに合わせ、合わせたことを user に伝える。
+各指摘に、ファイル:行番号、問題、実害、起こりやすさ（`通常` / `条件付き` / `意図的` / `保守`。定義は perspectives.md）、修正案を付ける。経路を追い切れなかった `[MUST]` には「（未確認）」が付く。security leg の重大度は、Critical・High を `[MUST]`、Medium を `[SHOULD]`、Low・Info を `[NITS]` に写す。intent は行を持たない PR 単位の問いを返す。PR 本文に独自の prefix 規約（`[must]/[imo]/[nits]/[fyi]` など）があれば、投稿時にそれに合わせ、合わせたことを user に伝える。
 
 統合サマリーの形:
 
@@ -121,6 +121,9 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 
 ### 事実検証で棄却した指摘
 {指摘の要約 — 棄却理由と根拠}
+
+### 重みで棄却した指摘
+{指摘の要約 — 起こりやすさと棄却の根拠}
 ```
 
 「事実検証で棄却した指摘」は、親が次のラウンドの重複除外・再検証に使う台帳になる。leg には渡さず、独立して再提起された候補も親が根拠と照合して判定する。指摘件数ではなく、妥当性と確認範囲を評価する。単一の比較から履歴分離の効果やモデルの優劣を断定しない。
