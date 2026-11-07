@@ -57,13 +57,14 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | {
 
 - `event` は `COMMENT` か省略（Pending）だけ。`APPROVE` / `REQUEST_CHANGES` は使わない。
 - インラインには `[MUST]` / `[SHOULD]` を載せる。`[NITS]` は user が含めると答えたときだけ。差分外の指摘・PR 単位の問い・参考（変更前からある問題）・良かった点は body に書き、インラインに載せない（参考をスレッドにすると `review-resolve-loop` が直しにいく）。
-- インラインの各指摘は、本文の先頭を `[SHOULD][条件付き][security] …` の形にする（分類、起こりやすさ、security leg の指摘なら `[security]`）。`review-resolve-loop` は本文の先頭だけを取得して判定の材料にする。
+- body と各インラインの先頭行を `🤖 multi-review` にする（AI の投稿の印になる。`review-resolve-loop` は、この印が無い自分名義のコメントを作業者の手書きとして扱う）。
+- インラインの各指摘は、印の次の行の先頭を `[SHOULD][条件付き][security] …` の形にする（分類、起こりやすさ、security leg の指摘なら `[security]`）。`review-resolve-loop` は本文の先頭だけを取得して判定の材料にする。
 
 ```bash
 # A. サマリーを body に含めて即時投稿
 gh api "repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews" --method POST --input - <<'PAYLOAD'
-{"event": "COMMENT", "body": "## Multi-Review 統合レビュー結果\n\n…",
- "comments": [{"path": "src/example.ts", "line": 10, "side": "RIGHT", "body": "[SHOULD] …"}]}
+{"event": "COMMENT", "body": "🤖 multi-review\n\n## Multi-Review 統合レビュー結果\n\n…",
+ "comments": [{"path": "src/example.ts", "line": 10, "side": "RIGHT", "body": "🤖 multi-review\n\n[SHOULD][通常] …"}]}
 PAYLOAD
 ```
 
