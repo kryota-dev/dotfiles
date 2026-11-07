@@ -89,7 +89,7 @@ T3 Code を新しい作業の入口にする。サーバーはデスクトップ
 （`t3 service`）を併用すると同じデータを取り合うため、使わない。worktree は T3 Code が作り、
 `pr-workflow` はそのまま使う。ターミナルから始める作業は `wtp` を使う。
 
-`home/dot_t3/userdata/modify_settings.json` は `~/.t3/userdata/settings.json` の次のキーを宣言する。
+`home/private_dot_t3/private_userdata/modify_settings.json` は `~/.t3/userdata/settings.json` の次のキーを宣言する。
 アプリも書き込むので、管理するキーだけを上書きし、それ以外は残す。
 
 - `defaultRuntimeMode`: `auto`
@@ -103,7 +103,8 @@ T3 Code を新しい作業の入口にする。サーバーはデスクトップ
 アプリの画面で有効にする。
 
 Claude の Auto では、Claude が人に聞こうとした操作を T3 Code が自動で許可するため、`permissions.ask` が効かない。
-`permissions.deny` は効く。承認の回数を増やさないため Auto のまま使い、上流の修正を
+リポジトリ・クラウド資源の削除やパッケージの公開なども確認なしで通る。`permissions.deny` は効く。
+承認の回数を増やさないため Auto のまま使い、上流の修正を
 [#36](https://github.com/kryota-dev/dotfiles/issues/36) で追う。
 
 ## モデルの役割分担

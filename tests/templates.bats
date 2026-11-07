@@ -105,7 +105,7 @@ assert_t3_settings() {
 
 @test "T3 Code の設定は T3 Code が書いたキーを残し、管理するキーを設定する" {
   input='{"theme":"dark","providerOptions":{"custom":true}}'
-  run render --with-stdin "$(cat "$SOURCE/dot_t3/userdata/modify_settings.json")" <<<"$input"
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<"$input"
   [ "$status" -eq 0 ]
   assert_t3_settings
   jq -e 'del(.defaultRuntimeMode, .defaultThreadEnvMode, .defaultModelSelection, .branchNamingMode, .worktreeCleanup) == {"theme":"dark","providerOptions":{"custom":true}}' <<<"$output" >/dev/null
@@ -129,7 +129,7 @@ assert_t3_settings() {
       }
     }
   }'
-  run render --with-stdin "$(cat "$SOURCE/dot_t3/userdata/modify_settings.json")" <<<"$input"
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<"$input"
   [ "$status" -eq 0 ]
   assert_t3_settings
   jq -e 'length == 5' <<<"$output" >/dev/null
@@ -137,7 +137,7 @@ assert_t3_settings() {
 
 @test "T3 Code の設定は空または空白だけの入力から管理するキーだけを描画できる" {
   for input in '' $' \t\n\r '; do
-    run render --with-stdin "$(cat "$SOURCE/dot_t3/userdata/modify_settings.json")" < <(printf '%s' "$input")
+    run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" < <(printf '%s' "$input")
     [ "$status" -eq 0 ]
     assert_t3_settings
     jq -e 'length == 5' <<<"$output" >/dev/null
@@ -145,7 +145,7 @@ assert_t3_settings() {
 }
 
 @test "T3 Code の設定は壊れた JSON で描画が失敗する" {
-  run render --with-stdin "$(cat "$SOURCE/dot_t3/userdata/modify_settings.json")" <<<'{"theme":'
+  run render --with-stdin "$(cat "$SOURCE/private_dot_t3/private_userdata/modify_settings.json")" <<<'{"theme":'
   [ "$status" -ne 0 ]
   [[ "$output" == *'fromJson'* ]]
 }

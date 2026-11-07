@@ -56,10 +56,11 @@ user-invocable: true
 
 ## Phase 0.5: ワークツリー
 
-1. `GD=$(git rev-parse --path-format=absolute --git-dir)` と `GCD=$(git rev-parse --path-format=absolute --git-common-dir)` を取得する。どちらかが失敗したら止まる。`[ "$GD" != "$GCD" ]` なら linked worktree の中なので、T3 Code などの呼び出し元が作ったものをそのまま使い、新しく作らない。
+1. `GD=$(git rev-parse --path-format=absolute --git-dir)` と `GCD=$(git rev-parse --path-format=absolute --git-common-dir)` を取得する。どちらかが失敗したら止まる。`[ "$GD" != "$GCD" ]` なら linked worktree の中なので、次の確認をしてから再利用する。
 2. 再利用・新規作成のどちらでも、`BASE=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)` を PR の base にする。
-3. `GD` と `GCD` が同じなら main worktree なので、ブランチ名を operation から決め（`feat/…` / `fix/…` / `refactor/…`。Issue があれば番号を含めてよい）、`wtp add -b <branch> "$BASE"` で作る（既存ブランチは `wtp add <branch>`）。
-4. 作成時に衝突したら `wtp list` で確認し、再利用するか別名にする。
+3. linked worktree の中なら `CUR=$(git branch --show-current)` を取得する。`CUR` が空か `$BASE` と同じなら、止まって user に使うブランチを確かめる。`gh pr list --head "$CUR" --state all` に PR があれば、同じ PR の続きかを user に確かめる。確認が済んだら、T3 Code などの呼び出し元が作ったワークツリーをそのまま使い、新しく作らない。
+4. `GD` と `GCD` が同じなら main worktree なので、ブランチ名を operation から決め（`feat/…` / `fix/…` / `refactor/…`。Issue があれば番号を含めてよい）、`wtp add -b <branch> "$BASE"` で作る（既存ブランチは `wtp add <branch>`）。
+5. 作成時に衝突したら `wtp list` で確認し、再利用するか別名にする。
 
 以降は使うワークツリーの絶対パスで作業する。削除はマージ後に user か呼び出し元が `wtp remove` で行う。
 
