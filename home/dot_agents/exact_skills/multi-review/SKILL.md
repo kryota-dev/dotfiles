@@ -78,7 +78,7 @@ leg は、汎用のパスが構造的に見落とすレンズ（intent・simplic
 | `[SHOULD]` | 修正推奨 |
 | `[NITS]` | 軽微な提案 |
 
-各指摘に、ファイル:行番号、問題、実害、起こりやすさ（`通常` / `条件付き` / `意図的`。定義は perspectives.md）、修正案を付ける。経路を追い切れなかった `[MUST]` には「（未確認）」が付く。security leg の重大度は、Critical・High を `[MUST]`、Medium を `[SHOULD]`、Low・Info を `[NITS]` に写す。intent は行を持たない PR 単位の問いを返す。PR 本文に独自の prefix 規約（`[must]/[imo]/[nits]/[fyi]` など）があれば、投稿時にそれに合わせ、合わせたことを user に伝える。
+各指摘に、ファイル:行番号、問題、実害、起こりやすさ（`通常` / `条件付き` / `意図的` / `保守`。定義は perspectives.md）、修正案を付ける。経路を追い切れなかった `[MUST]` には「（未確認）」が付く。security leg の重大度は、Critical・High を `[MUST]`、Medium を `[SHOULD]`、Low・Info を `[NITS]` に写す。intent は行を持たない PR 単位の問いを返す。PR 本文に独自の prefix 規約（`[must]/[imo]/[nits]/[fyi]` など）があれば、投稿時にそれに合わせ、合わせたことを user に伝える。
 
 統合サマリーの形:
 
