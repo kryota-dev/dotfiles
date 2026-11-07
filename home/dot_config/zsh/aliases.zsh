@@ -12,7 +12,6 @@ alias view='nvim -R'
 alias -g C='| pbcopy'
 alias rmnm='rm -rf ./node_modules'
 alias delds='find . -name ".DS_Store" -type f -ls -delete'
-alias notify='afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Classic/Glass.m4r && afplay /System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/AlertTones/Modern/Bamboo.m4r'
 
 # pnpm
 alias pn='pnpm'

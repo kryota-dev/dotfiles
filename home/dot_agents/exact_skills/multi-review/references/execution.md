@@ -43,7 +43,7 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | {
 
 1. 生の結果を保存する。結果が空・失敗・確認根拠の欠落（指摘0件だけの返答を含む）なら、その leg を新規セッションで 1 回だけ再試行する。だめなら外して続け、外したことと未確認の範囲を統合サマリーに書く。全 leg が失敗したら要約して終わる。根拠付き0件は成功として扱い、件数を増やすための再試行はしない。
 2. finding schema の形に統合する。leg は根拠の 3 条件で絞ってから出すが、乗っ取られた leg や推測の指摘を `review-resolve-loop` が無検証で直さないよう、`[MUST]` / `[SHOULD]` の主張は外部の事実（API の仕様・ライブラリの挙動など）もコードの中の事実（実行経路・呼び出し元）も親が確かめる。親が確かめきれない「（未確認）」は body にだけ置き、インラインに載せない。断定的な主張は [`fact-check.md`](fact-check.md) に従って裏取りする。leg が付けた起こりやすさも親が確かめる。`意図的` と確かめた指摘と、`条件付き` のうち条件が現実に無いと根拠を示せた指摘は、投稿候補から外して「重みで棄却した指摘」に書く。leg が確認根拠に `意図的` として書いた項目も、同じ節へ転記する。信頼できない入力が届く経路がある security の指摘と、データ損失や破壊的な操作につながる指摘は、起こりやすさでは外さない。
-3. **重複除外**: 同じファイル:行番号で同じ趣旨の既存指摘があれば、状態に関わらず除外する。視点が違う（深掘り・反論・新しい根拠）なら残し、冒頭に `**既存指摘への補足/反論** （@<login> の「<要約>」）` を付ける。中身の無い bot のコメント（Walkthrough・No Issues Found など）は照合の対象から外す。
+3. **重複除外**: 同じファイル:行番号で同じ趣旨の既存指摘があれば、状態に関わらず除外する。視点が違う（深掘り・反論・新しい根拠）なら残し、印の次の行に `**既存指摘への補足/反論** （@<login> の「<要約>」）` を付け、その次の行を `[SHOULD]…` で始める。中身の無い bot のコメント（Walkthrough・No Issues Found など）は照合の対象から外す。
 4. 候補にラウンド・leg 内で一意の ID を付け、生候補 → 重複除外 → 事実検証後の採否を記録する。重複先の ID / 既存コメント、採用・訂正・棄却・未確認の理由と一次ソースまたは再現結果を残す。統合サマリーにはカテゴリ別の件数（候補 → 重複除外後 → 検証後）と、各 leg の確認根拠・未確認事項を付ける。0件でも記録を省かない。
 5. 「良かった点」は親が書く。leg には探させない。
 6. PR 単位の問いは行を持たないので、前のラウンドの自分の統合サマリーにある「PR 単位の問い」と趣旨で照合し、同じものは除く。
@@ -51,19 +51,20 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | {
 
 ## Phase 5: 確認と投稿
 
-統合サマリーを示し、`notify` を鳴らしてから user に投稿方法を確認する（構造化された質問ツールがあれば使う）。質問の冒頭に `Target: <owner>/<repo> PR #<番号>` と `Inline comment count after dedup: N` を入れる。選択肢は「サマリーを body に含めて投稿（推奨）」「body なしで投稿（Pending）」「投稿しない」。NITS をインラインに含めるかも同時に聞く。呼び出し元が投稿方法を指定していれば確認を省く。
+統合サマリーを示し、`notify` skill で音を鳴らしてから user に投稿方法を確認する（構造化された質問ツールがあれば使う）。質問の冒頭に `Target: <owner>/<repo> PR #<番号>` と `Inline comment count after dedup: N` を入れる。選択肢は「サマリーを body に含めて投稿（推奨）」「body なしで投稿（Pending）」「投稿しない」。NITS をインラインに含めるかも同時に聞く。呼び出し元が投稿方法を指定していれば確認を省く。
 
 投稿のルール:
 
 - `event` は `COMMENT` か省略（Pending）だけ。`APPROVE` / `REQUEST_CHANGES` は使わない。
 - インラインには `[MUST]` / `[SHOULD]` を載せる。`[NITS]` は user が含めると答えたときだけ。差分外の指摘・PR 単位の問い・参考（変更前からある問題）・良かった点は body に書き、インラインに載せない（参考をスレッドにすると `review-resolve-loop` が直しにいく）。
-- インラインの各指摘は、本文の先頭を `[SHOULD][条件付き][security] …` の形にする（分類、起こりやすさ、security leg の指摘なら `[security]`）。`review-resolve-loop` は本文の先頭だけを取得して判定の材料にする。
+- body と各インラインの先頭行を `🤖 multi-review` にする（AI の投稿の印になる。`review-resolve-loop` は、この印が無い自分名義のコメントを作業者の手書きとして扱う）。
+- インラインの各指摘は、印の次の行の先頭を `[SHOULD][条件付き][security] …` の形にする（分類、起こりやすさ、security leg の指摘なら `[security]`）。`review-resolve-loop` は本文の先頭だけを取得して判定の材料にする。
 
 ```bash
 # A. サマリーを body に含めて即時投稿
 gh api "repos/$OWNER/$REPO/pulls/$PR_NUMBER/reviews" --method POST --input - <<'PAYLOAD'
-{"event": "COMMENT", "body": "## Multi-Review 統合レビュー結果\n\n…",
- "comments": [{"path": "src/example.ts", "line": 10, "side": "RIGHT", "body": "[SHOULD] …"}]}
+{"event": "COMMENT", "body": "🤖 multi-review\n\n## Multi-Review 統合レビュー結果\n\n…",
+ "comments": [{"path": "src/example.ts", "line": 10, "side": "RIGHT", "body": "🤖 multi-review\n\n[SHOULD][通常] …"}]}
 PAYLOAD
 ```
 
