@@ -1,0 +1,22 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* T3 Code 自身もこのファイルに書き込むので、管理するのは以下のキーだけ。 */ -}}
+{{- $c := dict -}}
+{{- if .chezmoi.stdin | trim -}}
+{{- $c = fromJson .chezmoi.stdin -}}
+{{- end -}}
+{{- $c = setValueAtPath "defaultRuntimeMode" "auto" $c -}}
+{{- $c = setValueAtPath "defaultThreadEnvMode" "worktree" $c -}}
+{{- $c = setValueAtPath "defaultModelSelection" (dict "instanceId" "claudeAgent" "model" "claude-opus-5-5") $c -}}
+{{- $c = setValueAtPath "branchNamingMode" "semantic" $c -}}
+{{- $c = setValueAtPath "worktreeCleanup" (fromJson `{
+  "mode": "custom",
+  "rules": {
+    "worktreeKeepWhen": "uncommitted-changes",
+    "worktreeAfterDays": null,
+    "worktreeSettledAfterDays": null,
+    "worktreeOnMerge": true,
+    "worktreeOnDelete": false,
+    "worktreeUnchanged": false
+  }
+}`) $c -}}
+{{- toPrettyJson $c -}}
