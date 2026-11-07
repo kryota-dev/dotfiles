@@ -202,6 +202,8 @@ cask "slack", args: { appdir: "/Applications" }
 cask "smoothcsv"
 # Application to control your PlayStation 4 or PlayStation 5
 cask "sony-ps-remote-play"
+# Minimal GUI for AI code agents
+cask "t3-code"
 # Mesh VPN based on WireGuard
 cask "tailscale-app"
 # Unpacks archive files

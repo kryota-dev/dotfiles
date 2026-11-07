@@ -10,6 +10,8 @@ export PAGER=less
 export LANG=ja_JP.UTF-8
 export LESS='-R -M -i -W -z-4'
 export LESSCHARSET=utf-8
+# 利用状況を送信しないため。
+export T3CODE_TELEMETRY_ENABLED=false
 
 # MCP サーバーの API キー（1Password から描画した 0600 のファイル）。
 [ -r "$HOME/.config/zsh/secrets.zsh" ] && . "$HOME/.config/zsh/secrets.zsh"

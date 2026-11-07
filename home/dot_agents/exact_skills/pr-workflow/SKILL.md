@@ -13,7 +13,7 @@ user-invocable: true
 
 タスクを分類し、tier に応じた path で「ワークツリー → 実装 → CI → レビュー → 指摘対応」を進める司令塔。自分は分類・GATE・統合判断に徹し、重い処理は各 skill に委ねる。
 
-- **全 tier でワークツリーを作り**（`wtp`）、以降のすべての作業をその中で行う。main worktree を直接変更しない。
+- **全 tier で linked worktree を使う。** 既にその中にいれば再利用し、main worktree なら `wtp` で作る。以降のすべての作業をその中で行う。
 - **委譲先の skill は実際に起動する。** `multi-review` / `review-resolve-loop` を「自分でやった方が速い」と手作業で代替しない（各 skill が持つ取得経路の網羅を欠き、指摘を取りこぼす）。
 - **マージは user が行う。** 自動でマージしない。
 - **設計と判断は Claude。実装者は PR ごとに Claude と Codex から選ぶ。** どの作業をどの役割（モデルとエフォート）に任せるかは [`references/model-roles.md`](references/model-roles.md) に従う。
@@ -56,10 +56,15 @@ user-invocable: true
 
 ## Phase 0.5: ワークツリー
 
-1. ブランチ名を operation から決める（`feat/…` / `fix/…` / `refactor/…`。Issue があれば番号を含めてよい）。
-2. `BASE=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)` を base にし、`wtp add -b <branch> "$BASE"` で作る（既存ブランチは `wtp add <branch>`）。以降は作ったワークツリーの絶対パスで作業する。
-3. 衝突したら `wtp list` で確認し、再利用するか別名にする。
-4. 呼び出し元がワークツリーを用意済みなら作らずに使う。削除はマージ後に user か呼び出し元が `wtp remove` で行う。
+1. `GD=$(git rev-parse --path-format=absolute --git-dir)` と `GCD=$(git rev-parse --path-format=absolute --git-common-dir)` を取得する。どちらかが失敗したら止まる。`[ "$GD" != "$GCD" ]` なら linked worktree の中なので、次の確認をしてから再利用する。
+2. 再利用・新規作成のどちらでも、`BASE=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)` を PR の base にする。
+3. linked worktree の中なら `CUR=$(git branch --show-current)` を取得する。`CUR` が空か `$BASE` と同じなら、止まって user に使うブランチを確かめる。`gh pr list --head "$CUR" --state all` に PR があれば、同じ PR の続きかを user に確かめる。確認が済んだら、T3 Code などの呼び出し元が作ったワークツリーをそのまま使い、新しく作らない。
+4. `GD` と `GCD` が同じなら main worktree なので、ブランチ名を operation から決め（`feat/…` / `fix/…` / `refactor/…`。Issue があれば番号を含めてよい）、`wtp add -b <branch> "$BASE"` で作る（既存ブランチは `wtp add <branch>`）。
+5. 作成時に衝突したら `wtp list` で確認し、再利用するか別名にする。
+
+以降は使うワークツリーの絶対パスで作業する。削除はマージ後に user か呼び出し元が `wtp remove` で行う。
+
+T3 Code はスレッドの途中でブランチ名を付け替えるので、push と PR の作成のそれぞれの直前に `git branch --show-current` で現在のブランチ名を取り直し、その名前を使う。
 
 `sdd` に委ねるときは、委譲プロンプトに「ワークツリーは作成済み。現在のワークツリーで作業し、新しく作らない。PR の base は `<$BASE>`。実装者は `<claude|codex>`」と書く。
 

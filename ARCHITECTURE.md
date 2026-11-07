@@ -83,6 +83,30 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 - skill はどちらのハーネスでも動く書き方にする。もう一方のハーネスのモデルは、その CLI（Claude Code からは
   `codex exec`、Codex からは `claude -p`）で呼ぶ。
 
+## T3 Code
+
+T3 Code を新しい作業の入口にする。サーバーはデスクトップアプリの内蔵のものだけを使う。常駐サービス
+（`t3 service`）を併用すると同じデータを取り合うため、使わない。worktree は T3 Code が作り、
+`pr-workflow` はそのまま使う。ターミナルから始める作業は `wtp` を使う。
+
+`home/private_dot_t3/private_userdata/modify_settings.json` は `~/.t3/userdata/settings.json` の次のキーを宣言する。
+アプリも書き込むので、管理するキーだけを上書きし、それ以外は残す。
+
+- `defaultRuntimeMode`: `auto`
+- `defaultThreadEnvMode`: `worktree`
+- `defaultModelSelection`: `instanceId` は `claudeAgent`、`model` は `claude-opus-5-5`
+- `branchNamingMode`: `semantic`
+- `worktreeCleanup`: `mode` は `custom`。`worktreeOnMerge` だけを有効にし、
+  `worktreeKeepWhen` は `uncommitted-changes`（未コミットの変更がある worktree を残す）。
+
+テレメトリは `.zprofile` の `T3CODE_TELEMETRY_ENABLED=false` で止める。遠隔操作は Tailscale HTTPS を使い、
+アプリの画面で有効にする。
+
+Claude の Auto では、Claude が人に聞こうとした操作を T3 Code が自動で許可するため、`permissions.ask` が効かない。
+リポジトリ・クラウド資源の削除やパッケージの公開なども確認なしで通る。`permissions.deny` は効く。
+承認の回数を増やさないため Auto のまま使い、上流の修正を
+[#36](https://github.com/kryota-dev/dotfiles/issues/36) で追う。
+
 ## モデルの役割分担
 
 設計と判断は Claude。実装者は PR ごとに Claude と GPT から選び、レビューの general は実装と別の系統が担う。
