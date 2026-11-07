@@ -15,7 +15,7 @@ skill や orchestration から Codex を起動するときの起動形と約束�
 skill から呼ぶときは、役割（`implementer`・`reviewer-gpt` など）を決めて、その定義から `-m` と `-c model_reasoning_effort=` を渡す。役割表・値の読み方・格上げ（`implementer-astra`）は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md) に従い、値をここに書き写さない。単体で相談するときは既定のままでよい。
 
 ```bash
-gpt_role() { sed -nE "s/^$2 *= *\"([^\"]*)\"\$/\1/p" "$HOME/.codex/agents/$1.toml" | head -1; }
+# gpt_role の定義は model-roles.md の「GPT の役割の起動」にある
 ROLE=implementer
 M=$(gpt_role "$ROLE" model) E=$(gpt_role "$ROLE" model_reasoning_effort)
 [ -n "$M" ] && [ -n "$E" ] || { echo "abort: ~/.codex/agents/$ROLE.toml が無い。chezmoi apply を実行する" >&2; exit 1; }

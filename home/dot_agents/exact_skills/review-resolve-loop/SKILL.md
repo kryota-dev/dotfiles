@@ -137,7 +137,7 @@ push の有無にかかわらず、毎ラウンド `gh pr checks {PR} --repo {ow
 
 - 待つ前に、PR が Draft でないことを確かめる（`gh pr view {PR} --repo {owner}/{repo} --json isDraft --jq .isDraft`）。Draft の間は CI を回さないリポジトリがあり、skipped を通過と見てしまうため。Draft なら待たずに止まり、ready に移すかを user に確かめる。
 
-- 失敗件数は、`--watch` が終わった後に `--watch` を付けずに取り直し、ステータス列（第 2 列）が厳密に `fail` の行だけを数える: `gh pr checks {PR} --repo {owner}/{repo} | awk -F'\t' '$2=="fail"' | grep -c .`（`--watch` の出力は表が繰り返されうるので数えない）。`grep -ic fail` はチェック名（`notify-on-schedule-failure` など）にも当たるので使わない。
+- 失敗件数は、`--watch` が終わった後に `--watch` を付けずに取り直す: `gh pr checks {PR} --repo {owner}/{repo} --json bucket --jq '[.[] | select(.bucket == "fail")] | length'`（`--watch` の出力は表が繰り返されうるので数えない）。`grep -ic fail` はチェック名（`notify-on-schedule-failure` など）にも当たるので使わない。
 - 出力を `tail` / `head` で間引かない。`--watch` 無しで pending を無視しない。
 - 失敗したら `gh run view {run_id} --log-failed` で原因を見て、直して push し、もう一度待つ。flaky と思われるものは 1 回だけ再実行し、同じ原因で 2 回続けて落ちたら `notify` で知らせる。
 
