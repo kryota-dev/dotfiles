@@ -108,7 +108,7 @@ gh api repos/{owner}/{repo}/issues/{PR}/comments --paginate --jq '
 
 | | bot | 自分名義（純粋セルフ） | 真の人間 |
 |---|---|---|---|
-| 返信冒頭の `@` | `@{login}`（`[bot]` を除く） | 付けない | `@{login}` |
+| 印の次の行の先頭の `@` | `@{login}`（`[bot]` を除く） | 付けない | `@{login}` |
 | 返信前の承認 | 不要（方針の承認で足りる） | 不要 | **必要** |
 | resolve | する | する（返信しないものも resolve する） | **しない**（本人が resolve する） |
 | re-request review | しない | しない | 返信したらする（`pulls/{PR}/requested_reviewers`） |
