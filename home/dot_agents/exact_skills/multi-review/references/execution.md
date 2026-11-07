@@ -51,7 +51,7 @@ gh api "repos/$OWNER/$REPO/issues/$PR_NUMBER/comments" --paginate --jq '[.[] | {
 
 ## Phase 5: 確認と投稿
 
-統合サマリーを示し、`notify` を鳴らしてから user に投稿方法を確認する（構造化された質問ツールがあれば使う）。質問の冒頭に `Target: <owner>/<repo> PR #<番号>` と `Inline comment count after dedup: N` を入れる。選択肢は「サマリーを body に含めて投稿（推奨）」「body なしで投稿（Pending）」「投稿しない」。NITS をインラインに含めるかも同時に聞く。呼び出し元が投稿方法を指定していれば確認を省く。
+統合サマリーを示し、`notify` skill で音を鳴らしてから user に投稿方法を確認する（構造化された質問ツールがあれば使う）。質問の冒頭に `Target: <owner>/<repo> PR #<番号>` と `Inline comment count after dedup: N` を入れる。選択肢は「サマリーを body に含めて投稿（推奨）」「body なしで投稿（Pending）」「投稿しない」。NITS をインラインに含めるかも同時に聞く。呼び出し元が投稿方法を指定していれば確認を省く。
 
 投稿のルール:
 

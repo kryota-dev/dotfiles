@@ -163,6 +163,6 @@ gh pr view <番号> --json isDraft,reviews,statusCheckRollup | jq --arg me "$ME"
 |---|---|
 | ワークツリーの作成に失敗 | `wtp list` で衝突を確認し、別名で再試行。だめなら user |
 | 実装の失敗 | model-roles.md の「実装の格上げ」に従い、同じ系統の中で 1 段ずつ上げる。最上位でもだめなら user |
-| コミット・push の失敗（1Password など） | `notify` で知らせ、user の対応を待つ |
+| コミット・push の失敗（1Password など） | `notify` skill で知らせ、user の対応を待つ |
 | merge conflict | 解消する。だめなら user |
 | GATE 3 で user が却下 | 止まる（マージしない） |

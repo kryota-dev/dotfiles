@@ -11,7 +11,7 @@ effort: high
 
 spec（要件・設計・タスク）を書いてから実装し、コミットと Draft PR の作成まで自律で行う。実装のレビューはしない（pr-workflow の PR 作成後の工程が担う）。spec だけは、実装の前に別の系統が 1 回レビューする。
 
-承認のために止まらない。止まるのは、呼び出し元がワークツリーを用意しなかったとき（下記）、spec レビューの指摘が user の承認済みの判断を覆すとき（[`references/spec-review.md`](references/spec-review.md)）、Git 操作が認証エラー（1Password など）で通らないとき（`notify` してから user に判断を仰ぐ）だけ。spec-workflow MCP の承認ツールも、止まる原因になるので使わない。
+承認のために止まらない。止まるのは、呼び出し元がワークツリーを用意しなかったとき（下記）、spec レビューの指摘が user の承認済みの判断を覆すとき（[`references/spec-review.md`](references/spec-review.md)）、Git 操作が認証エラー（1Password など）で通らないとき（`notify` skill を実行してから user に判断を仰ぐ）だけ。spec-workflow MCP の承認ツールも、止まる原因になるので使わない。
 
 ## 入力
 
