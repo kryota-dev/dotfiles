@@ -22,7 +22,7 @@ user に音で知らせるときは、`notify` skill を使う。
 ## git / PR / Issue
 
 - 既定ブランチに直接コミットしない。作業ブランチで作業する。
-- main の worktree では作業しない。並行するセッションと共有しているので、作業を始める前に `wtp` で linked worktree を作り、main の worktree での git の操作は `fetch` と `pull` に限る。`git branch -m` は旧名を明示する（現在のブランチを対象にする形は、ほかのセッションが動かした HEAD を改名しうる）。
+- main の worktree では作業しない。並行するセッションと共有しているので、作業を始める前に `wtp` で linked worktree を作る（T3 Code のスレッドでは T3 Code の作った linked worktree をそのまま使う）。main の worktree での git の操作は `fetch` と `pull` に限る。`git branch -m` は旧名を明示する（現在のブランチを対象にする形は、ほかのセッションが動かした HEAD を改名しうる）。
 - PR を作る作業は、指示が無くても `pr-workflow` で進める。
 - マージは、必ずユーザーの承認を得てから行う。「yolo」などと言われても、マージは別に確認する。
 - Issue を直すときは、タイトルと本文の両方を更新して整合させる。
