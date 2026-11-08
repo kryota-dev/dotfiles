@@ -10,7 +10,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kryota-dev/dotfiles/main
 ```
 
 Xcode Command Line Tools・Homebrew・1Password を入れ、1Password CLI が使えるようになるまで待ってから
-（テンプレートが描画時に秘密情報を読むため）、`chezmoi init --apply kryota-dev` を実行する。init は、秘密情報を
+（テンプレートが描画時に秘密情報を読むため）、`chezmoi init kryota-dev` と `chezmoi update` を実行する。init は既存の
+ソースを pull しないので、update で pull してから apply する（実行し直しても最新のソースで apply する）。init は、秘密情報を
 置いた 1Password の vault 名を尋ねる。答えは手元の `~/.config/chezmoi/chezmoi.toml` にだけ保存され、
 入力し直すときは `chezmoi init --prompt` を使う。
 
