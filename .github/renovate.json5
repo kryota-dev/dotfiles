@@ -8,6 +8,9 @@
   // npm・PyPI などの datasource だけで、mise の npm: の backend には効くが、ランタイムや GitHub Releases から
   // 入れる CLI には効かない。脆弱性の PR は Renovate の既定で minimumReleaseAge を外され、3 日待たない。
   osvVulnerabilityAlerts: true,
+  // 既定の 'none' では Dependency Dashboard に OSV の結果が出ず、照会が動いたかを確かめられない。
+  // 'all' なら、0 件のときも「CVE が見つからなかった」と出る。
+  dependencyDashboardOSVVulnerabilitySummary: 'all',
   mise: {
     managerFilePatterns: ['/^home/dot_config/mise/config\\.toml$/'],
   },
