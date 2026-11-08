@@ -11,6 +11,10 @@ sed -n 's/^tap "\([^"]*\)".*/\1/p' "$brewfile" | while read -r tap; do
 done
 
 # 1 つの項目の失敗（App Store から消えたアプリなど）で apply 全体を止めない。
+# Xcode のインストール後はライセンス同意まで Homebrew が止まるため、同意を確認して 1 回だけやり直す。
 if ! brew bundle --no-upgrade --file="$brewfile"; then
-  echo "WARNING: brew bundle で入らなかったものがあります（上の出力を参照）。brew bundle を再実行してください。" >&2
+  bash "{{ .chezmoi.sourceDir }}/run_before_05-macos-prerequisites.sh"
+  if ! brew bundle --no-upgrade --file="$brewfile"; then
+    echo "WARNING: brew bundle で入らなかったものがあります（上の出力を参照）。brew bundle を再実行してください。" >&2
+  fi
 fi
