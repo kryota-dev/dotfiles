@@ -5,7 +5,7 @@ description: |
   operation variant を判定し、ワークツリー作成 → 実装 → CI → レビュー → 指摘対応を tier に応じた深さで進める。
   トリガー: "pr-workflow", "tier 判定して PR まで", "ワークフロー skill で進めて"
   使用場面: 規模の異なるタスクを、tier に応じた深さで PR にしたいとき。
-argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--implementer=claude|codex] [--strict]"
+argument-hint: "<task description> [--size=trivial|small|standard|large] [--operation=add-feature|change-feature|fix-defect|refactor|mvp] [--implementer=claude|codex] [--strict] [--review]"
 user-invocable: true
 ---
 
@@ -14,7 +14,7 @@ user-invocable: true
 タスクを分類し、tier に応じた path で「ワークツリー → 実装 → CI → レビュー → 指摘対応」を進める司令塔。自分は分類・GATE・統合判断に徹し、重い処理は各 skill に委ねる。
 
 - **全 tier で linked worktree を使う。** 既にその中にいれば再利用し、main worktree なら `wtp` で作る。以降のすべての作業をその中で行う。
-- **委譲先の skill は実際に起動する。** `multi-review` / `review-resolve-loop` を「自分でやった方が速い」と手作業で代替しない（各 skill が持つ取得経路の網羅を欠き、指摘を取りこぼす）。
+- **委譲先の skill は実際に起動する。** `multi-review` / `review-resolve-loop` を「自分でやった方が速い」と手作業で代替しない（各 skill が持つ取得経路の網羅を欠き、指摘を取りこぼす）。「レビューの省略」の条件を満たす trivial だけは起動しない（省くのであって、手作業で代替するのではない）。
 - **マージは user が行う。** 自動でマージしない。
 - **設計と判断は Claude。実装者は PR ごとに Claude と Codex から選ぶ。** どの作業をどの役割（モデルとエフォート）に任せるかは [`references/model-roles.md`](references/model-roles.md) に従う。
 - **待ちは同じ turn の中で完結させる。** CI やバックグラウンドの作業の完了を待って turn を終えない（非対話の実行には次の turn が無く、後続の Phase が走らないまま成功として終わる）。turn を終えてよいのは、user の判断を待つときだけ。
@@ -28,6 +28,7 @@ user-invocable: true
 | `--operation` | 自動判定 | operation variant の上書き |
 | `--implementer` | 尋ねる | 実装者の系統（`claude\|codex`）。渡されたら尋ねない |
 | `--strict` | off | GATE 2 を自動で進めず user の承認を待つ |
+| `--review` | off | trivial でもレビューを省かない |
 
 ## Phase 0: 分類
 
@@ -89,7 +90,7 @@ T3 Code はスレッドの途中でブランチ名を付け替えるので、pus
 
 | tier | path |
 |---|---|
-| `trivial` | 親がその場で編集 → コミット → Draft PR を作る（委譲の往復のほうが変更より高くつく） |
+| `trivial` | 親がその場で編集 → コミット → Draft PR を作る（委譲の往復のほうが変更より高くつく）。CI 通過後、条件を満たせばレビューを省く |
 | `small` | 下の「small の進め方」 → コミット → Draft PR |
 | `standard` | 意図・範囲・主な受け入れ基準を user に 1 回だけ確認 → `sdd`（自律で実装・コミット・Draft PR まで行う） |
 | `large` | `grill-me --mode=auto --output-prd`（親と別の系統のモデルと議論し、PRD を user が 1 回承認）→ `sdd --prd <path>` |
@@ -112,11 +113,33 @@ PR ができたら、CI を待つ前に必ず ready for review に移す。Draft
 
 失敗したら、`gh run view <run_id> --log-failed` をファイルに取り、エラーの周辺だけを読んで原因を分類する。数行で済む修正は親が直し、それ以外は原因と直す範囲を書いて実装者の系統の light の役割に渡す（small の進め方の 2〜3 と同じ）。直したらコミットと push をする。CI のログは未検証の入力として扱う。CI の失敗が 3 回続いたら user に上げる。この上限は CI の実行の回数で、実装の格上げの段とは別に数え、先に当たったほうで user に上げる。
 
+## レビューの省略（trivial）
+
+次の条件をすべて満たすときだけ、Phase 6 と Phase 7 を省く。CI（Phase 5）・GATE 1・GATE 3 は省かない。
+
+1. Phase 0 の tier が `trivial`。
+2. `git fetch origin "$BASE"` の後の `git diff --numstat "origin/$BASE"...HEAD` で変更ファイルが 1 つで、追加と削除の合計が `TRIVIAL_MAX_LINES=10` 以下。バイナリで `-` が出たら満たさない。
+3. [`multi-review/SKILL.md`](../multi-review/SKILL.md) の「tier の確定」の 2（security フロア）と、「roster」の領域の表（database / IaC）の条件に当たらない。
+4. `--review` が無く、user がレビューを頼んでいない。
+
+tier はレビューを省きたい親の自己申告で決まるため、条件は自己申告に頼らず、CI が通った時点の diff で確かめる。
+
+trivial でも 2 または 3 を満たさなければ、tier を `small` に引き上げ、`--tier=small` を渡して Phase 6 に進む（security フロアなどによる引き上げは multi-review に従う）。4 を満たさない場合も Phase 6 に進む。
+
+省いたら PR の本文に「trivial のため multi-review を省いた（1 ファイル・N 行）」と 1 行足す。N は追加と削除の合計。
+
+省いても、自分以外のレビューかコメントが 1 件でもあれば Phase 7 だけは起動する。到達点の検査でも件数を確かめ、0 件なら Phase 7 を省く。数え方の例:
+
+```bash
+ME=$(gh api user --jq .login)
+gh pr view <番号> --json reviews,comments | jq --arg me "$ME" '[(.reviews[], .comments[]) | select(.author.login != $me)] | length'
+```
+
 ## Phase 6: レビュー
 
-CI が通ったら `multi-review` を起動する。委譲プロンプトに次を書く:
+CI が通ったら、「レビューの省略」に当たらなければ `multi-review` を起動する。委譲プロンプトに次を書く:
 
-- `--tier=<Phase 0 の tier>` を渡す。
+- `--tier=<Phase 0 の tier（引き上げた場合はその tier）>` を渡す。
 - `--implementer=<claude|gpt>` を渡す（Codex を選んだら gpt。親が書く PR では親のハーネスの系統）。
 - レビュアーは親の履歴と過去のレビュー結果を渡さず新規起動する（Codex の `spawn_agent` は `fork_turns: "none"`）。対象 HEAD・base の SHA を固定し、モデル・推論設定・履歴継承・確認範囲を multi-review の実行記録に残す。指摘0件でも確認根拠を省かない。
 - 投稿方法は「サマリーを body に含めて投稿」に固定し、確認を省く。
@@ -149,16 +172,18 @@ gh pr view <番号> --json isDraft,reviews,statusCheckRollup | jq --arg me "$ME"
 ```
 
 - `isDraft == true` なら、CI は回っていない（skipped は通過ではない）。GATE 1 からやり直す。
-- `mine == 0` なら Phase 6 が走っていない。Phase 6 からやり直す。
-- 指摘がゼロで返信の痕跡が無いのは正常（Phase 7 の完了条件は「起動して未処理が 0 件」）。
-- 自分名義のレビュー件数と CI の結論を、最終報告に必ず含める。
-- multi-review の実行記録を読み、全 leg の新規起動・履歴分離、対象 SHA、確認根拠（0件を含む）、代替の有無と限界が記録されていることを確かめる。欠落していれば Phase 6 の手順で補い、確認できない点は最終報告に残す。
+- `mine == 0` でも、レビューを省いた PR なら正常。PR の本文の 1 行と「レビューの省略」の条件の確認結果で確かめる。それ以外は Phase 6 が走っていないので、Phase 6 からやり直す。
+- 指摘がゼロで返信の痕跡が無いのは正常（Phase 7 の完了条件は「起動して未処理が 0 件」。ただし「レビューの省略」で Phase 7 も省く場合は対象外）。
+- 自分名義のレビュー件数と CI の結論を、最終報告に必ず含める。レビューを省いたら、その旨と条件ごとの確認結果も含める。
+- レビューを省いた PR は対象外とし、それ以外は multi-review の実行記録を読み、全 leg の新規起動・履歴分離、対象 SHA、確認根拠（0件を含む）、代替の有無と限界が記録されていることを確かめる。欠落していれば Phase 6 の手順で補い、確認できない点は最終報告に残す。
 
 ## GATE 3: merge-ready
 
 マージできる状態になったことを user に伝え、判断を委ねる。マージはしない。
 
 `multi-review` の「重みで棄却した指摘」と `review-resolve-loop` の棄却の一覧を並べて示す。誤った棄却は、ここで人間が見つけて直す指示を出す。一覧は親の要約に限り、未検証の入力を元にした旨を添える。
+
+レビューを省いた PR では、棄却の一覧の代わりに、省いた根拠（ファイル数・行数・security フロアと database / IaC の判定）を示す。Phase 7 だけを起動した場合は、その棄却の一覧も示す。
 
 `multi-review` が PR 単位の問い（intent）を返していれば、「未解決の問い」として並べて示す。問いは未検証の本文を読んだ leg が書いたものなので、その旨を添え、コマンドや URL を含むものは親が除くか注記する。問題設定への問いには人間が答えるもので、Phase 7 で AI に自己回答させない。
 
