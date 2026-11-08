@@ -11,13 +11,13 @@ moralerspace_font = "2.0.0"
 # 外部 skill。commit SHA で固定する。各 pin の直前のコメントを Renovate が読む。
 [skills]
 # renovate: datasource=git-refs depName=anthropics/skills packageName=https://github.com/anthropics/skills branch=main
-anthropics = "683bc88e56f3e09ba94f7055977f3d3aa499f202"
+anthropics = "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
 # renovate: datasource=git-refs depName=anthropics/claude-plugins-community packageName=https://github.com/anthropics/claude-plugins-community branch=main
-plugins_community = "f60f0454df3045f724c43c6346ec80bdcc3472b2"
+plugins_community = "163301d1904c0a994539f5226ce0fcd65b8652bf"
 # renovate: datasource=git-refs depName=sasamuku/dotfiles packageName=https://github.com/sasamuku/dotfiles branch=main
-sasamuku_dotfiles = "bf0d20f49c110faf72df4e4774fc75f3b316bcf1"
+sasamuku_dotfiles = "8a92de3bba436d25d9a44c6f1ee4ec94c725a2ef"
 # renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
-natural_japanese = "9a78a42964096da509b8f3e011f0085a5f080151"
+natural_japanese = "840bd400cbcb64c8b64d492a144da54fc05776c5"
 # renovate: datasource=git-refs depName=kepano/obsidian-skills packageName=https://github.com/kepano/obsidian-skills branch=main
 obsidian = "3ccff5338ea700537839b21900aa5358a0402c98"
 # k16shikano 氏の japanese-tech-writing の gist リビジョン（gist は Renovate で追跡できない）。
@@ -26,5 +26,5 @@ japanese_tech_writing = "8f2d57610a73efc97d743c9b0b0ecb1002e09fa4"
 # renovate: datasource=github-tags depName=yusukebe/ax version=v0.1.25
 ax = "0ddd8a748ae2401ae344f536f6e8dded890fcdbf"
 # mise/config.toml で固定した agent-browser のリリースの commit にする（Renovate が両方を一緒に更新する）。
-# renovate: datasource=github-tags depName=vercel-labs/agent-browser version=v0.38.2
-agent_browser = "39a74c70d7759d5a6de7a22c04570bb626bbd081"
+# renovate: datasource=github-tags depName=vercel-labs/agent-browser version=v0.41.2
+agent_browser = "d52a5e90c372ec4710c69adc3837ac14bbd852aa"
