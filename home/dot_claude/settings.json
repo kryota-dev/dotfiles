@@ -181,6 +181,17 @@
     "command": "$HOME/.claude/statusline.sh"
   },
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/tmux-claude-session.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "Elicitation": [
       {
         "matcher": "codex-cu",
