@@ -45,9 +45,12 @@ defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
   '<dict><key>Bundle ID</key><string>com.apple.CharacterPaletteIM</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>' \
   '<dict><key>Bundle ID</key><string>com.apple.50onPaletteIM</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>' \
   '<dict><key>Bundle ID</key><string>com.apple.PressAndHold</string><key>InputSourceKind</key><string>Non Keyboard Input Method</string></dict>'
+# macOS 27 はこのドメインへの書き込みを拒み、システム設定からしか変更できないため、
+# 失敗しても apply は止めず、手動での追加を案内する。
 defaults write com.apple.inputsources AppleEnabledThirdPartyInputSources -array \
   '<dict><key>Bundle ID</key><string>com.google.inputmethod.Japanese</string><key>Input Mode</key><string>com.apple.inputmethod.Japanese</string><key>InputSourceKind</key><string>Input Mode</string></dict>' \
-  '<dict><key>Bundle ID</key><string>com.google.inputmethod.Japanese</string><key>InputSourceKind</key><string>Keyboard Input Method</string></dict>'
+  '<dict><key>Bundle ID</key><string>com.google.inputmethod.Japanese</string><key>InputSourceKind</key><string>Keyboard Input Method</string></dict>' ||
+  echo "WARNING: システム設定 > キーボード > 入力ソース で Google 日本語入力を追加してください。" >&2
 
 # 表示言語と地域を日本語にする（再ログインで反映）
 defaults write NSGlobalDomain AppleLanguages -array "ja-JP" "en-JP"
