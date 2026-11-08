@@ -157,6 +157,6 @@ vault 名・自宅のホスト名のように、秘密ではないが公開し�
 
 ## 依存の更新
 
-Renovate は minor / patch の更新を週 1 回 1 つの PR にまとめ、CI が通れば自動でマージする。外部 skill・`ax`・
-GitHub Actions の更新は手で確認する。CI は `home/dot_config/mise/config.toml` で固定したツールのバージョンで、
-Ubuntu 上で `make test` を実行する。
+Renovate は minor / patch の更新を 1 つの PR にまとめ、CI が通れば自動でマージする。
+外部 skill・`ax`・GitHub Actions の更新は手で確認する。CI は `home/dot_config/mise/config.toml` で固定した
+ツールのバージョンで、Ubuntu 上で `make test` を実行する。
