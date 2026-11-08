@@ -23,13 +23,13 @@
 |---|---|---|
 | `run_before_05` | apply のたび | macOS の更新で失われうる Rosetta 2 と Xcode のライセンス同意 |
 | `run_before_06` | apply のたび | `~/.config/git/hooks` に書き込みの権限を戻す（下の「秘密情報」） |
-| `run_onchange_before_10` | Brewfile の変更 | `brew bundle`（1 項目の失敗で apply を止めない） |
+| `run_onchange_after_10` | Brewfile の変更 | ファイルの描画後に `brew bundle`（初回の長い bundle で 1Password の承認が切れないように）。Xcode のライセンスで失敗したら同意して 1 回やり直し、項目の失敗で apply を止めない |
 | `run_onchange_after_12` | mise の設定の変更 | `mise install` |
 | `run_onchange_after_13` | スクリプトの変更 | Claude Code の MCP サーバーの登録 |
 | `run_onchange_after_14` | Codex の computer use プラグインの変更 | その MCP サーバーを Claude Code に `codex-cu` として登録 |
 | `run_onchange_after_17` | settings.json の変更 | 宣言した Claude Code の plugin のインストール |
 | `run_onchange_after_18` | mise の設定の変更 | agent-browser が使うブラウザの取得 |
-| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults`・ファイアウォール・GUI アプリの PATH |
+| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults`・ファイアウォール・GUI アプリの PATH。Google 日本語入力の追加に失敗したら警告し、apply を止めない（macOS 27 はシステム設定からの変更が必要） |
 | `run_onchange_after_21` | スクリプトの変更 | `duti` で既定のアプリ |
 | `run_onchange_after_22` | LaunchAgent の変更 | キーの割り当ての LaunchAgent を読み込み直す |
 | `run_after_31` | apply のたび | Obsidian の vault をそろえる（下記） |
