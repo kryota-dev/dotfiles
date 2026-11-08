@@ -4,6 +4,10 @@
   // schedule は付けない。Mend の hosted app は実行の時刻を選べず、Renovate の PR がマージされていない
   // リポジトリは 1 日 1 回しか実行しないので、時間の窓を絞ると更新の PR が出なくなる。
   rebaseWhen: 'conflicted',
+  // mise の config.toml は GitHub の Dependabot alerts の対象外なので、OSV で脆弱性を拾う。OSV が扱うのは
+  // npm・PyPI などの datasource だけで、mise の npm: の backend には効くが、ランタイムや GitHub Releases から
+  // 入れる CLI には効かない。脆弱性の PR は Renovate の既定で minimumReleaseAge を外され、3 日待たない。
+  osvVulnerabilityAlerts: true,
   mise: {
     managerFilePatterns: ['/^home/dot_config/mise/config\\.toml$/'],
   },
