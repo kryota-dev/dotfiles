@@ -13,7 +13,7 @@
 |---|---|---|
 | `home/` | `~` | chezmoi のソースのルート（`.chezmoiroot`） |
 | `home/.chezmoidata.toml` | — | 個人の値と、外部のものの pin |
-| `home/.chezmoiexternal.toml` | — | フォントと外部 skill（commit SHA で固定） |
+| `home/.chezmoiexternal.toml` | — | フォント・外部 skill・tmux のプラグイン（commit SHA で固定） |
 | `home/run_*` | — | lifecycle スクリプト（下記） |
 | `install.sh` | — | 新しい Mac のセットアップ |
 
@@ -71,7 +71,8 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 - hook は、ハーネスの標準機能（設定キー・permission のルール・ダイアログの選択肢）で代替できないときだけ足し、
   スクリプトを `~/.claude/` に置いて `settings.json` の `hooks` で宣言し、理由をここに書く。hook から呼ぶのは
   ハーネス自身の CLI（`claude -p`）までにし、独自のランタイムやサーバーは持たない。
-- 今ある hook は `codex-cu-gate.sh`（`Elicitation`）だけ。`codex-cu`（Codex の computer use）は `cua.getApp` の
+- 今ある hook は `codex-cu-gate.sh`（`Elicitation`）と `tmux-claude-session.sh`（`SessionStart`）の 2 つ。
+- `codex-cu-gate.sh` は computer use の許可を判定する。`codex-cu`（Codex の computer use）は `cua.getApp` の
   たびに「Allow Computer Use to use "<App>"?」の elicitation を出し、「常に許可」の記憶を Codex アプリ
   （MCP クライアント）に委ねている。Claude Code にはその記憶がなく、ダイアログを省く手段も hook しかない。
   hook は auto mode と同じ三層（必ず聞くアプリ → 常に許可するアプリ → `claude -p` の分類器がユーザーの依頼に
@@ -80,8 +81,57 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
   mode は渡らない）。限界: transcript は非同期に書かれるので、実行予定の js は「結果が未記録の呼び出しが
   1 つだけ」のときに参考として渡すにとどめ、永続 REPL の既存の状態は見えない。subagent の中では user ターンが
   人の依頼ではないので自動承認しない。
+- `tmux-claude-session.sh` は、どのペインでどの会話が動いているかを tmux に渡す。Claude Code の設定キーにも
+  tmux の機能にも、この対応を渡す標準の手段が無いため、`SessionStart` で session ID と PID を記録する。
+  `claude -p` や Bash ツールの子も `TMUX_PANE` を継承するので、Claude Code の制御端末がペインの tty で、
+  前景のジョブのときだけ記録する。stdout は Claude Code の文脈に入るので何も出さない。
 - skill はどちらのハーネスでも動く書き方にする。もう一方のハーネスのモデルは、その CLI（Claude Code からは
   `codex exec`、Codex からは `claude -p`）で呼ぶ。
+
+## tmux
+
+再起動の後に、セッション・ウィンドウ・ペインの並びとレイアウト・各ペインの作業ディレクトリを戻し、
+Claude Code の会話を `claude --resume <ID>` で再開する。スクロールバックと、Claude Code 以外のプログラムは
+戻さない。resurrect の既定のプロセスの復元は、保存したコマンドラインをそのままシェルに打ち込み、ファイル名
+などに含まれる `$(...)` まで実行しうるため、`@resurrect-processes 'false'` で止める。
+
+tmux-resurrect と tmux-continuum は TPM を使わず、chezmoi の externals で `~/.local/share/tmux/plugins/` に
+配置し、`~/.tmux.conf` からこの順に読む。master の commit SHA で固定し、Renovate が更新を追跡する。
+プラグインは tmux サーバーの中でシェルとして動くため、更新は自動でマージしない。
+
+continuum が 5 分ごとに resurrect で `~/.local/share/tmux/resurrect/` に保存する。ステータス行の描画が契機に
+なるので、クライアントが接続している間だけ動く。Ghostty を閉じたときなど、クライアントが切断したときにも
+`client-detached` の hook から resurrect で保存する。
+
+Ghostty の最初のウィンドウは、`initial-command` で
+`/bin/zsh -lic 'exec tmux new-session -A -s claude-sessions'` を実行する。tmux は mise で入れていて GUI アプリの
+PATH に無いため、`.zshrc` の mise を通す対話のログインシェルで起動する。新しいサーバーでは continuum が
+最後の保存を復元する。`-A` は、`claude-sessions` が既にあれば attach する指定。保存に同じ名前と位置のペインがあれば、初期の
+ペインは復元したペインに置き換わる。2 枚目以降のウィンドウ・タブは普通のシェルを開く。LaunchAgent は使わない。
+
+Claude Code の会話は、SessionStart と resurrect の hook でペインに対応づける。
+resurrect の hook は `~/.config/tmux/claude-resume.sh` に置く。
+
+| 契機 | 処理 |
+|---|---|
+| `SessionStart` | ペインのユーザーオプション `@claude-session-id` と `@claude-pid` に session ID と PID を記録する |
+| `post-save-layout` | 記録した PID が生きていて制御端末がペインの tty と一致する行を、`claude_session` として保存ファイルに追記する |
+| `pre-restore-all` | 既存のペインに印を付け、すべての印付けが終わったことを記録する |
+| `pre-restore-pane-processes` | 印付けが完了していれば、印が無く前景がシェルのペインにだけ `claude --resume <ID>` を送る。ID が UUID の形でない行や、対象のペインが無い行は飛ばす |
+
+復元には次の限界がある。
+
+| 条件 | 限界 |
+|---|---|
+| 最後の保存より後の変更 | 戻らない。接続中は最大 5 分、切断中の変化は次の接続か切断まで保存されない |
+| ほかの tmux サーバーが動いている | continuum は自動の保存も復元もしない（上流の仕様） |
+| Claude Code の起動時のオプション | `--model` などは戻らない |
+| 保存に無い名前のセッションから始める | 初期のセッションが残る |
+| サーバーのペインが 1 つのときに手で復元する（`prefix + C-r`） | そのペインは置き換わる（上流の仕様） |
+| ペインの前景で `claude -p` を直接実行する | そのペインの会話の記録を上書きする |
+
+起動直後ではない既存のサーバーに設定を読み込むには、`tmux source-file ~/.tmux.conf` を実行する。
+continuum は復元せず、保存だけを始める。
 
 ## T3 Code
 
