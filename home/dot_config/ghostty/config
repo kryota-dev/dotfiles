@@ -24,3 +24,7 @@ copy-on-select = clipboard
 # macOS
 macos-option-as-alt = true
 macos-titlebar-style = tabs
+
+# 最初のウィンドウで tmux に入る。新しいサーバーなら tmux-continuum が最後の保存を復元する。
+# tmux は mise で入れていて GUI アプリの PATH に無いので、.zshrc まで読む対話のログインシェルで起動する。
+initial-command = /bin/zsh -lic 'exec tmux new-session -A -s claude-sessions'
