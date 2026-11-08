@@ -1,7 +1,15 @@
 #!/bin/bash
-# 新しい Mac のセットアップ: Xcode CLT → Homebrew → 1Password → chezmoi init → chezmoi update。
+# 新しい Mac のセットアップ: フルディスクアクセスの確認 → Xcode CLT → Homebrew → 1Password → chezmoi init → chezmoi update。
 # chezmoi のテンプレートは描画時に 1Password から秘密情報を読むので、1Password を先に用意する。
 set -euo pipefail
+
+# macOS の一部の設定の書き込みにはフルディスクアクセスが必要で、許可後はターミナルの開き直しが要る。
+# 長いセットアップの前に確かめる。TCC.db が無い場合は判定できないため、セットアップを止めない。
+tcc_db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+if [ -e "$tcc_db" ] && ! head -c 1 "$tcc_db" >/dev/null 2>&1; then
+  echo "このターミナルにフルディスクアクセスがありません。システム設定 > プライバシーとセキュリティ > フルディスクアクセス でこのターミナルをオンにし、ターミナルを開き直してからこのスクリプトを実行し直してください。" >&2
+  exit 1
+fi
 
 if ! xcode-select -p >/dev/null 2>&1; then
   xcode-select --install
