@@ -220,14 +220,12 @@ cask "visual-studio-code@insiders"
 cask "vlc"
 # Video communication and virtual meeting platform
 cask "zoom", args: { appdir: "/Applications" }
-mas "Copilot", id: 6738511300
 mas "Gapplin", id: 768053424
 mas "iMovie", id: 408981434
 mas "LINE", id: 539883307
 mas "Microsoft Excel", id: 462058435
 mas "Microsoft PowerPoint", id: 462062816
 mas "Microsoft Word", id: 462054704
-mas "PicGIF Lite", id: 844918735
 mas "RunCat Neo", id: 6757801838
 mas "ToyViewer", id: 414298354
 mas "Windows App", id: 1295203466
