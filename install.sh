@@ -1,5 +1,5 @@
 #!/bin/bash
-# 新しい Mac のセットアップ: Xcode CLT → Homebrew → 1Password → chezmoi init --apply。
+# 新しい Mac のセットアップ: Xcode CLT → Homebrew → 1Password → chezmoi init → chezmoi update。
 # chezmoi のテンプレートは描画時に 1Password から秘密情報を読むので、1Password を先に用意する。
 set -euo pipefail
 
@@ -24,6 +24,8 @@ until op vault list </dev/null >/dev/null 2>&1; do
   read -r -p "準備ができたら Enter で再確認します..."
 done
 
-sh -c "$(curl -fsLS https://get.chezmoi.io)" -- -b "$HOME/.local/bin" init --apply kryota-dev
+# init は既存のソースを pull しないので、実行し直したときも最新のソースで apply するよう update で pull してから apply する。
+sh -c "$(curl -fsLS https://get.chezmoi.io)" -- -b "$HOME/.local/bin" init kryota-dev
+"$HOME/.local/bin/chezmoi" update
 
 echo "完了しました。ターミナルを開き直してください。"
