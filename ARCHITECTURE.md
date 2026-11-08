@@ -23,7 +23,7 @@
 |---|---|---|
 | `run_before_05` | apply のたび | macOS の更新で失われうる Rosetta 2 と Xcode のライセンス同意 |
 | `run_before_06` | apply のたび | `~/.config/git/hooks` に書き込みの権限を戻す（下の「秘密情報」） |
-| `run_onchange_before_10` | Brewfile の変更 | `brew bundle`（1 項目の失敗で apply を止めない） |
+| `run_onchange_after_10` | Brewfile の変更 | ファイルの描画後に `brew bundle`（初回の長い bundle で 1Password の承認が切れないように）。項目の失敗で apply を止めない |
 | `run_onchange_after_12` | mise の設定の変更 | `mise install` |
 | `run_onchange_after_13` | スクリプトの変更 | Claude Code の MCP サーバーの登録 |
 | `run_onchange_after_14` | Codex の computer use プラグインの変更 | その MCP サーバーを Claude Code に `codex-cu` として登録 |
