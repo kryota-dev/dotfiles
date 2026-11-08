@@ -1,8 +1,8 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
   extends: ['config:recommended', 'helpers:pinGitHubActionDigests', ':pinAllExceptPeerDependencies'],
-  timezone: 'Asia/Tokyo',
-  schedule: ['before 9am on monday'],
+  // schedule は付けない。Mend の hosted app は実行の時刻を選べず、Renovate の PR がマージされていない
+  // リポジトリは 1 日 1 回しか実行しないので、時間の窓を絞ると更新の PR が出なくなる。
   rebaseWhen: 'conflicted',
   mise: {
     managerFilePatterns: ['/^home/dot_config/mise/config\\.toml$/'],
@@ -21,10 +21,12 @@
   ],
   packageRules: [
     {
-      // 通常のバージョン更新は週 1 回にまとめ、CI が通れば自動でマージする。
+      // 通常のバージョン更新は 1 つの PR にまとめ、CI が通れば自動でマージする。リリースの直後は
+      // mise のレジストリが追いついておらず、取り下げられる悪意のあるリリースもあるので、3 日待つ。
       matchUpdateTypes: ['minor', 'patch', 'pin', 'pinDigest'],
       groupName: 'non-major dependencies',
       automerge: true,
+      minimumReleaseAge: '3 days',
     },
     {
       // Moralerspace のリリースタグには先頭に "v" が付く。
