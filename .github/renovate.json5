@@ -21,10 +21,12 @@
   ],
   packageRules: [
     {
-      // 通常のバージョン更新は 1 つの PR にまとめ、CI が通れば自動でマージする。
+      // 通常のバージョン更新は 1 つの PR にまとめ、CI が通れば自動でマージする。リリースの直後は
+      // mise のレジストリが追いついておらず、取り下げられる悪意のあるリリースもあるので、3 日待つ。
       matchUpdateTypes: ['minor', 'patch', 'pin', 'pinDigest'],
       groupName: 'non-major dependencies',
       automerge: true,
+      minimumReleaseAge: '3 days',
     },
     {
       // Moralerspace のリリースタグには先頭に "v" が付く。
