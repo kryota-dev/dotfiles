@@ -5,6 +5,18 @@
     include = ["**/*.ttf"]
     refreshPeriod = "672h"
 
+[".local/share/tmux/plugins/tmux-resurrect"]
+    type = "archive"
+    url = "https://github.com/tmux-plugins/tmux-resurrect/archive/{{ .tmux_plugins.resurrect }}.tar.gz"
+    stripComponents = 1
+    refreshPeriod = "168h"
+
+[".local/share/tmux/plugins/tmux-continuum"]
+    type = "archive"
+    url = "https://github.com/tmux-plugins/tmux-continuum/archive/{{ .tmux_plugins.continuum }}.tar.gz"
+    stripComponents = 1
+    refreshPeriod = "168h"
+
 [".agents/skills/claude-api"]
     type = "archive"
     url = "https://github.com/anthropics/skills/archive/{{ .skills.anthropics }}.tar.gz"

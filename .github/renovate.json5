@@ -33,8 +33,8 @@
     },
     {
       // skill の本文はエージェントの挙動を左右し、ax は 1.0 前で skill が CLI のリリースに
-      // 紐づくため、自動マージせず手で確認する。
-      matchDepNames: ['anthropics/skills', 'anthropics/claude-plugins-community', 'coji/natural-japanese', 'kepano/obsidian-skills', 'yusukebe/ax', 'github:yusukebe/ax'],
+      // 紐づき、tmux のプラグインは tmux サーバーの中でシェルとして動くため、自動マージせず手で確認する。
+      matchDepNames: ['anthropics/skills', 'anthropics/claude-plugins-community', 'coji/natural-japanese', 'kepano/obsidian-skills', 'yusukebe/ax', 'github:yusukebe/ax', 'tmux-plugins/tmux-resurrect', 'tmux-plugins/tmux-continuum'],
       groupName: null,
       automerge: false,
     },
