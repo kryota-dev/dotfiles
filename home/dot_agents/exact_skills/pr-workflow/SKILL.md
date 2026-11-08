@@ -124,16 +124,13 @@ PR ができたら、CI を待つ前に必ず ready for review に移す。Draft
 
 tier はレビューを省きたい親の自己申告で決まるため、条件は自己申告に頼らず、CI が通った時点の diff で確かめる。
 
-trivial でも 2 または 3 を満たさなければ、tier を `small` に引き上げ、`--tier=small` を渡して Phase 6 に進む（security フロアなどによる引き上げは multi-review に従う）。4 を満たさない場合も Phase 6 に進む。
+trivial でも 2 を満たさなければ、tier を `small` に引き上げ、`--tier=small` を渡して Phase 6 に進む。
+
+3 の database / IaC の条件に当たれば、tier を `standard` に引き上げ、`--tier=standard` を渡して Phase 6 に進む（multi-review の database / IaC の leg は standard 以上でしか起動しないため）。security フロアによる standard 以上への引き上げは multi-review に従う。4 を満たさない場合も Phase 6 に進む。
 
 省いたら PR の本文に「trivial のため multi-review を省いた（1 ファイル・N 行）」と 1 行足す。N は追加と削除の合計。
 
-省いても、自分以外のレビューかコメントが 1 件でもあれば Phase 7 だけは起動する。到達点の検査でも件数を確かめ、0 件なら Phase 7 を省く。数え方の例:
-
-```bash
-ME=$(gh api user --jq .login)
-gh pr view <番号> --json reviews,comments | jq --arg me "$ME" '[(.reviews[], .comments[]) | select(.author.login != $me)] | length'
-```
+省いても、自分以外の投稿と、自分名義でも先頭行が `🤖 ` で始まらない手書きのレビューやコメントの件数は、到達点の検査の `others` で数える。CI が通った時点と GATE 3 の前に確かめ、1 件以上なら Phase 7 だけは起動し、0 件なら省く。
 
 ## Phase 6: レビュー
 
@@ -165,14 +162,17 @@ GATE 2 は自動で通過する（`--strict` のときだけ user の承認を�
 
 ```bash
 ME=$(gh api user --jq .login)
-gh pr view <番号> --json isDraft,reviews,statusCheckRollup | jq --arg me "$ME" '{
+gh pr view <番号> --json isDraft,reviews,comments,statusCheckRollup | jq --arg me "$ME" '{
   isDraft,
   mine: ([.reviews[] | select(.author.login == $me)] | length),
-  ci: ([.statusCheckRollup[]? | select(.conclusion != null) | .conclusion] | unique)}'
+  others: ([(.reviews[], .comments[]) | select(.body | length > 0)
+    | select((.author.login == $me | not) or (.body | startswith("🤖 ") | not))] | length),
+  ci: ([.statusCheckRollup[]? | select(.conclusion) | .conclusion] | unique)}'
 ```
 
 - `isDraft == true` なら、CI は回っていない（skipped は通過ではない）。GATE 1 からやり直す。
 - `mine == 0` でも、レビューを省いた PR なら正常。PR の本文の 1 行と「レビューの省略」の条件の確認結果で確かめる。それ以外は Phase 6 が走っていないので、Phase 6 からやり直す。
+- レビューを省いた PR で `others > 0` なら、Phase 7 を起動してから GATE 3 に進む。
 - 指摘がゼロで返信の痕跡が無いのは正常（Phase 7 の完了条件は「起動して未処理が 0 件」。ただし「レビューの省略」で Phase 7 も省く場合は対象外）。
 - 自分名義のレビュー件数と CI の結論を、最終報告に必ず含める。レビューを省いたら、その旨と条件ごとの確認結果も含める。
 - レビューを省いた PR は対象外とし、それ以外は multi-review の実行記録を読み、全 leg の新規起動・履歴分離、対象 SHA、確認根拠（0件を含む）、代替の有無と限界が記録されていることを確かめる。欠落していれば Phase 6 の手順で補い、確認できない点は最終報告に残す。
