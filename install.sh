@@ -19,6 +19,8 @@ brew install --cask 1password 1password-cli
 # アカウントが無いと op は手動追加を対話で尋ね、続きの質問は捨てた出力に消えて止まるので、標準入力を閉じる。
 until op vault list </dev/null >/dev/null 2>&1; do
   echo "1Password アプリにサインインし、設定 > 開発者 > 「1Password CLI と連携」を有効にしてください。"
+  echo "連携を有効にしても進まないときは、システム設定 > プライバシーとセキュリティ > ファイルとフォルダ で、"
+  echo "このターミナルの「Data shared by 1Password」をオンにし、ターミナルを開き直してからこのスクリプトを実行し直してください。"
   read -r -p "準備ができたら Enter で再確認します..."
 done
 
