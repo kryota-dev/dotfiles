@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# macOS の一部の設定の書き込みにはフルディスクアクセスが必要で、許可後はターミナルの開き直しが要る。
+# TCC.db が無い場合は判定できないため、設定の適用を止めない。
+tcc_db="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+if [ -e "$tcc_db" ] && ! head -c 1 "$tcc_db" >/dev/null 2>&1; then
+  echo "このターミナルにフルディスクアクセスがありません。システム設定 > プライバシーとセキュリティ > フルディスクアクセス でこのターミナルをオンにし、ターミナルを開き直してから chezmoi apply を実行し直してください。" >&2
+  exit 1
+fi
+
 # キーボード・表示の基本
 defaults write com.apple.HIToolbox AppleFnUsageType -int 2
 defaults write NSGlobalDomain AppleKeyboardUIMode -int 2

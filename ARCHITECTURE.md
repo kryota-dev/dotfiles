@@ -29,7 +29,7 @@
 | `run_onchange_after_14` | Codex の computer use プラグインの変更 | その MCP サーバーを Claude Code に `codex-cu` として登録 |
 | `run_onchange_after_17` | settings.json の変更 | 宣言した Claude Code の plugin のインストール |
 | `run_onchange_after_18` | mise の設定の変更 | agent-browser が使うブラウザの取得 |
-| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults`・ファイアウォール・GUI アプリの PATH。Google 日本語入力の追加に失敗したら警告し、apply を止めない（macOS 27 はシステム設定からの変更が必要） |
+| `run_onchange_after_20` | スクリプトの変更 | macOS の `defaults`・ファイアウォール・GUI アプリの PATH。フルディスクアクセスが無ければ案内して止める。Google 日本語入力の追加に失敗したら警告し、apply を止めない（macOS 27 はシステム設定からの変更が必要） |
 | `run_onchange_after_21` | スクリプトの変更 | `duti` で既定のアプリ |
 | `run_onchange_after_22` | LaunchAgent の変更 | キーの割り当ての LaunchAgent を読み込み直す |
 | `run_after_31` | apply のたび | Obsidian の vault をそろえる（下記） |

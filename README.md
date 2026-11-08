@@ -5,6 +5,9 @@
 
 ## 新しい Mac のセットアップ
 
+macOS の一部の設定を書き込むため、ターミナルにフルディスクアクセスが必要。`install.sh` が最初に確認し、
+許可が無ければ設定場所とターミナルの開き直しを案内して終了する。
+
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kryota-dev/dotfiles/main/install.sh)"
 ```
