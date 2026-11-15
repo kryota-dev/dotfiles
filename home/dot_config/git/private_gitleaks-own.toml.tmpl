@@ -16,3 +16,10 @@ regexes = [
 id = "client-identifiers"
 description = "クライアント・勤務先の固有名を公開リポジトリに入れない"
 regex = '''(?i)({{ onepasswordRead (printf "op://%s/Dotfiles - Redact Patterns/pattern" .op_vault) | trim }})'''
+
+# 固有名の規則だけに効かせ、既定の規則（秘密の検出）はこのパスでも働かせる。
+[[rules.allowlists]]
+description = "apt の配布元の署名の公開鍵。base64 の並びが規則に偶然一致する。秘密でも固有名でもない"
+paths = [
+  '''(^|/)infra/files/keys/[^/]+\.asc$''',
+]
