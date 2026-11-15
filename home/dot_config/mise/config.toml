@@ -42,7 +42,7 @@ zoxide = "0.10.0"
 "github:yusukebe/ax" = { version = "0.1.25", version_prefix = "v" }
 "github:k1LoW/mo" = { version = "1.7.0", version_prefix = "v" }
 # ~/.agents/skills の agent-browser skill も同じリリースに固定している（.chezmoidata.toml）。
-"npm:agent-browser" = "0.41.2"
+"npm:agent-browser" = "0.42.0"
 
 [settings]
 # 既定の flavor は lib/ を含まず、新規インストールが失敗する。
