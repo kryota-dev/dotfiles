@@ -1,7 +1,7 @@
 ---
 name: review-security-deep
 description: security-review --deep の最も深いセキュリティレビューを行う。skill の委譲から役割として呼ばれる。
-model: claude-fable-5-1
+model: claude-fable-5-2
 effort: high
 tools: Read, Grep, Glob
 ---
