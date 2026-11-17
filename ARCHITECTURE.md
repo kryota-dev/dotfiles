@@ -111,8 +111,9 @@ Codex のプロファイルも T3 からは選べない。codex app-server に�
 `advisorModel` は Fable 5.2 にする。T3 の既定の Opus 5.5 / medium のまま、長い作業の難所だけで上位のモデルに
 計画や軌道修正を相談させるため。advisor は呼ぶたびに会話の全体を読み、回数の上限も無いので、トークンは増える。
 advisor にはメインと同等以上のモデルが要り、エイリアスは Claude Code の更新で指す版が変わるので、完全な ID で固定する。
-T3（Agent SDK）経由で効くかは未確認。Fable の利用クレジットへの同意が無いと、保存した advisor は黙って付かないので、
-T3 のスレッドで advisor のツールが使えるかを見て確かめる。
+T3 のスレッドでも効く。T3 は `--setting-sources` を付けずに `claude` を起動するので、この設定が読まれる
+（2026-11 に T3 のスレッドで、`advisor` のツールが Fable 5.2 で応えることを確かめた）。ただし、Fable の
+利用クレジットへの同意が無いと、保存した advisor は黙って付かない。
 
 auto mode は組み込みの既定（`$defaults`）に `classifyAllShell` だけを足して使い、`environment` や `soft_deny` は書かない。
 既定は「起動したリポジトリとその remote を信頼する」形で、T3 のどのスレッドにも当てはまるため。
