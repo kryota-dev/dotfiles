@@ -170,7 +170,9 @@ Claude Code が自動委譲で subagent として選びうるので、Claude Cod
 
 Claude Code と Codex の作業記憶は `~/vaults/` の Obsidian の vault に置く（手順は `vault` skill、設計は
 `.claude/prds/obsidian-vault.prd.md`）。記憶の置き場所を 1 つにするため、両ハーネスの標準の memory は止めている。
-エージェントが学んだ振る舞いのルールは vault に提案として書き、ユーザーが PR で `home/AGENTS.md` に反映する。vault は git-remote-gcrypt で暗号化し、Google Drive の同期フォルダの
+エージェントが学んだ振る舞いのルールは、vault の inbox に提案として書く。反映は `rule-sweep` skill が担い、
+週 1 回の T3 Code の予約（steward の段 5 の後は steward の合図）で draft の PR を開く。ユーザーはマージだけを判断する。
+反映の担い手がユーザーだけだと、提案が溜まり続けたため。vault は git-remote-gcrypt で暗号化し、Google Drive の同期フォルダの
 ディレクトリへ push する。vault の中身はこのリポジトリに置かない。
 
 新しい Mac でも覚えておく手順を残さないため、`run_after_31` が apply のたびに足りないものだけを作る。

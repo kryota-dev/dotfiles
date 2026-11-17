@@ -94,6 +94,15 @@ chezmoi apply   # pinentry-mac 用のキーチェーン項目を作る
 
 6. `chezmoi apply` を実行する。Obsidian が起動していなければ、vault を Obsidian の一覧に登録し、クライアントの vault の別名の symlink を作る。ユーザーには、Obsidian で vault を開き、初回に出るコミュニティプラグインの有効化を承認してもらう。
 
+7. T3 Code の `schedule_task` で rule-sweep の週次の予約を足す。personal の予約は dotfiles のプロジェクトに置く。モードは実行時の cwd から決まるので、クライアントはその vault に属するリポジトリのプロジェクトを選ぶ。
+
+   | vault | 毎週の日時 | モード |
+   |---|---|---|
+   | personal | 月曜 10:00 | personal |
+   | クライアント | 月曜 09:30 | クライアント |
+
+   プロンプトは「rule-sweep の skill を実行する」の 1 文だけにし、vault の名前やクライアント名を書かない。`list_scheduled_tasks` で同じ vault の予約が既に無いか確かめ、あれば重ねて作らない。personal モードの予約は全体で 1 つだけにする（複数の実行が同じ inbox と PR を書き換えないようにするため）。T3 Code が使えなければ、予約を足せなかったことをユーザーに伝えて、この手順を飛ばす。
+
 ## 別の Mac での復元
 
 `install.sh`（または `chezmoi apply`）が、1Password と Google Drive のサインイン後に自動で行う。サインインの前は何もせず、次の apply でやり直す。手で復元するときも、必ず clone から始める（gcrypt の push は実質的に常に force になるので、`git init` した新しいリポジトリから push すると、バックアップの履歴を上書きする）。
