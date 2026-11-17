@@ -195,7 +195,7 @@ gpt_body() { awk '/^"""$/{f=0} f; /^developer_instructions = """$/{f=1}' "$HOME/
 
 ## fallback の検出
 
-Opus 5.5・Sonnet 5.5 は、cyber safeguard の classifier に当たると Opus 4.8 などに fallback する。ソースコードの脆弱性の走査は許可されているが、exploit の生成や攻撃手順の詳述は当たりうる（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#safeguard-refusals)）。Fable 5.2 では、分類器が拒否すると `stop_reason: "refusal"` が返り、`stop_details.category` に `cyber` などのカテゴリが示される（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#safeguard-refusals)）。
+Opus 5.5・Sonnet 5.5・Fable 5.2 は、Claude Code の上では、cyber safeguard の classifier に当たると Opus 4.8 などに fallback する（[Claude Code](https://code.claude.com/docs/en/model-config#automatic-model-fallback)）。ソースコードの脆弱性の走査は許可されているが、exploit の生成や攻撃手順の詳述は当たりうる（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#safeguard-refusals)）。API を単体で使ったときは fallback せず、`stop_reason: "refusal"` が返る（[Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#safeguard-refusals)）。
 
 `claude_leg` の結果の `modelUsage` に、要求していないモデルがあれば fallback している。実行記録に「要求したモデル・実際のモデル」を残し、その leg を `reviewer-gpt` で 1 回だけ走らせ直す。fallback した結果は捨てずに、GPT の結果と並べて統合する。
 
