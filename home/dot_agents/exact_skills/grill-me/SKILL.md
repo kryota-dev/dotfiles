@@ -19,7 +19,7 @@ description: |
 
 | flag | 既定 | 意味 |
 |------|------|------|
-| `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し、slug は basename（拡張子と `.prd` を除く）。省略時は確定した feature 名を kebab-case にした slug で `.claude/prds/<slug>.prd.md`（git tracked）に出力する |
+| `--output-prd [<path>]` | （なし） | 合意内容を PRD file として書き出す。`<path>` を渡せばそのパスに出力し、slug は basename（拡張子と `.prd` を除く）。省略時は確定した feature 名を kebab-case にした slug で、`vault` skill で解決した vault の `notes/<slug>.prd.md` に出力する（vault が無ければ scratchpad に出力する）。PRD はリポジトリで管理しない。PRD から Issue を起こすときは、本文を PRD に頼らず自己完結に書く（ほかの人は PRD を読めない） |
 | `--mode=interactive\|auto` | `interactive` | `auto` は user との対話の代わりに、親と別の系統のモデル（相手）と議論して決定木を踏破し、最終 PRD を user が 1 回承認する |
 
 flag を渡さなければ、対話だけで終わりファイルは出力しない。`pr-workflow` の standard / large path から呼ばれたときは、PRD の生成を既定の受け渡しとする。いずれの場合も、ファイルに保存する前に内容を示して user の承認を得る。
