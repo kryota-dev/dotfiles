@@ -196,6 +196,7 @@
   "skillOverrides": {
     "auto-mode-setup": "off"
   },
+  "switchModelsOnFlag": true,
   "enabledPlugins": {
     "codex@openai-codex": true,
     "claude-code-setup@claude-plugins-official": true

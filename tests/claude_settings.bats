@@ -40,3 +40,8 @@ setup() {
   run jq -e '.skillOverrides["auto-mode-setup"] == "off"' "$SETTINGS"
   [ "$status" -eq 0 ]
 }
+
+@test "安全の分類器に当たったらフォールバックのモデルで続ける" {
+  run jq -e '.switchModelsOnFlag == true' "$SETTINGS"
+  [ "$status" -eq 0 ]
+}
