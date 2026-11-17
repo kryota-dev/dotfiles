@@ -57,7 +57,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 2. 入口のノート `_index.md` を読む。個人のリポジトリなら personal の `projects/<repo>/_index.md` を読む。
 3. personal の `knowledge/_index.md`（知見の一覧）を読む。個々の知見は、作業に要るときだけ読む。
 4. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date +%F` で今日の日付を取り、フロントマターの `updated` と比べる。10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
-5. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更がある（Obsidian Git の commit が pre-commit hook で止まっている）ときは、理由をユーザーに 1 行で伝えて作業を続ける。
+5. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更があるときは、理由をユーザーに 1 行で伝えて作業を続ける。残る変更の原因を pre-commit hook と決めつけず、先に vault が Obsidian で開いているか（`~/Library/Application Support/obsidian/obsidian.json` の `open`）を確かめる。閉じていれば Obsidian Git は動かず、追記は commit されないまま残る。
 6. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
 7. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` のものは古い。steward が書いたノート（`author: steward`）も同じに扱う。
 
@@ -74,7 +74,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 | `decisions/YYYY-MM-DD-<slug>.md` | 決めたこと、検討した代替案、理由 |
 | `_index.md` | 現状・進行中の作業・決めたことへのリンク・資料へのリンク（形は下の「入口の形」）。書く直前に読み直し、変える箇所だけを編集する。4,000 字を目安にし、超えたら経緯を `log/YYYY-MM.md` へ移して、入口には現状とリンクだけを残す。古くなった項目は消す（経緯は log に残る） |
 | `log/YYYY-MM.md`（個人のリポジトリは `projects/<repo>/log/YYYY-MM.md`） | 時系列の記録（何をしたか・分かったこと）。日時の見出しで末尾に追記する。入口には書き足さない |
-| personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく、その vault の `_vault.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る） |
+| personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく、その vault の `_vault.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る）。追記した後は、そのファイルだけを commit して push する |
 | personal の `knowledge/` | 案件に依存しない技術の知見。クライアントのセッションからは、下の「知見の共有」の手順で書く |
 
 - 振る舞いのルールを学んだとき（「今後は〜する」「〜はしない」）は、AGENTS.md・skill・vault の自動で読まれる場所に書かない。個人のセッションは personal の `_inbox/rule-proposals.md`、クライアントのセッションは所属先の vault の `notes/rule-proposals.md` に、下の inbox と同じ形で追記する。クライアントの提案を personal へ届けるのは、出典の確認と検査を担う rule-sweep のクライアントモードだけにする。反映は rule-sweep が dotfiles の draft の PR を開き、ユーザーがマージする。
