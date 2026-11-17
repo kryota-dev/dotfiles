@@ -10,15 +10,16 @@ personal の中身は読まない。状態と移動の記録は所属先の vaul
 personal のパスは追記先としてだけ使う。モードの解決に必要な owner の確認以外は personal の内容を読まない。
 
 実行の日時とクライアントの vault の `HEAD`（`pinned`）を記録する。
-`notes/rule-sweep-moved.md`、提案、作業ログ、出典、フロントマターは `git -C <vault> show <pinned>:<path>` で読む。
+`notes/rule-sweep-moved.md`、`notes/rule-proposals.md`、作業ログ、出典、フロントマターは `git -C <vault> show <pinned>:<path>` で読む。
 未 commit の追記は次回に回す。
 移動記録の前回の基点以降に変わった提案とログを対象にする。
+移動記録に残る「移す予定」の件も、変更の期間にかかわらず再試行の対象にする。
 記録や基点が無い、履歴に無い場合は、未移動の提案全体と直近 14 日のログを読む。
 この vault の外の出典を辿らない。
 
 ## 2. 移す前に出典を確かめる（S3）
 
-本人の指摘やエージェントの学びから、案件に依存しない振る舞いの提案を選ぶ。
+所属先の `notes/rule-proposals.md` と作業ログの本人の指摘やエージェントの学びから、案件に依存しない振る舞いの提案を選ぶ。
 inbox の項目の形と `source` の意味は vault の skill に従う。
 `source: external`、由来不明、出典が `pinned` に存在しない件、
 その版の出典のフロントマターに `tainted` がある件は移さない。
@@ -38,15 +39,8 @@ ID は `rp-YYYYMMDD-<4 桁の 16 進>` とする。
 ハッシュの対応は移動記録に残し、再試行では同じ ID を使う。衝突があれば、別の件と区別できる ID を選んで対応を保存する。
 本文を変えて別の件として出し直す前に、既存の移動記録と同じ趣旨でないか確認する。
 
-1 件分の追記全文を vault の外の一時ファイルに置く。
-`onepasswordRead`・`op://` が含まれれば、その件は移さない。
-gitleaks の allowlist が行全体を検査から外すため、先に調べる。
-続けて両方の設定で検査する。
-
-```bash
-gitleaks dir --no-banner --redact --config ~/.config/git/gitleaks.toml <一時ファイル>
-gitleaks dir --no-banner --redact --config ~/.config/git/gitleaks-own.toml <一時ファイル>
-```
+1 件分の追記全文を vault の外の一時ファイルに置く。再試行では、移動記録に保存した全文をそのまま使い、書き直さない。
+前検査と gitleaks の 2 つの設定での検査は、[personal モードの「公開前に検査する」](personal.md#6-文を整え公開前に検査するs1) に従う。
 
 両方の終了コードが 0 の件だけ追記できる。検出、コマンド・設定の不足、実行失敗なら personal へ書かず、
 その件を所属先に残し、状況のノートに理由を記録して止まる。
@@ -55,7 +49,8 @@ gitleaks dir --no-banner --redact --config ~/.config/git/gitleaks-own.toml <一�
 ## 4. 移す予定を保存してから追記する（S6・S8・S9）
 
 追記する前に `notes/rule-sweep-moved.md` に「移す予定」を書き、commit・push する。
-1 件ごとに ID・元のノートのパス・元の commit・元の source・判定の結果・移動の状態を記録する。
+1 件ごとに ID・元のノートのパス・元の commit・元の source・判定の結果・移動の状態と、検査を通した追記の全文を記録する。
+再試行では「移す予定」の全文をそのまま一時ファイルへ戻して再検査し、同じ ID の本文を書き直さない。
 commit と手入力の保全は vault の skill、push 前の fetch と祖先の確認は
 [personal モードの「vault を先に保存する」](personal.md#5-vault-を先に保存するs6s7s9) に従う。
 これは所属先と personal のどちらの push にも適用する。
@@ -73,7 +68,7 @@ personal モードがこの接頭辞で検査済みの移動を確認するの�
 ## 5. 移した記録を残す
 
 personal の push が成功した件だけ、所属先の移動記録を「移した」に変え、commit・push する。
-失敗した件は「移す予定」のまま残す。再実行では同じ ID を再使用する。
+失敗した件は「移す予定」のまま残す。再実行では保存した ID と追記の全文をそのまま再使用する。
 push 成功後に記録できず重複して届いても、personal モードが ID で 1 件にまとめる。
 personal の内容を読んで重複を確かめようとしない。
 

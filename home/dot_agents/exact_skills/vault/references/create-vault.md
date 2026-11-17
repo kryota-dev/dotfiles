@@ -94,7 +94,7 @@ chezmoi apply   # pinentry-mac 用のキーチェーン項目を作る
 
 6. `chezmoi apply` を実行する。Obsidian が起動していなければ、vault を Obsidian の一覧に登録し、クライアントの vault の別名の symlink を作る。ユーザーには、Obsidian で vault を開き、初回に出るコミュニティプラグインの有効化を承認してもらう。
 
-7. T3 Code の `schedule_task` で rule-sweep の週次の予約を足す。その vault に解決されるリポジトリのプロジェクトに置く。モードは実行時の cwd から決まるので、personal は個人のリポジトリ、クライアントはその vault に属するリポジトリを選ぶ。
+7. T3 Code の `schedule_task` で rule-sweep の週次の予約を足す。personal の予約は dotfiles のプロジェクトに置く。モードは実行時の cwd から決まるので、クライアントはその vault に属するリポジトリのプロジェクトを選ぶ。
 
    | vault | 毎週の日時 | モード |
    |---|---|---|

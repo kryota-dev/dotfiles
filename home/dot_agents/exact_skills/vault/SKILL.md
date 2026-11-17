@@ -56,7 +56,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 1. vault を解決する。
 2. 入口のノート `_index.md` を読む。個人のリポジトリなら personal の `projects/<repo>/_index.md` を読む。
 3. personal の `knowledge/_index.md`（知見の一覧）を読む。個々の知見は、作業に要るときだけ読む。
-4. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date` で現在の日付を確かめ、`updated` が 10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
+4. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date +%F` で今日の日付を取り、フロントマターの `updated` と比べる。10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
 5. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更がある（Obsidian Git の commit が pre-commit hook で止まっている）ときは、理由をユーザーに 1 行で伝えて作業を続ける。
 6. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
 7. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` のものは古い。steward が書いたノート（`author: steward`）も同じに扱う。
@@ -77,9 +77,9 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 | personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく、その vault の `_vault.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る） |
 | personal の `knowledge/` | 案件に依存しない技術の知見。クライアントのセッションからは、下の「知見の共有」の手順で書く |
 
-- 振る舞いのルールを学んだとき（「今後は〜する」「〜はしない」）は、AGENTS.md・skill・vault の自動で読まれる場所に書かない。personal の `_inbox/rule-proposals.md` に、下の形で追記する。クライアントのセッションからは、知見の共有と同じ検査を通し、personal の中身を読まずに `>>` で追記する。反映は rule-sweep が dotfiles の draft の PR を開き、ユーザーがマージする。
+- 振る舞いのルールを学んだとき（「今後は〜する」「〜はしない」）は、AGENTS.md・skill・vault の自動で読まれる場所に書かない。個人のセッションは personal の `_inbox/rule-proposals.md`、クライアントのセッションは所属先の vault の `notes/rule-proposals.md` に、下の inbox と同じ形で追記する。クライアントの提案を personal へ届けるのは、出典の確認と検査を担う rule-sweep のクライアントモードだけにする。反映は rule-sweep が dotfiles の draft の PR を開き、ユーザーがマージする。
 - inbox への追記は誰でもしてよい。既存の件の状態を書き換えるのは rule-sweep の personal モードだけにする。追記と状態の更新を分け、反映の重複や却下した件の出し直しを防ぐためである。
-- 作業ログに教訓を書いたら、振る舞いのルールに当たるものは inbox にも書く。rule-sweep は personal のログからも拾うが、クライアントの vault のログはクライアントモードの実行が拾う。
+- 作業ログに教訓を書いたら、振る舞いのルールに当たるものは、個人なら inbox、クライアントなら所属先の `notes/rule-proposals.md` にも書く。rule-sweep は personal のログからも拾うが、クライアントの提案とログはクライアントモードの実行が拾う。
 - steward は段 3 の後に、本人の決まりのうち一般のものを inbox に追記する予定である。週 1 回の提案はまだ無い。steward の提案も、ユーザーの決定としては扱わない。
 - 秘密情報（トークン・パスワード・鍵）は、暗号化される vault にも書かない。
 - 推測を事実として書かない。確かめていないことは、確かめていないと書く。
@@ -94,7 +94,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 - source: owner | agent | external
 - 提案: <1〜3 文>
 - 理由: <きっかけ>
-- 出典: [[<personal のノート>]] | client:<ラベル>
+- 出典: [[<所属先のノート>]] | client:<ラベル>
 - 状態: （空） | 反映中: dotfiles PR #N | 反映: dotfiles PR #N | 却下: YYYY-MM-DD <理由>
 ```
 
