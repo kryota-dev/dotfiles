@@ -21,8 +21,7 @@ personal のパスは追記先としてだけ使う。モードの解決に必�
 
 所属先の `notes/rule-proposals.md` と作業ログの本人の指摘やエージェントの学びから、案件に依存しない振る舞いの提案を選ぶ。
 inbox の項目の形と `source` の意味は vault の skill に従う。
-`source: external`、由来不明、出典が `pinned` に存在しない件、
-その版の出典のフロントマターに `tainted` がある件は移さない。
+`source: external`、由来不明、出典が `pinned` に存在しない件は移さない。
 判定は元の文と元の vault で行う。personal へ届けてから判断させると、出典を読むために隔離を越えることになる。
 `source` は元の値を保ち、外部由来を `agent` や `owner` に変えない。
 `repo:`・`steward` が反映先の件は状態を変えず、件数だけを記録する。
