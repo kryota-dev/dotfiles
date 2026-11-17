@@ -83,6 +83,31 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 - skill はどちらのハーネスでも動く書き方にする。もう一方のハーネスのモデルは、その CLI（Claude Code からは
   `codex exec`、Codex からは `claude -p`）で呼ぶ。
 
+### T3 Code を正とする
+
+モデル・effort・権限のモードは、T3 Code のスレッドの設定と、その既定の `defaultModelSelection`・
+`defaultRuntimeMode` を正とする。Claude のスレッドでは、T3 が Agent SDK の `query()` に `model`・
+`permissionMode` を毎回渡し、`effort` はスレッドで未指定ならカタログの既定で補う。
+思考の設定と `autoCompactWindow` も flag settings で渡すため、これらは T3 が上書きする。
+
+一方、T3 は `settingSources` を指定しないので、user・project・local の設定は読み込まれる。
+`~/.claude/settings.json` に置くのは、T3 が上書きしない `autoMode`・`hooks`・`env`・`advisorModel` などと、
+CLI 用の最小限の設定（`model`）にする。`claude -p` の roles（`claude_leg`・`claude_impl`）は
+`--setting-sources ""` で起動するため、このファイルを読まず、モデルと effort は役割の定義で決める。
+
+steward の SSH の門の `t3 thread start` からは、モデルを指定できない。
+Codex のプロファイルも T3 からは選べない。codex app-server には `model` が毎回送られ、`effort` が送られるのは
+スレッドで指定したときと `gpt-6-astra` のとき（`medium`）だけ。
+
+`settings.json` から外した指定と理由は次のとおり。
+
+- `model` の `[1m]`: Opus 4.7 以降は標準で 1M のコンテキストを持つため、Opus 5.5 に接尾辞は不要。
+- トップレベルの `effortLevel`: user 設定のこのキーは Opus 5.5 以降には適用されない。
+- `modelSettings`: Opus 5.5 の既定と同じ `medium` と、旧版の Fable 5.1 の指定だけだったため不要。
+- `alwaysThinkingEnabled`: Opus 5.5 は思考を無効にできず、`false` を指定しても適用されない。
+- `env.MAX_THINKING_TOKENS`: adaptive thinking のモデルでは、正の値による固定の思考予算は無視される。
+- `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`: 既定より大きい値は無視され、T3 は `autoCompactWindow` を渡す。
+
 ## T3 Code
 
 T3 Code を新しい作業の入口にする。サーバーはデスクトップアプリの内蔵のものだけを使う。常駐サービス
