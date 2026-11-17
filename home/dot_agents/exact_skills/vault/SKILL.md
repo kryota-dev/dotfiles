@@ -92,6 +92,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 - author: human | claude | codex | steward
 - target: ~/AGENTS.md | skill:<名前> | repo:<owner>/<repo> | steward
 - source: owner | agent | external
+- 推定: source（rule-sweep が source を推定した件だけ）
 - 提案: <1〜3 文>
 - 理由: <きっかけ>
 - 出典: [[<所属先のノート>]] | client:<ラベル>
@@ -100,7 +101,7 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 
 `source` は由来を表す。`owner` は本人が言ったこと、`agent` はエージェントが失敗などから学んだこと、`external` は外部の文（Web・Issue・メール）に由来するものである。外部由来を本人の決定やエージェントの学びに変えない。
 
-新しい件の状態は空にする。状態が無い件も未反映として扱う。形が古い件は、rule-sweep の personal モードが最初に扱うときに、この形に直す。既存の ID は変えない。クライアントモードが移す件の ID は、元のノートのパスと固定した commit から作る短いハッシュを使い、出典は `client:<ラベル>` と件の ID だけにする。検証と再実行の手順は rule-sweep に従う。
+`推定: source` は、書き手が由来を書かず、rule-sweep がモデルの判断で `source` を決めた件の印である。rule-sweep だけが付け、消さない。新しい件の状態は空にする。状態が無い件も未反映として扱う。形が古い件は、rule-sweep の personal モードが最初に扱うときに、この形に直す。既存の ID は変えない。クライアントモードが移す件の ID は、元のノートのパスと固定した commit から作る短いハッシュを使い、出典は `client:<ラベル>` と件の ID だけにする。検証と再実行の手順は rule-sweep に従う。
 
 ### 知見の共有（クライアントのセッションから personal へ）
 
