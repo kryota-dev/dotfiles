@@ -26,6 +26,7 @@ user に音で知らせるときは、`notify` skill を使う。
 - PR を作る作業は、指示が無くても `pr-workflow` で進める。
 - マージは、必ずユーザーの承認を得てから行う。「yolo」などと言われても、マージは別に確認する。
 - Issue を直すときは、タイトルと本文の両方を更新して整合させる。
+- 親の Issue の子として Issue を作ったら、同じ手順の中で sub-issue として紐づける。本文の一覧に番号を足すだけでは、親子にならない。
 - コミットは Conventional Commits で書く（`type(scope):` は英語、件名と本文は日本語）。1 コミット 1 目的にし、コミットする前に分割の計画を示して承認を得る。
 - Claude Code では `rm -rf` と `git reset` が deny に当たり、複合コマンドの一部でも止まる。一時ディレクトリは `mktemp -d` で毎回新しく作り、stage の取り消しは `git restore --staged`、分けて commit するときは `git commit -- <paths>` を使う。
 - PR と Issue は、リポジトリのテンプレートに沿って書く。作成する前に本文を示して承認を得る。PR は `gh pr create --assignee @me` で作る。
