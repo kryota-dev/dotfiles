@@ -73,6 +73,13 @@ assert_t3_settings() {
   [[ "$output" != *'model_context_window'* ]]
 }
 
+@test "Codex の設定は非推奨の personality を消す" {
+  input=$'personality = "pragmatic"\n'
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_config.toml")" <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'personality'* ]]
+}
+
 @test "Codex の設定は空のファイルからでも描画できる" {
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_config.toml")" </dev/null
   [ "$status" -eq 0 ]
