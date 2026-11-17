@@ -58,19 +58,12 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 3. personal の `knowledge/_index.md`（知見の一覧）を読む。個々の知見は、作業に要るときだけ読む。
 4. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date +%F` で今日の日付を取り、フロントマターの `updated` と比べる。10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
 
-   あわせて、個人のリポジトリのセッションは、マージ済みの `home/AGENTS.md` と skill が、配置済みの `~/AGENTS.md`・`~/.agents/skills/` と同じかを確かめる。マージの後に apply されないと、決まりがエージェントに届かないため。違うファイルがあれば、対象をこの 2 つに絞って apply し、そのことをユーザーに 1 行で伝える。絞った apply はテンプレートを描かないので、1Password の承認が要らず、ユーザーが Mac の前にいなくても済む。main の worktree（`~/dotfiles`）での git の操作は `fetch` と `pull` だけにする。`pull --ff-only` が通らないか、apply の後もずれが残れば、apply せずに理由を伝える。
+   あわせて、個人のリポジトリのセッションは、マージ済みの `home/AGENTS.md` と skill が、配置済みの `~/AGENTS.md`・`~/.agents/skills/` と同じかを確かめる。マージの後に apply されないと、決まりがエージェントに届かないため。違えば、対象をこの 2 つに絞って apply し、そのことをユーザーに 1 行で伝える。絞った apply と verify はテンプレートを描かないので、1Password の承認が要らず、ユーザーが Mac の前にいなくても済む。`chezmoi verify` は、消した skill のように配置先にだけ残るファイルも、ずれとして扱う。比べる元は手元のソース（main の worktree の `~/dotfiles`）なので、先に `pull --ff-only` する。main の worktree での git の操作は `fetch` と `pull` だけにする。pull が通らないか、apply の後もずれが残れば、その理由を伝える。
 
    ```bash
-   D=~/dotfiles; git -C "$D" fetch -q origin main
-   drift() {
-     git -C "$D" ls-tree -r --name-only origin/main -- home/AGENTS.md home/dot_agents/exact_skills | while read -r f; do
-       r=${f#home/}; t="$HOME/${r/dot_agents\/exact_skills/.agents/skills}"
-       git -C "$D" show "origin/main:$f" | cmp -s - "$t" || echo "$f"
-     done
-   }
-   if [ -n "$(drift)" ]; then
-     git -C "$D" pull -q --ff-only && chezmoi apply ~/AGENTS.md ~/.agents/skills && drift
-   fi
+   T=(~/AGENTS.md ~/.agents/skills)
+   git -C ~/dotfiles pull -q --ff-only || echo "~/dotfiles を pull できない"
+   chezmoi verify "${T[@]}" || { chezmoi apply "${T[@]}" && chezmoi verify "${T[@]}"; }
    ```
 5. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更があるときは、理由をユーザーに 1 行で伝えて作業を続ける。残る変更の原因を pre-commit hook と決めつけず、先に vault が Obsidian で開いているか（`~/Library/Application Support/obsidian/obsidian.json` の `open`）を確かめる。閉じていれば Obsidian Git は動かず、追記は commit されないまま残る。
 6. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
