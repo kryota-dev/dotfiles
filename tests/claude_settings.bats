@@ -25,3 +25,8 @@ setup() {
   ' "$SETTINGS"
   [ "$status" -eq 0 ]
 }
+
+@test "advisor に Fable 5.2 を完全な ID で使う" {
+  run jq -e '.advisorModel == "claude-fable-5-2"' "$SETTINGS"
+  [ "$status" -eq 0 ]
+}

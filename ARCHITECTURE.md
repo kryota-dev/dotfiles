@@ -108,6 +108,10 @@ Codex のプロファイルも T3 からは選べない。codex app-server に�
 - `env.MAX_THINKING_TOKENS`: adaptive thinking のモデルでは、正の値による固定の思考予算は無視される。
 - `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`: 既定より大きい値は無視され、T3 は `autoCompactWindow` を渡す。
 
+`advisorModel` は Fable 5.2 にする。T3 の既定の Opus 5.5 / medium のまま、長い作業の難所だけで上位のモデルに
+計画や軌道修正を相談させるため。advisor は呼ぶたびに会話の全体を読み、回数の上限も無いので、トークンは増える。
+advisor にはメインと同等以上のモデルが要り、エイリアスは Claude Code の更新で指す版が変わるので、完全な ID で固定する。
+
 ## T3 Code
 
 T3 Code を新しい作業の入口にする。サーバーはデスクトップアプリの内蔵のものだけを使う。常駐サービス
