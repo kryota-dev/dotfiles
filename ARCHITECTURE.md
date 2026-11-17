@@ -83,6 +83,48 @@ Claude Code と Codex で、形式が許す範囲で設定を共有する。
 - skill はどちらのハーネスでも動く書き方にする。もう一方のハーネスのモデルは、その CLI（Claude Code からは
   `codex exec`、Codex からは `claude -p`）で呼ぶ。
 
+### T3 Code を正とする
+
+モデル・effort・権限のモードは、T3 Code のスレッドの設定と、その既定の `defaultModelSelection`・
+`defaultRuntimeMode` を正とする。Claude のスレッドでは、T3 が Agent SDK の `query()` に `model`・
+`permissionMode` を毎回渡し、`effort` はスレッドで未指定ならカタログの既定で補う。
+思考の設定と `autoCompactWindow` も flag settings で渡すため、これらは T3 が上書きする。
+
+一方、T3 は `settingSources` を指定しないので、user・project・local の設定は読み込まれる。
+`~/.claude/settings.json` に置くのは、T3 が上書きしない `autoMode`・`hooks`・`env`・`advisorModel` などと、
+CLI 用の最小限の設定（`model`）にする。`claude -p` の roles（`claude_leg`・`claude_impl`）は
+`--setting-sources ""` で起動するため、このファイルを読まず、モデルと effort は役割の定義で決める。
+
+steward の SSH の門の `t3 thread start` からは、モデルを指定できない。
+Codex のプロファイルも T3 からは選べない。codex app-server には `model` が毎回送られ、`effort` が送られるのは
+スレッドで指定したときと `gpt-6-astra` のとき（`medium`）だけ。
+
+`settings.json` から外した指定と理由は次のとおり。
+
+- `model` の `[1m]`: Opus 4.7 以降は標準で 1M のコンテキストを持つため、Opus 5.5 に接尾辞は不要。
+- トップレベルの `effortLevel`: user 設定のこのキーは Opus 5.5 以降には適用されない。
+- `modelSettings`: Opus 5.5 の既定と同じ `medium` と、旧版の Fable 5.1 の指定だけだったため不要。
+- `alwaysThinkingEnabled`: Opus 5.5 は思考を無効にできず、`false` を指定しても適用されない。
+- `env.MAX_THINKING_TOKENS`: adaptive thinking のモデルでは、正の値による固定の思考予算は無視される。
+- `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`: 既定より大きい値は無視され、T3 は `autoCompactWindow` を渡す。
+
+`advisorModel` は Fable 5.2 にする。T3 の既定の Opus 5.5 / medium のまま、長い作業の難所だけで上位のモデルに
+計画や軌道修正を相談させるため。advisor は呼ぶたびに会話の全体を読み、回数の上限も無いので、トークンは増える。
+advisor にはメインと同等以上のモデルが要り、エイリアスは Claude Code の更新で指す版が変わるので、完全な ID で固定する。
+T3 のスレッドでも効く。T3 は `--setting-sources` を付けずに `claude` を起動するので、この設定が読まれる
+（2026-11 に T3 のスレッドで、`advisor` のツールが Fable 5.2 で応えることを確かめた）。ただし、Fable の
+利用クレジットへの同意が無いと、保存した advisor は黙って付かない。
+
+auto mode は組み込みの既定（`$defaults`）に `classifyAllShell` だけを足して使い、`environment` や `soft_deny` は書かない。
+既定は「起動したリポジトリとその remote を信頼する」形で、T3 のどのスレッドにも当てはまるため。
+`skillOverrides` で `auto-mode-setup` を止める。`/auto-mode-setup` の勧めのダイアログは、受け入れると、
+そのとき開いていたプロジェクトに寄せた下書きを `~/.claude/settings.json` に直接書く。すると、その下書きが
+全プロジェクトに効き、リポジトリの設定ともずれる。止められる操作が出てきたら、項目をリポジトリに足す。
+
+`switchModelsOnFlag` は `true` にし、安全の分類器に当たったリクエストはフォールバックのモデルで続ける。
+未設定でも切り替わるが、対話のセッションでは初回に確認が出る。人が見ていない steward のスレッドが確認で止まらないよう、明示する。
+roles での切り替えは、`modelUsage` で検出する（pr-workflow の model-roles.md の「fallback の検出」）。
+
 ## T3 Code
 
 T3 Code を新しい作業の入口にする。サーバーはデスクトップアプリの内蔵のものだけを使う。常駐サービス

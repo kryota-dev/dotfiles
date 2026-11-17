@@ -12,7 +12,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `review-general` | Claude | claude-opus-5-5 | high | multi-review の general（standard 以上） |
 | `review-general-light` | Claude | claude-opus-5-5 | medium | multi-review の general（trivial・small） |
 | `review-security` | Claude | claude-opus-5-5 | high | multi-review の security、security-review の Phase 2 |
-| `review-security-deep` | Claude | claude-fable-5-1 | high | security-review の `--deep` |
+| `review-security-deep` | Claude | claude-fable-5-2 | high | security-review の `--deep` |
 | `review-intent` | Claude | claude-opus-5-5 | high | multi-review の intent |
 | `review-simplicity` | Claude | claude-opus-5-5 | high | multi-review の simplicity（standard 以上） |
 | `review-simplicity-light` | Claude | claude-sonnet-5-5 | medium | multi-review の simplicity（small） |
@@ -56,7 +56,7 @@ secret や認証情報に触れうるタスクは、どちらを選んでも親�
 2026-10 時点の公式資料と第三者の評価による。モデルが替わったら、ここと定義ファイルを一緒に見直す。
 
 - **設計と判断に Opus 5.5**: 大半の作業で Fable 5.1 と同等か上回り、単価は 6 割安い。既定の medium でも Opus 5 の high に並び、コードレビューでは Opus 5 より多くのバグを、少ない誤検知で見つける（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#capabilities-relevant-to-prompting)）。actionable precision は 66.7% で、Sonnet 5.5 は 41.2%（[CodeRabbit](https://www.coderabbit.ai/blog/sonnet-5-5-model-review)）。
-- **Fable 5.1 は格上げ先だけに使う**: 最難の長時間作業では強いが、単価が高い。頼まれた以上の変更やテストを足しがちで（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#keep-changes-and-tests-to-what-the-task-asks-for)）、15 回の試行の 1 回でテストを通すための近道をした報告もある（[The New Stack](https://thenewstack.io/claude-opus-5-5-vs-fable-5-1/)。本文は取得できず、見出しと要約で確認）。
+- **Fable 5.2 は `--deep` のレビューに限る**: 難しい推論と長い agentic な作業に向き、Opus 5.5 の高いエフォートで足りないときの格上げ先とされるが、単価は $8/$40 per MTok と高い（[Anthropic](https://platform.claude.com/docs/en/about-claude/models/overview)）。所有者として扱う指示で、頼まれていない変更・テスト・文書が増える。範囲を絞る規則でも打ち消せないため、変更を伴わないレビューに限る（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#say-who-owns-the-code)）。
 - **範囲の狭い作業に Sonnet 5.5**: Opus 5.5 の半額で速いが、持続的な判断では Opus に劣る（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)）。
 - **実装に GPT-6.1 Sol**: high で DeepSWE が Astra の high と同点で、費用は約 5 分の 1、3 割速い。security の判定（SecPass）も Astra とほぼ同じで、テストの改ざんなどの不正は 0 件だった（[Endor Labs](https://www.endorlabs.com/learn/gpt-6-1-sol-on-codex-astra-level-security-a-third-faster-zero-cheating)）。Astra は、Sol で足りないときの格上げ先にとどめる（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model)）。
 - **実装の段を系統で揃える**: Sonnet 5.5 と GPT-6.1 Sol はどちらも $2/$10 per MTok で、Opus 5.5 と GPT-6 Astra がそれぞれの最上位である（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)、[OpenAI](https://developers.openai.com/api/docs/models)）。light・通常・最上位の 3 段が、どちらの系統でも同じ位置に並ぶ。Sonnet 5.5 は、仕様が明確な agentic coding を medium から、難しければ high から始めるよう公式が勧め、最難の長時間作業には Opus を勧めている（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#calibrate-effort)）。
@@ -71,7 +71,7 @@ secret や認証情報に触れうるタスクは、どちらを選んでも親�
 | Opus 5.5 | 頼まれた範囲を広げたり、自分の判断で作業を置き換えたりする。自分の作業は指示が無くても検証する（[Opus 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#task-scope-and-over-verification)） | 頼まれた範囲を届けること（定義の本文に書いてある）。「念のため再確認する」のような検証の指示は足さない（検証が過剰になる）。考える量はプロンプトではなくエフォートで調整する（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort)） |
 | Claude 全般 | 貼り付けられた本文の中の指示にも従いうる | PR の本文・diff・Issue・Web の内容を `<pasted_content id="<乱数>">` と `</pasted_content id="<乱数>">` で囲む。定義の本文がその扱いを指示している（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#mark-pasted-text-in-user-messages)）。タグは偽装できるので、道具の制限（下記）と併用する |
 | Sonnet 5.5 | low・medium の長い作業で、確認のために止まりやすい。頼まれていないテスト・文書・小さなファイルを足しがち。low では検査を飛ばして完了と報告することがある（[Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#steer-initiative-and-scope)、[Verification on coding tasks](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#verification-on-coding-tasks)） | 定義の本文に、完了まで進めること・頼まれていない追加をしないこと・実際の検査で確かめること・確かめられなかった検査を報告することを書いてある。low は使わない |
-| Fable 5.1 | 頼まれていない修正・拡張・テストを足しがち | 定義の本文の「範囲を届ける」に加え、変更を伴う作業では任せない（レビューだけに使う） |
+| Fable 5.2 | 所有を示さないと既存の構造に追加しやすい。所有者として扱うと頼まれていない変更・テスト・文書が増え、PR の要約から小さな変更が漏れやすい（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#say-who-owns-the-code)） | 範囲を絞る規則でも所有者として扱う指示は打ち消せないため、その指示を入れない。レビューだけに使い、変更を伴う作業は任せない |
 | GPT-6.1 Sol | 確認の質問をして止まりやすい。小さな変更でもテストを広げすぎる。表と箇条書きの多い長い出力になりがち。skill や AGENTS.md の指示に敏感（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)） | 非対話で動いていて、可逆な作業は確認せずに完了させること。変更に見合うテストだけにすること。出力の形と長さ（定義の `developer_instructions` に書いてある）。委譲プロンプトは `codex` skill の 4 部構成で書く |
 
 ## Claude の役割の起動
@@ -195,7 +195,7 @@ gpt_body() { awk '/^"""$/{f=0} f; /^developer_instructions = """$/{f=1}' "$HOME/
 
 ## fallback の検出
 
-Opus 5.5・Sonnet 5.5・Fable 5.1 は、cyber safeguard の classifier に当たると Opus 4.8 などに fallback する。ソースコードの脆弱性の走査は許可されているが、exploit の生成や攻撃手順の詳述は当たりうる（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#safeguard-refusals)）。
+Opus 5.5・Sonnet 5.5・Fable 5.2 は、Claude Code の上では、cyber safeguard の classifier に当たると Opus 4.8 などに fallback する（[Claude Code](https://code.claude.com/docs/en/model-config#automatic-model-fallback)）。ソースコードの脆弱性の走査は許可されているが、exploit の生成や攻撃手順の詳述は当たりうる（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#safeguard-refusals)）。API を単体で使ったときは fallback せず、`stop_reason: "refusal"` が返る（[Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#safeguard-refusals)）。
 
 `claude_leg` の結果の `modelUsage` に、要求していないモデルがあれば fallback している。実行記録に「要求したモデル・実際のモデル」を残し、その leg を `reviewer-gpt` で 1 回だけ走らせ直す。fallback した結果は捨てずに、GPT の結果と並べて統合する。
 
