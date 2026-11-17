@@ -12,3 +12,27 @@ setup() {
     return 1
   }
 }
+
+# 本文から振り分けた手順を読めなくなるのを防ぐため、同じ skill 内の参照先を検査する。
+# 別の skill への相対リンクは検査の対象にしない。
+@test "SKILL.md の references への Markdown リンク先が実在する" {
+  run bash -c '
+    failed=0
+    for skill in "$1"/*/SKILL.md; do
+      while IFS= read -r reference; do
+        if [ ! -f "${skill%/*}/$reference" ]; then
+          echo "$skill: 参照先が存在しません: $reference"
+          failed=1
+        fi
+      done < <(
+        grep -oE "\[[^]]*\]\(references/[^)]+\.md\)" "$skill" |
+          sed -E "s/^\[[^]]*\]\((.*)\)$/\1/"
+      )
+    done
+    exit "$failed"
+  ' _ "$SKILLS"
+  [ "$status" -eq 0 ] || {
+    echo "$output"
+    return 1
+  }
+}
