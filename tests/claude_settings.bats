@@ -30,3 +30,13 @@ setup() {
   run jq -e '.advisorModel == "claude-fable-5-2"' "$SETTINGS"
   [ "$status" -eq 0 ]
 }
+
+@test "auto mode は組み込みの既定に classifyAllShell だけを足す" {
+  run jq -e '(.autoMode | keys) == ["classifyAllShell"] and .autoMode.classifyAllShell == true' "$SETTINGS"
+  [ "$status" -eq 0 ]
+}
+
+@test "auto mode のセットアップの勧めと書き込みを止める" {
+  run jq -e '.skillOverrides["auto-mode-setup"] == "off"' "$SETTINGS"
+  [ "$status" -eq 0 ]
+}

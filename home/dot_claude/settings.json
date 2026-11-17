@@ -193,6 +193,9 @@
   },
   "model": "claude-opus-5-5",
   "advisorModel": "claude-fable-5-2",
+  "skillOverrides": {
+    "auto-mode-setup": "off"
+  },
   "enabledPlugins": {
     "codex@openai-codex": true,
     "claude-code-setup@claude-plugins-official": true
