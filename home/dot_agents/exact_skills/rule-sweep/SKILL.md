@@ -7,10 +7,9 @@ user-invocable: true
 # rule-sweep
 
 vault の提案を短い決まりに整え、本人がマージを判断できる draft の PR にする。
-T3 Code の週次予約、steward の合図、本人の手動呼び出しで動く。
+Mac の T3 Code の週次予約と、本人の手動呼び出しで動く。
 予約は personal が月曜 10:00、クライアントの vault ごとに月曜 09:30。
-段 5 の後は、steward が T3 Code の門から「rule-sweep を実行する」と送る形に替わる。
-この skill では予約や門を作成・変更しない。
+この skill では予約を作成・変更しない。
 
 ## 完了と停止
 
