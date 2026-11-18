@@ -117,7 +117,13 @@ vault には、外部の入力（Web ページ・Issue・ログ）から取り�
 
 1. 知見を汎用の形に書き直す。クライアント名・製品名・リポジトリ名・人名・URL を除き、コード例は一般的な例に置き換える。
 2. slug・索引に書く要約の行・本文を読み直し、固有名が残っていないかを確かめる。
-3. 残っていなければ personal の `knowledge/<slug>.md` に置き、`knowledge/_index.md` に 1 行（`- [[<slug>]]: <要約>`）を `>>` で追記する。汎用にできない、または固有名かどうか迷うときは、personal には書かず、クライアントの vault の `notes/<slug>.md` に置く。
+3. 同じ 3 つを vault の外の一時ファイル（`mktemp "${TMPDIR:-/tmp}/vault-knowledge.XXXXXX"`）に書き、秘密情報を検査する。personal に書いた後に pre-commit で止まっても、ファイルと索引は作業ツリーに残り、ほかのクライアントのセッションに読まれるため。
+
+   ```bash
+   gitleaks dir --config ~/.config/git/gitleaks.toml --no-banner --redact <一時ファイル>
+   ```
+
+4. 固有名が残っておらず、終了コードが 0 なら personal の `knowledge/<slug>.md` に置き、`knowledge/_index.md` に 1 行（`- [[<slug>]]: <要約>`）を `>>` で追記する。汎用にできない、固有名かどうか迷う、検出された、または gitleaks か設定が無いときは、personal には書かず、クライアントの vault の `notes/<slug>.md` に置く。どちらの場合も一時ファイルは消す。
 
 ### 書き方
 

@@ -46,12 +46,31 @@ write_repo_hook() {
   chmod +x "$REPO/.git/hooks/pre-commit"
 }
 
-@test "リポジトリに .gitleaks.toml があれば、その設定で秘密情報を検査する" {
+@test "他者のリポジトリに .gitleaks.toml があれば、その設定だけで秘密情報を検査する" {
   touch "$REPO/.gitleaks.toml"
+  git -C "$REPO" remote add origin git@github.com:someone/example.git
   run_hook
   [ "$status" -eq 0 ]
   run grep -c -- '--config' "$LOG"
   [ "$output" = 0 ]
+}
+
+@test "自分のリポジトリに .gitleaks.toml があっても、グローバルの設定でも検査する" {
+  touch "$REPO/.gitleaks.toml"
+  git -C "$REPO" remote add origin git@github.com:kryota-dev/example.git
+  run_hook
+  [ "$status" -eq 0 ]
+  # 1 回目はリポジトリの設定（--config 無し）、2 回目はグローバルの設定。
+  run grep -c '' "$LOG"
+  [ "$output" = 2 ]
+  grep -q -- "--config $HOME/.config/git/gitleaks.toml" "$LOG"
+}
+
+@test "remote が無いリポジトリに .gitleaks.toml があっても、グローバルの設定でも検査する" {
+  touch "$REPO/.gitleaks.toml"
+  run_hook
+  [ "$status" -eq 0 ]
+  grep -q -- "--config $HOME/.config/git/gitleaks.toml" "$LOG"
 }
 
 @test "リポジトリに .gitleaks.toml が無ければ、グローバルの設定で秘密情報を検査する" {

@@ -66,7 +66,7 @@ chezmoi apply   # pinentry-mac 用のキーチェーン項目を作る
 
    Obsidian Git が `git-remote-gcrypt` と `gpg` を見つけられるのは、`run_onchange_after_20-macos-defaults.sh` が GUI アプリの PATH に Homebrew を入れているから（反映には再起動が要る）。
 
-3. git を初期化し、バックアップのディレクトリと gcrypt の remote を用意する。vault は公開しないので、dotfiles の SSH 署名（1Password の承認）を vault では使わない。改ざんの検出は gcrypt の GPG 署名が担う。gcrypt は `user.signingkey` を GPG の鍵として読むが、dotfiles はそこに SSH 鍵を設定しているので、vault 用の鍵を remote ごとに指定する。remote は最初の commit の前に足す。グローバルの pre-commit hook は、remote が無いリポジトリでクライアント名を検査し、クライアントの vault の `gcrypt::` の remote では検査しないため。
+3. git を初期化し、バックアップのディレクトリと gcrypt の remote を用意する。vault は公開しないので、dotfiles の SSH 署名（1Password の承認）を vault では使わない。改ざんの検出は gcrypt の GPG 署名が担う。gcrypt は `user.signingkey` を GPG の鍵として読むが、dotfiles はそこに SSH 鍵を設定しているので、vault 用の鍵を remote ごとに指定する。
 
    ```bash
    git -C <vault> init
