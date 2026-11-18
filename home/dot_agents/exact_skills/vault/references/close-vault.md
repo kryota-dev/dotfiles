@@ -8,7 +8,7 @@
 2. vault 名を Google Drive の `vault-backups/.closed` に 1 行で追記する（`printf '%s\n' <owner> >> "<vault-backups>/.closed"`）。
 3. 暗号化したバックアップを消す: Google Drive の `vault-backups/<owner>/`。Drive のゴミ箱からも消す（ゴミ箱に 30 日残るため）。
 4. ローカルの vault と、別名の symlink（`_vault.md` に書いたもの）を消す: `~/vaults/<owner>/`・`~/vaults/<別名>`。ほかの Mac でも消す。消し忘れた Mac では、apply のたびに「契約を終えた vault が残っています」と表示される。
-5. personal は触らない。personal の `daily/` には匿名のラベルしか無く、ラベルとクライアントの対応はクライアントの vault の `_vault.md` にしか無かったので、手順 3・4 で結び付きが消える。personal の `knowledge/` は固有名の検査を通したものだけなので、消さない。
+5. personal は触らない。personal の `daily/` には匿名のラベルしか無く、ラベルとクライアントの対応はクライアントの vault の `_vault.md` にしか無かったので、手順 3・4 で結び付きが消える。personal の `knowledge/` は固有名を除いたものだけなので、消さない。
 6. 消したことを personal の `daily/` に、匿名のラベルで 1 行記録する。
 
 Claude Code と Codex の会話の記録（`~/.claude/projects/`・`~/.codex/sessions/`）にも、そのクライアントの情報が残る。これを消すかどうかはユーザーに確かめる。

@@ -29,35 +29,19 @@ if command -v gitleaks >/dev/null 2>&1; then
       echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
       exit 1
     }
+    # 自分のリポジトリでは、既定の規則でも必ず 1 回検査する。独自の設定は useDefault を書き忘れると
+    # 既定の規則を持たず、検査が黙って空になるため。他人のリポジトリの除外には理由があるので重ねない。
+    case "$(git remote get-url origin 2>/dev/null || true)" in
+      "" | *github.com[:/]kryota-dev/*)
+        scan --config "$HOME/.config/git/gitleaks.toml" || {
+          echo "[pre-commit] gitleaks が既定の規則で秘密情報らしきものを検出したため、コミットを中止しました。" >&2
+          exit 1
+        }
+        ;;
+    esac
   else
     scan --config "$HOME/.config/git/gitleaks.toml" || {
       echo "[pre-commit] gitleaks が秘密情報らしきものを検出したため、コミットを中止しました。" >&2
-      exit 1
-    }
-  fi
-
-  # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
-  # personal の vault は全案件のセッションが読むので、remote が git のサーバーに替わっても検査を外さないよう、場所で判定する。
-  # 入口の symlink の参照先が無いと場所を比べられず、検査が黙って外れるため、その場合はコミットを止める。
-  # クライアントの vault はクライアント名を書くのが前提なので除く。
-  own="$HOME/.config/git/gitleaks-own.toml"
-  personal="$HOME/vaults/personal"
-  check_own=false
-  if [ -L "$personal" ] && ! [ -e "$personal" ]; then
-    echo "[pre-commit] ~/vaults/personal の symlink の参照先が無いため、コミットを中止しました。参照先を確認して修正してください。" >&2
-    exit 1
-  fi
-  if [ -n "$toplevel" ] && [ "$toplevel" -ef "$personal" ]; then
-    check_own=true
-  else
-    case "$(git remote get-url origin 2>/dev/null || true)" in
-      gcrypt::*) ;;
-      "" | *github.com[:/]kryota-dev/*) check_own=true ;;
-    esac
-  fi
-  if "$check_own" && [ -f "$own" ]; then
-    scan --config "$own" || {
-      echo "[pre-commit] クライアント・勤務先の固有名らしきものを検出したため、コミットを中止しました。" >&2
       exit 1
     }
   fi

@@ -25,7 +25,6 @@ Xcode Command Line Tools・Homebrew・1Password を入れ、1Password CLI が使
 | `Dotfiles - AWS Config` | `notesPlain` | `~/.aws/config` |
 | `Dotfiles - Exa API` | `credential` | Exa の MCP サーバー |
 | `Dotfiles - Firecrawl API` | `credential` | Firecrawl の MCP サーバー |
-| `Dotfiles - Redact Patterns` | `pattern` | 自分のリポジトリでクライアント名を検出する gitleaks のルール |
 | `Dotfiles - SSH Hosts` | `notesPlain` | `~/.ssh/config.d/hosts`（自宅のホスト。公開しない） |
 
 ## 日常の操作
