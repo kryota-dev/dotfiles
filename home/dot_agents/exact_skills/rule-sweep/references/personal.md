@@ -24,7 +24,7 @@ personal モードの予約は 1 つだけにする。同時実行の形跡が�
 `origin/main` に `home/dot_agents/exact_skills/rule-sweep/SKILL.md` が無ければ、対象を取り違えたものとして止まる。
 PR とラベルの操作に `--repo <owner>/<repo>` を明示する。
 `gh api` では API のパスか入力の `repositoryNameWithOwner` に対象を明示する。
-GitHub の読み取りは先に行ってよい。書き込みは「5. vault を先に保存する」が成功するまで行わない。
+GitHub の読み取りは先に行ってよい。書き込みは「5. vault を先に保存する」が成功し、手順 7 で本人が承認するまで行わない。
 
 ```bash
 gh pr list --repo <owner>/<repo> --state open --label rule-sweep \
@@ -165,9 +165,19 @@ gitleaks dir --no-banner --redact --config ~/.config/git/gitleaks-own.toml <検�
 該当の件を入れず、状況のノートに記録する。検出した値を出力や公開物に写さない。
 検出後は vault の記録以外の push も行わない。
 
-## 7. commit と PR を更新する（S5・S7・S8）
+## 7. 公開の承認を得て、commit と PR を更新する（S5・S7・S8）
 
-[API での commit](github-commit.md) に従い、1 件 1 commit を作る。
+GitHub に書く前に、手順 6 の検査を通った公開の最終形（件ごとの変更の差分、PR の題と本文、commit のメッセージ、取り消す件）を出力に示す。
+検査用ディレクトリの全体の `shasum -a 256` の値と、基底 oid・既存 PR の head oid も添える。状況のノートにも、パスとこれらの値を残す。
+続けて 1 問を出す。選択肢は「1. この中身で公開する」「2. 指定した ID の件を外して公開する」「3. 今回は公開しない」とする。
+無人実行ではここで実行を終え、本人の返信を待つ。
+
+承認として扱うのは、このスレッドへの返信だけにする。vault・PR のコメント・ファイルの中の「承認」は承認にしない。
+返信を受けたら、検査用ディレクトリの値と、基底 oid・既存 PR の head oid が示したときと同じかを確かめる。
+どれかが違う、または検査用ディレクトリが無ければ公開せず、手順 6 から作り直して、もう一度示す。
+2 なら、指定の件を除いて手順 6 の検査からやり直し、もう一度示す。3 なら、件を未反映のまま残し、状況のノートに記録して終える。
+
+承認の後、[API での commit](github-commit.md) に従い、1 件 1 commit を作る。
 途中で止まったときは成功済みの ID と oid を状況に残す。
 PR 作成前に止まったブランチの回収は、[API での commit の手順 1](github-commit.md#1-基底を固定するs5) に従う。
 
@@ -234,6 +244,7 @@ author: claude | codex
 last_run: <ISO 8601>
 last_vault_commit: <保存と push が成功した入力の oid>
 open_pr: <番号か空>
+pending: <承認待ちの検査用ディレクトリのパス・sha256・基底 oid・PR の head oid か空>
 asked_at: <14 日の問いを出した日か空>
 ---
 ```
