@@ -8,7 +8,7 @@
 
 vault は git-remote-gcrypt で暗号化し、Google Drive for desktop の同期フォルダの中の普通のディレクトリへ push する。gcrypt は、絶対パスで `HEAD` を持たないディレクトリを local バックエンドとして扱い、新しい pack のファイルだけを書くので、push の量は差分にとどまる。bare リポジトリ（`HEAD` を持つ）にすると git のバックエンドとして扱われ、push のたびに履歴全体を送るので、`git init --bare` はしない。認証は Drive アプリが担い、1Password も GitHub も通らない。Drive 上に置かれるのは暗号化したファイルだけで、Drive の版の履歴（30 日）も残る。
 
-`<backup>` は `$HOME/Library/CloudStorage/GoogleDrive-<account>/<マイドライブ>/vault-backups/<name>`（`<account>` は 1Password の「Dotfiles - Vault」の `drive_account`。`<マイドライブ>` のフォルダ名は OS の言語で変わり、英語では空白を含む `My Drive`）。gcrypt は `/` で始まるパスだけを local バックエンドとして扱うので、`~` を使わず `$HOME` で絶対パスにし、使う箇所はすべて二重引用符で囲む。personal のバックアップは必ず `vault-backups/personal` にする（pre-commit hook がこのパスでクライアント名を検査するため）。
+`<backup>` は `$HOME/Library/CloudStorage/GoogleDrive-<account>/<マイドライブ>/vault-backups/<name>`（`<account>` は 1Password の「Dotfiles - Vault」の `drive_account`。`<マイドライブ>` のフォルダ名は OS の言語で変わり、英語では空白を含む `My Drive`）。gcrypt は `/` で始まるパスだけを local バックエンドとして扱うので、`~` を使わず `$HOME` で絶対パスにし、使う箇所はすべて二重引用符で囲む。personal のバックアップは `vault-backups/personal` にする。personal の vault は必ず `~/vaults/personal` に置く（pre-commit hook はこの場所で personal を見分け、クライアント名を検査するため）。
 
 ## 前提: vault 用の GPG 鍵（一度だけ）
 
