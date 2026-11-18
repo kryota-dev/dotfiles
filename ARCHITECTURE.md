@@ -97,7 +97,7 @@ CLI 用の最小限の設定（`model`）にする。`claude -p` の roles（`cl
 
 steward の SSH の門の `t3 thread start` からは、モデルを指定できない。
 Codex のプロファイルも T3 からは選べない。codex app-server には `model` が毎回送られ、`effort` が送られるのは
-スレッドで指定したときと `gpt-6-astra` のとき（`medium`）だけ。
+スレッドで指定したときと `gpt-6-astra` のとき（`medium`）だけ。T3 Code 0.1.7 で確かめた。`gpt-6.2-astra` での扱いは未確認。
 
 `settings.json` から外した指定と理由は次のとおり。
 

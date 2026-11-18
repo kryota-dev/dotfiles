@@ -1,8 +1,8 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /* Codex 自身もこのファイルに書き込む（モデルの案内の表示回数など）ので、管理するのは以下のキーだけ。 */ -}}
-{{- /* `codex --profile astra`: 最も難しい作業を通しでやらせるとき。Astra は Light（low）から始め、足りなければ上げる。 */ -}}
-{{- /* CLI 専用。T3 Code（codex app-server）からはプロファイルを選べず、gpt-6-astra の effort は medium で送られる。 */ -}}
+{{- /* `codex --profile astra`: 最も難しい作業を通しでやらせるとき。OpenAI が GPT-6.2 ではクライアントの effort から始めるよう勧めるため、effort は固定せず config.toml の値を引き継ぐ。 */ -}}
+{{- /* T3 Code（codex app-server）からはプロファイルを選べない。 */ -}}
 {{- $c := fromToml .chezmoi.stdin -}}
-{{- $c = setValueAtPath "model" "gpt-6-astra" $c -}}
-{{- $c = setValueAtPath "model_reasoning_effort" "low" $c -}}
+{{- $c = setValueAtPath "model" "gpt-6.2-astra" $c -}}
+{{- $c = deleteValueAtPath "model_reasoning_effort" $c -}}
 {{- toToml $c -}}
