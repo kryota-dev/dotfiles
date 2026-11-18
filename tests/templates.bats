@@ -94,17 +94,24 @@ assert_t3_settings() {
     [[ "$output" == *'"gpt-5.5" = 3'* ]]
   done
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_astra.config.toml")" <<<"$input"
-  [[ "$output" == *'model = "gpt-6-astra"'* ]]
-  [[ "$output" == *'model_reasoning_effort = "low"'* ]]
+  [[ "$output" == *'model = "gpt-6.2-astra"'* ]]
+  [[ "$output" != *'model_reasoning_effort'* ]]
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_agent.config.toml")" <<<"$input"
   [[ "$output" == *'approval_policy = "never"'* ]]
   [[ "$output" == *'network_access = false'* ]]
 }
 
+@test "Codex の astra profile は以前に設定した effort を消す" {
+  input=$'model_reasoning_effort = "low"\n'
+  run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_astra.config.toml")" <<<"$input"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'model_reasoning_effort'* ]]
+}
+
 @test "Codex の profile は空のファイルからでも描画できる" {
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_astra.config.toml")" </dev/null
   [ "$status" -eq 0 ]
-  [[ "$output" == *'model = "gpt-6-astra"'* ]]
+  [[ "$output" == *'model = "gpt-6.2-astra"'* ]]
   run render --with-stdin "$(cat "$SOURCE/dot_codex/modify_private_agent.config.toml")" </dev/null
   [ "$status" -eq 0 ]
   [[ "$output" == *'sandbox_mode = "workspace-write"'* ]]
