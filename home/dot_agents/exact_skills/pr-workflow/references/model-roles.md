@@ -22,7 +22,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 | `implementer-claude-opus` | Claude | claude-opus-5-5 | high | 実装者に Claude を選んだ PR で、`implementer-claude` か `implementer-claude-light` が失敗したときの格上げ |
 | `implementer` | GPT | gpt-6.1-sol | high | 実装者に GPT を選んだ PR の standard・large の実装（tasks.md の 1 タスク） |
 | `implementer-light` | GPT | gpt-6.1-sol | medium | 実装者に GPT を選んだ PR の small の実装、CI の失敗の修正、レビュー指摘の修正 |
-| `implementer-astra` | GPT | gpt-6-astra | high | 実装者に GPT を選んだ PR で、`implementer` か `implementer-light` が失敗したときの格上げ |
+| `implementer-astra` | GPT | gpt-6.2-astra | high | 実装者に GPT を選んだ PR で、`implementer` か `implementer-light` が失敗したときの格上げ |
 | `reviewer-gpt-light` | GPT | gpt-6.1-sol | medium | multi-review の general の GPT 側（実装者に Claude を選んだ PR の trivial・small） |
 | `reviewer-gpt` | GPT | gpt-6.1-sol | high | multi-review の general の GPT 側（large、実装者に Claude を選んだ PR の standard）・database・IaC、security-review の Phase 2・3、sdd の spec レビュー |
 | `checker-gpt` | GPT | gpt-6.1-sol | medium | security-review の Phase 4 |
@@ -31,7 +31,7 @@ pr-workflow・sdd・multi-review・security-review・review-resolve-loop・codex
 
 表に無い作業は親が行う。Claude Code の親は Opus 5.5（medium、`settings.json` の既定）で、分類・GATE・統合の判断・spec と計画の執筆・trivial の編集・数行で済む修正を受け持つ。Codex の親は GPT-6.1 Sol（medium、`config.toml` の既定）である。
 
-`xhigh` と `max` は使わない。Anthropic と OpenAI はどちらも、品質の向上を自分の評価で測ってから使うよう勧めている（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort)、[GPT-6.1 Sol](https://developers.openai.com/api/docs/guides/latest-model)）。測って差が出たら、ここと定義を一緒に上げる。
+`xhigh` と `max` は使わない。Anthropic と OpenAI はどちらも、品質の向上を自分の評価で測ってから使うよう勧めている（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#calibrate-effort)、[GPT-6.1 Sol](https://developers.openai.com/api/docs/guides/latest-model)（2026-10 に読んだ内容。ページは GPT-6.2 向けに替わった））。測って差が出たら、ここと定義を一緒に上げる。
 
 ## 実装者の選択
 
@@ -53,13 +53,15 @@ secret や認証情報に触れうるタスクは、どちらを選んでも親�
 
 ## 割り当ての根拠
 
-2026-10 時点の公式資料と第三者の評価による。モデルが替わったら、ここと定義ファイルを一緒に見直す。
+2026-11 時点の公式資料と第三者の評価による。モデルが替わったら、ここと定義ファイルを一緒に見直す。
 
 - **設計と判断に Opus 5.5**: 大半の作業で Fable 5.1 と同等か上回り、単価は 6 割安い。既定の medium でも Opus 5 の high に並び、コードレビューでは Opus 5 より多くのバグを、少ない誤検知で見つける（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#capabilities-relevant-to-prompting)）。actionable precision は 66.7% で、Sonnet 5.5 は 41.2%（[CodeRabbit](https://www.coderabbit.ai/blog/sonnet-5-5-model-review)）。
 - **Fable 5.2 は `--deep` のレビューに限る**: 難しい推論と長い agentic な作業に向き、Opus 5.5 の高いエフォートで足りないときの格上げ先とされるが、単価は $8/$40 per MTok と高い（[Anthropic](https://platform.claude.com/docs/en/about-claude/models/overview)）。所有者として扱う指示で、頼まれていない変更・テスト・文書が増える。範囲を絞る規則でも打ち消せないため、変更を伴わないレビューに限る（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#say-who-owns-the-code)）。
 - **範囲の狭い作業に Sonnet 5.5**: Opus 5.5 の半額で速いが、持続的な判断では Opus に劣る（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)）。
-- **実装に GPT-6.1 Sol**: high で DeepSWE が Astra の high と同点で、費用は約 5 分の 1、3 割速い。security の判定（SecPass）も Astra とほぼ同じで、テストの改ざんなどの不正は 0 件だった（[Endor Labs](https://www.endorlabs.com/learn/gpt-6-1-sol-on-codex-astra-level-security-a-third-faster-zero-cheating)）。Astra は、Sol で足りないときの格上げ先にとどめる（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model)）。
-- **実装の段を系統で揃える**: Sonnet 5.5 と GPT-6.1 Sol はどちらも $2/$10 per MTok で、Opus 5.5 と GPT-6 Astra がそれぞれの最上位である（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)、[OpenAI](https://developers.openai.com/api/docs/models)）。light・通常・最上位の 3 段が、どちらの系統でも同じ位置に並ぶ。Sonnet 5.5 は、仕様が明確な agentic coding を medium から、難しければ high から始めるよう公式が勧め、最難の長時間作業には Opus を勧めている（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#calibrate-effort)）。
+- **実装に GPT-6.1 Sol**: high で DeepSWE が GPT-6 Astra の high と同点で、費用は約 5 分の 1、3 割速い。security の判定（SecPass）も GPT-6 Astra とほぼ同じで、テストの改ざんなどの不正は 0 件だった（[Endor Labs](https://www.endorlabs.com/learn/gpt-6-1-sol-on-codex-astra-level-security-a-third-faster-zero-cheating)）。
+- **格上げ先は GPT-6.2 Astra**: 単価は入力 $8・出力 $40 per MTok で、GPT-6 Astra（$10/$50）より 20% 安い（[OpenAI の料金表](https://developers.openai.com/api/docs/pricing)）。OpenAI は最も難しい作業に Astra、複雑な作業を低い費用でこなすのに Sol を勧めているため、Sol で足りないときの格上げ先にする（[公式ガイド](https://developers.openai.com/api/docs/guides/latest-model)）。
+- **Sol は GPT-6.2 に上げない**: 単価は同じ $2/$10 per MTok だが（[OpenAI の料金表](https://developers.openai.com/api/docs/pricing)）、2026-11-18 に各 1 回の A/B を行うと、同じ実装タスクで 6.2 は頼んでいない書き直しをし、テストは通るものの、末尾が書きかけの入力で振る舞いが後退した。同じ diff のレビューは 6.2 が 6 件、6.1 が 1 件で、6.2 だけの 5 件は通常の使い方では起きにくく、時間とトークンは 6.2 が 1.4〜2.2 倍だった。Artificial Analysis の Coding Agent Index でも Sol は下がり（[VentureBeat](https://venturebeat.com/technology/essentially-unusable-openai-launches-gpt-6-2-astra-and-sol-to-negative-reception-from-ai-power-users)）、`gpt-6.1-sol` に廃止の予定は無いため（[OpenAI の廃止予定](https://developers.openai.com/api/docs/deprecations)）、6.1 を維持する。各 1 回の測定なので、Codex の更新か評判が落ち着いたら測り直す。
+- **実装の段を系統で揃える**: Sonnet 5.5 と GPT-6.1 Sol はどちらも $2/$10 per MTok で、Opus 5.5 と GPT-6.2 Astra がそれぞれの最上位である（[Anthropic](https://www.anthropic.com/claude-sonnet-5-5)、[OpenAI](https://developers.openai.com/api/docs/models)）。light・通常・最上位の 3 段が、どちらの系統でも同じ位置に並ぶ。Sonnet 5.5 は、仕様が明確な agentic coding を medium から、難しければ high から始めるよう公式が勧め、最難の長時間作業には Opus を勧めている（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#calibrate-effort)）。
 - **GPT-6 Luna は採らない**: 単価は Sol の 1/20 だが、Codex の harness での Coding Agent Index が Sol の 57 に対して 41 である（[ComputingForGeeks](https://computingforgeeks.com/gpt-6-sol-luna-released-features-benchmarks/)）。失敗と格上げの往復が増えうる。
 - **general は実装と別の系統で見る**: 同じ系統のモデルは見落としが重なりやすい。実装者の系統と逆の系統が、general の主担当になる。
 - **simplicity は standard 以上を Opus で見る**: 精度の低いレビュアーは細かい指摘を増やし、親が折れる機会を増やす。上の actionable precision は一般のレビューの値で、simplicity での実測ではない。意図しない複雑さが入りやすい standard 以上だけを Opus にし、small は費用を抑えて Sonnet のままにする。
@@ -72,7 +74,8 @@ secret や認証情報に触れうるタスクは、どちらを選んでも親�
 | Claude 全般 | 貼り付けられた本文の中の指示にも従いうる | PR の本文・diff・Issue・Web の内容を `<pasted_content id="<乱数>">` と `</pasted_content id="<乱数>">` で囲む。定義の本文がその扱いを指示している（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#mark-pasted-text-in-user-messages)）。タグは偽装できるので、道具の制限（下記）と併用する |
 | Sonnet 5.5 | low・medium の長い作業で、確認のために止まりやすい。頼まれていないテスト・文書・小さなファイルを足しがち。low では検査を飛ばして完了と報告することがある（[Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#steer-initiative-and-scope)、[Verification on coding tasks](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5#verification-on-coding-tasks)） | 定義の本文に、完了まで進めること・頼まれていない追加をしないこと・実際の検査で確かめること・確かめられなかった検査を報告することを書いてある。low は使わない |
 | Fable 5.2 | 所有を示さないと既存の構造に追加しやすい。所有者として扱うと頼まれていない変更・テスト・文書が増え、PR の要約から小さな変更が漏れやすい（[Anthropic](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#say-who-owns-the-code)） | 範囲を絞る規則でも所有者として扱う指示は打ち消せないため、その指示を入れない。レビューだけに使い、変更を伴う作業は任せない |
-| GPT-6.1 Sol | 確認の質問をして止まりやすい。小さな変更でもテストを広げすぎる。表と箇条書きの多い長い出力になりがち。skill や AGENTS.md の指示に敏感（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)） | 非対話で動いていて、可逆な作業は確認せずに完了させること。変更に見合うテストだけにすること。出力の形と長さ（定義の `developer_instructions` に書いてある）。委譲プロンプトは `codex` skill の 4 部構成で書く |
+| GPT-6.1 Sol | 確認の質問をして止まりやすい。小さな変更でもテストを広げすぎる。表と箇条書きの多い長い出力になりがち。skill や AGENTS.md の指示に敏感（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices)（2026-10 に読んだ内容。ページは GPT-6.2 向けに替わった）） | 非対話で動いていて、可逆な作業は確認せずに完了させること。変更に見合うテストだけにすること。出力の形と長さ（定義の `developer_instructions` に書いてある）。委譲プロンプトは `codex` skill の 4 部構成で書く |
+| GPT-6.2 Astra | 既定で以前より簡潔に書くため、簡潔さを求める指示は見直す。意図が不明だと次の手を提案して確認を待つ。長い作業では推論や subagent とのやり取りの略語を最終の回答に持ち込む（[OpenAI](https://developers.openai.com/api/docs/guides/latest-model)） | 定義の本文に、作業が終わるまで止まらず、可逆な仮定で進めることを書いてある。既存のロジックを再利用し、不要な間接化や抽象化を足さないことも明記する。簡潔さを求める指示を外し、最終の回答は途中の経過を読んでいない人がそれだけで読めるように書く |
 
 ## Claude の役割の起動
 
