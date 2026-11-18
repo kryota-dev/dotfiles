@@ -20,8 +20,10 @@ claude_leg review-general "$RESULT" "Read(/$REC/**)" < "$PROMPT_FILE"
 
 ```bash
 M=$(gpt_role "$ROLE" model) E=$(gpt_role "$ROLE" model_reasoning_effort)
+B=$(gpt_body "$ROLE")
+[ -n "$M" ] && [ -n "$E" ] && [ -n "$B" ] || { echo "abort: 役割の値が空。chezmoi apply を実行する" >&2; exit 1; }
 codex exec --sandbox read-only --cd "$WT" --color never --json \
-  -m "$M" -c model_reasoning_effort="$E" -o "$RESULT" < "$PROMPT_FILE" > "$STREAM" 2>&1
+  -m "$M" -c model_reasoning_effort="$E" -c developer_instructions="$B" -o "$RESULT" < "$PROMPT_FILE" > "$STREAM" 2>&1
 ```
 
 - `PROMPT_FILE` に execution.md の Phase 3 に従う入力を保存し、stdin で渡す。`perspectives.md` の共通の約束とその leg の観点、PR のタイトルと本文を入れ、`codex` skill の 4 部構成（Goal / Context / Constraints / Done when）で書く。`review` サブコマンドは使わない（プロンプトは受け取れるが `--base` と併用できず、共通の約束と差分の範囲を同時に指定できない）。

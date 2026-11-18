@@ -189,10 +189,10 @@ gpt_body() { awk '/^"""$/{f=0} f; /^developer_instructions = """$/{f=1}' "$HOME/
 
 | 親 | 起動 |
 |---|---|
-| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill。定義の本文を渡す役割（`grill-counterpart-gpt` など）は `-c developer_instructions="$(gpt_body R)"` も足す |
+| Claude Code | `codex exec -m "$(gpt_role R model)" -c model_reasoning_effort="$(gpt_role R model_reasoning_effort)" -c developer_instructions="$(gpt_body R)"`。実装は `--profile agent`、レビューと検証は `--sandbox read-only`。起動形の詳細は `codex` skill |
 | Codex | `spawn_agent` に `agent_type: <役割>` と `fork_turns: "none"` を渡す |
 
-値が空なら（`chezmoi apply` の前など）起動せずに止め、`chezmoi apply` を案内する。既定のモデルで黙って代えない。
+model・effort・本文のどれかが空なら（`chezmoi apply` の前など）起動せずに止め、`chezmoi apply` を案内する。既定のモデルで黙って代えない。
 
 **制約**: Codex の custom agent の定義では `sandbox_mode` を上書きできない（[公式](https://learn.chatgpt.com/docs/agent-configuration/subagents)）。Codex が親のとき、`spawn_agent` で起動したレビューの役割は親の sandbox を継承し、読み取り専用であることは `developer_instructions` の文言だけで担保される。書き込みを許さない sandbox で走らせたいレビューは、Codex からも `codex exec --sandbox read-only` で起動する。
 

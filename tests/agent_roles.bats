@@ -148,6 +148,49 @@ definition_names() {
   done < <(find "$SOURCE/dot_agents/exact_skills" -type f -name '*.md')
 }
 
+@test "GPT の役割の値を読む Bash ブロックは本文も読み、起動時に渡す" {
+  local f failed=0
+  while IFS= read -r f; do
+    awk '
+      /^```bash$/ { in_bash=1; block=""; start=FNR; next }
+      /^```$/ && in_bash {
+        if (block ~ /gpt_role[^\n]*model_reasoning_effort/) {
+          if (block !~ /gpt_body[[:space:]]/) {
+            printf "役割の本文を読んでいません: %s:%d\n", FILENAME, start
+            failed=1
+          }
+          if (block ~ /codex exec/ && block !~ /-c[[:space:]]+developer_instructions=/) {
+            printf "役割の本文を渡していません: %s:%d\n", FILENAME, start
+            failed=1
+          }
+        }
+        in_bash=0
+      }
+      in_bash && $0 !~ /^[[:space:]]*#/ { block=block $0 "\n" }
+      END { exit failed }
+    ' "$f" || failed=1
+  done < <(find "$SOURCE/dot_agents/exact_skills" -type f -name '*.md')
+  [ "$failed" -eq 0 ]
+}
+
+@test "GPT の役割の起動表は Claude Code の起動形に本文を含める" {
+  require_roles
+  awk '
+    /^## GPT の役割の起動$/ { in_section=1; next }
+    /^## / { in_section=0 }
+    in_section && /^\| Claude Code \|/ {
+      split($0, spans, "`")
+      if (spans[2] ~ /codex exec.*-c developer_instructions=/) found=1
+    }
+    END {
+      if (!found) {
+        print "Claude Code の起動形に役割の本文がありません: " FILENAME
+        exit 1
+      }
+    }
+  ' "$ROLES"
+}
+
 # 役割表の文書にある起動の関数を取り出し、リポジトリの定義を ~/.agents/roles と ~/.codex/agents に見立てて読み込む。
 load_role_helpers() {
   local home="$BATS_TEST_TMPDIR/home"
@@ -177,8 +220,20 @@ load_role_helpers() {
   [ "$(gpt_role reviewer-gpt model_reasoning_effort)" = high ]
   gbody=$(gpt_body grill-counterpart-gpt)
   [[ "$gbody" == "あなたは"* ]]
-  [[ "$gbody" != *"model ="* ]]
-  [[ "$gbody" != *'"""'* ]]
+  local f role
+  # codex exec は本文が空なら起動しないので、すべての GPT の役割で本文が取れることを確かめる。
+  for f in "$SOURCE/dot_codex/agents/"*.toml; do
+    role=$(basename "$f" .toml)
+    gbody=$(gpt_body "$role")
+    [ -n "$gbody" ] || {
+      echo "本文が空です: $role"
+      return 1
+    }
+    [[ "$gbody" != *"model ="* && "$gbody" != *'"""'* ]] || {
+      echo "本文に定義のほかの部分が混ざっています: $role"
+      return 1
+    }
+  done
 }
 
 @test "Bash を持つのは implementer-claude* だけ、書き込みの道具を持つのは spec-designer と implementer-claude* だけ" {
