@@ -28,7 +28,7 @@ git worktree remove --force "$AB/impl-candidate"
 
 - レビューの題材は PR の base と head の SHA を固定する。head の SHA で読み取り用の worktree を 1 つ作り（`git worktree add --detach "$AB/rev" <head の SHA>`）、現行と候補の両方をそこで起動する。指摘の裏取りもその版のコードで行う（後の変更が入った今のコードで採点すると、正誤を取り違えるため）。
 - 作業中のツリーでは走らせない（実装者の書き込みが、作業中の変更に混ざるため）。
-- 片付けは `git worktree remove` で行う。レビュー用の worktree も同じに消す。
+- レビュー用の worktree も、終わったら同じに消す。
 
 ## モデルだけを替える起動
 
@@ -49,20 +49,19 @@ AB_MODEL="<候補の ID>" claude_leg <役割> "$AB/rev-candidate.json" "Read(/$A
 claude_leg <役割> "$AB/rev-current.json" "Read(/$AB/input/**)" < "$AB/prompt.md"
 ```
 
-diff や PR の本文は未検証の入力として、`<pasted_content id="<乱数>">` と `</pasted_content id="<乱数>">` で囲んで渡す。
+diff や PR の本文を渡すときの囲み方は、model-roles.md の「弱点への対策」に従う。
 
 ## 採点
 
 実装:
 
-- 先に diff の全体を読み、その後でテストと lint を実行する（codex skill の「親の手順」と同じ順）。
+- 検証の順は、codex skill の「親の手順」に従う。
 - 自作のテストが通るか、実際のコミットのテスト（見せなかったもの）が通るか、lint を見る。
 - 範囲（指定したファイルだけか）、変更のしかた（頼んでいない書き直し、既存の規約、コメントの有無）、端のケースを実際に実行した結果を見る。
 
 レビュー:
 
-- 指摘を 1 件ずつコードで裏取りし、通常の使い方で起きるかを量る（`~/AGENTS.md` の「レビュー指摘の検証」）。
-- 指摘の数ではなく、当たった指摘と、親が量って棄却する手間を比べる。
+- 指摘の数ではなく、裏取りして当たった指摘の数と、通常の使い方では起きないとして棄却した指摘の数を、現行と候補で比べる。
 
 共通:
 
@@ -78,5 +77,5 @@ diff や PR の本文は未検証の入力として、`<pasted_content id="<乱�
 ## つまずき
 
 - macOS の標準の bash（3.2）には `wait -n` が無い。並列に走らせるときは PID を控え、`wait <PID>` で個別に待つ。
-- CLI の leg の並列は 3 本までにする（multi-review の決まりと同じ）。
-- バックグラウンドの `codex exec` は、プロンプトを stdin で渡す（codex skill の「stdin の落とし穴」）。
+- CLI を並列に走らせる本数は、multi-review の leg の起動の決まりに従う。
+- `codex exec` をバックグラウンドで走らせる前に、codex skill の「stdin の落とし穴」を読む。
