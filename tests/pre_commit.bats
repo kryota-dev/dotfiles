@@ -59,7 +59,8 @@ write_repo_hook() {
   grep -q 'gitleaks-own.toml' "$LOG"
 }
 
-@test "クライアントの vault（gcrypt の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
+@test "personal の vault がある Mac で、クライアントの vault（gcrypt の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
+  git init -q "$HOME/vaults/personal"
   REPO="$HOME/vaults/client-a"
   git init -q "$REPO"
   git -C "$REPO" remote add origin "gcrypt::$HOME/Library/CloudStorage/GoogleDrive-x/My Drive/vault-backups/client-a"
@@ -70,7 +71,8 @@ write_repo_hook() {
   [ "$output" = 0 ]
 }
 
-@test "クライアントの vault（SSH の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
+@test "personal の vault がある Mac で、クライアントの vault（SSH の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
+  git init -q "$HOME/vaults/personal"
   REPO="$HOME/vaults/client-a"
   git init -q "$REPO"
   git -C "$REPO" remote add origin ssh://git@vault-server/client-a
@@ -110,7 +112,7 @@ write_repo_hook() {
   grep -q 'gitleaks-own.toml' "$LOG"
 }
 
-@test "personal の vault の入口があるのに実際のパスを解決できないときはコミットを止める" {
+@test "personal の vault の入口の symlink の参照先が無いときはコミットを止める" {
   mkdir -p "$HOME/vaults"
   ln -s "$REPO" "$HOME/vaults/personal"
   git -C "$REPO" remote add origin ssh://git@vault-server/personal
@@ -123,6 +125,7 @@ write_repo_hook() {
   [ ! -e "$HOME/vaults/personal" ]
   run bash "$HOOK"
   [ "$status" -ne 0 ]
+  [[ "$output" == *"~/vaults/personal の symlink の参照先が無い"* ]]
 }
 
 @test "personal の vault が無くてもクライアントの vault は秘密情報だけを検査して通る" {

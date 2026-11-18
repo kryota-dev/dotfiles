@@ -38,24 +38,18 @@ if command -v gitleaks >/dev/null 2>&1; then
 
   # 自分のリポジトリ（と、まだ remote が無いリポジトリ）では、クライアント名の検査も必ず行う。
   # personal の vault は全案件のセッションが読むので、remote が git のサーバーに替わっても検査を外さないよう、場所で判定する。
-  # 実際のパスを解決できないまま進むと検査が漏れるため、その場合はコミットを止める。
+  # 入口の symlink の参照先が無いと場所を比べられず、検査が黙って外れるため、その場合はコミットを止める。
   # クライアントの vault はクライアント名を書くのが前提なので除く。
   own="$HOME/.config/git/gitleaks-own.toml"
+  personal="$HOME/vaults/personal"
   check_own=false
-  if [ -e "$HOME/vaults/personal" ] || [ -L "$HOME/vaults/personal" ]; then
-    if ! personal_path="$(cd "$HOME/vaults/personal" && pwd -P)"; then
-      echo "[pre-commit] ~/vaults/personal の実際のパスを解決できないため、コミットを中止しました。ディレクトリの権限や symlink の参照先を確認して修正してください。" >&2
-      exit 1
-    fi
-    if ! toplevel_path="$(cd "$toplevel" && pwd -P)"; then
-      echo "[pre-commit] 作業ツリーの最上位の実際のパスを解決できないため、コミットを中止しました。作業ツリーの場所とディレクトリの権限を確認して修正してください。" >&2
-      exit 1
-    fi
-    if [ "$toplevel_path" = "$personal_path" ]; then
-      check_own=true
-    fi
+  if [ -L "$personal" ] && ! [ -e "$personal" ]; then
+    echo "[pre-commit] ~/vaults/personal の symlink の参照先が無いため、コミットを中止しました。参照先を確認して修正してください。" >&2
+    exit 1
   fi
-  if ! "$check_own"; then
+  if [ -n "$toplevel" ] && [ "$toplevel" -ef "$personal" ]; then
+    check_own=true
+  else
     case "$(git remote get-url origin 2>/dev/null || true)" in
       gcrypt::*) ;;
       "" | *github.com[:/]kryota-dev/*) check_own=true ;;
