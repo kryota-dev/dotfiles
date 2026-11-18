@@ -19,9 +19,11 @@
 AB=<スクラッチ>/model-update/<対象>/ab
 git worktree add --detach "$AB/impl-current" <親コミット>
 git worktree add --detach "$AB/impl-candidate" <親コミット>
-# 実際のコミットのテストは、実装者に見せないよう worktree の外に取り出す
-git show <コミット>:<テストのパス> > "$AB/hidden-test"
-# 終わったら
+# 実際のコミットのテストは、実装者に見せないよう、$AB の外に取り出す
+HIDDEN=$(mktemp -d)
+git show <コミット>:<テストのパス> > "$HIDDEN/test"
+# 終わったら、実装の変更を保存してから消す（未追跡のファイルも diff に入れる）
+for w in impl-current impl-candidate; do git -C "$AB/$w" add -N . && git -C "$AB/$w" diff > "$AB/$w.diff"; done
 git worktree remove --force "$AB/impl-current"
 git worktree remove --force "$AB/impl-candidate"
 ```
@@ -31,12 +33,14 @@ git worktree remove --force "$AB/impl-candidate"
 
 ## モデルだけを替える起動
 
-- GPT の役割: [codex skill](../../codex/SKILL.md) の起動形で、`-m` だけ現行と候補で替える。effort は定義から読む（`gpt_role <役割> model_reasoning_effort`）。それ以外は、その役割を普段起動する形に合わせ、現行と候補で同じにする（普段と違う条件で比べると、実際の使い方での差が分からないため）。定義の本文を `-c developer_instructions="$(gpt_body <役割>)"` で渡している役割は、両方に同じ本文を渡す。`gpt_role`・`gpt_body` と、どの役割に本文を渡すかは、[model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」に従う。実装は `--profile agent`、レビューは `--sandbox read-only`。`--json` を付けてトークンを記録する。
+- GPT の役割: [model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」の形で起動し、`-m` だけを現行と候補で替える。それ以外（effort・本文・sandbox）は普段の起動形のまま、現行と候補で同じにする（普段と違う条件で比べると、実際の使い方での差が分からないため）。`--json` を付けてトークンを記録する。
 - Claude の役割: model-roles.md の関数を読み込み、`claude_role` を上書きしてモデルだけを差し替え、`claude_leg`（レビュー）か `claude_impl`（実装）で起動する。次の形は実機で確かめてある。
 - Claude の fallback は、結果の `modelUsage` で判定する。要求した ID が出力トークンを持って載り、ほかに並ぶのは現行の回にも同じように並ぶ補助の小さいモデルだけであることを見る。それ以外のモデルが並んでいれば途中で fallback しているので、その回を無効にして結果に書く。
 
 ```bash
-# bash で実行する（model-roles.md の関数は bash 向け）
+# bash で実行する（model-roles.md の関数は bash 向け）。AB は上と同じ値を入れ直す
+AB=<スクラッチ>/model-update/<対象>/ab
+cd "$AB/rev"
 ROLES="$HOME/.agents/skills/pr-workflow/references/model-roles.md"
 awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$ROLES" > "$AB/helpers.sh"
 source "$AB/helpers.sh"
@@ -56,6 +60,7 @@ diff や PR の本文を渡すときの囲み方は、model-roles.md の「弱�
 
 - 検証の順は、codex skill の「親の手順」に従う。
 - 自作のテストが通るか、実際のコミットのテスト（見せなかったもの）が通るか、lint を見る。
+- 実装者のログで、題材のコミットや題材のツリーの外を読んでいないかを見る。読んでいたら、その回を無効にする（worktree は元のリポジトリの履歴を共有するので、正解を読めるため）。
 - 範囲（指定したファイルだけか）、変更のしかた（頼んでいない書き直し、既存の規約、コメントの有無）、端のケースを実際に実行した結果を見る。
 
 レビュー:
