@@ -187,8 +187,9 @@ pinentry-mac が読むキーチェーンの項目（service `GnuPG`・account �
 秘密情報の値は 1Password にだけ置く。テンプレートは `onepasswordRead` で読み、`private_` 属性（0600）で配置する。
 vault 名・自宅のホスト名のように、秘密ではないが公開したくない値もリポジトリに書かない。vault 名は
 `.chezmoi.toml.tmpl` の `promptStringOnce` で初回に入力させて手元の設定に残し、ホスト名は 1Password から描画する。
-グローバルの gitleaks の pre-commit hook がすべてのコミットを検査し、自分のリポジトリではクライアント・勤務先の
-固有名（パターンは 1Password にある）も検出する。
+グローバルの gitleaks の pre-commit hook が、すべてのコミットの秘密情報を検査する。クライアント・勤務先の固有名は
+機械では検査しない。名前の一覧は保守されず、検査が漏れたまま安心だけを生んでいたため、決まり（`home/AGENTS.md`）と、
+公開の前の本人の確認で守る。
 
 ほかのリポジトリの古い lefthook（2.1.4 以前の `lefthook run`、2.1.0 より前の `lefthook install`）は、グローバルの
 `core.hooksPath` のフックを上書きする（lefthook は書き先を `git rev-parse --git-path hooks` で求める）。まず、pre-commit は

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# グローバルの pre-commit hook が、リポジトリの場所と remote に応じてクライアント名の検査を行うかを確かめる。
+# グローバルの pre-commit hook の秘密情報の検査と、リポジトリ自身のフックへの受け渡しを確かめる。
 # gitleaks は呼ばれた設定ファイルを記録するだけの偽物に差し替える。
 
 bats_require_minimum_version 1.5.0
@@ -9,7 +9,7 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   export TMPDIR="$BATS_TEST_TMPDIR"
   mkdir -p "$HOME/.config/git" "$BATS_TEST_TMPDIR/bin"
-  touch "$HOME/.config/git/gitleaks.toml" "$HOME/.config/git/gitleaks-own.toml"
+  touch "$HOME/.config/git/gitleaks.toml"
   LOG="$BATS_TEST_TMPDIR/gitleaks.log"
   printf '#!/usr/bin/env bash\necho "$*" >>"%s"\n' "$LOG" >"$BATS_TEST_TMPDIR/bin/gitleaks"
   chmod +x "$BATS_TEST_TMPDIR/bin/gitleaks"
@@ -46,103 +46,23 @@ write_repo_hook() {
   chmod +x "$REPO/.git/hooks/pre-commit"
 }
 
-@test "自分の GitHub の remote ではクライアント名も検査する" {
+@test "リポジトリに .gitleaks.toml があれば、その設定で秘密情報を検査する" {
+  touch "$REPO/.gitleaks.toml"
+  run_hook
+  [ "$status" -eq 0 ]
+  run grep -c -- '--config' "$LOG"
+  [ "$output" = 0 ]
+}
+
+@test "リポジトリに .gitleaks.toml が無ければ、グローバルの設定で秘密情報を検査する" {
+  run_hook
+  [ "$status" -eq 0 ]
+  grep -q -- "--config $HOME/.config/git/gitleaks.toml" "$LOG"
+}
+
+@test "固有名の設定のファイルが手元に残っていても、使わない" {
+  touch "$HOME/.config/git/gitleaks-own.toml"
   git -C "$REPO" remote add origin git@github.com:kryota-dev/example.git
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks-own.toml' "$LOG"
-}
-
-@test "remote が無いリポジトリではクライアント名も検査する" {
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks-own.toml' "$LOG"
-}
-
-@test "personal の vault がある Mac で、クライアントの vault（gcrypt の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
-  git init -q "$HOME/vaults/personal"
-  REPO="$HOME/vaults/client-a"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin "gcrypt::$HOME/Library/CloudStorage/GoogleDrive-x/My Drive/vault-backups/client-a"
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks.toml' "$LOG"
-  run grep -c 'gitleaks-own.toml' "$LOG"
-  [ "$output" = 0 ]
-}
-
-@test "personal の vault がある Mac で、クライアントの vault（SSH の remote）ではクライアント名を検査せず、秘密情報だけを検査する" {
-  git init -q "$HOME/vaults/personal"
-  REPO="$HOME/vaults/client-a"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin ssh://git@vault-server/client-a
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks.toml' "$LOG"
-  run grep -c 'gitleaks-own.toml' "$LOG"
-  [ "$output" = 0 ]
-}
-
-@test "personal の vault（gcrypt の remote）ではクライアント名も検査する" {
-  REPO="$HOME/vaults/personal"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin "gcrypt::$HOME/Library/CloudStorage/GoogleDrive-x/My Drive/vault-backups/personal"
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks-own.toml' "$LOG"
-}
-
-@test "personal の vault（SSH の remote）ではクライアント名も検査する" {
-  REPO="$HOME/vaults/personal"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin ssh://git@vault-server/personal
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks-own.toml' "$LOG"
-}
-
-@test "personal の vault を指す別の symlink からでもクライアント名を検査する" {
-  REPO="$HOME/vaults/personal"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin ssh://git@vault-server/personal
-  ln -s "$REPO" "$BATS_TEST_TMPDIR/personal-link"
-  REPO="$BATS_TEST_TMPDIR/personal-link"
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks-own.toml' "$LOG"
-}
-
-@test "personal の vault の入口の symlink の参照先が無いときはコミットを止める" {
-  mkdir -p "$HOME/vaults"
-  ln -s "$REPO" "$HOME/vaults/personal"
-  git -C "$REPO" remote add origin ssh://git@vault-server/personal
-  # 先に vault に入り、入口の symlink だけを壊すと、作業中のリポジトリは有効に保てる。
-  # 権限や hook 内のコマンドに依存せず、personal のパスだけを解決不能にするため。
-  cd "$HOME/vaults/personal"
-  rm "$HOME/vaults/personal"
-  ln -s "$BATS_TEST_TMPDIR/missing-vault" "$HOME/vaults/personal"
-  [ -L "$HOME/vaults/personal" ]
-  [ ! -e "$HOME/vaults/personal" ]
-  run bash "$HOOK"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"~/vaults/personal の symlink の参照先が無い"* ]]
-}
-
-@test "personal の vault が無くてもクライアントの vault は秘密情報だけを検査して通る" {
-  REPO="$HOME/vaults/client-a"
-  git init -q "$REPO"
-  git -C "$REPO" remote add origin ssh://git@vault-server/client-a
-  [ ! -e "$HOME/vaults/personal" ]
-  [ ! -L "$HOME/vaults/personal" ]
-  run_hook
-  [ "$status" -eq 0 ]
-  grep -q 'gitleaks.toml' "$LOG"
-  run grep -c 'gitleaks-own.toml' "$LOG"
-  [ "$output" = 0 ]
-}
-
-@test "他者の remote ではクライアント名を検査しない" {
-  git -C "$REPO" remote add origin git@github.com:someone/example.git
   run_hook
   [ "$status" -eq 0 ]
   run grep -c 'gitleaks-own.toml' "$LOG"
