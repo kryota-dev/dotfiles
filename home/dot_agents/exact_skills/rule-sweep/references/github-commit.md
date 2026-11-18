@@ -41,7 +41,7 @@ gh api repos/<owner>/<repo>/git/refs \
 ```
 
 作成の競合・認証・API の失敗では止まり、別名のブランチを自動で増やさない。
-書き込みを始める前に、personal モードの vault の保存・push と公開物の検査を終えておく。
+書き込みを始める前に、personal モードの vault の保存・push と公開物の検査、本人の承認を終えておく。
 
 ## 3. 1 件 1 commit を送る
 
