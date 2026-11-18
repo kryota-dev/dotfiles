@@ -42,7 +42,7 @@ URL にモデルの名前が入っていれば新モデルの版に読み替え�
 
 短い依頼を 1 回だけ送り、動くことを確かめる。effort は、そのモデルを使う役割と同じ値にする。次の起動形は、どちらも実機で 1 回ずつ確かめてある。
 
-- GPT: `codex exec --sandbox read-only -m <新しい ID>` に短い依頼を stdin で渡す（起動形は [codex skill](../../codex/SKILL.md)）。終了コードが 0 で、ログの `model:` の行が `<新しい ID>` であることを見る。手元の設定についての警告は、ID が使えるかどうかとは別に扱う。
+- GPT: `codex exec --sandbox read-only -m <新しい ID> -c model_reasoning_effort="<役割の effort>"` に短い依頼を stdin で渡す（起動形は [codex skill](../../codex/SKILL.md)）。終了コードが 0 で、ログの `model:` の行が `<新しい ID>` であることを見る。手元の設定についての警告は、ID が使えるかどうかとは別に扱う。
 - Claude: 次の形で起動する。結果の `modelUsage` に `<新しい ID>` があり、出力トークンが 0 でないことを見る。補助の小さいモデルが一緒に並ぶことがあるので、「ほかのモデルが無いこと」では判定しない。
 
 ```bash

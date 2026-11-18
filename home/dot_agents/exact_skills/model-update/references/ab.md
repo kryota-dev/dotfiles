@@ -2,7 +2,7 @@
 
 ## 原則
 
-- 役割の定義（effort と本文）はそのままにし、モデルだけを替えて、現行と候補に同じ入力を渡す（モデルの差を比べるため）。
+- 役割を普段起動する形（effort と本文）はそのままにし、モデルだけを替えて、現行と候補に同じ入力を渡す（モデルの差を比べるため）。
 - 題材は、対象のモデルが担う作業の種類ごとに 1 件（実装・レビューなど）。
 - 各 1 回の小さい標本であることを結果に書く。
 - 役割として起動できない箇所（advisor など）は、この手順では比べられない。その箇所の問いには「A/B で確かめる」を入れず、比べられない旨を含意に書く。
@@ -32,7 +32,7 @@ git worktree remove --force "$AB/impl-candidate"
 
 ## モデルだけを替える起動
 
-- GPT の役割: [codex skill](../../codex/SKILL.md) の起動形で、`-m` だけ現行と候補で替える。effort は定義から読む（`gpt_role <役割> model_reasoning_effort`）。定義の本文も、両方に同じものを `-c developer_instructions="$(gpt_body <役割>)"` で渡す（`codex exec` は custom agent の定義を自動では読まないため）。`gpt_role`・`gpt_body` は [model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」を参照する。実装は `--profile agent`、レビューは `--sandbox read-only`。`--json` を付けてトークンを記録する。
+- GPT の役割: [codex skill](../../codex/SKILL.md) の起動形で、`-m` だけ現行と候補で替える。effort は定義から読む（`gpt_role <役割> model_reasoning_effort`）。それ以外は、その役割を普段起動する形に合わせ、現行と候補で同じにする（普段と違う条件で比べると、実際の使い方での差が分からないため）。定義の本文を `-c developer_instructions="$(gpt_body <役割>)"` で渡している役割は、両方に同じ本文を渡す。`gpt_role`・`gpt_body` と、どの役割に本文を渡すかは、[model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」に従う。実装は `--profile agent`、レビューは `--sandbox read-only`。`--json` を付けてトークンを記録する。
 - Claude の役割: model-roles.md の関数を読み込み、`claude_role` を上書きしてモデルだけを差し替え、`claude_leg`（レビュー）か `claude_impl`（実装）で起動する。次の形は実機で確かめてある。
 - Claude の fallback は、結果の `modelUsage` で判定する。要求した ID が出力トークンを持って載り、ほかに並ぶのは現行の回にも同じように並ぶ補助の小さいモデルだけであることを見る。それ以外のモデルが並んでいれば途中で fallback しているので、その回を無効にして結果に書く。
 
