@@ -8,7 +8,7 @@ personal の中身は読まない。状態と移動の記録は所属先の vaul
 [vault の skill](../../vault/SKILL.md) の解決を使う。personal に当たるときは [personal モード](personal.md) へ進む。
 クライアントと解決できた後は、その vault 以外を検索・閲覧しない。
 personal のパスは追記先としてだけ使う。モードの解決に必要な owner の確認以外は personal の内容を読まない。
-vault の根の `rules.md` は読まない。その案件でだけ従う決まりで、ほかの案件に広げないため。
+vault の根の `rules.md` は読まず、作らない。セッションの開始時に読んだ行があっても、この実行では従わない。その案件でだけ従う決まりで、ほかの案件に広げず、personal へ移す判断に混ぜないため。
 
 実行の日時とクライアントの vault の `HEAD`（`pinned`）を記録する。
 `notes/rule-sweep-moved.md`、`notes/rule-proposals.md`、作業ログ、出典、フロントマターは `git -C <vault> show <pinned>:<path>` で読む。
