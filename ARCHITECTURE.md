@@ -123,7 +123,9 @@ auto mode は組み込みの既定（`$defaults`）に `classifyAllShell` だけ
 
 `switchModelsOnFlag` は `true` にし、安全の分類器に当たったリクエストはフォールバックのモデルで続ける。
 未設定でも切り替わるが、対話のセッションでは初回に確認が出る。人が見ていない steward のスレッドが確認で止まらないよう、明示する。
-roles での切り替えは、`modelUsage` で検出する（pr-workflow の model-roles.md の「fallback の検出」）。
+roles（`claude_leg`・`claude_impl`）は `--setting-sources ""` で settings.json を読まず未設定になるので、
+`--settings` で `switchModelsOnFlag: true` を明示する。分類器に当たったときに効くかは未確認。
+結果の判定は、pr-workflow の model-roles.md の「結果の判定」に従う。
 
 ## T3 Code
 
@@ -161,7 +163,8 @@ Claude の Auto では、Claude が人に聞こうとした操作を T3 Code が
 権限を絞った `claude -p` で起動する。実装の役割（`implementer-claude*`）だけは Bash を持ち、Claude Code の sandbox
 （`--settings` で有効にし、ネットワークなし・書き込みは作業ツリーと一時ディレクトリだけで、git の共通ディレクトリへの
 書き込みは拒否）の中で動く。Claude Code の subagent にしないのは、親の広い permission を継承させず、
-cyber safeguard の fallback を親のセッションから隔離して `modelUsage` で検出するため。`~/.claude/agents` に置くと
+cyber safeguard の fallback を親のセッションから隔離して、結果 JSON で判定するため
+（model-roles.md の「結果の判定」）。`~/.claude/agents` に置くと
 Claude Code が自動委譲で subagent として選びうるので、Claude Code が読まない場所に置く。値の正本は定義ファイルで、
 役割表との一致と起動の引数は `tests/agent_roles.bats` が検査する。`roles/` と `agents/` は `exact_` にしない
 （手元に作った定義を apply で消さないため）。

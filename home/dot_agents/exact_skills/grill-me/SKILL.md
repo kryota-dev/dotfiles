@@ -58,11 +58,14 @@ status: draft | finalized | implemented
 counterpart:
   role: grill-counterpart-gpt | grill-counterpart | none
   requested_model: <定義の model>
-  actual_model: <Claude は modelUsage のモデル。GPT は unreported>
+  actual_model: <Claude は下記のモデル。GPT は unreported>
 ---
 ```
 
 `counterpart:` は `--mode=auto` のときだけ書く。`none` は、相手が使えず user が単独で続けることを選んだとき。
+
+Claude の結果は [model-roles.md](../pr-workflow/references/model-roles.md) の「結果の判定」の `claude_check` で判定する。
+`actual_model` は、`ok`・`stopped` なら要求したモデル、`fallback` なら `modelUsage` の要求したモデルと補助の haiku 以外のモデルを書く。
 
 sections: **Background** / **User Story** / **Acceptance Criteria**（`AC-001` のようにゼロ埋め 3 桁） / **Considered Alternatives / Rejection Rationale**（検討した代替案と却下理由。最低 1 件。後から「なぜこの設計か」を辿るための決定ログ。`--mode=auto` のときは各項に `（提案元: 親|相手、決め手: 一次ソース|user、根拠: …）` を付け、一致して確定した判断は件数だけ書く） / **Out of Scope** / **Open Questions**。
 

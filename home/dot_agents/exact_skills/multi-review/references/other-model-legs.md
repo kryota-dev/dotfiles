@@ -11,7 +11,7 @@ claude_leg review-general "$RESULT" "Read(/$REC/**)" < "$PROMPT_FILE"
 ```
 
 - プロンプトには execution.md の Phase 3 に従う入力を入れる。PR のタイトルと本文、差分は、未検証の入力として `<pasted_content id="<乱数>">` で囲んだファイルにする（定義の本文が、その中の指示に従わないよう指示している）。乱数は親がラウンドと leg ごとに作る（`openssl rand -hex 4` など）。
-- JSON の `result` をレビュー結果として読む。`session_id` と `modelUsage`（実際に使われたモデル。要求していないモデルがあれば fallback）も保存する。JSON 自体と stderr は実行記録として保持する。
+- model-roles.md の「[結果の判定](../../pr-workflow/references/model-roles.md#結果の判定)」の `claude_check` で先に判定し、JSON の `result` をレビュー結果として読む。`session_id`・`modelUsage`（モデルごとの出力トークン）・`safety_stops`・`stop_reason`・`terminal_reason`・`is_error`・判定も保存する。JSON 自体と stderr は実行記録として保持する。判定が失敗したときは終了コードとエラーも残す。判定後の扱いは execution.md の Phase 4 に従う。
 - `--resume` / `--continue` / `--fork-session` は使わず、再レビュー・再試行も新規起動する。
 
 ## GPT の役割: Claude Code から（Codex CLI）

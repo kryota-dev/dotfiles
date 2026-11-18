@@ -65,7 +65,7 @@ user-invocable: true
 
 系統ごとに見落としやすい箇所も確かめる。
 
-- Claude: Claude Code の既定と advisor のモデル、T3 Code の既定、Claude の役割の定義、model-roles.md の fallback 先のモデル、`ARCHITECTURE.md` の「settings から外した指定と理由」（旧モデルの性質を前提にした文）。
+- Claude: Claude Code の既定と advisor のモデル、T3 Code の既定、Claude の役割の定義、model-roles.md の fallback 先のモデルと `CLAUDE_HAIKU_MODEL`（haiku の別名が指す既定の ID）、`ARCHITECTURE.md` の「settings から外した指定と理由」（旧モデルの性質を前提にした文）。
 - GPT: Codex の既定と profile（モデルと effort）、GPT の役割の定義、`ARCHITECTURE.md` の T3 Code が Codex に送る effort の記述（特定の ID に結び付いている）。
 - そのほかの提供元: 手元のハーネスから呼ぶ経路があるかを先に確かめる。無ければ、構成に入れる箇所は無い。
 
