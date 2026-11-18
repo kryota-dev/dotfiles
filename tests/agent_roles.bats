@@ -3,6 +3,7 @@
 setup() {
   SOURCE="$BATS_TEST_DIRNAME/../home"
   ROLES="$SOURCE/dot_agents/exact_skills/pr-workflow/references/model-roles.md"
+  unset ANTHROPIC_DEFAULT_HAIKU_MODEL
 }
 
 claude_field() {
@@ -203,6 +204,146 @@ load_role_helpers() {
   source "$BATS_TEST_TMPDIR/helpers.sh"
 }
 
+# 実物の結果を持ち込まず、補助の haiku の出力が多い正常系を基準に、判定に関係する欄だけを変える。
+write_claude_result() {
+  jq -n '{
+    is_error: false, stop_reason: "end_turn", terminal_reason: "completed", safety_stops: 0,
+    modelUsage: {
+      "claude-opus-5-5": {outputTokens: 1200},
+      "claude-haiku-5-5": {outputTokens: 20409}
+    }
+  }' | jq "${1:-.}" >"$BATS_TEST_TMPDIR/result.json"
+}
+
+@test "claude_check は補助の haiku の出力が多くても正常終了を ok とする" {
+  load_role_helpers
+  write_claude_result
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+}
+
+@test "claude_check は haiku が載らない正常終了も ok とする" {
+  load_role_helpers
+  write_claude_result 'del(.modelUsage["claude-haiku-5-5"])'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+}
+
+@test "claude_check は補助以外のモデルが載れば safety_stops より fallback を優先する" {
+  load_role_helpers
+  write_claude_result '.modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = fallback ]
+}
+
+@test "claude_check はモデルの切り替えが無くても safety_stops が正なら stopped とする" {
+  load_role_helpers
+  write_claude_result '.safety_stops = 1'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = stopped ]
+}
+
+@test "claude_check は safety_stops の欄が無ければ stopped とする" {
+  load_role_helpers
+  write_claude_result 'del(.safety_stops)'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = stopped ]
+}
+
+@test "claude_check は要求したモデルの出力が 0 なら fallback とする" {
+  load_role_helpers
+  write_claude_result '.modelUsage["claude-opus-5-5"].outputTokens = 0'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = fallback ]
+}
+
+@test "claude_check は要求したモデルが載らなければ fallback とする" {
+  load_role_helpers
+  write_claude_result 'del(.modelUsage["claude-opus-5-5"])'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = fallback ]
+}
+
+@test "claude_check は is_error が true なら abnormal とする" {
+  load_role_helpers
+  write_claude_result '.is_error = true'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = abnormal ]
+}
+
+@test "claude_check は stop_reason が end_turn 以外なら abnormal とする" {
+  load_role_helpers
+  write_claude_result '.stop_reason = "refusal"'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = abnormal ]
+}
+
+@test "claude_check は terminal_reason が completed 以外なら abnormal とする" {
+  load_role_helpers
+  write_claude_result '.terminal_reason = "error"'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = abnormal ]
+}
+
+@test "claude_check は fallback と stopped の条件を満たしても abnormal を優先する" {
+  load_role_helpers
+  write_claude_result '.is_error = true | .modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = abnormal ]
+}
+
+@test "claude_check は環境変数で指定した haiku のモデルを補助とみなす" {
+  local ANTHROPIC_DEFAULT_HAIKU_MODEL=x
+  load_role_helpers
+  write_claude_result '.modelUsage.x = .modelUsage["claude-haiku-5-5"] | del(.modelUsage["claude-haiku-5-5"])'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = ok ]
+}
+
+@test "claude_check は haiku のモデルを環境変数で変えたら既定の haiku を fallback とする" {
+  local ANTHROPIC_DEFAULT_HAIKU_MODEL=x
+  load_role_helpers
+  write_claude_result '.modelUsage.x = {outputTokens: 1}'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = fallback ]
+}
+
+@test "claude_check は空・空白だけ・壊れた JSON・配列を非ゼロ終了で拒否する" {
+  load_role_helpers
+  # 関数の未定義による非ゼロ終了を、不正入力を拒否できたという成功にしない。
+  type claude_check >/dev/null
+  local input
+  for input in '' $' \n\t' '{"is_error":' '[]'; do
+    printf '%s' "$input" >"$BATS_TEST_TMPDIR/result.json"
+    run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+    [ "$status" -ne 0 ] || {
+      printf '不正な入力を拒否しませんでした: %q\n' "$input"
+      return 1
+    }
+  done
+}
+
+@test "claude_check は modelUsage の欄が無ければ判定に失敗せず fallback とする" {
+  load_role_helpers
+  write_claude_result 'del(.modelUsage)'
+  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
+  [ "$status" -eq 0 ]
+  [ "$output" = fallback ]
+}
+
 @test "役割表の文書の起動の関数は shellcheck を通る" {
   command -v shellcheck >/dev/null || skip "shellcheck がインストールされていない"
   awk '/^```bash$/{f=1;next} /^```$/{f=0} f' "$ROLES" | shellcheck -s bash -
@@ -267,6 +408,14 @@ load_role_helpers() {
   [[ "$args" != *$'\nRead\n'* ]]
 }
 
+@test "claude_leg は switchModelsOnFlag を true にした settings を明示する" {
+  load_role_helpers
+  claude() { printf '%s\n' "$@"; }
+  claude_leg fact-checker "$BATS_TEST_TMPDIR/out.json" </dev/null
+  args=$(cat "$BATS_TEST_TMPDIR/out.json")
+  [[ "$args" == *$'--settings\n{"switchModelsOnFlag":true}\n'* ]]
+}
+
 @test "claude_impl は linked worktree の外では claude を呼ばずに止まる" {
   load_role_helpers
   claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
@@ -312,4 +461,7 @@ load_role_helpers() {
   [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "EXAMPLE_SERVICE_API_KEY" and .mode == "deny")) | length' <<<"$settings")" = 1 ]
   [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "HOME")) | length' <<<"$settings")" = 0 ]
   [[ "$args" != *SUBPROCESS_ENV_SCRUB* ]]
+  # settings を重ねると sandbox の設定を失いうるため、同じ JSON の最上位に含める。
+  [ "$(awk '/^--settings$/{n++} END {print n+0}' "$BATS_TEST_TMPDIR/out.json")" = 1 ]
+  [ "$(jq -r '.switchModelsOnFlag == true' <<<"$settings")" = true ]
 }

@@ -83,7 +83,7 @@ Claude の役割は、どちらのハーネスからでも `claude -p` の別プ
 
 - **権限**: Claude Code の subagent は親の permission の規則を継承する（[公式](https://code.claude.com/docs/en/sub-agents)）。親の allow には `npx`・`git push`・`sed` などがあるので、diff を読む leg に Bash を持たせると、埋め込まれた指示で実行されうる。
 - **fallback の隔離**: cyber safeguard が fallback すると、Claude Code 2.1.229 以降はセッションの残りがそのモデルに固定される。subagent の fallback が親に波及するかは、ドキュメントに記述が無い。
-- **検出**: `claude -p` の JSON の `modelUsage` で、実際に使われたモデルを確かめられる。手元の 2.1.291 の subagent の報告には、公式ドキュメントにある `⚠ This agent switched to` が出ない（cyber の fallback は `safeguards flagged this message` と `[answered by …]` の形で届く）。
+- **検出**: `claude -p` の JSON の `modelUsage`・`safety_stops`・終了の欄を `claude_check` で判定する（「結果の判定」）。手元の 2.1.291 の subagent の報告には、公式ドキュメントにある `⚠ This agent switched to` が出ない（cyber の fallback は `safeguards flagged this message` と `[answered by …]` の形で届く）。
 
 ```bash
 claude_role() { sed -n "s/^$2: *//p" "$HOME/.agents/roles/$1.md" | head -1; }
@@ -112,9 +112,11 @@ claude_leg() {
   for t in $tools; do
     case $t in Read | Grep | Glob | Edit | Write) ;; *) allow+=("$t") ;; esac
   done
+  # settings.json を読まない起動でも、切り替えて続ける設定を明示する。
   # shellcheck disable=SC2086 # tools は定義の道具名を空白で区切ったもの
   claude -p --model "$m" --effort "$e" --output-format json \
     --permission-mode dontAsk --setting-sources "" --strict-mcp-config \
+    --settings '{"switchModelsOnFlag":true}' \
     --append-system-prompt "$(claude_body "$role")" \
     --tools $tools --allowedTools "${allow[@]}" "$@" \
     --disallowedTools "${CLAUDE_SECRET_DENY[@]}" \
@@ -127,7 +129,7 @@ claude_leg() {
 - `dontAsk` は許可リストに無い操作を確認なしで拒否する。`--setting-sources ""` で user / project の settings（広い allow を持つ）を読ませず、`--strict-mcp-config` で MCP も使わせない。settings.json の deny も効かなくなるので、同等以上の秘密のファイルを `--disallowedTools` で拒否する。パターンは拡張子と名前で絞り、`secretManager.ts` のような認証まわりのソースは拒否しない。
 - `--setting-sources ""` では Claude Code の agent の定義も読まれないので `--agent` は使わず、値と本文は `~/.agents/roles` の定義から読んで渡す。
 - 実装の役割を除く定義の道具は Read・Grep・Glob（`fact-checker` は WebFetch・WebSearch、`spec-designer` は Edit・Write も）で、Bash は持たない。diff・コミットの履歴・リンク先の Issue の本文は、親が取得してファイルに書き、そのディレクトリを追加の許可で渡す。`spec-designer` の書き込みは、追加の許可の `Edit(./<パス>/**)` で許したパスに限られる（`Edit` の規則は Write にも効く。許したパスの外は拒否されることを実機で確かめた）。
-- 結果は JSON の `result` を読む。`session_id` と `modelUsage` も実行記録に残す。
+- 結果は先に `claude_check` で判定し、「結果の判定」の扱いに従って JSON の `result` を読む。`session_id` と判定に使った欄も、同節に従って実行記録に残す。
 
 ## Claude の実装の役割の起動
 
@@ -152,7 +154,8 @@ claude_impl() {
   }
   # 起動時の環境から、名前が認証情報らしい変数を拾って拒否に足す（固定の一覧だけでは漏れる）。
   secret_env=$(compgen -e | grep -E 'TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL' | jq -Rsc 'split("\n") | map(select(length > 0))')
-  settings=$(jq -nc --arg gcd "$gcd" --argjson env "$secret_env" '{sandbox: {
+  # settings.json を読まないので、切り替えて続ける設定も sandbox と同じ JSON に入れる。
+  settings=$(jq -nc --arg gcd "$gcd" --argjson env "$secret_env" '{switchModelsOnFlag: true, sandbox: {
     enabled: true, allowUnsandboxedCommands: false, failIfUnavailable: true, autoAllowBashIfSandboxed: true,
     network: {strictAllowlist: true, allowedDomains: $ARGS.positional},
     filesystem: {denyWrite: [$gcd]},
@@ -178,7 +181,7 @@ claude_impl() {
 - `failIfUnavailable` により、sandbox を起動できないと claude は起動時に終わる。sandbox なしで走らせ直さず、user に上げる。
 - ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 3 引数以降に渡す。書き込みのできる API を持つドメイン（汎用のコードホスティングなど）は、秘密の持ち出しの経路になるので避ける。
 - 親は `git status --porcelain` と `git diff` で、新規ファイルも含めて変更の全体を読んでから、ホストでテストと lint を実行する（`git diff` は未追跡のファイルを出さない）。commit は親が行う。順序は `codex` skill の親の手順と同じ。
-- 結果の `modelUsage` に要求していないモデルがあれば、fallback として実行記録と PR の本文に残す。走らせ直さない。
+- 結果は `claude_check` で判定し、「結果の判定」の実装の扱いに従う。`fallback`・`stopped` は走らせ直さず、実行記録と PR の本文に残す。`abnormal` は格上げに数えず user に上げる。
 
 ## GPT の役割の起動
 
@@ -196,11 +199,51 @@ model・effort・本文のどれかが空なら（`chezmoi apply` の前など�
 
 **制約**: Codex の custom agent の定義では `sandbox_mode` を上書きできない（[公式](https://learn.chatgpt.com/docs/agent-configuration/subagents)）。Codex が親のとき、`spawn_agent` で起動したレビューの役割は親の sandbox を継承し、読み取り専用であることは `developer_instructions` の文言だけで担保される。書き込みを許さない sandbox で走らせたいレビューは、Codex からも `codex exec --sandbox read-only` で起動する。
 
-## fallback の検出
+## 結果の判定
 
 Opus 5.5・Sonnet 5.5・Fable 5.2 は、Claude Code の上では、cyber safeguard の classifier に当たると Opus 4.8 などに fallback する（[Claude Code](https://code.claude.com/docs/en/model-config#automatic-model-fallback)）。ソースコードの脆弱性の走査は許可されているが、exploit の生成や攻撃手順の詳述は当たりうる（[Opus 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5#safeguard-refusals)）。API を単体で使ったときは fallback せず、`stop_reason: "refusal"` が返る（[Fable 5.2](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-2#safeguard-refusals)）。
 
-`claude_leg` の結果の `modelUsage` に、要求していないモデルがあれば fallback している。実行記録に「要求したモデル・実際のモデル」を残し、その leg を `reviewer-gpt` で 1 回だけ走らせ直す。fallback した結果は捨てずに、GPT の結果と並べて統合する。
+`claude_leg` と `claude_impl` は `switchModelsOnFlag: true` を `--settings` で明示する。`--setting-sources ""` では settings.json の設定を読まないためである。公式では、未設定でも自動で切り替えるが、対話のセッションでは先に聞くことがある。`false` を指定した `-p` では、分類器に当たったリクエストは error で終わる（[設定のリファレンス](https://code.claude.com/docs/en/settings-reference#switchmodelsonflag)）。`--settings` の指定が分類器に当たったときに効くかは未確認である。Sonnet 5.5 の bio のように fallback 先が無ければ、`true` でも拒否で終わる。
+
+`modelUsage` には、補助の処理に使う haiku も載る。2026-11-18 に手元の結果 600 件余りを調べると、2 件を除くすべてに `claude-haiku-5-5` が載り、WebFetch を使う役割では出力トークンが 20409 の例もあった。出力の大きさでは補助を見分けず、haiku の ID を判定から除く。別名の指す先を `ANTHROPIC_DEFAULT_HAIKU_MODEL` で変えているときは、その値を使う。
+
+モデルの切り替えが無くても、`safety_stops: 1` で途中の応答が止められた実行があった。`safety_stops: 2` で Opus 4.8 に切り替えて最後まで続いた実行もあり、どちらも終了の欄は正常と同じ値だった。このため、使われたモデルと終了の欄に加えて `safety_stops` も見る。
+
+```bash
+# haiku の別名が指す既定の ID。Claude Code は補助の処理（WebFetch の取得したページの処理など）にこのモデルを使う。
+CLAUDE_HAIKU_MODEL=claude-haiku-5-5
+# claude_check <結果 JSON> <要求したモデル>: ok・fallback・stopped・abnormal のどれかを出す
+claude_check() {
+  jq -rn --arg m "$2" --arg h "${ANTHROPIC_DEFAULT_HAIKU_MODEL:-$CLAUDE_HAIKU_MODEL}" '
+    input | if type != "object" then error("結果が JSON のオブジェクトでない") else . end |
+    if .is_error != false or .stop_reason != "end_turn" or .terminal_reason != "completed" then "abnormal"
+    elif (.modelUsage[$m].outputTokens // 0) == 0 or (((.modelUsage // {}) | keys) - [$m, $h] | length) > 0 then "fallback"
+    elif (.safety_stops // 1) > 0 then "stopped"
+    else "ok" end' "$1"
+}
+```
+
+`claude_check <結果 JSON> "$(claude_role <役割> model)"` で判定する。条件は次の順に調べ、最初に当たった判定を返す。
+
+| 判定 | 条件 |
+|---|---|
+| `abnormal` | `is_error` が false でない、`stop_reason` が `end_turn` でない、`terminal_reason` が `completed` でない、のいずれか |
+| `fallback` | 要求したモデルが無いか出力トークンが 0、または要求したモデルと補助の haiku 以外のモデルが載る |
+| `stopped` | `safety_stops` が正、または欄が無い |
+| `ok` | 上のどれにも当たらない |
+
+拒否と他の異常終了を見分ける値は未観測なので、どちらも `abnormal` とする。`fallback` と `stopped` が重なれば `fallback` を返す。扱いは同じで、GPT での走らせ直しは 1 回だけである。
+
+| 判定 | leg（`claude_leg`） | 実装（`claude_impl`） |
+|---|---|---|
+| `ok` | そのまま使う | そのまま使う |
+| `fallback` | 結果は捨てず、`reviewer-gpt` で 1 回走らせ直して並べる | 走らせ直さず、実行記録と PR の本文に残す |
+| `stopped` | fallback と同じ | fallback と同じ（親の diff の検証で欠けを見る） |
+| `abnormal` | 結果があれば残し、`reviewer-gpt` で 1 回走らせ直す | 格上げに数えず user に上げる |
+
+結果 JSON が空・空白だけ・壊れている・オブジェクトでないときは、判定が 0 以外で終わる。呼び出し側は終了コードを確認し、「結果が空・失敗」として扱う。leg の一般の再試行（新規セッションで 1 回）は、判定そのものが失敗したときと、`ok` でも結果が空か確認根拠が欠けているときに限る。`fallback`・`stopped`・`abnormal` は表の扱いに進み、元の Claude の leg を一般の再試行で回し直さない。
+
+実行記録には、`session_id`・要求したモデル・`modelUsage`（モデルごとの出力トークン）・`safety_stops`・`stop_reason`・`terminal_reason`・`is_error`・判定を残す。判定が失敗したときは、その終了コードとエラーも残す。
 
 ## 実装の格上げ
 
