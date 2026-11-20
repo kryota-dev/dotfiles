@@ -11,6 +11,32 @@ Mac の T3 Code の週次予約と、本人の手動呼び出しで動く。
 予約は personal が月曜 10:00、クライアントの vault ごとに月曜 09:30。
 この skill では予約を作成・変更しない。
 
+## 最初に: 変更が無ければすぐ終える
+
+予約は vault に変更が無い週も動くので、手順のファイルを読む前に、次の確かめだけを行う。
+判断はコマンドの出力で決め、ほかのファイルは読まない。
+
+```bash
+owner=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#/.*##')
+if grep -qxF -- "- $owner" ~/vaults/personal/owners.md 2>/dev/null; then
+  v=~/vaults/personal s=_inbox/rule-sweep-status.md
+  watch=(_inbox/rule-proposals.md daily 'projects/*/daily/*' 'projects/*/log/*')
+  busy=$(grep -E '^(open_pr|pending|asked_at): *[^ ]' "$v/$s")
+else
+  v=~/vaults/$owner s=notes/rule-sweep-status.md
+  watch=(notes/rule-proposals.md daily log)
+  busy=$(grep -l '移す予定' "$v/notes/rule-sweep-moved.md" 2>/dev/null)
+fi
+base=$(git -C "$v" log -1 --format=%H -- "$s")
+[ -n "$base" ] && [ -z "$busy" ] && [ -z "$(git -C "$v" log --oneline "$base..HEAD" -- "${watch[@]}")" ] && echo idle
+```
+
+`idle` と出たら、前回の実行が状況のノートを commit した後に、提案とログの commit が無く、反映待ちの PR・承認待ち・移す予定の件も無い。
+状況のノートを手で更新して終える。personal はフロントマターの `updated` と `last_run` を今の日時にし、クライアントは本文の末尾に `- YYYY-MM-DD: 変更なし` を足す。
+そのファイルだけを `agent(<claude|codex>): rule-sweep 変更なし` で commit し、`git -C "$v" fetch origin` の後に
+`git -C "$v" merge-base --is-ancestor origin/main HEAD` が成功したときだけ push する（gcrypt の push は実質的に force になるため）。
+`idle` と出なければ、以下の手順で進める。vault や状況のノートが見つからないときも、以下の手順で進める。
+
 ## 完了と停止
 
 personal モードは、対象の処理と PR の後始末を終え、inbox と状況のノートを保存・push したら完了。
