@@ -27,11 +27,12 @@ else
   watch=(notes/rule-proposals.md daily log)
   busy=$(grep -l '移す予定' "$v/notes/rule-sweep-moved.md" 2>/dev/null)
 fi
-base=$(git -C "$v" log -1 --format=%H -- "$s")
+base=$(sed -n 's/^done_at: *//p' "$v/$s" 2>/dev/null | head -1)
 [ -n "$base" ] && [ -z "$busy" ] && [ -z "$(git -C "$v" log --oneline "$base..HEAD" -- "${watch[@]}")" ] && echo idle
 ```
 
-`idle` と出たら、前回の実行が状況のノートを commit した後に、提案とログの commit が無く、反映待ちの PR・承認待ち・移す予定の件も無い。
+`done_at` は、前回の実行が残しなく終えたときにだけ書く、その回に読んだ commit である（未反映の件・止まった理由・食い違いが残れば空）。
+`idle` と出たら、その commit の後に提案とログの commit が無く、反映待ちの PR・承認待ち・移す予定の件も無い。
 状況のノートを手で更新して終える。personal はフロントマターの `updated` と `last_run` を今の日時にし、クライアントは本文の末尾に `- YYYY-MM-DD: 変更なし` を足す。
 そのファイルだけを `agent(<claude|codex>): rule-sweep 変更なし` で commit し、`git -C "$v" fetch origin` の後に
 `git -C "$v" merge-base --is-ancestor origin/main HEAD` が成功したときだけ push する（gcrypt の push は実質的に force になるため）。
