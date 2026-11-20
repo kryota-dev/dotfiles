@@ -92,7 +92,7 @@ author: claude | codex
    ```
 4. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更があるときは、理由をユーザーに 1 行で伝えて作業を続ける。残る変更の原因を pre-commit hook と決めつけず、先に vault が Obsidian で開いているか（`~/Library/Application Support/obsidian/obsidian.json` の `open`）を確かめる。閉じていれば Obsidian Git は動かず、追記は commit されないまま残る。
 5. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
-6. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` のものは古い。steward が書いたノート（`author: steward`）も同じに扱う。
+6. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` か `superseded_by` のあるノートと、`valid_to` の日付が過ぎたノートは古い。steward が書いたノート（`author: steward`）も同じに扱う。
 
 ## 作業の区切りと終了時
 
