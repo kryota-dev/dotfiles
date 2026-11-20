@@ -1,6 +1,6 @@
 ---
 name: rule-sweep
-description: vault に溜まった振る舞いの提案を、本人の承認を得て dotfiles の draft の PR にまとめるときに使う。
+description: vault に溜まった振る舞いと知見の提案を、本人の承認を得て dotfiles の draft の PR にまとめるときに使う。
 user-invocable: true
 ---
 
