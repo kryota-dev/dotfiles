@@ -86,8 +86,7 @@ claude_leg review-security "$RESULT" < "$PROMPT_FILE"
 
 `--deep` のときは、同じ形で `review-security-deep` も起動する。leg の Read は作業ディレクトリに限られ、Bash も持たないので、
 コミットの履歴が要るなら親が `git log` の出力を作業用のディレクトリに書き、追加の許可 `Read(/<そのディレクトリ>/**)` を渡す。
-結果は model-roles.md の「結果の判定」の `claude_check` で判定する。実行記録も同節に従い、
-`modelUsage`・`safety_stops`・`stop_reason`・`terminal_reason`・`is_error`・判定を残す。
+結果は model-roles.md の「結果の判定」の `claude_check` で判定する。同節の実行記録の欄も保存する。
 
 **GPT の leg**: `reviewer-gpt` を `codex` skill の「相談・分析」の起動形（`--sandbox read-only`。`-m`・
 `-c model_reasoning_effort=`・`-c developer_instructions=` は役割の定義から）で起動する。Codex が親のときも `spawn_agent` ではなくこの形にする

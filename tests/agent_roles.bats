@@ -215,110 +215,68 @@ write_claude_result() {
   }' | jq "${1:-.}" >"$BATS_TEST_TMPDIR/result.json"
 }
 
-@test "claude_check は補助の haiku の出力が多くても正常終了を ok とする" {
+assert_check() {
   load_role_helpers
-  write_claude_result
+  write_claude_result "$1"
   run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = ok ]
+  [ "$status" -eq 0 ] && [ "$output" = "$2" ] || {
+    echo "status=$status output=$output"
+    return 1
+  }
+}
+
+@test "claude_check は補助の haiku の出力が多くても正常終了を ok とする" {
+  assert_check '.' ok
 }
 
 @test "claude_check は haiku が載らない正常終了も ok とする" {
-  load_role_helpers
-  write_claude_result 'del(.modelUsage["claude-haiku-5-5"])'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = ok ]
+  assert_check 'del(.modelUsage["claude-haiku-5-5"])' ok
 }
 
 @test "claude_check は補助以外のモデルが載れば safety_stops より fallback を優先する" {
-  load_role_helpers
-  write_claude_result '.modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = fallback ]
+  assert_check '.modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2' fallback
 }
 
 @test "claude_check はモデルの切り替えが無くても safety_stops が正なら stopped とする" {
-  load_role_helpers
-  write_claude_result '.safety_stops = 1'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = stopped ]
+  assert_check '.safety_stops = 1' stopped
 }
 
 @test "claude_check は safety_stops の欄が無ければ stopped とする" {
-  load_role_helpers
-  write_claude_result 'del(.safety_stops)'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = stopped ]
+  assert_check 'del(.safety_stops)' stopped
 }
 
 @test "claude_check は要求したモデルの出力が 0 なら fallback とする" {
-  load_role_helpers
-  write_claude_result '.modelUsage["claude-opus-5-5"].outputTokens = 0'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = fallback ]
+  assert_check '.modelUsage["claude-opus-5-5"].outputTokens = 0' fallback
 }
 
 @test "claude_check は要求したモデルが載らなければ fallback とする" {
-  load_role_helpers
-  write_claude_result 'del(.modelUsage["claude-opus-5-5"])'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = fallback ]
+  assert_check 'del(.modelUsage["claude-opus-5-5"])' fallback
 }
 
 @test "claude_check は is_error が true なら abnormal とする" {
-  load_role_helpers
-  write_claude_result '.is_error = true'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = abnormal ]
+  assert_check '.is_error = true' abnormal
 }
 
 @test "claude_check は stop_reason が end_turn 以外なら abnormal とする" {
-  load_role_helpers
-  write_claude_result '.stop_reason = "refusal"'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = abnormal ]
+  assert_check '.stop_reason = "refusal"' abnormal
 }
 
 @test "claude_check は terminal_reason が completed 以外なら abnormal とする" {
-  load_role_helpers
-  write_claude_result '.terminal_reason = "error"'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = abnormal ]
+  assert_check '.terminal_reason = "error"' abnormal
 }
 
 @test "claude_check は fallback と stopped の条件を満たしても abnormal を優先する" {
-  load_role_helpers
-  write_claude_result '.is_error = true | .modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = abnormal ]
+  assert_check '.is_error = true | .modelUsage["claude-opus-4-8"] = {outputTokens: 23732} | .safety_stops = 2' abnormal
 }
 
 @test "claude_check は環境変数で指定した haiku のモデルを補助とみなす" {
   local ANTHROPIC_DEFAULT_HAIKU_MODEL=x
-  load_role_helpers
-  write_claude_result '.modelUsage.x = .modelUsage["claude-haiku-5-5"] | del(.modelUsage["claude-haiku-5-5"])'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = ok ]
+  assert_check '.modelUsage.x = .modelUsage["claude-haiku-5-5"] | del(.modelUsage["claude-haiku-5-5"])' ok
 }
 
 @test "claude_check は haiku のモデルを環境変数で変えたら既定の haiku を fallback とする" {
   local ANTHROPIC_DEFAULT_HAIKU_MODEL=x
-  load_role_helpers
-  write_claude_result '.modelUsage.x = {outputTokens: 1}'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = fallback ]
+  assert_check '.modelUsage.x = {outputTokens: 1}' fallback
 }
 
 @test "claude_check は空・空白だけ・壊れた JSON・配列を非ゼロ終了で拒否する" {
@@ -337,11 +295,7 @@ write_claude_result() {
 }
 
 @test "claude_check は modelUsage の欄が無ければ判定に失敗せず fallback とする" {
-  load_role_helpers
-  write_claude_result 'del(.modelUsage)'
-  run claude_check "$BATS_TEST_TMPDIR/result.json" claude-opus-5-5
-  [ "$status" -eq 0 ]
-  [ "$output" = fallback ]
+  assert_check 'del(.modelUsage)' fallback
 }
 
 @test "役割表の文書の起動の関数は shellcheck を通る" {

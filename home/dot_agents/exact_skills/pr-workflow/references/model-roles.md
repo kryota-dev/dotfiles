@@ -234,14 +234,16 @@ claude_check() {
 
 拒否と他の異常終了を見分ける値は未観測なので、どちらも `abnormal` とする。`fallback` と `stopped` が重なれば `fallback` を返す。扱いは同じで、GPT での走らせ直しは 1 回だけである。
 
-| 判定 | leg（`claude_leg`） | 実装（`claude_impl`） |
+| 判定 | レビューの leg（multi-review・security-review の `claude_leg`） | 実装（`claude_impl`） |
 |---|---|---|
 | `ok` | そのまま使う | そのまま使う |
 | `fallback` | 結果は捨てず、`reviewer-gpt` で 1 回走らせ直して並べる | 走らせ直さず、実行記録と PR の本文に残す |
 | `stopped` | fallback と同じ | fallback と同じ（親の diff の検証で欠けを見る） |
 | `abnormal` | 結果があれば残し、`reviewer-gpt` で 1 回走らせ直す | 格上げに数えず user に上げる |
 
-結果 JSON が空・空白だけ・壊れている・オブジェクトでないときは、判定が 0 以外で終わる。呼び出し側は終了コードを確認し、「結果が空・失敗」として扱う。leg の一般の再試行（新規セッションで 1 回）は、判定そのものが失敗したときと、`ok` でも結果が空か確認根拠が欠けているときに限る。`fallback`・`stopped`・`abnormal` は表の扱いに進み、元の Claude の leg を一般の再試行で回し直さない。
+レビュー以外の `claude_leg`（`spec-designer`・`fact-checker`・`grill-counterpart` など）は、呼び出し元の skill の扱いに従う。書かれていなければ、`fallback`・`stopped` は結果を使って判定を記録する。`abnormal` は同じ役割を新規セッションで 1 回走らせ直し、だめなら user に上げる。
+
+結果 JSON が空・空白だけ・壊れている・オブジェクトでないときは、判定が 0 以外で終わる。呼び出し側は終了コードを確認し、「結果が空・失敗」として扱う。
 
 実行記録には、`session_id`・要求したモデル・`modelUsage`（モデルごとの出力トークン）・`safety_stops`・`stop_reason`・`terminal_reason`・`is_error`・判定を残す。判定が失敗したときは、その終了コードとエラーも残す。
 
