@@ -396,6 +396,8 @@ make_linked_worktree() {
   claude() { printf '%s\n' "$@"; }
   export EXAMPLE_SERVICE_API_KEY=dummy
   local wt gcd settings out
+  mkdir "$BATS_TEST_TMPDIR/tmp"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   wt=$(make_linked_worktree)
   gcd=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)
   cd "$wt"
@@ -429,10 +431,12 @@ make_linked_worktree() {
   [ "$(jq -r '.switchModelsOnFlag == true' <<<"$settings")" = true ]
 }
 
-@test "claude_impl は結果の置き場所を作業場所の外に作り、denyWrite に入れてパスだけを出す" {
+@test "claude_impl は結果の置き場所を作業場所の外の基底の下に作り、基底ごと拒否してパスだけを出す" {
   load_role_helpers
   claude() { printf '%s\n' "$@"; }
-  local wt root settings out
+  local wt root settings out base args
+  mkdir "$BATS_TEST_TMPDIR/tmp"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   wt=$(make_linked_worktree)
   cd "$wt"
   root=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
@@ -444,15 +448,33 @@ make_linked_worktree() {
   [ -s "$out" ]
   [ "$(cd "$(dirname "$out")" && pwd -P)" = "$(dirname "$out")" ]
   [[ "$out/" != "$root"/* ]]
+  base=$(cd "$TMPDIR" && pwd -P)/claude-impl
+  [ "$(dirname "$(dirname "$out")")" = "$base" ]
   settings=$(awk '/^--settings$/{getline; print; exit}' "$out")
-  [ "$(jq -r --arg d "$(dirname "$out")" '.sandbox.filesystem.denyWrite | index($d) != null' <<<"$settings")" = true ]
+  # 並列の回の結果も守るよう、基底ごと denyWrite に入れ、Bash を通らない道具でも拒否する。
+  [ "$(jq -r --arg d "$base" '.sandbox.filesystem.denyWrite | index($d) != null' <<<"$settings")" = true ]
+  args=$(cat "$out")
+  [[ "$args" == *$'\n'"Edit(/$base/**)"* ]]
+  [[ "$args" == *$'\n'"Read(/$base/**)"$'\n'* ]]
   # 起動のたびに別の置き場所を作る。
   [ "$(claude_impl implementer-claude </dev/null)" != "$out" ]
+}
+
+@test "claude_impl は役割の定義が無ければ何も出さずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl no-such-role </dev/null
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
 }
 
 @test "claude_impl は claude が失敗しても結果のパスを出し、終了コードを返す" {
   load_role_helpers
   claude() { echo partial; return 3; }
+  mkdir "$BATS_TEST_TMPDIR/tmp"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   cd "$(make_linked_worktree)"
   run --separate-stderr claude_impl implementer-claude </dev/null
   [ "$status" -eq 3 ]
