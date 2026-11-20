@@ -3,7 +3,7 @@ name: vault
 description: |
   Obsidian の vault を、Claude Code と Codex が共有する作業記憶として読み書きする手順。
   どの vault を使うかの解決、セッションの開始時に読むもの、作業の区切りで書くもの、commit と push、
-  知見の共有の安全装置、新しい vault の作成と契約終了時の削除を定める。
+  クライアントの決まり、新しい vault の作成と契約終了時の削除を定める。
   トリガー: セッションの開始（~/AGENTS.md の指示）、"vault", "作業記憶", "記録して", "vault を作って"
   使用場面: 作業を始めるとき、決定や進捗を記録するとき、vault を作る・消すとき。
 ---
@@ -26,7 +26,7 @@ steward（本人の常駐のエージェント）が、セッションとは別�
 
 vault は 2 層ある。
 
-- `~/vaults/personal/`: 共有の層。汎用の知見・1 日の全体像・個人のリポジトリの作業記憶。
+- `~/vaults/personal/`: 共有の層。1 日の全体像・振る舞いの提案の inbox・個人のリポジトリの作業記憶。
 - `~/vaults/<owner>/`: クライアントごとの層。そのクライアントの owner の別名と匿名のラベルは、vault の中の `_vault.md` に書き、別名は `~/vaults/<別名>` の symlink にする。クライアントと owner・ラベルの対応は、そのクライアントの vault の中にしか置かない（personal に置くと、契約が終わっても履歴に残り、ほかのクライアントのセッションにも読まれるため）。
 
 作業中のリポジトリから、使う vault を次の順に決める。
@@ -40,7 +40,7 @@ vault は 2 層ある。
 
 | セッション | 読んでよいもの |
 |---|---|
-| クライアントのリポジトリ | その vault の全体と、personal の `knowledge/`・`owners.md`（自分の owner だけ） |
+| クライアントのリポジトリ | その vault の全体と、personal の `owners.md`（自分の owner だけ） |
 | 個人のリポジトリ | personal の全体 |
 
 クライアントのリポジトリのセッションでは、これ以外の `~/vaults/*` を読まない。personal の `daily/` には各案件の要約が入るので、これも読まない。vault を横断する検索（`grep -r ~/vaults` など）もしない。
@@ -81,8 +81,7 @@ author: claude | codex
 
 1. vault を解決する。
 2. 入口のノート `_index.md` を読む。個人のリポジトリなら personal の `projects/<repo>/_index.md` を読む。クライアントのリポジトリなら、続けて vault の根の `rules.md` を読む（rule-sweep の実行は除く）。無ければ上の「空の `rules.md` の形」で作り、そのファイルだけを commit して push する（steward が vault に書くとき、追跡していないファイルは守りが効かないため）。
-3. personal の `knowledge/_index.md`（知見の一覧）を読む。個々の知見は、作業に要るときだけ読む。
-4. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date +%F` で今日の日付を取り、フロントマターの `updated` と比べる。10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
+3. 個人のリポジトリのセッションだけ、personal の `_inbox/rule-sweep-status.md` があれば読む。`date +%F` で今日の日付を取り、フロントマターの `updated` と比べる。10 日を超えて古いか、本文に止まった理由があれば、1 セッションに 1 回だけユーザーに 1 行で伝える。予約が動かなかったときにも気付けるようにするためである。クライアントのセッションでは読まず、inbox や作業ログもこの確認のためには読まない。
 
    あわせて、個人のリポジトリのセッションは、マージ済みの `home/AGENTS.md` と skill が、配置済みの `~/AGENTS.md`・`~/.agents/skills/` と同じかを確かめる。マージの後に apply されないと、決まりがエージェントに届かないため。違えば、対象をこの 2 つに絞って apply し、そのことをユーザーに 1 行で伝える。絞った apply と verify はテンプレートを描かないので、1Password の承認が要らず、ユーザーが Mac の前にいなくても済む。`chezmoi verify` は、消した skill のように配置先にだけ残るファイルも、ずれとして扱う。比べる元は手元のソース（main の worktree の `~/dotfiles`）なので、先に `pull --ff-only` する。main の worktree での git の操作は `fetch` と `pull` だけにする。pull が通らないか、apply の後もずれが残れば、その理由を伝える。
 
@@ -91,9 +90,9 @@ author: claude | codex
    git -C ~/dotfiles pull -q --ff-only || echo "~/dotfiles を pull できない"
    chezmoi verify "${T[@]}" || { chezmoi apply "${T[@]}" && chezmoi verify "${T[@]}"; }
    ```
-5. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更があるときは、理由をユーザーに 1 行で伝えて作業を続ける。残る変更の原因を pre-commit hook と決めつけず、先に vault が Obsidian で開いているか（`~/Library/Application Support/obsidian/obsidian.json` の `open`）を確かめる。閉じていれば Obsidian Git は動かず、追記は commit されないまま残る。
-6. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
-7. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` のものは古い。steward が書いたノート（`author: steward`）も同じに扱う。
+4. バックアップを確かめる。`git -C <vault> rev-list --count @{u}..HEAD` が 1 以上なら `git -C <vault> push` を試す。Google Drive が起動していない（`pgrep -x "Google Drive"` が失敗する）か、push が失敗したか、`git -C <vault> status --porcelain` に 1 日以上前から残る変更があるときは、理由をユーザーに 1 行で伝えて作業を続ける。残る変更の原因を pre-commit hook と決めつけず、先に vault が Obsidian で開いているか（`~/Library/Application Support/obsidian/obsidian.json` の `open`）を確かめる。閉じていれば Obsidian Git は動かず、追記は commit されないまま残る。
+5. 詳しい内容は、作業に必要になったときに `_index.md` のリンクをたどって読む。最初にすべてを読まない。
+6. 探すときは、入口と一覧 → 語句の Grep（`type:`・`summary:` の行を Grep すると、本文を読まずに種類と要旨が分かる）→ リンク（本文の wikilink・`source`・`supersedes`）の順に辿り、原文で確かめる。`status: superseded` のものは古い。steward が書いたノート（`author: steward`）も同じに扱う。
 
 ## 作業の区切りと終了時
 
@@ -109,8 +108,8 @@ author: claude | codex
 | `_index.md` | 現状・進行中の作業・決めたことへのリンク・資料へのリンク（形は下の「入口の形」）。書く直前に読み直し、変える箇所だけを編集する。4,000 字を目安にし、超えたら経緯を `log/YYYY-MM.md` へ移して、入口には現状とリンクだけを残す。古くなった項目は消す（経緯は log に残る） |
 | `log/YYYY-MM.md`（個人のリポジトリは `projects/<repo>/log/YYYY-MM.md`） | 時系列の記録（何をしたか・分かったこと）。日時の見出しで末尾に追記する。入口には書き足さない |
 | personal の `daily/YYYY-MM-DD.md` | クライアントの作業は 1 行だけ。クライアント名ではなく、その vault の `_vault.md` の匿名のラベルと作業の種類を書く（例: `- c1: 実装`）。クライアントのセッションからは、ファイルを読まずにシェルの `>>` で追記する（編集の道具は先に読み込むので、ほかの案件の要約が文脈に入る）。追記した後は、そのファイルだけを commit して push する |
-| personal の `knowledge/` | 案件に依存しない技術の知見。クライアントのセッションからは、下の「知見の共有」の手順で書く |
 
+- 技術の知見（ある道具の癖・確かめた手順など）は vault に溜めない。ほかの案件でも使えるものは、下の振る舞いのルールと同じく inbox に提案として書き、rule-sweep が反映先（どの作業でも守る短い決まりは `~/AGENTS.md`、特定の作業の手順や注意は skill）に入れる。そのリポジトリだけに当てはまる知見は inbox に書かず、そのセッションの中で、そのリポジトリの `AGENTS.md` や docs への変更としてユーザーに提案する（そのリポジトリの PR の決まりに従う）。
 - 振る舞いのルールを学んだとき（「今後は〜する」「〜はしない」）は、AGENTS.md・skill・vault の自動で読まれる場所（`rules.md` を含む）に書かない。個人のセッションは personal の `_inbox/rule-proposals.md`、クライアントのセッションは所属先の vault の `notes/rule-proposals.md` に、下の inbox と同じ形で追記する。クライアントの提案を personal へ届けるのは、出典の確認と検査を担う rule-sweep のクライアントモードだけにする。反映は rule-sweep が dotfiles の draft の PR を開き、ユーザーがマージする。
 - inbox への追記は誰でもしてよい。既存の件の状態を書き換えるのは rule-sweep の personal モードだけにする。追記と状態の更新を分け、反映の重複や却下した件の出し直しを防ぐためである。
 - 作業ログに教訓を書いたら、振る舞いのルールに当たるものは、個人なら inbox、クライアントなら所属先の `notes/rule-proposals.md` にも書く。rule-sweep は personal のログからも拾うが、クライアントの提案とログはクライアントモードの実行が拾う。
@@ -137,20 +136,6 @@ author: claude | codex
 
 `推定: source` は、書き手が由来を書かず、rule-sweep がモデルの判断で `source` を決めた件の印である。rule-sweep だけが付け、消さない。新しい件の状態は空にする。状態が無い件も未反映として扱う。形が古い件は、rule-sweep の personal モードが最初に扱うときに、この形に直す。既存の ID は変えない。クライアントモードが移す件の ID は、元のノートのパスと固定した commit から作る短いハッシュを使い、出典は `client:<ラベル>` と件の ID だけにする。検証と再実行の手順は rule-sweep に従う。
 
-### 知見の共有（クライアントのセッションから personal へ）
-
-固有の情報が personal に入るのを防ぐ。固有名は機械では検査しないので、書き直した文を読み直して確かめる。
-
-1. 知見を汎用の形に書き直す。クライアント名・製品名・リポジトリ名・人名・URL を除き、コード例は一般的な例に置き換える。
-2. slug・索引に書く要約の行・本文を読み直し、固有名が残っていないかを確かめる。
-3. 同じ 3 つを vault の外の一時ファイル（`mktemp "${TMPDIR:-/tmp}/vault-knowledge.XXXXXX"`）に書き、秘密情報を検査する。personal に書いた後に pre-commit で止まっても、ファイルと索引は作業ツリーに残り、ほかのクライアントのセッションに読まれるため。
-
-   ```bash
-   gitleaks dir --config ~/.config/git/gitleaks.toml --no-banner --redact <一時ファイル>
-   ```
-
-4. 固有名が残っておらず、終了コードが 0 なら personal の `knowledge/<slug>.md` に置き、`knowledge/_index.md` に 1 行（`- [[<slug>]]: <要約>`）を `>>` で追記する。汎用にできない、固有名かどうか迷う、検出された、または gitleaks か設定が無いときは、personal には書かず、クライアントの vault の `notes/<slug>.md` に置く。どちらの場合も一時ファイルは消す。
-
 ### 書き方
 
 - ファイル名は `YYYY-MM-DD` か kebab-case の slug。ノート間のリンクは `[[wikilink]]` を使う。
@@ -158,14 +143,14 @@ author: claude | codex
 
 ```yaml
 ---
-type: index | daily | log | decision | meeting | knowledge | note | doc | rule | person | project
+type: index | daily | log | decision | meeting | note | doc | rule | person | project
 date: YYYY-MM-DD        # 作った日
 author: human | claude | codex | steward
 ---
 ```
 
 - `rule` はクライアントの決まり（`rules.md`）、`person` は人、`project` は案件（契約の条件は、このノートの行に書く）。`person`・`project` は steward の秘書もクライアントの vault に書く。
-- 使うときだけ足す: `updated`（書き直し続けるノート）、`summary`（一覧の 1 行と同じ要旨。200 字まで）、`source`（出どころ。同じ vault は `"[[…]]"`、別の vault は `"<vault>/<パス>"`）、`status`（`active`・`superseded`）・`supersedes`・`superseded_by`（置き換わった決定や知見）。古いほうは消さずに `status: superseded` にする（経緯を辿れるようにするため）。Obsidian は同じ名前のプロパティを vault 全体で同じ型として扱うので、値の形はここに揃える。
+- 使うときだけ足す: `updated`（書き直し続けるノート）、`summary`（一覧の 1 行と同じ要旨。200 字まで）、`source`（出どころ。同じ vault は `"[[…]]"`、別の vault は `"<vault>/<パス>"`）、`status`（`active`・`superseded`）・`supersedes`・`superseded_by`（置き換わった決定）。古いほうは消さずに `status: superseded` にする（経緯を辿れるようにするため）。Obsidian は同じ名前のプロパティを vault 全体で同じ型として扱うので、値の形はここに揃える。
 
 #### 入口の形
 

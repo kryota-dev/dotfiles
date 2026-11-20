@@ -42,7 +42,7 @@ chezmoi apply   # pinentry-mac 用のキーチェーン項目を作る
 
    `_index.md` は、SKILL.md の「入口の形」で作る。
 
-   personal ではさらに `knowledge/_index.md`・`projects/`・`_inbox/rule-proposals.md`・`owners.md` を作る。`owners.md` には自分の GitHub の owner だけを 1 行ずつ書き、クライアントの情報は書かない。personal の `projects/<repo>/` を作るときは、`_index.md` と `log/` も作る。
+   personal ではさらに `projects/`・`_inbox/rule-proposals.md`・`owners.md` を作る。`owners.md` には自分の GitHub の owner だけを 1 行ずつ書き、クライアントの情報は書かない。personal の `projects/<repo>/` を作るときは、`_index.md` と `log/` も作る。
 
    クライアントの vault ではさらに、空の `rules.md`（SKILL.md の「空の `rules.md` の形」）と `_vault.md` を作る。`run_after_31-vaults.sh` は `owners:` の行を読み、vault 名と異なる owner ごとに `~/vaults/<owner>` の symlink を作る。
 
