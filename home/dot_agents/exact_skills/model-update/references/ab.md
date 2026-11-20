@@ -35,7 +35,7 @@ git worktree remove --force "$AB/impl-candidate"
 
 - GPT の役割: [model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」の形で起動し、`-m` だけを現行と候補で替える。それ以外（effort・本文・sandbox）は普段の起動形のまま、現行と候補で同じにする（普段と違う条件で比べると、実際の使い方での差が分からないため）。`--json` を付けてトークンを記録する。
 - Claude の役割: model-roles.md の関数を読み込み、`claude_role` を上書きしてモデルだけを差し替え、`claude_leg`（レビュー）か `claude_impl`（実装）で起動する。次の形は実機で確かめてある。
-- Claude の fallback は、結果の `modelUsage` で判定する。要求した ID が出力トークンを持って載り、ほかに並ぶのは現行の回にも同じように並ぶ補助の小さいモデルだけであることを見る。それ以外のモデルが並んでいれば途中で fallback しているので、その回を無効にして結果に書く。
+- Claude の結果は、model-roles.md の「結果の判定」の `claude_check` で判定する。要求したモデルには、その回の起動に渡した ID（候補の回は差し替えた候補の ID）を渡す。`ok` でない回と判定が失敗した回は無効にし、同節の実行記録の欄とともに結果に書く。
 
 ```bash
 # bash で実行する（model-roles.md の関数は bash 向け）。AB は上と同じ値を入れ直す

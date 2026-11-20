@@ -17,7 +17,7 @@ PR 単位の差分レビュー（`multi-review`）ではなく、プロジェク
 
 **実行するときは、Phase 1 の前に [`references/checklists.md`](references/checklists.md) を Read する。**
 各フェーズのプロンプトテンプレート・設計原則・検査項目の詳細はそちらに置く。役割（モデルとエフォート）・起動のしかた・
-fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md) に従う。
+結果の判定は [`pr-workflow/references/model-roles.md`](../pr-workflow/references/model-roles.md#結果の判定) に従う。
 
 ## 前提
 
@@ -28,7 +28,7 @@ fallback の検出は [`pr-workflow/references/model-roles.md`](../pr-workflow/r
 ## cyber safeguard とモデルの選び方
 
 - Claude の役割のモデルは、ソースコードの脆弱性の走査・セキュリティ問題のトリアージ・安全なコードの作成にはそのまま使える。
-  exploit の生成や攻撃手順の詳述は classifier に当たり、格下のモデルに fallback しうる（詳細は model-roles.md の「fallback の検出」）。
+  exploit の生成や攻撃手順の詳述は classifier に当たり、格下のモデルに fallback しうる（詳細は model-roles.md の「結果の判定」）。
 - Claude Code 2.1.229 以降は、fallback するとセッションの残りがそのモデルに固定される。親が攻撃シナリオを書くと、
   以降の統合の判断まで格下のモデルで行うことになる。
 - そこで、Claude の leg は親のセッションの外（`claude -p` の別プロセス。model-roles.md の `claude_leg`）で走らせ、
@@ -85,7 +85,8 @@ claude_leg review-security "$RESULT" < "$PROMPT_FILE"
 ```
 
 `--deep` のときは、同じ形で `review-security-deep` も起動する。leg の Read は作業ディレクトリに限られ、Bash も持たないので、
-コミットの履歴が要るなら親が `git log` の出力を作業用のディレクトリに書き、追加の許可 `Read(/<そのディレクトリ>/**)` を渡す。JSON の `modelUsage` で、実際に使われたモデルを確かめる。
+コミットの履歴が要るなら親が `git log` の出力を作業用のディレクトリに書き、追加の許可 `Read(/<そのディレクトリ>/**)` を渡す。
+結果は model-roles.md の「結果の判定」の `claude_check` で判定する。同節の実行記録の欄も保存する。
 
 **GPT の leg**: `reviewer-gpt` を `codex` skill の「相談・分析」の起動形（`--sandbox read-only`。`-m`・
 `-c model_reasoning_effort=`・`-c developer_instructions=` は役割の定義から）で起動する。Codex が親のときも `spawn_agent` ではなくこの形にする
@@ -107,7 +108,8 @@ Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レ
 1. Phase 2 の発見を、ファイル:行番号と種類で突き合わせる。両方の系統が出したものは確度が高い。
 2. 片方の系統だけが出した Critical / High は、親がコードで経路を確かめる。確かめきれなければ、もう一方の系統の役割に
    「この経路が成立するか」だけを、該当の箇所を添えて確かめさせる（攻撃手順は求めない）。
-3. 各 leg の役割・要求したモデル・実際のモデル（fallback の有無）を、レポートの「使用モデル」に書く。
+3. 各 leg の役割・要求したモデル・実際のモデル・判定（Claude は `ok`・`fallback`・`stopped`・`abnormal`）を、
+   レポートの「使用モデル」に書く。
 
 出力先は user に確認する。
 
@@ -115,7 +117,8 @@ Phase 2〜4 の結果を統合し、`references/checklists.md` の「Phase 5 レ
 
 | 状況 | 対処 |
 |---|---|
-| Claude の leg が fallback（`modelUsage` に要求していないモデル） | 結果は捨てずに残し、「fallback した」と記録する。カバーが欠けた範囲を `reviewer-gpt` に追加で渡す |
+| Claude の leg の判定が `fallback`・`stopped` | 結果は捨てずに残し、判定を記録する。カバーが欠けた範囲を `reviewer-gpt` に追加で渡す（1 回） |
+| Claude の leg の判定が `abnormal` | 結果があれば残し、判定を記録する。`reviewer-gpt` で 1 回走らせ直す |
 | 親のセッションが fallback した | 以降の統合の判断の質が落ちる。user に伝え、新しいセッションで Phase 5 をやり直すかを確認する |
 | GPT が脅威モデリングを拒否 | プロンプトを防御的な文脈（緩和策を導くための列挙）に書き換えて再試行。それでも拒否なら、親が影響と緩和策だけを列挙する |
 | 特定の CWE パターンの検査がブロック | 検査項目を分割し、1 項目ずつ実行する |

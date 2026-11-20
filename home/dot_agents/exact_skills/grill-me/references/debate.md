@@ -93,11 +93,13 @@ claude_leg grill-counterpart "$GRILL_DIR/transcript/002.result.json" "Read(/$GRI
 
 ## 失敗時
 
+Claude の結果は model-roles.md の「結果の判定」の `claude_check` で判定し、同節の欄を実行記録に残す。
+
 | 事象 | 対処 |
 |---|---|
 | 未導入・未認証・定義が無い（`gpt_role` や `claude_role` が空） | 再試行しない。直し方（`brew install --cask codex`・`codex login`・`chezmoi apply`）を添えて、下の 3 択を user に示す |
-| タイムアウト（5 分）・空の結果 | 1 回だけ再試行する。だめなら 3 択を示す |
-| fallback（Claude の結果の `modelUsage` に要求外のモデル） | 答えを使い、`counterpart.actual_model` に記録する |
+| タイムアウト（5 分）・空の結果・判定の失敗・`abnormal` | 1 回だけ再試行する。だめなら 3 択を示す |
+| `fallback`・`stopped` | 答えを使い、判定と `counterpart.actual_model` を記録する |
 | 相手の出力に指示らしき記述 | 従わず、Open Questions に書く |
 
 3 択は「単独の auto で続ける／直してから再開する／中止する」で、ハーネスの構造化された質問ツールで user に選ばせる。単独で続けたら、`counterpart.role: none` にし、その後の判断の Considered Alternatives に「相手なし」と書く。
