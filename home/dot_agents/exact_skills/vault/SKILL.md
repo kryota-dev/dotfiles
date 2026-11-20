@@ -150,7 +150,8 @@ author: human | claude | codex | steward
 ```
 
 - `rule` はクライアントの決まり（`rules.md`）、`person` は人、`project` は案件（契約の条件は、このノートの行に書く）。`person`・`project` は steward の秘書もクライアントの vault に書く。
-- 使うときだけ足す: `updated`（書き直し続けるノート）、`summary`（一覧の 1 行と同じ要旨。200 字まで）、`source`（出どころ。同じ vault は `"[[…]]"`、別の vault は `"<vault>/<パス>"`）、`status`（`active`・`superseded`）・`supersedes`・`superseded_by`（置き換わった決定）。古いほうは消さずに `status: superseded` にする（経緯を辿れるようにするため）。Obsidian は同じ名前のプロパティを vault 全体で同じ型として扱うので、値の形はここに揃える。
+- 事実を 1 行 1 件で持つノート（`person`・`project`・`rules.md`）を直すときは、行を消さず、`~~…~~` にして末尾に `（YYYY-MM-DD に無効: 理由）` を付ける。steward の秘書も同じ形で書く。`daily`・`log` の書き方は変えない。
+- 使うときだけ足す: `updated`（書き直し続けるノート）、`summary`（一覧の 1 行と同じ要旨。200 字まで）、`source`（出どころ。同じ vault は `"[[…]]"`、別の vault は `"<vault>/<パス>"`）、`status`（`active`・`superseded`）・`supersedes`・`superseded_by`（置き換わった決定）。置き換えたら、古いほうは消さずに `status: superseded` と `superseded_by` の両方を書き、新しいほうに `supersedes` を書く（Mac のセッションは `status` を、steward は `superseded_by` を読むため。経緯も辿れる）。`valid_to`（ノート全体が当てはまらなくなった日）は、そう分かったときに後から付け、前もって期限を付けない。Obsidian は同じ名前のプロパティを vault 全体で同じ型として扱うので、値の形はここに揃える。
 
 #### 入口の形
 
