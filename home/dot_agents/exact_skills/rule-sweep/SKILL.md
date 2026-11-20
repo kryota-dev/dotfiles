@@ -1,6 +1,6 @@
 ---
 name: rule-sweep
-description: vault に溜まった振る舞いの提案を、本人の承認を得て dotfiles の draft の PR にまとめるときに使う。
+description: vault に溜まった振る舞いと知見の提案を、本人の承認を得て dotfiles の draft の PR にまとめるときに使う。
 user-invocable: true
 ---
 
@@ -43,7 +43,7 @@ dotfiles ではローカルの commit、checkout、restore、stash、reset、cle
 ## モードと参照先
 
 最初に [vault の skill](../vault/SKILL.md) を読む。
-vault の解決・読む範囲・手入力の保全・commit と push・`>>` の扱い・知見の共有は、その手順を使う。
+vault の解決・読む範囲・手入力の保全・commit と push・`>>` の扱いは、その手順を使う。
 cwd のリポジトリの owner が personal に当たれば [personal モード](references/personal.md)、
 クライアントの vault に当たれば [クライアントモード](references/client.md) へ進む。
 解決できない場合は推測して横断せず、出力に理由を残して終える。
