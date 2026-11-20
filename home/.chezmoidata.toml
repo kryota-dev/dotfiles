@@ -15,7 +15,7 @@ anthropics = "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
 # renovate: datasource=git-refs depName=anthropics/claude-plugins-community packageName=https://github.com/anthropics/claude-plugins-community branch=main
 plugins_community = "163301d1904c0a994539f5226ce0fcd65b8652bf"
 # renovate: datasource=git-refs depName=sasamuku/dotfiles packageName=https://github.com/sasamuku/dotfiles branch=main
-sasamuku_dotfiles = "8a92de3bba436d25d9a44c6f1ee4ec94c725a2ef"
+sasamuku_dotfiles = "87420195812a80590af1054c1fd297b8af2a84de"
 # renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
 natural_japanese = "840bd400cbcb64c8b64d492a144da54fc05776c5"
 # renovate: datasource=git-refs depName=kepano/obsidian-skills packageName=https://github.com/kepano/obsidian-skills branch=main
