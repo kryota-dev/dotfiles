@@ -164,9 +164,9 @@ claude_impl() {
     ;;
   esac
   base=$tmp/claude-impl
-  # 他の利用者が先に作った基底は、中の置き場所を付け替えられうるので使わない。
+  # 他の利用者が先に作った基底と symlink の基底は、中の置き場所を付け替えられうるので使わない。
   # macOS の mktemp -d はテンプレートが無いと TMPDIR を見ないので、置き場所を明示する。
-  if ! { [ -d "$base" ] || mkdir -m 700 "$base"; } || [ ! -O "$base" ] || ! dir=$(mktemp -d "$base/XXXXXX"); then
+  if [ -L "$base" ] || ! { [ -d "$base" ] || mkdir -m 700 "$base"; } || [ ! -O "$base" ] || ! dir=$(mktemp -d "$base/XXXXXX"); then
     echo "abort: 結果の置き場所を作れない" >&2
     return 1
   fi
@@ -202,7 +202,7 @@ claude_impl() {
 - `denyWrite` に git の共通ディレクトリを入れる。sandbox は linked worktree の共有 `.git` への書き込みを既定で許すので、commit・reset を物理的に止めるために必要である。linked worktree の外では起動しない。
 - 環境変数は、固定の一覧に加えて、起動時の環境から名前が認証情報らしいものを拾い、`credentials.envVars` で sandbox の中から消す。`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` は使わない。付けると `bash t.sh` のようなスクリプトの実行が自動許可から外れ、`dontAsk` で拒否されて、実装者がテストを回せなくなる（実機で確かめた）。
 - 実機の確認（2026-10-22、Claude Code 2.1.291、macOS）: この関数で、Bash は確認なしで通った。外部への `curl` は proxy に 403 で拒否された。worktree のルートの `.git` ファイルと `$HOME` への書き込みは `operation not permitted` で拒否され、Edit も拒否された。`~/.ssh` の読み取りは拒否され、`credentials.envVars` の環境変数（`GH_TOKEN`）は消えていた。一覧に無かった `~/.gmail-mcp` は読め、一覧に無い環境変数は見えたので、上の一覧と環境変数の拾い上げを足した。
-- 実機の確認（2026-11-20、Claude Code 2.1.325、macOS）: `denyWrite` に入れたディレクトリへは、sandbox の中の `bash` のスクリプトから、既存の結果の上書き・追記・新規作成・削除・ディレクトリの `mv`・`mkdir` がすべて `operation not permitted` で拒否された。worktree の中の、`denyWrite` に入れないディレクトリでは同じ操作が通った。既定の `TMPDIR` は `denyWrite` が無くても sandbox から書けないので、`denyWrite` は `TMPDIR` を書ける場所に向けたときの備えになる。パスを直接書いた Bash の呼び出しは、sandbox に届く前に `dontAsk` で拒否された。sandbox から書ける場所に置いた `denyWrite` のディレクトリでは、祖先の `mv` も拒否された。子の sandbox は `/private/tmp/claude-<uid>` の下（Claude Code の scratchpad）に書けたので、親の `TMPDIR` がそこを指すと、拒否は `denyWrite` だけが頼りになる。worktree の中の symlink を経由して置き場所を読む・書く道具の呼び出しは、`--disallowedTools` の `Read`・`Edit` の deny で止まった。この deny が無いときに Write を止めたのは、先に Read を求める道具の検査だった。
+- 実機の確認（2026-11-20、Claude Code 2.1.325、macOS）: `TMPDIR` を子の sandbox から書ける `/tmp/claude-<uid>` の下に向け、この関数をそのまま使った。sandbox の中の `bash` のスクリプトから、基底の下の自分の回と別の回の `result.json` への上書き・削除と作り直し・回のディレクトリの `mv`、基底そのものの `mv` を試すと、すべて `operation not permitted` で拒否された。別の回の中身は変わらず、自分の回は `claude_check` で `ok` になった。基底の外の対照のディレクトリでは同じ操作が通った。worktree の中の symlink を経由して置き場所を読む・書く道具の呼び出しは、`--disallowedTools` の deny で止まった（この deny が無いときに Write を止めたのは、先に Read を求める道具の検査だった）。既定の `TMPDIR`（`/var/folders/…`）は、`denyWrite` が無くても sandbox から書けない。パスを直接書いた Bash の呼び出しは、sandbox に届く前に `dontAsk` で拒否された。
 - `failIfUnavailable` により、sandbox を起動できないと claude は起動時に終わる。sandbox なしで走らせ直さず、user に上げる。
 - ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 2 引数以降に渡す。書き込みのできる API を持つドメイン（汎用のコードホスティングなど）は、秘密の持ち出しの経路になるので避ける。
 - 親は `git status --porcelain` と `git diff` で、新規ファイルも含めて変更の全体を読んでから、ホストでテストと lint を実行する（`git diff` は未追跡のファイルを出さない）。commit は親が行う。順序は `codex` skill の親の手順と同じ。

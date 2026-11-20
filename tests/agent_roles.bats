@@ -460,6 +460,20 @@ make_linked_worktree() {
   [ "$(claude_impl implementer-claude </dev/null)" != "$out" ]
 }
 
+@test "claude_impl は基底が symlink なら claude を呼ばずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  mkdir "$BATS_TEST_TMPDIR/tmp" "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/tmp/claude-impl"
+  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
+
 @test "claude_impl は役割の定義が無ければ何も出さずに止まる" {
   load_role_helpers
   claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
