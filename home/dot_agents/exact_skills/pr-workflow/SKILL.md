@@ -98,7 +98,7 @@ T3 Code はスレッドの途中でブランチ名を付け替えるので、pus
 ### small の進め方
 
 1. **計画（Claude）**: 変更するファイル、テストの一覧（先に書いて失敗させるもの）、完了の条件を短く書く。Claude Code では親が書く。Codex では `spec-designer` を model-roles.md の `claude_leg` で起動し（追加の許可は渡さず、読み取りだけにする）、結果の本文を計画として受け取る。
-2. **実装（選んだ実装者）**: 計画を実装者の系統の light の役割に渡す。Codex なら、Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。Claude なら、どちらのハーネスからも model-roles.md の `claude_impl`。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
+2. **実装（選んだ実装者）**: 計画を実装者の系統の light の役割に渡す。Codex なら、Claude Code からは `codex` skill の「実装を任せる」の起動形、Codex からは `spawn_agent`。Claude なら、どちらのハーネスからも model-roles.md の `claude_impl`（結果 JSON のパスは関数が標準出力に出すので、置き場所を渡さない）。委譲プロンプトは `codex` skill の 4 部構成で書き、書いてよいファイルを計画から列挙する。
 3. **検証（親）**: diff の全体を読んでから、テストと lint を実行する。計画のテストが先に失敗する形で書かれているか、テストを弱めていないかも見る。通ったら親がコミットする。失敗したら、原因を委譲プロンプトに足して渡し直す。格上げは model-roles.md の「実装の格上げ」に従う。
 
 standard / large は、意図の確認なしに実装へ入らない。確認を省くなら理由を PR に 1 行残す。コミットと PR は `~/AGENTS.md` の規約に従う。
