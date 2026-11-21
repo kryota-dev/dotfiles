@@ -19,7 +19,7 @@ sasamuku_dotfiles = "8a92de3bba436d25d9a44c6f1ee4ec94c725a2ef"
 # renovate: datasource=git-refs depName=coji/natural-japanese packageName=https://github.com/coji/natural-japanese branch=main
 natural_japanese = "840bd400cbcb64c8b64d492a144da54fc05776c5"
 # renovate: datasource=git-refs depName=kepano/obsidian-skills packageName=https://github.com/kepano/obsidian-skills branch=main
-obsidian = "3ccff5338ea700537839b21900aa5358a0402c98"
+obsidian = "b110b2f8e9eb1f287892f937050dfd40af862cbb"
 # k16shikano 氏の japanese-tech-writing の gist リビジョン（gist は Renovate で追跡できない）。
 japanese_tech_writing = "8f2d57610a73efc97d743c9b0b0ecb1002e09fa4"
 # mise/config.toml で固定した ax のリリースの commit にする（Renovate が両方を一緒に更新する）。
