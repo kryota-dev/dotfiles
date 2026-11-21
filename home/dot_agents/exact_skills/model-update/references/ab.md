@@ -35,6 +35,7 @@ git worktree remove --force "$AB/impl-candidate"
 
 - GPT の役割: [model-roles.md](../../pr-workflow/references/model-roles.md) の「GPT の役割の起動」の形で起動し、`-m` だけを現行と候補で替える。それ以外（effort・本文・sandbox）は普段の起動形のまま、現行と候補で同じにする（普段と違う条件で比べると、実際の使い方での差が分からないため）。`--json` を付けてトークンを記録する。
 - Claude の役割: model-roles.md の関数を読み込み、`claude_role` を上書きしてモデルだけを差し替え、`claude_leg`（レビュー）か `claude_impl`（実装）で起動する。次の形は実機で確かめてある。
+- `claude_impl` には結果の置き場所を渡さない。関数が実装者の書けない場所に作り、パスを標準出力に出す。判定と採点は、各回の直後に受け取ったパスの JSON で行う（下の例の末尾）。`$AB` は子の sandbox から書けうる場所（scratchpad）にあるので、写しは記録にだけ使う。
 - Claude の結果は、model-roles.md の「結果の判定」の `claude_check` で判定する。要求したモデルには、その回の起動に渡した ID（候補の回は差し替えた候補の ID）を渡す。`ok` でない回と判定が失敗した回は無効にし、同節の実行記録の欄とともに結果に書く。
 
 ```bash
@@ -50,6 +51,11 @@ claude_role() {
 }
 AB_MODEL="<候補の ID>" claude_leg <役割> "$AB/rev-candidate.json" "Read(/$AB/input/**)" < "$AB/prompt.md"
 claude_leg <役割> "$AB/rev-current.json" "Read(/$AB/input/**)" < "$AB/prompt.md"
+# 実装は各 worktree の中で起動し（claude_impl は linked worktree の外では止まる）、次の回の前に判定する
+cd "$AB/impl-candidate" && out_c=$(AB_MODEL="<候補の ID>" claude_impl <役割> < "$AB/impl-prompt.md")
+claude_check "$out_c" "<候補の ID>" && cp "$out_c" "$AB/impl-candidate.json"
+cd "$AB/impl-current" && out_r=$(claude_impl <役割> < "$AB/impl-prompt.md")
+claude_check "$out_r" "$(claude_role <役割> model)" && cp "$out_r" "$AB/impl-current.json"
 ```
 
 diff や PR の本文を渡すときの囲み方は、model-roles.md の「弱点への対策」に従う。

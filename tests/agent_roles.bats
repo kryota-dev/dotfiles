@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
 
 setup() {
+  bats_require_minimum_version 1.5.0
   SOURCE="$BATS_TEST_DIRNAME/../home"
   ROLES="$SOURCE/dot_agents/exact_skills/pr-workflow/references/model-roles.md"
-  unset ANTHROPIC_DEFAULT_HAIKU_MODEL
+  unset ANTHROPIC_DEFAULT_HAIKU_MODEL XDG_STATE_HOME
 }
 
 claude_field() {
@@ -370,13 +371,23 @@ assert_check() {
   [[ "$args" == *$'--settings\n{"switchModelsOnFlag":true}\n'* ]]
 }
 
+# linked worktree を作り、そのパスを出す。
+make_linked_worktree() {
+  local repo="$BATS_TEST_TMPDIR/main" wt="$BATS_TEST_TMPDIR/wt"
+  git init -q "$repo"
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
+  git -C "$repo" worktree add -q "$wt"
+  echo "$wt"
+}
+
 @test "claude_impl は linked worktree の外では claude を呼ばずに止まる" {
   load_role_helpers
   claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
   git init -q "$BATS_TEST_TMPDIR/plain"
   cd "$BATS_TEST_TMPDIR/plain"
-  run claude_impl implementer-claude "$BATS_TEST_TMPDIR/out.json" </dev/null
+  run --separate-stderr claude_impl implementer-claude </dev/null
   [ "$status" -ne 0 ]
+  [ -z "$output" ]
   [ ! -e "$BATS_TEST_TMPDIR/called" ]
 }
 
@@ -384,15 +395,13 @@ assert_check() {
   load_role_helpers
   claude() { printf '%s\n' "$@"; }
   export EXAMPLE_SERVICE_API_KEY=dummy
-  local repo="$BATS_TEST_TMPDIR/main" wt="$BATS_TEST_TMPDIR/wt" gcd settings
-  git init -q "$repo"
-  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m init
-  git -C "$repo" worktree add -q "$wt"
+  local wt gcd settings out
+  wt=$(make_linked_worktree)
   gcd=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)
   cd "$wt"
-  claude_impl implementer-claude "$BATS_TEST_TMPDIR/out.json" example.com </dev/null
-  args=$(cat "$BATS_TEST_TMPDIR/out.json")
-  settings=$(awk '/^--settings$/{getline; print; exit}' "$BATS_TEST_TMPDIR/out.json")
+  out=$(claude_impl implementer-claude example.com </dev/null)
+  args=$(cat "$out")
+  settings=$(awk '/^--settings$/{getline; print; exit}' "$out")
   [ "$(jq -r '.sandbox.enabled' <<<"$settings")" = true ]
   [ "$(jq -r '.sandbox.allowUnsandboxedCommands' <<<"$settings")" = false ]
   [ "$(jq -r '.sandbox.failIfUnavailable' <<<"$settings")" = true ]
@@ -416,6 +425,94 @@ assert_check() {
   [ "$(jq -r '.sandbox.credentials.envVars | map(select(.name == "HOME")) | length' <<<"$settings")" = 0 ]
   [[ "$args" != *SUBPROCESS_ENV_SCRUB* ]]
   # settings を重ねると sandbox の設定を失いうるため、同じ JSON の最上位に含める。
-  [ "$(awk '/^--settings$/{n++} END {print n+0}' "$BATS_TEST_TMPDIR/out.json")" = 1 ]
+  [ "$(awk '/^--settings$/{n++} END {print n+0}' "$out")" = 1 ]
   [ "$(jq -r '.switchModelsOnFlag == true' <<<"$settings")" = true ]
+}
+
+@test "claude_impl は結果の置き場所を作業場所の外の固定の基底の下に作り、基底ごと拒否してパスだけを出す" {
+  load_role_helpers
+  claude() { printf '%s\n' "$@"; }
+  local wt root settings out base args
+  wt=$(make_linked_worktree)
+  cd "$wt"
+  root=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -eq 0 ]
+  # 標準出力は結果のパスの 1 行だけ。
+  [ "${#lines[@]}" -eq 1 ]
+  out=$output
+  [ -s "$out" ]
+  [ "$(cd "$(dirname "$out")" && pwd -P)" = "$(dirname "$out")" ]
+  [[ "$out/" != "$root"/* ]]
+  # 基底は TMPDIR に依らず、回ごとに TMPDIR が違っても同じ場所になる。
+  base=$(cd "$HOME/.local/state/claude-impl" && pwd -P)
+  [ "$(TMPDIR="$BATS_TEST_TMPDIR" claude_impl implementer-claude </dev/null | xargs dirname | xargs dirname)" = "$base" ]
+  [ "$(dirname "$(dirname "$out")")" = "$base" ]
+  settings=$(awk '/^--settings$/{getline; print; exit}' "$out")
+  # 並列の回の結果も守るよう、基底ごと denyWrite に入れ、Bash を通らない道具でも拒否する。
+  [ "$(jq -r --arg d "$base" '.sandbox.filesystem.denyWrite | index($d) != null' <<<"$settings")" = true ]
+  args=$(cat "$out")
+  [[ "$args" == *$'\n'"Edit(/$base/**)"* ]]
+  [[ "$args" == *$'\n'"Read(/$base/**)"$'\n'* ]]
+  # 起動のたびに別の置き場所を作る。
+  [ "$(claude_impl implementer-claude </dev/null)" != "$out" ]
+}
+
+@test "claude_impl は基底が symlink なら claude を呼ばずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere" "$HOME/.local/state"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$HOME/.local/state/claude-impl"
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
+
+@test "claude_impl は役割の定義が無ければ何も出さずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl no-such-role </dev/null
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
+}
+
+@test "claude_impl は claude が失敗しても結果のパスを出し、終了コードを返す" {
+  load_role_helpers
+  claude() { echo partial; return 3; }
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -eq 3 ]
+  [ "$(cat "$output")" = partial ]
+}
+
+@test "claude_impl は基底が worktree の中なら claude を呼ばずに止まる" {
+  load_role_helpers
+  claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
+  local wt
+  wt=$(make_linked_worktree)
+  cd "$wt"
+  XDG_STATE_HOME="$wt/state" run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  [ ! -e "$BATS_TEST_TMPDIR/called" ]
+  # 回の置き場所を作らない。
+  [ -z "$(ls -A "$wt/state/claude-impl")" ]
+}
+
+@test "claude_impl は既にある基底を使い、権限を 700 にそろえる" {
+  load_role_helpers
+  claude() { echo '{}'; }
+  # 並列の初回で、ほかの回が先に基底を作った場合にあたる。
+  mkdir -p "$HOME/.local/state/claude-impl"
+  chmod 777 "$HOME/.local/state/claude-impl"
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -eq 0 ]
+  [ -s "$output" ]
+  [[ "$(ls -ld "$HOME/.local/state/claude-impl")" == drwx------* ]]
 }

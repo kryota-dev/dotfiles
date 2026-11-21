@@ -161,8 +161,8 @@ Claude の Auto では、Claude が人に聞こうとした操作を T3 Code が
 （`~/.codex/agents/*.toml`）で、Codex からは `spawn_agent`、Claude Code からは `codex exec` に定義の値を渡して起動する
 （`codex exec` は agent の定義を選べない）。Claude の役割は `~/.agents/roles/*.md` に置き、どちらのハーネスからも
 権限を絞った `claude -p` で起動する。実装の役割（`implementer-claude*`）だけは Bash を持ち、Claude Code の sandbox
-（`--settings` で有効にし、ネットワークなし・書き込みは作業ツリーと一時ディレクトリだけで、git の共通ディレクトリへの
-書き込みは拒否）の中で動く。Claude Code の subagent にしないのは、親の広い permission を継承させず、
+（`--settings` で有効にし、ネットワークなし・書き込みは作業ツリーと一時ディレクトリだけで、git の共通ディレクトリと
+結果 JSON の置き場所への書き込みは拒否）の中で動く。Claude Code の subagent にしないのは、親の広い permission を継承させず、
 cyber safeguard の fallback を親のセッションから隔離して、結果 JSON で判定するため
 （model-roles.md の「結果の判定」）。`~/.claude/agents` に置くと
 Claude Code が自動委譲で subagent として選びうるので、Claude Code が読まない場所に置く。値の正本は定義ファイルで、

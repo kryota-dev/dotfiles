@@ -136,10 +136,10 @@ claude_leg() {
 実装の役割（`implementer-claude*`）は Bash を持ち、sandbox の中でテストを回す。起動は `claude_leg` と同じく `claude -p` で、sandbox の設定を `--settings` で渡す。`claude_leg` と同じ秘密のファイルの一覧は、共通の配列 `CLAUDE_SECRET_DENY` に置く。
 
 ```bash
-# claude_impl <役割> <結果 JSON> [許すドメイン …] < プロンプト
+# claude_impl <役割> [許すドメイン …] < プロンプト: 結果 JSON のパスを標準出力に 1 行出す
 claude_impl() {
-  local role=$1 out=$2 m e tools gd gcd root secret_env settings
-  shift 2
+  local role=$1 base dir out rc m e tools gd gcd root secret_env settings
+  shift
   gd=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) &&
     gcd=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) &&
     root=$(git rev-parse --show-toplevel 2>/dev/null) &&
@@ -152,13 +152,34 @@ claude_impl() {
     echo "abort: ~/.agents/roles/$role.md が無い。chezmoi apply を実行する" >&2
     return 1
   }
+  # 結果の置き場所は、子の sandbox が書けない固定の基底の下に起動のたびに作り、基底ごと sandbox と道具の両方で
+  # 拒否する（実装者に、自分の回にも並列の回にも偽の結果を書かせないため。TMPDIR は回ごとに違いうるので使わない）。
+  base=${XDG_STATE_HOME:-$HOME/.local/state}/claude-impl
+  # 並列の初回でも失敗しないよう、作成の成否は見ずに、できた基底を検査する。
+  mkdir -p "${base%/*}" 2>/dev/null
+  mkdir -m 700 "$base" 2>/dev/null
+  # symlink の基底と他の利用者の基底は、中の置き場所を付け替えられうるので使わない。
+  if [ -L "$base" ] || [ ! -d "$base" ] || [ ! -O "$base" ] || ! chmod 700 "$base" || ! base=$(cd "$base" && pwd -P); then
+    echo "abort: 結果の置き場所の基底を使えない: $base" >&2
+    return 1
+  fi
+  case "$base/" in "$(cd "$root" && pwd -P)"/*)
+    echo "abort: 結果の置き場所の基底が worktree の中にある" >&2
+    return 1
+    ;;
+  esac
+  dir=$(mktemp -d "$base/XXXXXX") || {
+    echo "abort: 結果の置き場所を作れない" >&2
+    return 1
+  }
+  out=$dir/result.json
   # 起動時の環境から、名前が認証情報らしい変数を拾って拒否に足す（固定の一覧だけでは漏れる）。
   secret_env=$(compgen -e | grep -E 'TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL' | jq -Rsc 'split("\n") | map(select(length > 0))')
   # settings.json を読まないので、切り替えて続ける設定も sandbox と同じ JSON に入れる。
-  settings=$(jq -nc --arg gcd "$gcd" --argjson env "$secret_env" '{switchModelsOnFlag: true, sandbox: {
+  settings=$(jq -nc --arg gcd "$gcd" --arg base "$base" --argjson env "$secret_env" '{switchModelsOnFlag: true, sandbox: {
     enabled: true, allowUnsandboxedCommands: false, failIfUnavailable: true, autoAllowBashIfSandboxed: true,
     network: {strictAllowlist: true, allowedDomains: $ARGS.positional},
-    filesystem: {denyWrite: [$gcd]},
+    filesystem: {denyWrite: [$gcd, $base]},
     credentials: {
       files: (["~/.ssh", "~/.aws", "~/.config/gcloud", "~/.config/gh", "~/.docker", "~/.codex", "~/.netrc", "~/.npmrc", "~/.git-credentials", "~/.gmail-mcp", "~/.config/op", "~/.gnupg", "~/.kube"] | map({path: ., mode: "deny"})),
       envVars: ((["GH_TOKEN", "GITHUB_TOKEN", "NPM_TOKEN", "OP_SERVICE_ACCOUNT_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"] + $env) | unique | map({name: ., mode: "deny"}))}}}' --args "$@")
@@ -167,19 +188,25 @@ claude_impl() {
     --permission-mode dontAsk --setting-sources "" --strict-mcp-config --settings "$settings" \
     --append-system-prompt "$(claude_body "$role")" \
     --tools $tools --allowedTools "Read(/$root/**)" "Edit(/$root/**)" \
-    --disallowedTools "${CLAUDE_SECRET_DENY[@]}" \
+    --disallowedTools "${CLAUDE_SECRET_DENY[@]}" "Read(/$base/**)" "Edit(/$base/**)" \
     > "$out" 2> "$out.err"
+  rc=$?
+  echo "$out"
+  return "$rc"
 }
 ```
 
 - Read と Edit の許可は、worktree のルートの絶対パス（`//<root>/**`）で固定する。`./**` は現在のディレクトリを基準にするので、実装者が Bash で `cd` すると基準が移り、ルートのファイルへの Edit が `dontAsk` で拒否される（実機で確かめた）。
 - プロンプトは stdin で渡す。`--allowedTools` などの可変長の引数が、末尾の位置引数を飲み込むため。
+- 結果の JSON は、関数が起動のたびに `mktemp -d` で基底の下に作るディレクトリに書き、そのパスを標準出力に 1 行だけ出す。`out=$(claude_impl <役割> < "$PROMPT")` で受け取り、`claude_check "$out" "$(claude_role <役割> model)"` で判定する。終了コードは `claude` のもので、失敗してもパスは出す（stderr は `"$out.err"`）。worktree の外にいる・定義が無い・置き場所を作れないときは何も出さずに止まる。
+- 置き場所は、実装者に `ok` になる偽の結果を書かせないため、`${XDG_STATE_HOME:-$HOME/.local/state}/claude-impl/` の下に作る。拒否は基底ごとにかける。`denyWrite` は Bash を止め、`--disallowedTools` の `Read`・`Edit` は Bash の sandbox を通らない Edit・Write・Read の道具を止める。基底ごとにするのは、並列の回や判定前の前の回の結果も守るため。`TMPDIR` を基底にしないのは、回ごとに値が違いうるうえ、子の sandbox から書ける場所（`/tmp/claude-<uid>` の下など）を指しうるからで、違う基底の回どうしは互いを拒否できない。基底が symlink・他の利用者のもの・worktree の中なら止まる。基底は実体のパスに直してから拒否に入れる。結果を書くのは sandbox の外の親のシェルなので、書き出しは止まらない。
 - Bash の allow は渡さない。sandbox の中のコマンドは auto-allow で確認なしに通り、`FOO=bar cmd` のように通常の判定に回るものは `dontAsk` で拒否される。
 - `denyWrite` に git の共通ディレクトリを入れる。sandbox は linked worktree の共有 `.git` への書き込みを既定で許すので、commit・reset を物理的に止めるために必要である。linked worktree の外では起動しない。
 - 環境変数は、固定の一覧に加えて、起動時の環境から名前が認証情報らしいものを拾い、`credentials.envVars` で sandbox の中から消す。`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` は使わない。付けると `bash t.sh` のようなスクリプトの実行が自動許可から外れ、`dontAsk` で拒否されて、実装者がテストを回せなくなる（実機で確かめた）。
 - 実機の確認（2026-10-22、Claude Code 2.1.291、macOS）: この関数で、Bash は確認なしで通った。外部への `curl` は proxy に 403 で拒否された。worktree のルートの `.git` ファイルと `$HOME` への書き込みは `operation not permitted` で拒否され、Edit も拒否された。`~/.ssh` の読み取りは拒否され、`credentials.envVars` の環境変数（`GH_TOKEN`）は消えていた。一覧に無かった `~/.gmail-mcp` は読め、一覧に無い環境変数は見えたので、上の一覧と環境変数の拾い上げを足した。
+- 実機の確認（2026-11-21、Claude Code 2.1.325、macOS）: この関数をそのまま使い、`TMPDIR` を子の sandbox から書ける `/tmp/claude-<uid>` の下に向けた。sandbox の中の `bash` のスクリプトから試した結果は次のとおり。基底（`~/.local/state/claude-impl`）の下の自分の回と別の回の `result.json` への上書き・削除、回のディレクトリの `mv`、基底そのものの `mv` は、すべて `operation not permitted` で拒否された。別の回の中身は変わらず、自分の回は `claude_check` で `ok` になった。`TMPDIR` の下の対照のディレクトリでは、同じ操作が通った。2026-11-20 には、worktree の中の symlink を経由して置き場所を読む・書く道具の呼び出しが、`--disallowedTools` の deny で止まることも確かめた（この deny が無いときに Write を止めたのは、先に Read を求める道具の検査だった）。パスを直接書いた Bash の呼び出しは、sandbox に届く前に `dontAsk` で拒否された。
 - `failIfUnavailable` により、sandbox を起動できないと claude は起動時に終わる。sandbox なしで走らせ直さず、user に上げる。
-- ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 3 引数以降に渡す。書き込みのできる API を持つドメイン（汎用のコードホスティングなど）は、秘密の持ち出しの経路になるので避ける。
+- ネットワークは既定で無い。要るときは、必要性を説明できる場合に限り、許すドメインを第 2 引数以降に渡す。書き込みのできる API を持つドメイン（汎用のコードホスティングなど）は、秘密の持ち出しの経路になるので避ける。
 - 親は `git status --porcelain` と `git diff` で、新規ファイルも含めて変更の全体を読んでから、ホストでテストと lint を実行する（`git diff` は未追跡のファイルを出さない）。commit は親が行う。順序は `codex` skill の親の手順と同じ。
 - 結果は `claude_check` で判定し、「結果の判定」の実装の扱いに従う。`fallback`・`stopped` は走らせ直さず、実行記録と PR の本文に残す。`abnormal` は格上げに数えず user に上げる。
 

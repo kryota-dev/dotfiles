@@ -7,7 +7,7 @@
 - requirements.md / design.md / tasks.md を読み、tasks.md を順に実装する。着手時に `[ ]` → `[-]`、完了時に `[-]` → `[x]` と更新する。テストが要るタスクはテストも書く。
 - **実装は、実装者の系統の通常の役割に、tasks.md の 1 タスクずつ渡す**（Codex なら `implementer`、Claude なら `implementer-claude`。役割と系統の選び方は [`pr-workflow/references/model-roles.md`](../../pr-workflow/references/model-roles.md)「実装者の選択」）。
   - Codex の起動: Claude Code からは `codex/SKILL.md`「実装を任せる」の起動形、Codex からは `spawn_agent`（`agent_type: implementer`、`fork_turns: "none"`）。
-  - Claude の起動: どちらのハーネスからも model-roles.md の `claude_impl`（「Claude の実装の役割の起動」）。
+  - Claude の起動: どちらのハーネスからも model-roles.md の `claude_impl`（「Claude の実装の役割の起動」）。結果 JSON のパスは関数が標準出力に出すので、置き場所を渡さない。
   - 委譲プロンプトは `codex` skill の 4 部構成で書く。Goal にタスクの Purpose、Context に requirements.md・design.md の該当箇所と _Leverage のファイル、Constraints にタスクの File（書いてよいファイル）、Done when にタスクの受け入れ基準とテストを書く。
   - 渡すのは linked worktree の中にいるときだけ。worktree のガード・実行の順序・委任してよい範囲は、Codex なら `codex/SKILL.md`、Claude なら model-roles.md の「Claude の実装の役割の起動」が SSOT で、ここに再掲しない。どちらの系統でも、`git diff` の全体を読んでから検証コマンドを走らせ、commit は親が行う（diff を読む前にテスト・lint・ビルドを実行しない）。
   - 親は diff を design.md と照らし、テストを弱めていないか、タスクの File の外を変えていないかを確かめる。だめなら原因を委譲プロンプトに足して渡し直し、格上げは model-roles.md の「実装の格上げ」に従う（系統はまたがない）。
