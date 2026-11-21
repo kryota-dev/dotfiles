@@ -250,6 +250,7 @@ last_vault_commit: <保存と push が成功した入力の oid>
 open_pr: <番号か空>
 pending: <承認待ちの検査用ディレクトリのパス・sha256・基底 oid・PR の head oid か空>
 asked_at: <14 日の問いを出した日か空>
+done_at: <未反映の件・止まった理由・食い違いを残さずに終えたときだけ、今回の pinned。残れば空>
 ---
 ```
 
