@@ -11,7 +11,7 @@ moralerspace_font = "2.0.0"
 # 外部 skill。commit SHA で固定する。各 pin の直前のコメントを Renovate が読む。
 [skills]
 # renovate: datasource=git-refs depName=anthropics/skills packageName=https://github.com/anthropics/skills branch=main
-anthropics = "2c5958ecac7cee2b583967a2c4981d0f4a75c579"
+anthropics = "e4bb5d960d87126ff3b3a8af1a104b7db67560ba"
 # renovate: datasource=git-refs depName=anthropics/claude-plugins-community packageName=https://github.com/anthropics/claude-plugins-community branch=main
 plugins_community = "163301d1904c0a994539f5226ce0fcd65b8652bf"
 # renovate: datasource=git-refs depName=sasamuku/dotfiles packageName=https://github.com/sasamuku/dotfiles branch=main
