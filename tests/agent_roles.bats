@@ -4,7 +4,7 @@ setup() {
   bats_require_minimum_version 1.5.0
   SOURCE="$BATS_TEST_DIRNAME/../home"
   ROLES="$SOURCE/dot_agents/exact_skills/pr-workflow/references/model-roles.md"
-  unset ANTHROPIC_DEFAULT_HAIKU_MODEL
+  unset ANTHROPIC_DEFAULT_HAIKU_MODEL XDG_STATE_HOME
 }
 
 claude_field() {
@@ -396,8 +396,6 @@ make_linked_worktree() {
   claude() { printf '%s\n' "$@"; }
   export EXAMPLE_SERVICE_API_KEY=dummy
   local wt gcd settings out
-  mkdir "$BATS_TEST_TMPDIR/tmp"
-  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   wt=$(make_linked_worktree)
   gcd=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)
   cd "$wt"
@@ -431,12 +429,10 @@ make_linked_worktree() {
   [ "$(jq -r '.switchModelsOnFlag == true' <<<"$settings")" = true ]
 }
 
-@test "claude_impl は結果の置き場所を作業場所の外の基底の下に作り、基底ごと拒否してパスだけを出す" {
+@test "claude_impl は結果の置き場所を作業場所の外の固定の基底の下に作り、基底ごと拒否してパスだけを出す" {
   load_role_helpers
   claude() { printf '%s\n' "$@"; }
   local wt root settings out base args
-  mkdir "$BATS_TEST_TMPDIR/tmp"
-  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   wt=$(make_linked_worktree)
   cd "$wt"
   root=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
@@ -448,7 +444,9 @@ make_linked_worktree() {
   [ -s "$out" ]
   [ "$(cd "$(dirname "$out")" && pwd -P)" = "$(dirname "$out")" ]
   [[ "$out/" != "$root"/* ]]
-  base=$(cd "$TMPDIR" && pwd -P)/claude-impl
+  # 基底は TMPDIR に依らず、回ごとに TMPDIR が違っても同じ場所になる。
+  base=$(cd "$HOME/.local/state/claude-impl" && pwd -P)
+  [ "$(TMPDIR="$BATS_TEST_TMPDIR" claude_impl implementer-claude </dev/null | xargs dirname | xargs dirname)" = "$base" ]
   [ "$(dirname "$(dirname "$out")")" = "$base" ]
   settings=$(awk '/^--settings$/{getline; print; exit}' "$out")
   # 並列の回の結果も守るよう、基底ごと denyWrite に入れ、Bash を通らない道具でも拒否する。
@@ -463,9 +461,8 @@ make_linked_worktree() {
 @test "claude_impl は基底が symlink なら claude を呼ばずに止まる" {
   load_role_helpers
   claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
-  mkdir "$BATS_TEST_TMPDIR/tmp" "$BATS_TEST_TMPDIR/elsewhere"
-  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/tmp/claude-impl"
-  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere" "$HOME/.local/state"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$HOME/.local/state/claude-impl"
   cd "$(make_linked_worktree)"
   run --separate-stderr claude_impl implementer-claude </dev/null
   [ "$status" -ne 0 ]
@@ -487,25 +484,35 @@ make_linked_worktree() {
 @test "claude_impl は claude が失敗しても結果のパスを出し、終了コードを返す" {
   load_role_helpers
   claude() { echo partial; return 3; }
-  mkdir "$BATS_TEST_TMPDIR/tmp"
-  export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   cd "$(make_linked_worktree)"
   run --separate-stderr claude_impl implementer-claude </dev/null
   [ "$status" -eq 3 ]
   [ "$(cat "$output")" = partial ]
 }
 
-@test "claude_impl は TMPDIR が worktree の中なら claude を呼ばずに止まる" {
+@test "claude_impl は基底が worktree の中なら claude を呼ばずに止まる" {
   load_role_helpers
   claude() { echo called >"$BATS_TEST_TMPDIR/called"; }
   local wt
   wt=$(make_linked_worktree)
-  mkdir "$wt/tmp"
   cd "$wt"
-  TMPDIR="$wt/tmp" run --separate-stderr claude_impl implementer-claude </dev/null
+  XDG_STATE_HOME="$wt/state" run --separate-stderr claude_impl implementer-claude </dev/null
   [ "$status" -ne 0 ]
   [ -z "$output" ]
   [ ! -e "$BATS_TEST_TMPDIR/called" ]
-  # 作りかけの置き場所を残さない。
-  [ -z "$(ls -A "$wt/tmp")" ]
+  # 回の置き場所を作らない。
+  [ -z "$(ls -A "$wt/state/claude-impl")" ]
+}
+
+@test "claude_impl は既にある基底を使い、権限を 700 にそろえる" {
+  load_role_helpers
+  claude() { echo '{}'; }
+  # 並列の初回で、ほかの回が先に基底を作った場合にあたる。
+  mkdir -p "$HOME/.local/state/claude-impl"
+  chmod 777 "$HOME/.local/state/claude-impl"
+  cd "$(make_linked_worktree)"
+  run --separate-stderr claude_impl implementer-claude </dev/null
+  [ "$status" -eq 0 ]
+  [ -s "$output" ]
+  [[ "$(ls -ld "$HOME/.local/state/claude-impl")" == drwx------* ]]
 }
