@@ -31,7 +31,7 @@ assert_t3_settings() {
 
 @test "1Password を参照しないテンプレートはすべて描画できる" {
   while IFS= read -r f; do
-    grep -q onepasswordRead "$f" && continue
+    grep -qE "onepassword(Read|Document)" "$f" && continue
     [ "$(basename "$f")" = .chezmoi.toml.tmpl ] && continue
     run render <"$f"
     [ "$status" -eq 0 ] || {

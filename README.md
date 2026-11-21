@@ -25,6 +25,7 @@ Xcode Command Line Tools・Homebrew・1Password を入れ、1Password CLI が使
 | `Dotfiles - AWS Config` | `notesPlain` | `~/.aws/config` |
 | `Dotfiles - Exa API` | `credential` | Exa の MCP サーバー |
 | `Dotfiles - Firecrawl API` | `credential` | Firecrawl の MCP サーバー |
+| `Dotfiles - Google Workspace CLI` | ドキュメント（ファイル） | `~/.config/gws/client_secret.json`（ふだんの `gws`）。同意をやり直すときの許可の一覧はメモに置く |
 | `Dotfiles - SSH Hosts` | `notesPlain` | `~/.ssh/config.d/hosts`（自宅のホスト。公開しない） |
 
 ## 日常の操作
